@@ -371,13 +371,23 @@ class StorageService {
 
   private loadInitialState(): AppState {
     try {
-      const saved = localStorage.getItem(STORAGE_KEY);
+      const saved = typeof window !== 'undefined' && window.localStorage ? localStorage.getItem(STORAGE_KEY) : null;
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed.users && parsed.departments && parsed.weapons) {
+        if (parsed && typeof parsed === 'object') {
           return {
-            ...parsed,
-            currentUser: null // Always start at the login screen
+            users: Array.isArray(parsed.users) ? parsed.users : INITIAL_USERS,
+            departments: Array.isArray(parsed.departments) ? parsed.departments : INITIAL_DEPARTMENTS,
+            units: Array.isArray(parsed.units) ? parsed.units : INITIAL_UNITS,
+            courses: Array.isArray(parsed.courses) ? parsed.courses : INITIAL_COURSES,
+            vaultSpaces: Array.isArray(parsed.vaultSpaces) ? parsed.vaultSpaces : INITIAL_VAULTS,
+            calibers: Array.isArray(parsed.calibers) ? parsed.calibers : INITIAL_CALIBERS,
+            ammoStocks: Array.isArray(parsed.ammoStocks) ? parsed.ammoStocks : INITIAL_STOCKS,
+            ammoMovements: Array.isArray(parsed.ammoMovements) ? parsed.ammoMovements : [],
+            weapons: Array.isArray(parsed.weapons) ? parsed.weapons : INITIAL_WEAPONS,
+            movements: Array.isArray(parsed.movements) ? parsed.movements : [],
+            auditLogs: Array.isArray(parsed.auditLogs) ? parsed.auditLogs : INITIAL_AUDIT_LOGS,
+            currentUser: null // Always start at login screen
           };
         }
       }
@@ -409,7 +419,9 @@ class StorageService {
       this.state = newState;
     }
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      if (typeof window !== 'undefined' && window.localStorage) {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
+      }
     } catch (e) {
       console.error('Failed to save to localStorage', e);
     }
