@@ -375,7 +375,10 @@ class StorageService {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.users && parsed.departments && parsed.weapons) {
-          return parsed;
+          return {
+            ...parsed,
+            currentUser: null // Always start at the login screen
+          };
         }
       }
     } catch (e) {
@@ -394,7 +397,7 @@ class StorageService {
       weapons: INITIAL_WEAPONS,
       movements: [],
       auditLogs: INITIAL_AUDIT_LOGS,
-      currentUser: INITIAL_USERS[0] // Initially Master Geral logged in for convenience or null
+      currentUser: null // Initial screen is always login
     };
 
     this.saveStateToStorage(defaultState);
@@ -477,7 +480,7 @@ class StorageService {
     }
 
     if (user.password !== cleanPassInput) {
-      return { success: false, error: 'MASP ou senha incorretos.' };
+      return { success: false, error: 'Senha incorreta.' };
     }
 
     this.setCurrentUser(user);
