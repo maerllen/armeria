@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Movement, Weapon, VaultSpace, Course } from '../types';
 import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
-import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock } from 'lucide-react';
+import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2 } from 'lucide-react';
 
 interface MovementModuleProps {
   currentUser: User;
@@ -97,6 +97,18 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao aprovar retirada.');
+    }
+  };
+
+  const handleDeleteMovement = (mov: Movement) => {
+    if (window.confirm(`Deseja realmente excluir o registro de movimentação da arma ${mov.weaponModel} (${mov.weaponSerialNumber})?`)) {
+      try {
+        storage.deleteMovement(mov.id);
+        setSuccessMsg(`Registro de movimentação excluído com sucesso.`);
+        onRefresh();
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao excluir movimentação.');
+      }
     }
   };
 
@@ -327,6 +339,17 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
                               className="bg-purple-600 hover:bg-purple-500 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg shadow"
                             >
                               Confirmar Recibo
+                            </button>
+                          )}
+
+                          {/* Delete Movement (Armeiro, Administrador, Geral) */}
+                          {canApproveOrConfirm && (
+                            <button
+                              onClick={() => handleDeleteMovement(m)}
+                              className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Excluir Registro de Movimentação"
+                            >
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           )}
 

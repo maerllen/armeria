@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search, Trash2 } from 'lucide-react';
 
 interface AmmunitionModuleProps {
   currentUser: User;
@@ -82,6 +82,42 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao cadastrar calibre.');
+    }
+  };
+
+  const handleDeleteCaliber = (cal: Caliber) => {
+    if (window.confirm(`Deseja realmente excluir o calibre "${cal.name}"?`)) {
+      try {
+        storage.deleteCaliber(cal.id);
+        setSuccessMsg(`Calibre "${cal.name}" excluído com sucesso.`);
+        onRefresh();
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao excluir calibre.');
+      }
+    }
+  };
+
+  const handleDeleteStock = (st: AmmunitionStock) => {
+    if (window.confirm(`Deseja realmente excluir este registro de estoque do cofre?`)) {
+      try {
+        storage.deleteAmmoStock(st.id);
+        setSuccessMsg(`Registro de estoque excluído com sucesso.`);
+        onRefresh();
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao excluir estoque.');
+      }
+    }
+  };
+
+  const handleDeleteAmmoMovement = (m: AmmunitionMovement) => {
+    if (window.confirm(`Deseja realmente excluir este histórico de movimentação de munição?`)) {
+      try {
+        storage.deleteAmmoMovement(m.id);
+        setSuccessMsg(`Histórico de movimentação excluído com sucesso.`);
+        onRefresh();
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao excluir movimentação.');
+      }
     }
   };
 
@@ -207,7 +243,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between"
               >
                 <span className="font-mono font-bold text-slate-100 text-sm">{c.name}</span>
-                <span className="text-[10px] text-slate-500 uppercase">Calibre Padrão</span>
+                <div className="flex items-center space-x-2">
+                  <span className="text-[10px] text-slate-500 uppercase">Calibre Padrão</span>
+                  {canManageCalibers && (
+                    <button
+                      onClick={() => handleDeleteCaliber(c)}
+                      className="p-1 text-slate-500 hover:text-red-400 rounded transition"
+                      title="Excluir Calibre"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
@@ -251,9 +298,20 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
                     <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
                       <span className="text-xs text-slate-400">Quantidade em estoque:</span>
-                      <span className="text-lg font-mono font-black text-emerald-400">
-                        {st.quantity} un
-                      </span>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-lg font-mono font-black text-emerald-400">
+                          {st.quantity} un
+                        </span>
+                        {canManageStock && (
+                          <button
+                            onClick={() => handleDeleteStock(st)}
+                            className="p-1 text-slate-500 hover:text-red-400 rounded transition"
+                            title="Excluir Estoque"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -281,12 +339,13 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <th className="py-3 px-4">Local no Cofre</th>
                 <th className="py-3 px-4">Destino / Motivo</th>
                 <th className="py-3 px-4">Responsável</th>
+                {canManageStock && <th className="py-3 px-4 text-right">Ações</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {movements.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500 italic">
+                  <td colSpan={canManageStock ? 8 : 7} className="py-8 text-center text-slate-500 italic">
                     Nenhuma movimentação de munição registrada.
                   </td>
                 </tr>
@@ -327,6 +386,17 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                       <td className="py-3 px-4 text-slate-300">
                         {m.userName}
                       </td>
+                      {canManageStock && (
+                        <td className="py-3 px-4 text-right">
+                          <button
+                            onClick={() => handleDeleteAmmoMovement(m)}
+                            className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                            title="Excluir Registro de Movimentação"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

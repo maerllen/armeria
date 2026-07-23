@@ -167,15 +167,13 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         {/* Action Buttons */}
         {!isPolicial && (
           <div className="flex items-center space-x-3">
-            {isGeral && (
-              <button
-                onClick={() => handleOpenDeptModal()}
-                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4 text-amber-400" />
-                <span>Novo Departamento</span>
-              </button>
-            )}
+            <button
+              onClick={() => handleOpenDeptModal()}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4 text-amber-400" />
+              <span>Novo Departamento</span>
+            </button>
 
             <button
               onClick={() => handleOpenUnitModal()}
@@ -224,7 +222,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   </p>
                 </div>
 
-                {isGeral && (
+                {!isPolicial && (
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleOpenDeptModal(dept)}

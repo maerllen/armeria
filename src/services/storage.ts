@@ -826,6 +826,54 @@ class StorageService {
     return newCaliber;
   }
 
+  public deleteCaliber(id: string): boolean {
+    const caliber = this.state.calibers.find(c => c.id === id);
+    if (!caliber) return false;
+
+    // Check if weapons use this caliber
+    const weaponsUsingCaliber = this.state.weapons.filter(w => w.caliber.toLowerCase() === caliber.name.toLowerCase());
+    const stockUsingCaliber = this.state.ammoStocks.filter(s => s.caliberId === id && s.quantity > 0);
+
+    if (weaponsUsingCaliber.length > 0 || stockUsingCaliber.length > 0) {
+      throw new Error(`Não é possível excluir o calibre "${caliber.name}" pois há ${weaponsUsingCaliber.length} arma(s) ou munição em estoque vinculada a ele.`);
+    }
+
+    this.state.calibers = this.state.calibers.filter(c => c.id !== id);
+    this.addAuditLog('Munições', 'Excluir', `Excluído calibre: ${caliber.name}`);
+    this.saveStateToStorage();
+    return true;
+  }
+
+  public deleteAmmoStock(id: string): boolean {
+    const actor = this.state.currentUser;
+    if (!actor || actor.role === 'Policial') {
+      throw new Error('Apenas Armeiro, Administrador ou Geral possuem permissão para excluir estoques de munição.');
+    }
+
+    const stock = this.state.ammoStocks.find(s => s.id === id);
+    if (!stock) return false;
+
+    this.state.ammoStocks = this.state.ammoStocks.filter(s => s.id !== id);
+    this.addAuditLog('Munições', 'Excluir', `Excluído registro de estoque de munição`);
+    this.saveStateToStorage();
+    return true;
+  }
+
+  public deleteAmmoMovement(id: string): boolean {
+    const actor = this.state.currentUser;
+    if (!actor || actor.role === 'Policial') {
+      throw new Error('Apenas Armeiro, Administrador ou Geral possuem permissão para excluir histórico de movimentação de munição.');
+    }
+
+    const mov = this.state.ammoMovements.find(m => m.id === id);
+    if (!mov) return false;
+
+    this.state.ammoMovements = this.state.ammoMovements.filter(m => m.id !== id);
+    this.addAuditLog('Munições', 'Excluir', `Excluído registro de movimentação de munição`);
+    this.saveStateToStorage();
+    return true;
+  }
+
   public getAmmoStocks(currentUser: User | null): AmmunitionStock[] {
     if (!currentUser) return [];
     if (currentUser.role === 'Geral') return this.state.ammoStocks;
@@ -992,6 +1040,28 @@ class StorageService {
   }
 
   // --- Movements (Weapon Retiradas e Devoluções) ---
+  public deleteMovement(id: string): boolean {
+    const actor = this.state.currentUser;
+    if (!actor || actor.role === 'Policial') {
+      throw new Error('Apenas Armeiro, Administrador ou Geral possuem permissão para excluir movimentações.');
+    }
+
+    const movement = this.state.movements.find(m => m.id === id);
+    if (!movement) return false;
+
+    // Reset weapon status if it was linked to this movement
+    const weapon = this.state.weapons.find(w => w.id === movement.weaponId);
+    if (weapon && (weapon.currentMovementId === movement.id || weapon.status !== 'No Cofre')) {
+      weapon.status = 'No Cofre';
+      weapon.currentMovementId = undefined;
+    }
+
+    this.state.movements = this.state.movements.filter(m => m.id !== id);
+    this.addAuditLog('Movimentações', 'Excluir', `Excluído registro de movimentação: ${movement.weaponModel} (${movement.weaponSerialNumber})`);
+    this.saveStateToStorage();
+    return true;
+  }
+
   public getMovements(currentUser: User | null): Movement[] {
     if (!currentUser) return [];
     if (currentUser.role === 'Geral') return this.state.movements;
