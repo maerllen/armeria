@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
-import { Shield, Lock, User, AlertCircle, Sparkles } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle } from 'lucide-react';
 
 interface LoginModalProps {
   onLoginSuccess: (maspDigits: string, passwordDigits: string) => void;
@@ -8,8 +8,8 @@ interface LoginModalProps {
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, error }) => {
-  const [maspRaw, setMaspRaw] = useState('1255748');
-  const [password, setPassword] = useState('1255748');
+  const [maspRaw, setMaspRaw] = useState('');
+  const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
   const handleMaspChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -32,11 +32,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, error })
     }
 
     onLoginSuccess(maspRaw, password);
-  };
-
-  const handleFillMaster = () => {
-    setMaspRaw('1255748');
-    setPassword('1255748');
   };
 
   return (
@@ -102,24 +97,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, error })
                 required
               />
             </div>
-          </div>
-
-          {/* Quick Master Info Notice */}
-          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 text-xs text-slate-400 space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="font-semibold text-amber-400 flex items-center space-x-1">
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>Acesso Master Padrão:</span>
-              </span>
-              <button
-                type="button"
-                onClick={handleFillMaster}
-                className="text-amber-400 hover:underline font-bold text-[11px]"
-              >
-                Preencher Dados
-              </button>
-            </div>
-            <p>MASP: <code className="text-slate-200">1255748</code> • Senha: <code className="text-slate-200">1255748</code> (Perfil Geral)</p>
           </div>
 
           <button
