@@ -1,0 +1,6 @@
+{
+  "name": "Armeria",
+  "description": "Sistema de Gestão de Armas e Munições para Delegacias da Polícia Civil",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
