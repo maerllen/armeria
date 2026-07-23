@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Department, Unit } from '../types';
 import { storage } from '../services/storage';
 import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UnitModuleProps {
   currentUser: User;
@@ -20,6 +21,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'unit'; item: any; name: string } | null>(null);
 
   // Form states
   const [deptName, setDeptName] = useState('');
@@ -81,15 +83,11 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   };
 
   const handleDeleteDept = (dept: Department) => {
-    if (window.confirm(`Deseja realmente excluir o departamento "${dept.name}"?`)) {
-      try {
-        storage.deleteDepartment(dept.id);
-        setSuccessMsg('Departamento excluído com sucesso.');
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Não foi possível excluir o departamento.');
-      }
-    }
+    setDeleteTarget({ type: 'dept', item: dept, name: `departamento "${dept.name}"` });
+  };
+
+  const handleDeleteUnit = (unit: Unit) => {
+    setDeleteTarget({ type: 'unit', item: unit, name: `unidade "${unit.name}"` });
   };
 
   // Handlers for Unit
@@ -133,15 +131,23 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     }
   };
 
-  const handleDeleteUnit = (unit: Unit) => {
-    if (window.confirm(`Deseja realmente excluir a unidade "${unit.name}"?`)) {
-      try {
-        storage.deleteUnit(unit.id);
-        setSuccessMsg('Unidade excluída com sucesso.');
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Não foi possível excluir a unidade.');
+  const confirmExecutionDelete = () => {
+    if (!deleteTarget) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      if (deleteTarget.type === 'dept') {
+        storage.deleteDepartment(deleteTarget.item.id);
+        setSuccessMsg(`Departamento "${deleteTarget.item.name}" excluído com sucesso.`);
+      } else {
+        storage.deleteUnit(deleteTarget.item.id);
+        setSuccessMsg(`Unidade "${deleteTarget.item.name}" excluída com sucesso.`);
       }
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Não foi possível concluir a exclusão.');
+    } finally {
+      setDeleteTarget(null);
     }
   };
 
@@ -421,6 +427,15 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        title="Confirmar Exclusão"
+        message={`Deseja realmente excluir ${deleteTarget?.name || 'este item'}?`}
+        onConfirm={confirmExecutionDelete}
+        onCancel={() => setDeleteTarget(null)}
+      />
 
     </div>
   );
