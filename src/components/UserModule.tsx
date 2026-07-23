@@ -776,11 +776,16 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   <button
                     onClick={() => {
                       if (window.confirm(`Excluir o curso "${course.name}"?`)) {
-                        storage.deleteCourse(course.id);
-                        onRefresh();
+                        try {
+                          storage.deleteCourse(course.id);
+                          setSuccessMsg(`Curso "${course.name}" excluído com sucesso.`);
+                          onRefresh();
+                        } catch (err: any) {
+                          alert(err.message || 'Erro ao excluir curso.');
+                        }
                       }
                     }}
-                    className="p-1.5 text-slate-400 hover:text-red-400 rounded"
+                    className="p-1.5 text-slate-400 hover:text-red-400 rounded transition"
                     title="Excluir Curso"
                   >
                     <Trash2 className="w-4 h-4" />

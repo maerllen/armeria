@@ -570,9 +570,9 @@ class StorageService {
     if (!dept) return false;
 
     // Check if units exist
-    const hasUnits = this.state.units.some(u => u.departmentId === id);
-    if (hasUnits) {
-      throw new Error('Não é possível excluir departamento que possui unidades vinculadas.');
+    const linkedUnits = this.state.units.filter(u => u.departmentId === id);
+    if (linkedUnits.length > 0) {
+      throw new Error(`Não é possível excluir o departamento "${dept.name}" porque existem ${linkedUnits.length} unidade(s) vinculada(s) a ele. Exclua ou altere as unidades primeiro.`);
     }
 
     this.state.departments = this.state.departments.filter(d => d.id !== id);
@@ -623,11 +623,11 @@ class StorageService {
     if (!unit) return false;
 
     // Check if users or weapons belong to unit
-    const hasUsers = this.state.users.some(u => u.unitId === id);
-    const hasWeapons = this.state.weapons.some(w => w.unitId === id);
+    const linkedUsers = this.state.users.filter(u => u.unitId === id);
+    const linkedWeapons = this.state.weapons.filter(w => w.unitId === id);
 
-    if (hasUsers || hasWeapons) {
-      throw new Error('Não é possível excluir unidade que possui policiais ou armas cadastradas.');
+    if (linkedUsers.length > 0 || linkedWeapons.length > 0) {
+      throw new Error(`Não é possível excluir a unidade "${unit.name}" porque ela possui ${linkedUsers.length} policial(is) e ${linkedWeapons.length} arma(s) cadastrada(s).`);
     }
 
     this.state.units = this.state.units.filter(u => u.id !== id);
@@ -704,6 +704,18 @@ class StorageService {
     const user = this.state.users.find(u => u.id === id);
     if (!user) return false;
 
+    if (this.state.currentUser?.id === id) {
+      throw new Error('Não é possível excluir o usuário com o qual você está atualmente conectado no sistema.');
+    }
+
+    // Check if user has active cautela/weapon loans or pending requests
+    const activeLoan = this.state.movements.find(
+      m => m.requesterId === id && (m.status === 'Em Trânsito' || m.status === 'Pendente Recibo' || m.status === 'Pendente Aprovação')
+    );
+    if (activeLoan) {
+      throw new Error(`Não é possível excluir o policial ${user.name} pois ele possui solicitação ou armamento ativo em cautela (${activeLoan.status}).`);
+    }
+
     this.state.users = this.state.users.filter(u => u.id !== id);
     this.addAuditLog('Usuários', 'Excluir', `Excluído policial: ${user.name} (MASP: ${user.masp})`);
     this.saveStateToStorage();
@@ -741,6 +753,11 @@ class StorageService {
     const course = this.state.courses.find(c => c.id === id);
     if (!course) return false;
 
+    const enrolledUsers = this.state.users.filter(u => u.courses && u.courses.some(c => c.courseId === id));
+    if (enrolledUsers.length > 0) {
+      throw new Error(`Não é possível excluir o curso "${course.name}" pois ele está vinculado ao cadastro de ${enrolledUsers.length} policial(is). Desvincule o curso dos policiais primeiro.`);
+    }
+
     this.state.courses = this.state.courses.filter(c => c.id !== id);
     this.addAuditLog('Cursos', 'Excluir', `Excluído curso: ${course.name}`);
     this.saveStateToStorage();
@@ -773,10 +790,12 @@ class StorageService {
     const vault = this.state.vaultSpaces.find(v => v.id === id);
     if (!vault) return false;
 
-    // Check if weapon is stored in this vault
+    // Check if weapon or ammo is stored in this vault
     const hasWeapon = this.state.weapons.some(w => w.vaultSpaceId === id && w.status === 'No Cofre');
-    if (hasWeapon) {
-      throw new Error('Não é possível excluir local do cofre que possui armas guardadas.');
+    const hasAmmo = this.state.ammoStocks.some(s => s.vaultSpaceId === id && s.quantity > 0);
+
+    if (hasWeapon || hasAmmo) {
+      throw new Error(`Não é possível excluir o local do cofre "${vault.code}" pois há armas ou munições armazenadas nele.`);
     }
 
     this.state.vaultSpaces = this.state.vaultSpaces.filter(v => v.id !== id);
