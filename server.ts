@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
+import { testConnection, initializeDatabaseSchema, dbConfig } from './src/db/mysql';
 
 async function startServer() {
   const app = express();
@@ -11,7 +12,40 @@ async function startServer() {
 
   // API Routes
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', app: 'Armeria - Gestão de Armas e Munições' });
+    res.json({
+      status: 'ok',
+      app: 'Armeria - Gestão de Armas e Munições',
+      database: {
+        type: 'MySQL',
+        name: dbConfig.database,
+        user: dbConfig.user,
+        host: dbConfig.host,
+        port: dbConfig.port
+      }
+    });
+  });
+
+  // MySQL Database Status Endpoint
+  app.get('/api/db/status', async (req, res) => {
+    const status = await testConnection();
+    res.status(status.success ? 200 : 500).json(status);
+  });
+
+  // MySQL Database Schema Initialization Endpoint
+  app.post('/api/db/init', async (req, res) => {
+    const result = await initializeDatabaseSchema();
+    res.status(result.success ? 200 : 500).json(result);
+  });
+
+  // MySQL Non-sensitive Config Endpoint
+  app.get('/api/db/config', (req, res) => {
+    res.json({
+      type: 'MySQL',
+      database: dbConfig.database,
+      user: dbConfig.user,
+      host: dbConfig.host,
+      port: dbConfig.port
+    });
   });
 
   // Handle favicon.ico requests gracefully
