@@ -421,7 +421,24 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
 
-    const cleanMasp = updates.masp ? updates.masp.replace(/\D/g, '') : rows[0].masp;
+    const userMasp = rows[0].masp;
+
+    if (updates.resetPassword) {
+      await pool.query(
+        'UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?',
+        [userMasp, id]
+      );
+      await insertAuditLog(
+        'Usuários',
+        'Reset Senha',
+        `Senha do policial ${rows[0].name} (MASP: ${userMasp}) foi resetada para o MASP pelo administrador`,
+        actor,
+        req.ip
+      );
+      return res.json({ success: true, message: 'Senha resetada para o MASP com sucesso.' });
+    }
+
+    const cleanMasp = updates.masp ? updates.masp.replace(/\D/g, '') : userMasp;
 
     await pool.query(
       `UPDATE users SET

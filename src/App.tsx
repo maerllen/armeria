@@ -299,16 +299,16 @@ export default function App() {
       </div>
 
       {/* Change Password Modal */}
-      {showChangePasswordModal && currentUser && (
+      {(showChangePasswordModal || currentUser.password === currentUser.masp || currentUser.mustChangePassword) && currentUser && (
         <ChangePasswordModal
           user={currentUser}
-          isMandatory={currentUser.password === currentUser.masp}
+          isMandatory={currentUser.password === currentUser.masp || currentUser.mustChangePassword}
           onSuccess={() => {
             setShowChangePasswordModal(false);
             refreshData();
           }}
           onCancel={
-            currentUser.password === currentUser.masp
+            (currentUser.password === currentUser.masp || currentUser.mustChangePassword)
               ? handleLogout
               : () => setShowChangePasswordModal(false)
           }

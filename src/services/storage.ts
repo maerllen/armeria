@@ -231,6 +231,30 @@ class StorageService {
     }
   }
 
+  public async resetUserPassword(userId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/users/${userId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resetPassword: true, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao resetar senha do usuário.' };
+      
+      // Update local state fallback if matching
+      const targetUser = this.state.users.find(u => u.id === userId);
+      if (targetUser) {
+        targetUser.password = targetUser.masp;
+        targetUser.mustChangePassword = true;
+      }
+      
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message || 'Erro ao comunicar com o servidor.' };
+    }
+  }
+
   // --- DEPARTMENTS ---
   public getDepartments(currentUser?: User | null): Department[] {
     const actor = currentUser || this.state.currentUser;

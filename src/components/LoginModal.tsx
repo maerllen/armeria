@@ -176,40 +176,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
           </button>
         </form>
 
-        {/* Quick Demo Credentials */}
-        <div className="px-6 pb-4">
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 text-xs space-y-2">
-            <p className="text-slate-400 font-semibold text-[11px] uppercase tracking-wider">
-              Contas de Acesso Rápido (Teste):
-            </p>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <button
-                type="button"
-                onClick={() => {
-                  setMaspRaw('1255748');
-                  setPassword('1255748');
-                }}
-                className="text-left p-2 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 text-slate-300 transition"
-              >
-                <div className="font-bold text-amber-400">Admin Master</div>
-                <div className="text-[10px] text-slate-500">MASP: 1255748</div>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setMaspRaw('3333333');
-                  setPassword('3333333');
-                }}
-                className="text-left p-2 bg-slate-900 hover:bg-slate-800 rounded-lg border border-slate-800 text-slate-300 transition"
-              >
-                <div className="font-bold text-amber-400">Armeiro COE</div>
-                <div className="text-[10px] text-slate-500">MASP: 3333333</div>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-slate-950 px-6 py-3 border-t border-slate-800 text-center">
+        <div className="bg-slate-950 px-6 py-4 border-t border-slate-800 text-center">
           <p className="text-[11px] text-slate-500">
             Acesso restrito a policiais civis autorizados. Todas as ações são auditadas.
           </p>

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UserModuleProps {
@@ -176,6 +176,24 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
   const handleDeleteUser = (usr: User) => {
     setDeleteTargetUser({ type: 'user', id: usr.id, name: `o policial ${usr.name} (MASP: ${formatMasp(usr.masp)})` });
+  };
+
+  const isAdmin = currentUser.role === 'Administrador';
+  const isArmeiro = currentUser.role === 'Armeiro';
+  const canResetPassword = isGeral || isAdmin || isArmeiro;
+
+  const handleResetPassword = async () => {
+    if (!editingUser) return;
+    if (window.confirm(`Confirma o reset de senha de ${editingUser.name} (MASP: ${formatMasp(editingUser.masp)}) para o número do MASP?`)) {
+      try {
+        setErrorMsg('');
+        setSuccessMsg('');
+        await storage.resetUserPassword(editingUser.id);
+        setSuccessMsg(`Senha do policial ${editingUser.name} resetada com sucesso para o MASP. No próximo login, o usuário deverá alterar sua senha.`);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao resetar senha do policial.');
+      }
+    }
   };
 
   const confirmExecuteDeleteUser = async () => {
@@ -510,11 +528,18 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     value={formatMasp(maspRaw)}
                     onChange={(e) => setMaspRaw(cleanMasp(e.target.value))}
                     placeholder="Ex: 1255748"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                    disabled={!!editingUser}
+                    className={`w-full border rounded-xl px-3.5 py-2 text-sm font-mono ${
+                      editingUser
+                        ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
+                        : 'bg-slate-950 border-slate-700 text-slate-100'
+                    }`}
                     required
                   />
                   <p className="text-[10px] text-slate-500 mt-0.5">
-                    Armazenado apenas números. Senha inicial do primeiro login = MASP.
+                    {editingUser
+                      ? 'O número de MASP é inalterável por qualquer perfil.'
+                      : 'Armazenado apenas números. Senha inicial do primeiro login = MASP.'}
                   </p>
                 </div>
 
@@ -689,6 +714,29 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     Determina se o Armeiro/Usuário pode gerenciar e movimentar armas, munições, usuários e cofres em todo o departamento ou restrito à sua unidade.
                   </p>
                 </div>
+
+                {/* Resetar Senha (Geral, Administrador ou Armeiro) */}
+                {canResetPassword && editingUser && (
+                  <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 p-3.5 rounded-xl flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-amber-400 block flex items-center space-x-1.5">
+                        <KeyRound className="w-4 h-4 text-amber-400" />
+                        <span>Resetar Senha do Policial</span>
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Redefine a senha do policial para o número do MASP. No próximo acesso, o policial será direcionado obrigatoriamente para a página de primeiro acesso para cadastrar uma nova senha (mínimo 6 dígitos).
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleResetPassword}
+                      className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-3.5 py-2 rounded-xl text-xs font-bold transition shrink-0 ml-4 flex items-center space-x-1.5"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Resetar Senha</span>
+                    </button>
+                  </div>
+                )}
 
               </div>
 
