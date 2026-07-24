@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { getPool } from './mysql';
+import { getPool, dbConfig } from './mysql';
 
 export const apiRouter = Router();
 
@@ -43,8 +43,31 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     const cleanMasp = (maspDigits || '').replace(/\D/g, '');
     const cleanPass = (passwordDigits || '').trim();
 
-    const pool = getPool();
-    const [rows]: any = await pool.query('SELECT * FROM users WHERE masp = ?', [cleanMasp]);
+    let rows: any;
+    let pool;
+    try {
+      pool = getPool();
+      [rows] = await pool.query('SELECT * FROM users WHERE masp = ?', [cleanMasp]);
+    } catch (dbErr: any) {
+      console.error('[MySQL Login Error]', dbErr);
+      const isAccessDenied = dbErr.code === 'ER_ACCESS_DENIED_ERROR' || dbErr.message?.includes('Access denied');
+      const isConnRefused = dbErr.code === 'ECONNREFUSED' || dbErr.message?.includes('ECONNREFUSED');
+
+      let customMsg = `Erro no banco de dados MySQL (${dbErr.code || 'ERRO'}): ${dbErr.message}`;
+      if (isAccessDenied) {
+        customMsg = `Acesso negado ao MySQL para o usuário '${dbConfig.user}'. Verifique o usuário, senha e permissões do banco no Hostinger.`;
+      } else if (isConnRefused) {
+        customMsg = `Não foi possível conectar ao servidor MySQL (${dbConfig.host}:${dbConfig.port}). Verifique se o MySQL está ativo.`;
+      }
+
+      return res.status(500).json({
+        success: false,
+        isDbError: true,
+        dbErrorCode: dbErr.code || 'DB_CONNECT_ERROR',
+        error: customMsg,
+        rawMessage: dbErr.message
+      });
+    }
 
     if (!rows || rows.length === 0) {
       return res.status(400).json({ success: false, error: 'MASP ou senha incorretos.' });

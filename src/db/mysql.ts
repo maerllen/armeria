@@ -1,7 +1,12 @@
 import mysql from 'mysql2/promise';
 
+const rawHost = process.env.DB_HOST || '127.0.0.1';
+// In Node mysql2, 'localhost' resolves to IPv6 '::1' which causes "Access denied for user@'::1'".
+// Defaulting to IPv4 '127.0.0.1' ensures proper loopback socket matching for local MySQL.
+const effectiveHost = rawHost === 'localhost' ? '127.0.0.1' : rawHost;
+
 export const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
+  host: effectiveHost,
   port: parseInt(process.env.DB_PORT || '3306', 10),
   database: process.env.DB_NAME || 'u552818109_Armeriadb',
   user: process.env.DB_USER || 'u552818109_Armeria_user',

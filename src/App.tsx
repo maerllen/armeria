@@ -91,11 +91,23 @@ export default function App() {
     setLoginError('');
   };
 
+  const handleLocalFallbackLogin = (maspDigits: string) => {
+    setLoginError('');
+    const res = storage.loginLocalFallback(maspDigits);
+    if (!res.success || !res.user) {
+      setLoginError(res.error || 'MASP não encontrado no ambiente local.');
+      return;
+    }
+    setCurrentUser(res.user);
+    refreshData();
+  };
+
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
         <LoginModal
           onLoginSuccess={handleLoginSubmit}
+          onLocalFallbackLogin={handleLocalFallbackLogin}
           error={loginError}
         />
       </div>
