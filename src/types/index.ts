@@ -8,7 +8,8 @@ export type ModuleType =
   | 'municoes' 
   | 'armas' 
   | 'movimentacoes' 
-  | 'relatorio';
+  | 'relatorio'
+  | 'manual';
 
 export type UserCargo = 
   | 'Delegado' 

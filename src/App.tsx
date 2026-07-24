@@ -13,6 +13,7 @@ import { AmmunitionModule } from './components/AmmunitionModule';
 import { WeaponModule } from './components/WeaponModule';
 import { MovementModule } from './components/MovementModule';
 import { ReportModule } from './components/ReportModule';
+import { ManualModule } from './components/ManualModule';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -278,6 +279,10 @@ export default function App() {
               weapons={weapons}
               users={allUsers}
             />
+          )}
+
+          {activeModule === 'manual' && (
+            <ManualModule />
           )}
 
           {/* Footer Bar with Audit Log Trigger */}
