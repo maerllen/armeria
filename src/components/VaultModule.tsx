@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, VaultSpace, VaultSpaceType, Department, Unit } from '../types';
 import { storage } from '../services/storage';
 import { Vault, Plus, Trash2, AlertCircle, Check, Crosshair, Disc } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface VaultModuleProps {
   currentUser: User;
@@ -26,6 +27,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [deleteTargetVault, setDeleteTargetVault] = useState<VaultSpace | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
@@ -76,14 +78,21 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   };
 
   const handleDelete = (vault: VaultSpace) => {
-    if (window.confirm(`Deseja realmente excluir o local do cofre "${vault.code}"?`)) {
-      try {
-        storage.deleteVaultSpace(vault.id);
-        setSuccessMsg('Local do cofre excluído com sucesso.');
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir local do cofre.');
-      }
+    setDeleteTargetVault(vault);
+  };
+
+  const confirmExecuteDeleteVault = () => {
+    if (!deleteTargetVault) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      storage.deleteVaultSpace(deleteTargetVault.id);
+      setSuccessMsg(`Local do cofre "${deleteTargetVault.code}" excluído com sucesso.`);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir local do cofre.');
+    } finally {
+      setDeleteTargetVault(null);
     }
   };
 
@@ -326,6 +335,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetVault}
+        title="Excluir Local do Cofre Definitivamente"
+        message={`Deseja realmente apagar permanentemente o local do cofre "${deleteTargetVault?.code}"?`}
+        onConfirm={confirmExecuteDeleteVault}
+        onCancel={() => setDeleteTargetVault(null)}
+      />
 
     </div>
   );

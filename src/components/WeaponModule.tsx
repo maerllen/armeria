@@ -3,6 +3,7 @@ import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement } from '.
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -32,6 +33,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [selectedWeapon, setSelectedWeapon] = useState<Weapon | null>(null);
   const [weaponHistory, setWeaponHistory] = useState<Movement[]>([]);
   const [transitMovement, setTransitMovement] = useState<Movement | null>(null);
+  const [deleteTargetWeapon, setDeleteTargetWeapon] = useState<Weapon | null>(null);
 
   // Weapon form states
   const [editingWeapon, setEditingWeapon] = useState<Weapon | null>(null);
@@ -149,14 +151,23 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   };
 
   const handleDeleteWeapon = (weap: Weapon) => {
-    if (window.confirm(`Deseja realmente excluir a arma modelo ${weap.model} (Série: ${weap.serialNumber})?`)) {
-      try {
-        storage.deleteWeapon(weap.id);
-        setSuccessMsg('Arma excluída do acervo com sucesso.');
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir arma.');
-      }
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDeleteTargetWeapon(weap);
+  };
+
+  const confirmExecuteDeleteWeapon = () => {
+    if (!deleteTargetWeapon) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      storage.deleteWeapon(deleteTargetWeapon.id);
+      setSuccessMsg(`Arma ${deleteTargetWeapon.manufacturer} ${deleteTargetWeapon.model} (Série: ${deleteTargetWeapon.serialNumber}) excluída definitivamente.`);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir arma.');
+    } finally {
+      setDeleteTargetWeapon(null);
     }
   };
 
@@ -761,6 +772,15 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetWeapon}
+        title="Excluir Arma Definitivamente"
+        message={`Deseja realmente apagar permanentemente a arma ${deleteTargetWeapon?.manufacturer} ${deleteTargetWeapon?.model} (Série: ${deleteTargetWeapon?.serialNumber}) do sistema?`}
+        onConfirm={confirmExecuteDeleteWeapon}
+        onCancel={() => setDeleteTargetWeapon(null)}
+      />
 
     </div>
   );

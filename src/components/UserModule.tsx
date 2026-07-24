@@ -48,6 +48,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [deleteTargetUser, setDeleteTargetUser] = useState<{ type: 'user' | 'course'; id: string; name: string } | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
@@ -166,14 +167,26 @@ export const UserModule: React.FC<UserModuleProps> = ({
   };
 
   const handleDeleteUser = (usr: User) => {
-    if (window.confirm(`Deseja realmente excluir o policial ${usr.name} (MASP: ${formatMasp(usr.masp)})?`)) {
-      try {
-        storage.deleteUser(usr.id);
-        setSuccessMsg('Policial excluído com sucesso.');
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir policial.');
+    setDeleteTargetUser({ type: 'user', id: usr.id, name: `o policial ${usr.name} (MASP: ${formatMasp(usr.masp)})` });
+  };
+
+  const confirmExecuteDeleteUser = () => {
+    if (!deleteTargetUser) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      if (deleteTargetUser.type === 'user') {
+        storage.deleteUser(deleteTargetUser.id);
+        setSuccessMsg(`Policial excluído com sucesso.`);
+      } else {
+        storage.deleteCourse(deleteTargetUser.id);
+        setSuccessMsg(`Curso excluído com sucesso.`);
       }
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao realizar exclusão.');
+    } finally {
+      setDeleteTargetUser(null);
     }
   };
 
@@ -776,15 +789,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </div>
                   <button
                     onClick={() => {
-                      if (window.confirm(`Excluir o curso "${course.name}"?`)) {
-                        try {
-                          storage.deleteCourse(course.id);
-                          setSuccessMsg(`Curso "${course.name}" excluído com sucesso.`);
-                          onRefresh();
-                        } catch (err: any) {
-                          alert(err.message || 'Erro ao excluir curso.');
-                        }
-                      }
+                      setDeleteTargetUser({ type: 'course', id: course.id, name: `o curso "${course.name}"` });
                     }}
                     className="p-1.5 text-slate-400 hover:text-red-400 rounded transition"
                     title="Excluir Curso"
@@ -907,6 +912,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetUser}
+        title="Confirmar Exclusão"
+        message={`Deseja realmente apagar permanentemente ${deleteTargetUser?.name || 'este item'} do sistema?`}
+        onConfirm={confirmExecuteDeleteUser}
+        onCancel={() => setDeleteTargetUser(null)}
+      />
 
     </div>
   );

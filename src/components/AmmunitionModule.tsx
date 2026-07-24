@@ -3,6 +3,7 @@ import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Departm
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search, Trash2 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface AmmunitionModuleProps {
   currentUser: User;
@@ -41,6 +42,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [deleteTargetAmmo, setDeleteTargetAmmo] = useState<{ type: 'caliber' | 'stock' | 'movement'; id: string; label: string } | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
@@ -86,38 +88,37 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   };
 
   const handleDeleteCaliber = (cal: Caliber) => {
-    if (window.confirm(`Deseja realmente excluir o calibre "${cal.name}"?`)) {
-      try {
-        storage.deleteCaliber(cal.id);
-        setSuccessMsg(`Calibre "${cal.name}" excluído com sucesso.`);
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir calibre.');
-      }
-    }
+    setDeleteTargetAmmo({ type: 'caliber', id: cal.id, label: `o calibre "${cal.name}"` });
   };
 
   const handleDeleteStock = (st: AmmunitionStock) => {
-    if (window.confirm(`Deseja realmente excluir este registro de estoque do cofre?`)) {
-      try {
-        storage.deleteAmmoStock(st.id);
-        setSuccessMsg(`Registro de estoque excluído com sucesso.`);
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir estoque.');
-      }
-    }
+    setDeleteTargetAmmo({ type: 'stock', id: st.id, label: `o registro de estoque` });
   };
 
   const handleDeleteAmmoMovement = (m: AmmunitionMovement) => {
-    if (window.confirm(`Deseja realmente excluir este histórico de movimentação de munição?`)) {
-      try {
-        storage.deleteAmmoMovement(m.id);
+    setDeleteTargetAmmo({ type: 'movement', id: m.id, label: `o histórico de movimentação de munição` });
+  };
+
+  const confirmExecuteDeleteAmmo = () => {
+    if (!deleteTargetAmmo) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      if (deleteTargetAmmo.type === 'caliber') {
+        storage.deleteCaliber(deleteTargetAmmo.id);
+        setSuccessMsg(`Calibre excluído com sucesso.`);
+      } else if (deleteTargetAmmo.type === 'stock') {
+        storage.deleteAmmoStock(deleteTargetAmmo.id);
+        setSuccessMsg(`Registro de estoque excluído com sucesso.`);
+      } else if (deleteTargetAmmo.type === 'movement') {
+        storage.deleteAmmoMovement(deleteTargetAmmo.id);
         setSuccessMsg(`Histórico de movimentação excluído com sucesso.`);
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir movimentação.');
       }
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao realizar exclusão.');
+    } finally {
+      setDeleteTargetAmmo(null);
     }
   };
 
@@ -594,6 +595,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetAmmo}
+        title="Confirmar Exclusão"
+        message={`Deseja realmente apagar permanentemente ${deleteTargetAmmo?.label || 'este item'} do sistema?`}
+        onConfirm={confirmExecuteDeleteAmmo}
+        onCancel={() => setDeleteTargetAmmo(null)}
+      />
 
     </div>
   );

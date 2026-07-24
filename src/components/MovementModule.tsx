@@ -3,6 +3,7 @@ import { User, Movement, Weapon, VaultSpace, Course } from '../types';
 import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
 import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2 } from 'lucide-react';
+import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface MovementModuleProps {
   currentUser: User;
@@ -39,6 +40,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [deleteTargetMov, setDeleteTargetMov] = useState<Movement | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
@@ -101,14 +103,21 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   };
 
   const handleDeleteMovement = (mov: Movement) => {
-    if (window.confirm(`Deseja realmente excluir o registro de movimentação da arma ${mov.weaponModel} (${mov.weaponSerialNumber})?`)) {
-      try {
-        storage.deleteMovement(mov.id);
-        setSuccessMsg(`Registro de movimentação excluído com sucesso.`);
-        onRefresh();
-      } catch (err: any) {
-        setErrorMsg(err.message || 'Erro ao excluir movimentação.');
-      }
+    setDeleteTargetMov(mov);
+  };
+
+  const confirmExecuteDeleteMovement = () => {
+    if (!deleteTargetMov) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    try {
+      storage.deleteMovement(deleteTargetMov.id);
+      setSuccessMsg(`Registro de movimentação da arma ${deleteTargetMov.weaponModel} (${deleteTargetMov.weaponSerialNumber}) excluído com sucesso.`);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir movimentação.');
+    } finally {
+      setDeleteTargetMov(null);
     }
   };
 
@@ -565,6 +574,15 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTargetMov}
+        title="Excluir Movimentação Definitivamente"
+        message={`Deseja realmente apagar permanentemente este registro de movimentação da arma ${deleteTargetMov?.weaponModel} (${deleteTargetMov?.weaponSerialNumber})?`}
+        onConfirm={confirmExecuteDeleteMovement}
+        onCancel={() => setDeleteTargetMov(null)}
+      />
 
     </div>
   );

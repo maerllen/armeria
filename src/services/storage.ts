@@ -1029,9 +1029,8 @@ class StorageService {
     const weapon = this.state.weapons.find(w => w.id === id);
     if (!weapon) return false;
 
-    if (weapon.status !== 'No Cofre') {
-      throw new Error('Armas em trânsito ou com movimentação pendente não podem ser excluídas.');
-    }
+    // Clean up any movements related to this weapon
+    this.state.movements = this.state.movements.filter(m => m.weaponId !== id);
 
     this.state.weapons = this.state.weapons.filter(w => w.id !== id);
     this.addAuditLog('Armas', 'Excluir', `Excluída arma ${weapon.type} ${weapon.model} (Série: ${weapon.serialNumber})`);
