@@ -113,7 +113,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     setShowUserModal(true);
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -126,7 +126,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
     try {
       if (editingUser) {
-        storage.updateUser(editingUser.id, {
+        await storage.updateUser(editingUser.id, {
           masp: cleanMaspInput,
           name: name.trim(),
           phone: cleanPhone(phone),
@@ -141,10 +141,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
-        storage.addUser({
-          masp: cleanMaspInput,
-          password: cleanMaspInput, // Default password = MASP
+        await storage.addUser({
           name: name.trim(),
+          masp: cleanMaspInput,
           phone: cleanPhone(phone),
           cargo,
           role,
@@ -153,7 +152,6 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canMoveAmmunition: canMoveAmmo,
           canMoveWeapons: canMoveWeapons,
           hasSystemAccess,
-          mustChangePassword: true,
           courses: userCourses
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
@@ -170,16 +168,16 @@ export const UserModule: React.FC<UserModuleProps> = ({
     setDeleteTargetUser({ type: 'user', id: usr.id, name: `o policial ${usr.name} (MASP: ${formatMasp(usr.masp)})` });
   };
 
-  const confirmExecuteDeleteUser = () => {
+  const confirmExecuteDeleteUser = async () => {
     if (!deleteTargetUser) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
       if (deleteTargetUser.type === 'user') {
-        storage.deleteUser(deleteTargetUser.id);
+        await storage.deleteUser(deleteTargetUser.id);
         setSuccessMsg(`Policial excluído com sucesso.`);
       } else {
-        storage.deleteCourse(deleteTargetUser.id);
+        await storage.deleteCourse(deleteTargetUser.id);
         setSuccessMsg(`Curso excluído com sucesso.`);
       }
       onRefresh();
@@ -212,7 +210,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   };
 
   // Create Course Handler
-  const handleCreateCourse = (e: React.FormEvent) => {
+  const handleCreateCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCourseName.trim()) return;
     if (selectedModels.length === 0 || selectedCalibers.length === 0) {
@@ -221,7 +219,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     }
 
     try {
-      storage.addCourse({
+      await storage.addCourse({
         name: newCourseName.trim(),
         allowedModels: selectedModels,
         allowedCalibers: selectedCalibers,

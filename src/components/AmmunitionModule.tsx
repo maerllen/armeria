@@ -66,7 +66,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   };
 
   // Save Caliber
-  const handleSaveCaliber = (e: React.FormEvent) => {
+  const handleSaveCaliber = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -77,7 +77,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
 
     try {
-      storage.addCaliber(caliberName.trim());
+      await storage.addCaliber(caliberName.trim());
       setSuccessMsg(`Calibre "${caliberName.trim()}" cadastrado com sucesso.`);
       setCaliberName('');
       setShowCaliberModal(false);
@@ -99,19 +99,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setDeleteTargetAmmo({ type: 'movement', id: m.id, label: `o histórico de movimentação de munição` });
   };
 
-  const confirmExecuteDeleteAmmo = () => {
+  const confirmExecuteDeleteAmmo = async () => {
     if (!deleteTargetAmmo) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
       if (deleteTargetAmmo.type === 'caliber') {
-        storage.deleteCaliber(deleteTargetAmmo.id);
+        await storage.deleteCaliber(deleteTargetAmmo.id);
         setSuccessMsg(`Calibre excluído com sucesso.`);
       } else if (deleteTargetAmmo.type === 'stock') {
-        storage.deleteAmmoStock(deleteTargetAmmo.id);
+        await storage.deleteAmmoStock(deleteTargetAmmo.id);
         setSuccessMsg(`Registro de estoque excluído com sucesso.`);
       } else if (deleteTargetAmmo.type === 'movement') {
-        storage.deleteAmmoMovement(deleteTargetAmmo.id);
+        await storage.deleteAmmoMovement(deleteTargetAmmo.id);
         setSuccessMsg(`Histórico de movimentação excluído com sucesso.`);
       }
       onRefresh();
@@ -123,7 +123,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   };
 
   // Save Movement (Entrada / Saída)
-  const handleSaveMovement = (e: React.FormEvent) => {
+  const handleSaveMovement = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -151,7 +151,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
 
     try {
-      storage.recordAmmoMovement({
+      await storage.recordAmmoMovement({
         type: movementType,
         caliberId: selectedCaliberId,
         quantity,

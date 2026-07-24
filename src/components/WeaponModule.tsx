@@ -101,7 +101,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     setShowWeaponModal(true);
   };
 
-  const handleSaveWeapon = (e: React.FormEvent) => {
+  const handleSaveWeapon = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -117,7 +117,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
     try {
       if (editingWeapon) {
-        storage.updateWeapon(editingWeapon.id, {
+        await storage.updateWeapon(editingWeapon.id, {
           type,
           serialNumber: serialNumber.trim().toUpperCase(),
           manufacturer: manufacturer.trim(),
@@ -130,7 +130,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         });
         setSuccessMsg('Arma atualizada com sucesso.');
       } else {
-        storage.addWeapon({
+        await storage.addWeapon({
           type,
           serialNumber: serialNumber.trim().toUpperCase(),
           manufacturer: manufacturer.trim(),
@@ -156,12 +156,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     setDeleteTargetWeapon(weap);
   };
 
-  const confirmExecuteDeleteWeapon = () => {
+  const confirmExecuteDeleteWeapon = async () => {
     if (!deleteTargetWeapon) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      storage.deleteWeapon(deleteTargetWeapon.id);
+      await storage.deleteWeapon(deleteTargetWeapon.id);
       setSuccessMsg(`Arma ${deleteTargetWeapon.manufacturer} ${deleteTargetWeapon.model} (Série: ${deleteTargetWeapon.serialNumber}) excluída definitivamente.`);
       onRefresh();
     } catch (err: any) {
@@ -179,12 +179,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     setShowMaintenanceModal(true);
   };
 
-  const handleSaveMaintenance = (e: React.FormEvent) => {
+  const handleSaveMaintenance = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedWeapon) return;
 
     try {
-      storage.updateWeapon(selectedWeapon.id, {
+      await storage.updateWeapon(selectedWeapon.id, {
         lastMaintenanceDate: maintDate,
         lastMaintenanceResponsible: maintResponsible.trim()
       });

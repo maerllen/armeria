@@ -66,7 +66,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   };
 
   // Submit Withdrawal Request
-  const handleSaveWithdrawal = (e: React.FormEvent) => {
+  const handleSaveWithdrawal = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -77,7 +77,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
     }
 
     try {
-      storage.requestWithdrawal({
+      await storage.requestWithdrawal({
         weaponId: selectedWeaponId,
         ammunitionCount: ammoCount,
         magazineCount
@@ -92,9 +92,9 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   };
 
   // Approve Withdrawal
-  const handleApprove = (mov: Movement) => {
+  const handleApprove = async (mov: Movement) => {
     try {
-      storage.approveWithdrawal(mov.id);
+      await storage.approveWithdrawal(mov.id);
       setSuccessMsg(`Retirada da arma ${mov.weaponModel} (${mov.weaponSerialNumber}) aprovada com sucesso.`);
       onRefresh();
     } catch (err: any) {
@@ -106,12 +106,12 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
     setDeleteTargetMov(mov);
   };
 
-  const confirmExecuteDeleteMovement = () => {
+  const confirmExecuteDeleteMovement = async () => {
     if (!deleteTargetMov) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      storage.deleteMovement(deleteTargetMov.id);
+      await storage.deleteMovement(deleteTargetMov.id);
       setSuccessMsg(`Registro de movimentação da arma ${deleteTargetMov.weaponModel} (${deleteTargetMov.weaponSerialNumber}) excluído com sucesso.`);
       onRefresh();
     } catch (err: any) {
@@ -140,7 +140,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   };
 
   // Submit Return Request
-  const handleSaveReturn = (e: React.FormEvent) => {
+  const handleSaveReturn = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -162,7 +162,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
     }
 
     try {
-      storage.requestReturn({
+      await storage.requestReturn({
         movementId: selectedMovement.id,
         returnVaultSpaceId: returnVaultId,
         returningAmmunitionCount: returningAmmoCount,
@@ -179,9 +179,9 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   };
 
   // Confirm Receipt
-  const handleConfirmReceipt = (mov: Movement) => {
+  const handleConfirmReceipt = async (mov: Movement) => {
     try {
-      storage.confirmReceipt(mov.id);
+      await storage.confirmReceipt(mov.id);
       setSuccessMsg(`Recibo da devolução da arma ${mov.weaponModel} (${mov.weaponSerialNumber}) confirmado.`);
       onRefresh();
     } catch (err: any) {

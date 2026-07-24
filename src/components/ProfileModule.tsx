@@ -53,13 +53,13 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const dept = departments.find(d => d.id === activeUser.departmentId);
   const unit = units.find(u => u.id === activeUser.unitId);
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setSuccessMsg('');
     setErrorMsg('');
 
     try {
-      storage.updateUser(activeUser.id, {
+      await storage.updateUser(activeUser.id, {
         name: name.trim(),
         phone: cleanPhone(phone),
         cargo

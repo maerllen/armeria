@@ -22,7 +22,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState('');
   const [localError, setLocalError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLocalError('');
 
@@ -50,7 +50,7 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
       return;
     }
 
-    const res = storage.changePassword(user.id, trimmedNew);
+    const res = await storage.changePassword(user.id, trimmedNew);
     if (!res.success) {
       setLocalError(res.error || 'Erro ao alterar a senha.');
       return;

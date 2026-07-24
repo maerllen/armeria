@@ -48,7 +48,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setShowModal(true);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -63,7 +63,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     }
 
     try {
-      storage.addVaultSpace({
+      await storage.addVaultSpace({
         code: code.trim().toUpperCase(),
         type,
         departmentId: deptId,
@@ -81,12 +81,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setDeleteTargetVault(vault);
   };
 
-  const confirmExecuteDeleteVault = () => {
+  const confirmExecuteDeleteVault = async () => {
     if (!deleteTargetVault) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      storage.deleteVaultSpace(deleteTargetVault.id);
+      await storage.deleteVaultSpace(deleteTargetVault.id);
       setSuccessMsg(`Local do cofre "${deleteTargetVault.code}" excluído com sucesso.`);
       onRefresh();
     } catch (err: any) {

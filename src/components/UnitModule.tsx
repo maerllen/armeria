@@ -62,17 +62,17 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     setShowDeptModal(true);
   };
 
-  const handleSaveDept = (e: React.FormEvent) => {
+  const handleSaveDept = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
     try {
       if (editingDept) {
-        storage.updateDepartment(editingDept.id, deptName.trim(), deptCode.trim());
+        await storage.updateDepartment(editingDept.id, deptName.trim(), deptCode.trim());
         setSuccessMsg('Departamento atualizado com sucesso.');
       } else {
-        storage.addDepartment({ name: deptName.trim(), code: deptCode.trim() });
+        await storage.addDepartment({ name: deptName.trim(), code: deptCode.trim() });
         setSuccessMsg('Novo departamento cadastrado com sucesso.');
       }
       setShowDeptModal(false);
@@ -106,7 +106,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     setShowUnitModal(true);
   };
 
-  const handleSaveUnit = (e: React.FormEvent) => {
+  const handleSaveUnit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -118,10 +118,10 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
     try {
       if (editingUnit) {
-        storage.updateUnit(editingUnit.id, unitName.trim(), selectedDeptId);
+        await storage.updateUnit(editingUnit.id, unitName.trim(), selectedDeptId);
         setSuccessMsg('Unidade atualizada com sucesso.');
       } else {
-        storage.addUnit({ name: unitName.trim(), departmentId: selectedDeptId });
+        await storage.addUnit({ name: unitName.trim(), departmentId: selectedDeptId });
         setSuccessMsg('Nova unidade cadastrada com sucesso.');
       }
       setShowUnitModal(false);
@@ -131,16 +131,16 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     }
   };
 
-  const confirmExecutionDelete = () => {
+  const confirmExecutionDelete = async () => {
     if (!deleteTarget) return;
     setErrorMsg('');
     setSuccessMsg('');
     try {
       if (deleteTarget.type === 'dept') {
-        storage.deleteDepartment(deleteTarget.item.id);
+        await storage.deleteDepartment(deleteTarget.item.id);
         setSuccessMsg(`Departamento "${deleteTarget.item.name}" excluído com sucesso.`);
       } else {
-        storage.deleteUnit(deleteTarget.item.id);
+        await storage.deleteUnit(deleteTarget.item.id);
         setSuccessMsg(`Unidade "${deleteTarget.item.name}" excluída com sucesso.`);
       }
       onRefresh();

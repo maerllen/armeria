@@ -252,6 +252,127 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'audit_logs' verificada/criada.");
 
+    // --- SEEDING INITIAL DATA IF EMPTY ---
+    const [deptRows]: any = await connection.query('SELECT COUNT(*) as count FROM departments');
+    if (deptRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'departments'...");
+      await connection.query(`
+        INSERT INTO departments (id, name, code) VALUES
+        ('dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'DOE-COE'),
+        ('dept-dhpp', 'DEPARTAMENTO DE HOMICÍDIOS E PROTEÇÃO À PESSOA (DHPP)', 'DHPP'),
+        ('dept-dic', 'DEPARTAMENTO DE INVESTIGAÇÕES CRIMINAIS (DIC)', 'DIC');
+      `);
+    }
+
+    const [unitRows]: any = await connection.query('SELECT COUNT(*) as count FROM units');
+    if (unitRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'units'...");
+      await connection.query(`
+        INSERT INTO units (id, department_id, name) VALUES
+        ('unit-coe-insp', 'dept-coe', 'INSPETORIA COE'),
+        ('unit-coe-grt', 'dept-coe', 'GRUPO DE RESGATE TÁTICO (GRT)'),
+        ('unit-dhpp-1', 'dept-dhpp', '1ª DELEGACIA DE HOMICÍDIOS'),
+        ('unit-dic-cargas', 'dept-dic', 'DELEGACIA DE REPRESSÃO AO ROUBO DE CARGAS');
+      `);
+    }
+
+    const [caliberRows]: any = await connection.query('SELECT COUNT(*) as count FROM calibers');
+    if (caliberRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'calibers'...");
+      await connection.query(`
+        INSERT INTO calibers (id, name) VALUES
+        ('cal-556', '5,56x45mm'),
+        ('cal-40', '.40 S&W'),
+        ('cal-9mm', '9x19mm'),
+        ('cal-380', '.380 ACP'),
+        ('cal-12ga', '12 GA');
+      `);
+    }
+
+    const [courseRows]: any = await connection.query('SELECT COUNT(*) as count FROM courses');
+    if (courseRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'courses'...");
+      await connection.query(`
+        INSERT INTO courses (id, name, allowed_models, allowed_calibers, department_id) VALUES
+        ('course-fuzil', 'Operador de fuzil', '["T4", "IA2", "M4A1"]', '["5,56x45mm"]', 'dept-coe'),
+        ('course-pistola', 'Operador de Pistola', '["PT92", "Glock G22", "TH40", "PT840"]', '[".40 S&W", "9x19mm"]', 'dept-coe'),
+        ('course-12', 'Operador de Espingarda C12', '["CBC 586-P", "Benelli M4"]', '["12 GA"]', 'dept-coe');
+      `);
+    }
+
+    const [vaultRows]: any = await connection.query('SELECT COUNT(*) as count FROM vault_spaces');
+    if (vaultRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'vault_spaces'...");
+      await connection.query(`
+        INSERT INTO vault_spaces (id, code, type, department_id, unit_id) VALUES
+        ('vault-coe-1', 'A1-G1', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
+        ('vault-coe-2', 'A1-G2', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
+        ('vault-coe-3', 'C1-L1', 'MUNIÇÕES', 'dept-coe', 'unit-coe-insp'),
+        ('vault-coe-4', 'C1-L2', 'MUNIÇÕES', 'dept-coe', 'unit-coe-insp'),
+        ('vault-dhpp-1', 'B1-G1', 'ARMAS', 'dept-dhpp', 'unit-dhpp-1'),
+        ('vault-dhpp-2', 'M1-L1', 'MUNIÇÕES', 'dept-dhpp', 'unit-dhpp-1');
+      `);
+    }
+
+    const [userRows]: any = await connection.query('SELECT COUNT(*) as count FROM users');
+    if (userRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'users'...");
+      await connection.query(`
+        INSERT INTO users (id, masp, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, password, must_change_password) VALUES
+        ('usr-master-geral', '1255748', 'Administrador Geral Master', '31999998888', 'Delegado', 'Geral', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '1255748', 1),
+        ('usr-admin-coe', '2222222', 'Dr. Roberto Silva (Admin DOE)', '31988887777', 'Delegado', 'Administrador', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '2222222', 0),
+        ('usr-armeiro-coe', '3333333', 'Agente Carlos Andrade (Armeiro COE)', '31977776666', 'Investigador', 'Armeiro', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '3333333', 0),
+        ('usr-policial-coe', '4444444', 'Policial Eduardo Costa', '31966665555', 'Investigador', 'Policial', 'dept-coe', 'unit-coe-insp', 0, 0, 1, '4444444', 0),
+        ('usr-policial-dhpp', '5555555', 'Escrivã Ana Lima', '31955554444', 'Escrivão', 'Policial', 'dept-dhpp', 'unit-dhpp-1', 0, 0, 1, '5555555', 0);
+      `);
+
+      // Seed user_courses
+      await connection.query(`
+        INSERT INTO user_courses (id, user_id, course_id, completion_date, expiration_date) VALUES
+        ('uc-1', 'usr-master-geral', 'course-fuzil', '2025-10-15', '2027-10-15'),
+        ('uc-2', 'usr-master-geral', 'course-pistola', '2025-11-20', '2027-11-20'),
+        ('uc-3', 'usr-admin-coe', 'course-fuzil', '2025-05-10', '2027-05-10'),
+        ('uc-4', 'usr-admin-coe', 'course-pistola', '2025-06-01', '2027-06-01'),
+        ('uc-5', 'usr-armeiro-coe', 'course-fuzil', '2025-01-15', '2027-01-15'),
+        ('uc-6', 'usr-armeiro-coe', 'course-pistola', '2025-02-10', '2027-02-10'),
+        ('uc-7', 'usr-armeiro-coe', 'course-12', '2025-03-01', '2027-03-01'),
+        ('uc-8', 'usr-policial-coe', 'course-fuzil', '2025-08-12', '2027-08-12'),
+        ('uc-9', 'usr-policial-coe', 'course-pistola', '2023-01-10', '2025-01-10'),
+        ('uc-10', 'usr-policial-dhpp', 'course-pistola', '2025-04-10', '2027-04-10');
+      `);
+    }
+
+    const [weaponRows]: any = await connection.query('SELECT COUNT(*) as count FROM weapons');
+    if (weaponRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'weapons'...");
+      await connection.query(`
+        INSERT INTO weapons (id, type, serial_number, manufacturer, model, caliber, magazine_quantity, status, department_id, unit_id, vault_space_id, last_maintenance_date, last_maintenance_responsible) VALUES
+        ('weap-1', 'Fuzil', 'EKG-5486', 'Taurus', 'T4', '5,56x45mm', 4, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-1', '2026-05-10', 'Agente Carlos Andrade'),
+        ('weap-2', 'Pistola', 'PT-998822', 'Taurus', 'PT92', '.40 S&W', 3, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-2', '2026-06-15', 'Agente Carlos Andrade'),
+        ('weap-3', 'Espingarda', 'CBC-12009', 'CBC', 'CBC 586-P', '12 GA', 1, 'No Cofre', 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-1', '2026-04-01', 'Armeiro DHPP');
+      `);
+    }
+
+    const [ammoStockRows]: any = await connection.query('SELECT COUNT(*) as count FROM ammo_stocks');
+    if (ammoStockRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'ammo_stocks'...");
+      await connection.query(`
+        INSERT INTO ammo_stocks (id, caliber_id, quantity, department_id, unit_id, vault_space_id) VALUES
+        ('stock-1', 'cal-556', 2500, 'dept-coe', 'unit-coe-insp', 'vault-coe-3'),
+        ('stock-2', 'cal-40', 1200, 'dept-coe', 'unit-coe-insp', 'vault-coe-4'),
+        ('stock-3', 'cal-9mm', 800, 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-2');
+      `);
+    }
+
+    const [auditRows]: any = await connection.query('SELECT COUNT(*) as count FROM audit_logs');
+    if (auditRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'audit_logs'...");
+      await connection.query(`
+        INSERT INTO audit_logs (id, timestamp, user_id, user_name, user_masp, user_role, module, action, details, ip_address) VALUES
+        ('log-1', NOW(), 'usr-master-geral', 'Administrador Geral Master', '1255748', 'Geral', 'Unidade', 'Criar', 'Inicialização do sistema e cadastro das unidades padrão no MySQL', '192.168.1.100');
+      `);
+    }
+
     connection.release();
     return {
       success: true,

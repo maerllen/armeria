@@ -40,25 +40,25 @@ export default function App() {
   const [loginError, setLoginError] = useState('');
 
   // Load all app data based on logged in user
-  const refreshData = () => {
+  const refreshData = async () => {
     const active = storage.getCurrentUser();
-    setCurrentUser(active);
-
     if (active) {
-      if (active.password === active.masp) {
-        setShowChangePasswordModal(true);
-      }
+      await storage.refreshFromServer();
+      const freshUser = storage.getCurrentUser();
+      setCurrentUser(freshUser);
 
-      setAllUsers(storage.getUsers(active));
-      setDepartments(storage.getDepartments(active));
-      setUnits(storage.getUnits(active));
-      setVaultSpaces(storage.getVaultSpaces(active));
+      setAllUsers(storage.getUsers(freshUser));
+      setDepartments(storage.getDepartments(freshUser));
+      setUnits(storage.getUnits(freshUser));
+      setVaultSpaces(storage.getVaultSpaces(freshUser));
       setCalibers(storage.getCalibers());
-      setAmmoStocks(storage.getAmmoStocks(active));
-      setAmmoMovements(storage.getAmmoMovements(active));
-      setWeapons(storage.getWeapons(active));
-      setMovements(storage.getMovements(active));
+      setAmmoStocks(storage.getAmmoStocks(freshUser));
+      setAmmoMovements(storage.getAmmoMovements(freshUser));
+      setWeapons(storage.getWeapons(freshUser));
+      setMovements(storage.getMovements(freshUser));
       setCourses(storage.getCourses());
+    } else {
+      setCurrentUser(null);
     }
   };
 
@@ -66,16 +66,16 @@ export default function App() {
     refreshData();
   }, []);
 
-  const handleLoginSubmit = (maspDigits: string, passwordInput: string) => {
+  const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
     setLoginError('');
-    const res = storage.login(maspDigits, passwordInput);
+    const res = await storage.login(maspDigits, passwordInput);
     if (!res.success || !res.user) {
       setLoginError(res.error || 'MASP ou senha incorretos.');
       return;
     }
 
     setCurrentUser(res.user);
-    refreshData();
+    await refreshData();
 
     if (res.user.password === res.user.masp) {
       setShowChangePasswordModal(true);

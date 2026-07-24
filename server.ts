@@ -3,12 +3,16 @@ import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { testConnection, initializeDatabaseSchema, dbConfig } from './src/db/mysql';
+import { apiRouter } from './src/db/apiRoutes';
 
 async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
   app.use(express.json());
+
+  // Mount MySQL CRUD endpoints
+  app.use('/api', apiRouter);
 
   // API Routes
   app.get('/api/health', (req, res) => {
