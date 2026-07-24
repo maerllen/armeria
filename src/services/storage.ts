@@ -280,7 +280,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.units;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.units.filter(u => u.departmentId === actor.departmentId);
     }
     return this.state.units.filter(u => u.id === actor.unitId);
@@ -326,11 +326,22 @@ class StorageService {
   public getUsers(currentUser?: User | null): User[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.users;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
-      return this.state.users.filter(u => u.departmentId === actor.departmentId);
+    
+    let list: User[] = [];
+    if (actor.role === 'Geral') {
+      list = this.state.users;
+    } else if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      list = this.state.users.filter(u => u.departmentId === actor.departmentId);
+    } else {
+      list = this.state.users.filter(u => u.unitId === actor.unitId);
     }
-    return this.state.users.filter(u => u.unitId === actor.unitId);
+
+    // Apenas usuários com perfil Geral podem ver usuários com perfil Geral
+    if (actor.role !== 'Geral') {
+      list = list.filter(u => u.role !== 'Geral');
+    }
+
+    return list;
   }
 
   public async addUser(data: Omit<User, 'id' | 'password' | 'createdAt' | 'mustChangePassword'>): Promise<User> {
@@ -403,7 +414,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.vaultSpaces;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.vaultSpaces.filter(v => v.departmentId === actor.departmentId);
     }
     return this.state.vaultSpaces.filter(v => v.unitId === actor.unitId);
@@ -467,7 +478,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.ammoStocks;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.ammoStocks.filter(s => s.departmentId === actor.departmentId);
     }
     return this.state.ammoStocks.filter(s => s.unitId === actor.unitId);
@@ -477,7 +488,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.ammoMovements;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.ammoMovements.filter(m => m.departmentId === actor.departmentId);
     }
     return this.state.ammoMovements.filter(m => m.unitId === actor.unitId);
@@ -543,23 +554,25 @@ class StorageService {
     let result: Weapon[] = [];
     if (actor.role === 'Geral') {
       result = this.state.weapons;
-    } else if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    } else if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       result = this.state.weapons.filter(w => w.departmentId === actor.departmentId);
     } else {
-      // Policial: filter weapons in unit and qualified courses
+      // Policial or Armeiro scoped to unit: filter weapons in unit
       result = this.state.weapons.filter(w => w.unitId === actor.unitId);
-      const validCourses = (actor.courses || []).filter(c => !isCourseExpired(c.completionDate));
-      const qualifiedCourseObjects = this.state.courses.filter(courseObj =>
-        validCourses.some(vc => vc.courseId === courseObj.id)
-      );
+      if (actor.role === 'Policial') {
+        const validCourses = (actor.courses || []).filter(c => !isCourseExpired(c.completionDate));
+        const qualifiedCourseObjects = this.state.courses.filter(courseObj =>
+          validCourses.some(vc => vc.courseId === courseObj.id)
+        );
 
-      result = result.filter(weapon => {
-        return qualifiedCourseObjects.some(course => {
-          const modelMatch = course.allowedModels.some(m => m.toLowerCase() === weapon.model.toLowerCase());
-          const caliberMatch = course.allowedCalibers.some(c => c.toLowerCase() === weapon.caliber.toLowerCase());
-          return modelMatch && caliberMatch;
+        result = result.filter(weapon => {
+          return qualifiedCourseObjects.some(course => {
+            const modelMatch = course.allowedModels.some(m => m.toLowerCase() === weapon.model.toLowerCase());
+            const caliberMatch = course.allowedCalibers.some(c => c.toLowerCase() === weapon.caliber.toLowerCase());
+            return modelMatch && caliberMatch;
+          });
         });
-      });
+      }
     }
 
     return result;
@@ -569,7 +582,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.weapons;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.weapons.filter(w => w.departmentId === actor.departmentId);
     }
     return this.state.weapons.filter(w => w.unitId === actor.unitId);
@@ -616,7 +629,7 @@ class StorageService {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     if (actor.role === 'Geral') return this.state.movements;
-    if (actor.role === 'Administrador' || actor.role === 'Armeiro') {
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.movements.filter(m => m.departmentId === actor.departmentId);
     }
     return this.state.movements.filter(m => m.unitId === actor.unitId);

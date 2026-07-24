@@ -37,6 +37,7 @@ export interface User {
   canMoveWeapons: boolean;
   hasSystemAccess: boolean;
   mustChangePassword: boolean;
+  managementScope?: 'department' | 'unit';
   courses: UserCourse[];
   createdAt: string;
 }

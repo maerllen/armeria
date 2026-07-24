@@ -246,7 +246,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <span className="font-mono font-bold text-slate-100 text-sm">{c.name}</span>
                 <div className="flex items-center space-x-2">
                   <span className="text-[10px] text-slate-500 uppercase">Calibre Padrão</span>
-                  {canManageCalibers && (
+                  {isGeral && (
                     <button
                       onClick={() => handleDeleteCaliber(c)}
                       className="p-1 text-slate-500 hover:text-red-400 rounded transition"
@@ -303,7 +303,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                         <span className="text-lg font-mono font-black text-emerald-400">
                           {st.quantity} un
                         </span>
-                        {canManageStock && (
+                        {isGeral && (
                           <button
                             onClick={() => handleDeleteStock(st)}
                             className="p-1 text-slate-500 hover:text-red-400 rounded transition"

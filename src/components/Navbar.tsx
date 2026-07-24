@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { User } from '../types';
 import { formatMasp } from '../utils/masks';
-import { storage } from '../services/storage';
-import { Shield, UserCheck, LogOut, KeyRound, RefreshCw } from 'lucide-react';
+import { Shield, LogOut, KeyRound } from 'lucide-react';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -14,12 +13,8 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onLogout,
-  onChangePasswordClick,
-  onUserSwitched
+  onChangePasswordClick
 }) => {
-  const [showTesterMenu, setShowTesterMenu] = useState(false);
-  const allUsers = storage.getAllUsersUnfiltered();
-
   const getRoleBadgeColor = (role: string) => {
     switch (role) {
       case 'Geral':
@@ -30,20 +25,6 @@ export const Navbar: React.FC<NavbarProps> = ({
         return 'bg-amber-950/80 text-amber-300 border-amber-500/50';
       default:
         return 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
-    }
-  };
-
-  const handleSwitchUser = (user: User) => {
-    storage.setCurrentUser(user);
-    storage.addAuditLog('Login', 'Login', `[Tester] Alternado para o perfil ${user.name} (${user.role})`);
-    setShowTesterMenu(false);
-    onUserSwitched();
-  };
-
-  const handleResetData = () => {
-    if (window.confirm('Deseja restaurar os dados do sistema para o estado inicial de demonstração?')) {
-      storage.resetToSeedData();
-      onUserSwitched();
     }
   };
 
@@ -64,63 +45,14 @@ export const Navbar: React.FC<NavbarProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block font-sans">
-              Gestão e Cautela Tática de Armamentos e Munições
+              Sistema de gerencia de material bélico da COE
             </p>
           </div>
         </div>
 
-        {/* Right: Quick Tester, User info & Logout */}
+        {/* Right: User info & Logout */}
         {currentUser && (
           <div className="flex items-center space-x-3">
-            
-            {/* Quick Profile Tester Switcher */}
-            <div className="relative">
-              <button
-                onClick={() => setShowTesterMenu(!showTesterMenu)}
-                className="flex items-center space-x-1.5 text-xs bg-slate-900/80 hover:bg-slate-800 text-slate-300 px-3 py-1.5 rounded-lg border border-slate-700/80 transition shadow-sm"
-                title="Alternar perfis de teste rápido"
-              >
-                <UserCheck className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden md:inline font-medium">Alternar Perfil</span>
-              </button>
-
-              {showTesterMenu && (
-                <div className="absolute right-0 mt-2 w-72 glass-card border border-slate-700 rounded-xl shadow-2xl py-2 z-50 text-xs text-slate-200">
-                  <div className="px-3 py-1.5 border-b border-slate-700/80 font-semibold text-slate-400 flex justify-between items-center font-mono text-[10px]">
-                    <span>SELECIONAR PERFIL DE TESTE:</span>
-                    <button 
-                      onClick={handleResetData} 
-                      className="text-amber-400 hover:underline flex items-center space-x-1"
-                      title="Restaurar Banco de Dados"
-                    >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Reset</span>
-                    </button>
-                  </div>
-                  <div className="max-h-60 overflow-y-auto">
-                    {allUsers.map((u) => (
-                      <button
-                        key={u.id}
-                        onClick={() => handleSwitchUser(u)}
-                        className={`w-full text-left px-3 py-2 hover:bg-slate-800/80 flex flex-col space-y-0.5 border-b border-slate-800/50 transition ${
-                          u.id === currentUser.id ? 'bg-slate-800/90 text-amber-400 font-medium' : ''
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold text-slate-100">{u.name}</span>
-                          <span className={`text-[9px] px-1.5 py-0.5 rounded border uppercase font-mono font-bold ${getRoleBadgeColor(u.role)}`}>
-                            {u.role}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          MASP: {formatMasp(u.masp)} • {u.cargo}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
 
             {/* Current User Badge */}
             <div className="hidden sm:flex items-center space-x-2.5 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800/80">

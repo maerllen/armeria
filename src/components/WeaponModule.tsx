@@ -60,7 +60,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const isPolicial = currentUser.role === 'Policial';
 
   const canAddEditWeapon = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
-  const canDeleteWeapon = isGeral || isArmeiro || isAdmin;
+  const canDeleteWeapon = isGeral;
   const canManageMaintenance = isGeral || isArmeiro;
 
   // Vault spaces for weapons: MUST BE TYPE ARMAS

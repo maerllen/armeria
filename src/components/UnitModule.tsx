@@ -173,13 +173,15 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         {/* Action Buttons */}
         {!isPolicial && (
           <div className="flex items-center space-x-3">
-            <button
-              onClick={() => handleOpenDeptModal()}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4 text-amber-400" />
-              <span>Novo Departamento</span>
-            </button>
+            {isGeral && (
+              <button
+                onClick={() => handleOpenDeptModal()}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4 text-amber-400" />
+                <span>Novo Departamento</span>
+              </button>
+            )}
 
             <button
               onClick={() => handleOpenUnitModal()}
@@ -228,7 +230,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   </p>
                 </div>
 
-                {!isPolicial && (
+                {isGeral && (
                   <div className="flex items-center space-x-2">
                     <button
                       onClick={() => handleOpenDeptModal(dept)}
@@ -277,13 +279,15 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                                   >
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
-                                  <button
-                                    onClick={() => handleDeleteUnit(unit)}
-                                    className="p-1 text-slate-400 hover:text-red-400 rounded"
-                                    title="Excluir Unidade"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
+                                  {isGeral && (
+                                    <button
+                                      onClick={() => handleDeleteUnit(unit)}
+                                      className="p-1 text-slate-400 hover:text-red-400 rounded"
+                                      title="Excluir Unidade"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
                                 </div>
                               )}
                             </div>

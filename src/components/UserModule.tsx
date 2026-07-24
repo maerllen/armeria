@@ -38,6 +38,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [canMoveAmmo, setCanMoveAmmo] = useState(false);
   const [canMoveWeapons, setCanMoveWeapons] = useState(false);
   const [hasSystemAccess, setHasSystemAccess] = useState(true);
+  const [managementScope, setManagementScope] = useState<'department' | 'unit'>('unit');
   const [userCourses, setUserCourses] = useState<UserCourse[]>([]);
 
   // Course Management Form states
@@ -71,7 +72,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     'Operador'
   ];
 
-  const rolesList: UserRole[] = isGeral
+  const rolesList: UserRole[] = (editingUser && editingUser.role === 'Geral')
     ? ['Geral', 'Administrador', 'Armeiro', 'Policial']
     : ['Administrador', 'Armeiro', 'Policial'];
 
@@ -93,6 +94,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanMoveAmmo(usr.canMoveAmmunition);
       setCanMoveWeapons(usr.canMoveWeapons);
       setHasSystemAccess(usr.hasSystemAccess);
+      setManagementScope(usr.managementScope || 'department');
       setUserCourses(usr.courses || []);
     } else {
       setEditingUser(null);
@@ -108,6 +110,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanMoveAmmo(false);
       setCanMoveWeapons(false);
       setHasSystemAccess(true);
+      setManagementScope('unit');
       setUserCourses([]);
     }
     setShowUserModal(true);
@@ -124,6 +127,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
       return;
     }
 
+    if (!editingUser && role === 'Geral') {
+      setErrorMsg('Não é permitido criar usuários com perfil Geral.');
+      return;
+    }
+
     try {
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
@@ -137,6 +145,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canMoveAmmunition: canMoveAmmo,
           canMoveWeapons: canMoveWeapons,
           hasSystemAccess,
+          managementScope,
           courses: userCourses
         });
         setSuccessMsg('Policial atualizado com sucesso.');
@@ -152,6 +161,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canMoveAmmunition: canMoveAmmo,
           canMoveWeapons: canMoveWeapons,
           hasSystemAccess,
+          managementScope,
           courses: userCourses
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
@@ -458,13 +468,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => handleDeleteUser(usr)}
-                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Excluir Policial"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {isGeral && (
+                              <button
+                                onClick={() => handleDeleteUser(usr)}
+                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Excluir Policial"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       )}
@@ -660,6 +672,24 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </select>
                 </div>
 
+                {/* Abrangência de Movimentação/Gestão (Armeiro / Admin) */}
+                <div className="md:col-span-2 bg-amber-950/20 border border-amber-800/40 p-3 rounded-xl">
+                  <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">
+                    Abrangência de Movimentação e Gestão (Armeiro)
+                  </label>
+                  <select
+                    value={managementScope}
+                    onChange={(e) => setManagementScope(e.target.value as 'department' | 'unit')}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-medium"
+                  >
+                    <option value="department">Departamento e todas as unidades do departamento vinculado</option>
+                    <option value="unit">Apenas a unidade específica que está vinculado</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Determina se o Armeiro/Usuário pode gerenciar e movimentar armas, munições, usuários e cofres em todo o departamento ou restrito à sua unidade.
+                  </p>
+                </div>
+
               </div>
 
               {/* Course Assignment Section */}
@@ -785,15 +815,17 @@ export const UserModule: React.FC<UserModuleProps> = ({
                       <strong>Calibres abrangidos:</strong> {course.allowedCalibers.join(', ')}
                     </p>
                   </div>
-                  <button
-                    onClick={() => {
-                      setDeleteTargetUser({ type: 'course', id: course.id, name: `o curso "${course.name}"` });
-                    }}
-                    className="p-1.5 text-slate-400 hover:text-red-400 rounded transition"
-                    title="Excluir Curso"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  {isGeral && (
+                    <button
+                      onClick={() => {
+                        setDeleteTargetUser({ type: 'course', id: course.id, name: `o curso "${course.name}"` });
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-red-400 rounded transition"
+                      title="Excluir Curso"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
