@@ -2,8 +2,14 @@
  * Root entry point for Node.js runtime environments (Hostinger, cPanel, PM2, Docker).
  * Delegates execution to the compiled server bundle in dist/server.cjs or dist/server.js.
  */
-const path = require('path');
-const fs = require('fs');
+import path from 'path';
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
 
 const cjsBundle = path.join(__dirname, 'dist', 'server.cjs');
 const jsBundle = path.join(__dirname, 'dist', 'server.js');
@@ -27,3 +33,4 @@ if (fs.existsSync(cjsBundle)) {
     process.exit(1);
   }
 }
+
