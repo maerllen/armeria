@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { User, Movement, Weapon, VaultSpace, Course } from '../types';
 import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
-import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2 } from 'lucide-react';
+import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2, FileText, Printer } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { MovementReceiptModal } from './MovementReceiptModal';
 
 interface MovementModuleProps {
   currentUser: User;
@@ -41,6 +42,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetMov, setDeleteTargetMov] = useState<Movement | null>(null);
+  const [receiptTargetMov, setReceiptTargetMov] = useState<Movement | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
@@ -351,6 +353,16 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
                             </button>
                           )}
 
+                          {/* Print Receipt Button */}
+                          <button
+                            onClick={() => setReceiptTargetMov(m)}
+                            className="bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 font-bold text-[11px] px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center space-x-1 shadow transition"
+                            title="Gerar/Imprimir Recibo da Movimentação"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Recibo</span>
+                          </button>
+
                           {/* Delete Movement (Armeiro, Administrador, Geral) */}
                           {canApproveOrConfirm && (
                             <button
@@ -583,6 +595,16 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
         onConfirm={confirmExecuteDeleteMovement}
         onCancel={() => setDeleteTargetMov(null)}
       />
+
+      {/* Movement Printable Receipt Modal */}
+      {receiptTargetMov && (
+        <MovementReceiptModal
+          movement={receiptTargetMov}
+          weapon={weapons.find(w => w.id === receiptTargetMov.weaponId)}
+          vaultSpaces={vaultSpaces}
+          onClose={() => setReceiptTargetMov(null)}
+        />
+      )}
 
     </div>
   );

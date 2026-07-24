@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, VaultSpace, VaultSpaceType, Department, Unit } from '../types';
 import { storage } from '../services/storage';
-import { Vault, Plus, Trash2, AlertCircle, Check, Crosshair, Disc } from 'lucide-react';
+import { Vault, Plus, Trash2, Edit2, AlertCircle, Check, Crosshair, Disc } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface VaultModuleProps {
@@ -20,6 +20,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   onRefresh
 }) => {
   const [showModal, setShowModal] = useState(false);
+  const [editingVault, setEditingVault] = useState<VaultSpace | null>(null);
   const [code, setCode] = useState('');
   const [type, setType] = useState<VaultSpaceType>('ARMAS');
   const [deptId, setDeptId] = useState('');
@@ -32,6 +33,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
   const isPolicial = currentUser.role === 'Policial';
+  const canManageVault = isGeral || isAdminOrArmeiro;
 
   // Available departments & units for modal
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
@@ -39,12 +41,23 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
   const handleOpenModal = () => {
     setErrorMsg('');
+    setEditingVault(null);
     setCode('');
     setType('ARMAS');
     const initialDept = isGeral ? (departments[0]?.id || '') : currentUser.departmentId;
     setDeptId(initialDept);
     const initialUnits = units.filter(u => u.departmentId === initialDept);
     setUnitId(initialUnits[0]?.id || '');
+    setShowModal(true);
+  };
+
+  const handleOpenEditModal = (vault: VaultSpace) => {
+    setErrorMsg('');
+    setEditingVault(vault);
+    setCode(vault.code);
+    setType(vault.type);
+    setDeptId(vault.departmentId);
+    setUnitId(vault.unitId);
     setShowModal(true);
   };
 
@@ -63,17 +76,27 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     }
 
     try {
-      await storage.addVaultSpace({
-        code: code.trim().toUpperCase(),
-        type,
-        departmentId: deptId,
-        unitId
-      });
-      setSuccessMsg(`Local de guarda "${code.toUpperCase()}" cadastrado com sucesso.`);
+      if (editingVault) {
+        await storage.updateVaultSpace(editingVault.id, {
+          code: code.trim().toUpperCase(),
+          type,
+          departmentId: deptId,
+          unitId
+        });
+        setSuccessMsg(`Local de guarda "${code.toUpperCase()}" atualizado com sucesso.`);
+      } else {
+        await storage.addVaultSpace({
+          code: code.trim().toUpperCase(),
+          type,
+          departmentId: deptId,
+          unitId
+        });
+        setSuccessMsg(`Local de guarda "${code.toUpperCase()}" cadastrado com sucesso.`);
+      }
       setShowModal(false);
       onRefresh();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao cadastrar local do cofre.');
+      setErrorMsg(err.message || 'Erro ao salvar local do cofre.');
     }
   };
 
@@ -176,14 +199,23 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       </span>
                     </div>
 
-                    {!isPolicial && (
-                      <button
-                        onClick={() => handleDelete(v)}
-                        className="p-1 text-slate-500 hover:text-red-400 rounded transition"
-                        title="Excluir Local"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                    {canManageVault && (
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={() => handleOpenEditModal(v)}
+                          className="p-1 text-slate-500 hover:text-amber-400 rounded transition"
+                          title="Editar Local do Cofre"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDelete(v)}
+                          className="p-1 text-slate-500 hover:text-red-400 rounded transition"
+                          title="Excluir Local"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -241,7 +273,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800">
-              Novo Espaço de Armazenamento no Cofre
+              {editingVault ? 'Editar Local do Cofre' : 'Novo Espaço de Armazenamento no Cofre'}
             </h3>
 
             <form onSubmit={handleSave} className="space-y-4">
@@ -328,7 +360,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   type="submit"
                   className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
                 >
-                  Cadastrar Local
+                  {editingVault ? 'Salvar Alterações' : 'Cadastrar Local'}
                 </button>
               </div>
             </form>

@@ -456,6 +456,20 @@ class StorageService {
     return space;
   }
 
+  public async updateVaultSpace(id: string, data: Partial<Omit<VaultSpace, 'id' | 'createdAt'>>): Promise<VaultSpace> {
+    const res = await fetch(`/api/vault-spaces/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, actor: this.state.currentUser })
+    });
+    const space = await res.json();
+    if (!res.ok) throw new Error(space.error || 'Erro ao atualizar local do cofre.');
+    await this.refreshFromServer();
+    const updated = this.state.vaultSpaces.find(v => v.id === id);
+    if (!updated) throw new Error('Local do cofre não encontrado.');
+    return updated;
+  }
+
   public async deleteVaultSpace(id: string): Promise<boolean> {
     const res = await fetch(`/api/vault-spaces/${id}`, {
       method: 'DELETE',

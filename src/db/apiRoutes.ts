@@ -1,7 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { getPool, dbConfig } from './mysql';
+import crypto from 'crypto';
 
 export const apiRouter = Router();
+
+const ARMERIA_SALT = 'PCMG_ARMERIA_SECURE_SALT_2026';
+
+// Helper to generate SHA-256 encrypted password hash
+export function hashPassword(plainText: string): string {
+  if (!plainText) return '';
+  return crypto.createHash('sha256').update(plainText + ARMERIA_SALT).digest('hex');
+}
 
 // Helper to log audit in DB
 async function insertAuditLog(
@@ -79,8 +88,17 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       return res.status(403).json({ success: false, error: 'Usuário sem permissão de acesso ao sistema.' });
     }
 
-    if (dbUser.password !== cleanPass) {
+    const hashedInput = hashPassword(cleanPass);
+    const isHashMatch = dbUser.password === hashedInput;
+    const isPlainMatch = dbUser.password === cleanPass;
+
+    if (!isHashMatch && !isPlainMatch) {
       return res.status(400).json({ success: false, error: 'Senha incorreta.' });
+    }
+
+    // Auto-encrypt legacy plain text password on successful login
+    if (isPlainMatch && !isHashMatch) {
+      await pool.query('UPDATE users SET password = ? WHERE id = ?', [hashedInput, dbUser.id]);
     }
 
     // Get user courses
@@ -141,7 +159,8 @@ apiRouter.post('/auth/change-password', async (req: Request, res: Response) => {
       return res.status(400).json({ success: false, error: 'A nova senha não pode ser igual ao MASP.' });
     }
 
-    await pool.query('UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?', [cleanPass, userId]);
+    const hashedNewPass = hashPassword(cleanPass);
+    await pool.query('UPDATE users SET password = ?, must_change_password = 0 WHERE id = ?', [hashedNewPass, userId]);
 
     await insertAuditLog(
       'Perfil',
@@ -354,13 +373,14 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     }
 
     const id = `usr-${Date.now()}`;
+    const hashedDefaultPass = hashPassword(cleanMasp);
     await pool.query(
       `INSERT INTO users (id, masp, password, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, must_change_password, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
       [
         id,
         cleanMasp,
-        cleanMasp, // Default password = MASP
+        hashedDefaultPass, // Encrypted default password = MASP hash
         name,
         phone || null,
         cargo,
@@ -424,9 +444,10 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     const userMasp = rows[0].masp;
 
     if (updates.resetPassword) {
+      const hashedMasp = hashPassword(userMasp);
       await pool.query(
         'UPDATE users SET password = ?, must_change_password = 1 WHERE id = ?',
-        [userMasp, id]
+        [hashedMasp, id]
       );
       await insertAuditLog(
         'Usuários',
@@ -602,6 +623,24 @@ apiRouter.post('/vault-spaces', async (req: Request, res: Response) => {
 
     await insertAuditLog('Cofre', 'Criar', `Criado local de guarda: ${code} (${type})`, actor, req.ip);
     return res.json({ id, code, type, departmentId, unitId, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/vault-spaces/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { code, type, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+
+    await pool.query(
+      'UPDATE vault_spaces SET code = ?, type = ?, department_id = ?, unit_id = ? WHERE id = ?',
+      [code, type, departmentId || null, unitId || null, id]
+    );
+
+    await insertAuditLog('Cofre', 'Editar', `Atualizado local de guarda no cofre: ${code} (${type})`, actor, req.ip);
+    return res.json({ id, code, type, departmentId, unitId });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
