@@ -270,10 +270,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const filteredWeapons = weapons.filter(w => {
     const term = searchTerm.toLowerCase();
     return (
-      w.serialNumber.toLowerCase().includes(term) ||
-      w.model.toLowerCase().includes(term) ||
-      w.type.toLowerCase().includes(term) ||
-      w.manufacturer.toLowerCase().includes(term)
+      (w.serialNumber || '').toLowerCase().includes(term) ||
+      (w.model || '').toLowerCase().includes(term) ||
+      (w.type || '').toLowerCase().includes(term) ||
+      (w.manufacturer || '').toLowerCase().includes(term)
     );
   });
 

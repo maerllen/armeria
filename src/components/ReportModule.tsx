@@ -69,7 +69,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     if (selectedUser !== 'ALL' && m.requesterId !== selectedUser) return false;
 
     // Caliber
-    if (selectedCaliber !== 'ALL' && m.caliber.toLowerCase() !== selectedCaliber.toLowerCase()) return false;
+    if (selectedCaliber !== 'ALL' && (m.caliber || '').toLowerCase() !== selectedCaliber.toLowerCase()) return false;
 
     // Vault Space
     if (selectedVaultSpace !== 'ALL' && m.withdrawalVaultSpaceId !== selectedVaultSpace && m.returnVaultSpaceId !== selectedVaultSpace) return false;
@@ -104,7 +104,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     if (selectedCaliber !== 'ALL') {
       const cal = calibers.find(c => c.id === m.caliberId);
       const calName = cal ? cal.name : m.caliberId;
-      if (calName.toLowerCase() !== selectedCaliber.toLowerCase()) return false;
+      if ((calName || '').toLowerCase() !== selectedCaliber.toLowerCase()) return false;
     }
 
     // Vault Space
@@ -122,7 +122,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     if (selectedUser !== 'ALL' && m.responsibleUserId !== selectedUser && m.userId !== selectedUser) return false;
 
     // Reason Filter
-    if (reasonFilter !== 'ALL' && !m.recipientOrReason.toLowerCase().includes(reasonFilter.toLowerCase())) return false;
+    if (reasonFilter !== 'ALL' && !(m.recipientOrReason || '').toLowerCase().includes(reasonFilter.toLowerCase())) return false;
 
     return true;
   });

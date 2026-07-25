@@ -428,14 +428,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setMovBoxId('');
 
     // Filter plans with type 'curso de formação'
-    const formacaoPlans = lessonPlans.filter(p => p.type.toLowerCase().includes('formação'));
+    const formacaoPlans = lessonPlans.filter(p => (p.type || '').toLowerCase().includes('formação'));
     const initialPlan = formacaoPlans[0];
     setMovPlanId(initialPlan?.id || '');
     setMovLessonNumber(1);
 
     const lessonItem = initialPlan?.lessonsData[0];
-    const targetCal = lessonItem?.caliberName || ammoStocks[0]?.caliber;
-    const matchingStock = ammoStocks.find(a => a.caliber.toLowerCase() === targetCal?.toLowerCase()) || ammoStocks[0];
+    const targetCal = lessonItem?.caliberName || ammoStocks[0]?.caliber || '';
+    const matchingStock = ammoStocks.find(a => (a.caliber || '').toLowerCase() === targetCal.toLowerCase()) || ammoStocks[0];
     setMovAmmoStockId(matchingStock?.id || '');
 
     const studentCount = firstClass?.studentCount || 20;
@@ -827,7 +827,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           {plan.career}
                         </span>
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase ${
-                          plan.type.toLowerCase().includes('formação')
+                          (plan.type || '').toLowerCase().includes('formação')
                             ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
                             : 'bg-blue-950 text-blue-300 border-blue-800'
                         }`}>
@@ -1780,7 +1780,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   >
                     <option value="">-- Sem Plano de Aula --</option>
                     {lessonPlans
-                      .filter(p => p.type.toLowerCase().includes('formação'))
+                      .filter(p => (p.type || '').toLowerCase().includes('formação'))
                       .map(p => (
                         <option key={p.id} value={p.id}>
                           {p.name} ({p.career} - {p.year})
@@ -1855,18 +1855,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       const targetCal = currentLesson?.caliberName || '';
 
                       const meafVaultIds = vaultSpaces
-                        .filter(v => v.name.toUpperCase().includes('MEAF') || (v.location && v.location.toUpperCase().includes('MEAF')))
+                        .filter(v => (v.name || '').toUpperCase().includes('MEAF') || (v.location || '').toUpperCase().includes('MEAF'))
                         .map(v => v.id);
 
                       const filteredStocks = ammoStocks.filter(a => {
-                        const matchCal = !targetCal || a.caliber.toLowerCase() === targetCal.toLowerCase();
+                        const matchCal = !targetCal || (a.caliber || '').toLowerCase() === targetCal.toLowerCase();
                         const isMeaf = meafVaultIds.includes(a.vaultSpaceId) || (a.notes && a.notes.toUpperCase().includes('MEAF'));
                         return matchCal && (meafVaultIds.length === 0 || isMeaf);
                       });
 
                       const listToDisplay = filteredStocks.length > 0
                         ? filteredStocks
-                        : ammoStocks.filter(a => !targetCal || a.caliber.toLowerCase() === targetCal.toLowerCase());
+                        : ammoStocks.filter(a => !targetCal || (a.caliber || '').toLowerCase() === targetCal.toLowerCase());
 
                       return listToDisplay.map(a => (
                         <option key={a.id} value={a.id}>

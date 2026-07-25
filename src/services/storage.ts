@@ -663,8 +663,8 @@ class StorageService {
 
         result = result.filter(weapon => {
           return qualifiedCourseObjects.some(course => {
-            const modelMatch = course.allowedModels.some(m => m.toLowerCase() === weapon.model.toLowerCase());
-            const caliberMatch = course.allowedCalibers.some(c => c.toLowerCase() === weapon.caliber.toLowerCase());
+            const modelMatch = (course.allowedModels || []).some(m => (m || '').toLowerCase() === (weapon.model || '').toLowerCase());
+            const caliberMatch = (course.allowedCalibers || []).some(c => (c || '').toLowerCase() === (weapon.caliber || '').toLowerCase());
             return modelMatch && caliberMatch;
           });
         });

@@ -440,7 +440,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   const cal = calibers.find(c => c.id === m.caliberId);
                   const vault = vaultSpaces.find(v => v.id === m.vaultSpaceId);
 
-                  const isCourseOrTest = m.recipientOrReason.toLowerCase().includes('curso') || m.recipientOrReason.toLowerCase().includes('teste');
+                  const reasonStr = (m.recipientOrReason || '').toLowerCase();
+                  const isCourseOrTest = reasonStr.includes('curso') || reasonStr.includes('teste');
                   const returnedQty = m.returnedQuantity || 0;
                   const canReturnMore = m.type === 'Saída' && isCourseOrTest && returnedQty < m.quantity;
 
