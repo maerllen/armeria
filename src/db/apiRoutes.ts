@@ -1409,9 +1409,17 @@ apiRouter.get('/weapon-boxes', async (req: Request, res: Response) => {
 
 apiRouter.post('/weapon-boxes', async (req: Request, res: Response) => {
   try {
-    const { name, courseType, weaponCount, weaponIds, departmentId, unitId, actor } = req.body;
+    const actor = req.body.actor;
+    const name = req.body.name || 'Caixa de Armas';
+    const courseType = req.body.courseType || req.body.course_type || 'Geral';
+    const rawWeaponIds = req.body.weaponIds || req.body.weapon_ids || [];
+    const weaponIds = Array.isArray(rawWeaponIds) ? rawWeaponIds : (typeof rawWeaponIds === 'string' ? JSON.parse(rawWeaponIds) : []);
+    const weaponCount = req.body.weaponCount !== undefined ? Number(req.body.weaponCount) : (req.body.weapon_count !== undefined ? Number(req.body.weapon_count) : weaponIds.length);
+    const departmentId = req.body.departmentId || req.body.department_id || null;
+    const unitId = req.body.unitId || req.body.unit_id || null;
+
     const pool = getPool();
-    const id = `wp-box-${Date.now()}`;
+    const id = req.body.id || `wp-box-${Date.now()}`;
     await pool.query(
       `INSERT INTO weapon_boxes (id, name, course_type, weapon_count, weapon_ids, department_id, unit_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
@@ -1420,15 +1428,16 @@ apiRouter.post('/weapon-boxes', async (req: Request, res: Response) => {
         name,
         courseType,
         weaponCount,
-        JSON.stringify(weaponIds || []),
-        departmentId || null,
-        unitId || null
+        JSON.stringify(weaponIds),
+        departmentId,
+        unitId
       ]
     );
 
     await insertAuditLog('Cursos', 'Criar', `Criada caixa de armas de aula: ${name} (${weaponCount} armas)`, actor, req.ip);
     return res.json({ id, name, courseType, weaponCount, weaponIds, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
+    console.error('Erro no POST /weapon-boxes:', err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -1436,7 +1445,15 @@ apiRouter.post('/weapon-boxes', async (req: Request, res: Response) => {
 apiRouter.put('/weapon-boxes/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, courseType, weaponCount, weaponIds, departmentId, unitId, actor } = req.body;
+    const actor = req.body.actor;
+    const name = req.body.name || 'Caixa de Armas';
+    const courseType = req.body.courseType || req.body.course_type || 'Geral';
+    const rawWeaponIds = req.body.weaponIds || req.body.weapon_ids || [];
+    const weaponIds = Array.isArray(rawWeaponIds) ? rawWeaponIds : (typeof rawWeaponIds === 'string' ? JSON.parse(rawWeaponIds) : []);
+    const weaponCount = req.body.weaponCount !== undefined ? Number(req.body.weaponCount) : (req.body.weapon_count !== undefined ? Number(req.body.weapon_count) : weaponIds.length);
+    const departmentId = req.body.departmentId || req.body.department_id || null;
+    const unitId = req.body.unitId || req.body.unit_id || null;
+
     const pool = getPool();
 
     await pool.query(
@@ -1452,9 +1469,9 @@ apiRouter.put('/weapon-boxes/:id', async (req: Request, res: Response) => {
         name,
         courseType,
         weaponCount,
-        JSON.stringify(weaponIds || []),
-        departmentId || null,
-        unitId || null,
+        JSON.stringify(weaponIds),
+        departmentId,
+        unitId,
         id
       ]
     );
@@ -1462,6 +1479,7 @@ apiRouter.put('/weapon-boxes/:id', async (req: Request, res: Response) => {
     await insertAuditLog('Cursos', 'Editar', `Atualizada caixa de armas de aula: ${name}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
+    console.error('Erro no PUT /weapon-boxes:', err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -1572,35 +1590,55 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
   }
 });
 
+function computeCareerAbbreviation(career?: string): string {
+  const c = (career || '').toUpperCase();
+  if (c.includes('DELEGADO') || c.includes('DL')) return 'DL';
+  if (c.includes('INVESTIGADOR') || c.includes('IP')) return 'IP';
+  if (c.includes('ESCRIVÃ') || c.includes('ESCRIVAO') || c.includes('EP')) return 'EP';
+  if (c.includes('PERITO') || c.includes('PC')) return 'PC';
+  if (c.includes('MÉDICO') || c.includes('MEDICO') || c.includes('LEGISTA') || c.includes('ML')) return 'ML';
+  return 'DL';
+}
+
 apiRouter.post('/course-classes', async (req: Request, res: Response) => {
   try {
-    const { courseId, courseName, subject, career, careerAbbreviation, turmaNumber, studentCount, teacherUserIds, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const finalCareer = career || 'Delegado';
+    const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
+    
+    let rawNum = req.body.turmaNumber || req.body.turma_number || req.body.name || req.body.code || '01';
+    rawNum = String(rawNum).replace(/\D/g, '');
+    const turmaNumber = (rawNum || '01').padStart(2, '0').slice(-2);
+    const code = req.body.code || `${careerAbbreviation} ${turmaNumber}`;
+
+    const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
+
     const pool = getPool();
-    const id = `class-${Date.now()}`;
-    const code = `${careerAbbreviation} ${turmaNumber.trim().padStart(2, '0')}`;
+    const id = req.body.id || `class-${Date.now()}`;
 
     await pool.query(
       `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, department_id, unit_id, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         id,
-        courseId,
-        courseName,
-        subject,
-        career,
+        courseId || '',
+        courseName || '',
+        subject || 'MEAF',
+        finalCareer,
         careerAbbreviation,
         turmaNumber,
         code,
-        studentCount || 1,
-        JSON.stringify(teacherUserIds || []),
+        Number(studentCount) || 1,
+        JSON.stringify(finalTeacherUserIds),
         departmentId || null,
         unitId || null
       ]
     );
 
     await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject} - ${studentCount} alunos)`, actor, req.ip);
-    return res.json({ id, courseId, courseName, subject, career, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds, departmentId, unitId, createdAt: new Date().toISOString() });
+    return res.json({ id, courseId, courseName, subject, career: finalCareer, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds: finalTeacherUserIds, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
+    console.error('Erro em POST /course-classes:', err);
     return res.status(500).json({ error: err.message });
   }
 });
@@ -1608,9 +1646,18 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
 apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { courseId, courseName, subject, career, careerAbbreviation, turmaNumber, studentCount, teacherUserIds, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const finalCareer = career || 'Delegado';
+    const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
+    
+    let rawNum = req.body.turmaNumber || req.body.turma_number || req.body.name || req.body.code || '01';
+    rawNum = String(rawNum).replace(/\D/g, '');
+    const turmaNumber = (rawNum || '01').padStart(2, '0').slice(-2);
+    const code = req.body.code || `${careerAbbreviation} ${turmaNumber}`;
+
+    const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
+
     const pool = getPool();
-    const code = `${careerAbbreviation} ${turmaNumber.trim().padStart(2, '0')}`;
 
     await pool.query(
       `UPDATE course_classes SET
@@ -1627,15 +1674,15 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
         unit_id = ?
        WHERE id = ?`,
       [
-        courseId,
-        courseName,
-        subject,
-        career,
+        courseId || '',
+        courseName || '',
+        subject || 'MEAF',
+        finalCareer,
         careerAbbreviation,
         turmaNumber,
         code,
-        studentCount || 1,
-        JSON.stringify(teacherUserIds || []),
+        Number(studentCount) || 1,
+        JSON.stringify(finalTeacherUserIds),
         departmentId || null,
         unitId || null,
         id
@@ -1645,6 +1692,7 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
     await insertAuditLog('Cursos', 'Editar', `Atualizada turma de aula: ${code}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
+    console.error('Erro em PUT /course-classes:', err);
     return res.status(500).json({ error: err.message });
   }
 });

@@ -232,17 +232,28 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [editingClass, setEditingClass] = useState<CourseClass | null>(null);
   const [classCourseId, setClassCourseId] = useState('');
   const [classCareer, setClassCareer] = useState('Delegado');
-  const [classNameStr, setClassNameStr] = useState('');
+  const [classTurmaNum, setClassTurmaNum] = useState('01');
   const [classTeacherId, setClassTeacherId] = useState('');
   const [classSubject, setClassSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [classStudentCount, setClassStudentCount] = useState<number>(20);
+
+  const getCareerAbbr = (car: string): 'DL' | 'IP' | 'EP' | 'PC' | 'ML' => {
+    const c = (car || '').toUpperCase();
+    if (c.includes('DELEGADO') || c.includes('DL')) return 'DL';
+    if (c.includes('INVESTIGADOR') || c.includes('IP')) return 'IP';
+    if (c.includes('ESCRIVÃ') || c.includes('ESCRIVAO') || c.includes('EP')) return 'EP';
+    if (c.includes('PERITO') || c.includes('PC')) return 'PC';
+    if (c.includes('MÉDICO') || c.includes('MEDICO') || c.includes('LEGISTA') || c.includes('ML')) return 'ML';
+    return 'DL';
+  };
 
   const handleOpenClassModal = (cls?: CourseClass) => {
     if (cls) {
       setEditingClass(cls);
       setClassCourseId(cls.courseId);
       setClassCareer(cls.career);
-      setClassNameStr(cls.name);
+      const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
+      setClassTurmaNum(digits ? digits.padStart(2, '0').slice(-2) : '01');
       setClassTeacherId(cls.teacherUserId);
       setClassSubject(cls.subject);
       setClassStudentCount(cls.studentCount);
@@ -250,7 +261,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setEditingClass(null);
       setClassCourseId(academyCourses[0]?.id || '');
       setClassCareer('Delegado');
-      setClassNameStr('');
+      setClassTurmaNum('01');
       setClassTeacherId(teachers[0]?.id || '');
       setClassSubject('MEAF');
       setClassStudentCount(20);
@@ -260,9 +271,13 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!classCourseId || !classNameStr.trim()) return;
+    if (!classCourseId) return;
     const selectedCourse = academyCourses.find(c => c.id === classCourseId);
     const selectedTeacher = teachers.find(t => t.id === classTeacherId);
+
+    const abbr = getCareerAbbr(classCareer);
+    const formattedNum = (classTurmaNum.trim() || '01').padStart(2, '0').slice(-2);
+    const fullName = `${abbr} ${formattedNum}`;
 
     try {
       const res = await storage.saveCourseClass({
@@ -270,14 +285,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         courseId: classCourseId,
         courseName: selectedCourse?.name || '',
         career: classCareer,
-        name: classNameStr.trim(),
+        careerAbbreviation: abbr,
+        turmaNumber: formattedNum,
+        code: fullName,
+        name: fullName,
         teacherUserId: classTeacherId,
         teacherName: selectedTeacher?.name || 'Professor',
         subject: classSubject,
         studentCount: Number(classStudentCount) || 0
       });
       if (!res.success) throw new Error(res.error);
-      setSuccessMsg('Turma salva com sucesso!');
+      setSuccessMsg(`Turma ${fullName} salva com sucesso!`);
       setShowClassModal(false);
       onRefresh();
     } catch (err: any) {
@@ -1172,26 +1190,38 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <select
                   value={classCareer}
                   onChange={(e) => setClassCareer(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
                 >
-                  <option value="Delegado">Delegado de Polícia</option>
-                  <option value="Investigador">Investigador de Polícia</option>
-                  <option value="Escrivão">Escrivão de Polícia</option>
-                  <option value="Perito">Perito Criminal</option>
-                  <option value="Médico Legista">Médico Legista</option>
+                  <option value="Delegado">DELEGADO (DL)</option>
+                  <option value="Investigador">INVESTIGADOR (IP)</option>
+                  <option value="Escrivão">ESCRIVÃO (EP)</option>
+                  <option value="Perito">PERITO (PC)</option>
+                  <option value="Médico Legista">MÉDICO LEGISTA (ML)</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome / Identificador da Turma</label>
+                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                  <span>Número / Identificador da Turma (2 Dígitos)</span>
+                  <span className="text-amber-400 font-bold text-xs bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
+                    Identificador: {getCareerAbbr(classCareer)} {classTurmaNum.padStart(2, '0').slice(-2)}
+                  </span>
+                </label>
                 <input
                   type="text"
-                  value={classNameStr}
-                  onChange={(e) => setClassNameStr(e.target.value)}
-                  placeholder="Ex: Turma Alfa - 2025/1"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  maxLength={2}
+                  value={classTurmaNum}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/\D/g, '').slice(0, 2);
+                    setClassTurmaNum(val);
+                  }}
+                  placeholder="Ex: 01"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono text-sm tracking-wider focus:border-amber-500 focus:outline-none"
                   required
                 />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Ao selecionar a carreira, a sigla ({getCareerAbbr(classCareer)}) será combinada com o número de dois dígitos (Ex: DL 01, IP 02).
+                </p>
               </div>
 
               <div>
