@@ -1386,6 +1386,110 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
   }
 });
 
+// Lesson Plans (Planos de Aula)
+apiRouter.get('/lesson-plans', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM lesson_plans ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      career: r.career,
+      year: r.year,
+      type: r.type,
+      lessonCount: r.lesson_count,
+      lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
+      departmentId: r.department_id || undefined,
+      unitId: r.unit_id || undefined,
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/lesson-plans', async (req: Request, res: Response) => {
+  try {
+    const { name, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+    const id = req.body.id || `plano-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO lesson_plans (id, name, career, year, type, lesson_count, lessons_data, department_id, unit_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        id,
+        name,
+        career || 'Delegado',
+        Number(year) || new Date().getFullYear(),
+        type || 'curso de formação',
+        Number(lessonCount) || 1,
+        JSON.stringify(lessonsData || []),
+        departmentId || null,
+        unitId || null
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado plano de aula: ${name} (${career} - ${type})`, actor, req.ip);
+    return res.json({ id, name, career, year, type, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    console.error('Erro em POST /lesson-plans:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/lesson-plans/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+
+    await pool.query(
+      `UPDATE lesson_plans SET
+        name = ?,
+        career = ?,
+        year = ?,
+        type = ?,
+        lesson_count = ?,
+        lessons_data = ?,
+        department_id = ?,
+        unit_id = ?
+       WHERE id = ?`,
+      [
+        name,
+        career || 'Delegado',
+        Number(year) || new Date().getFullYear(),
+        type || 'curso de formação',
+        Number(lessonCount) || 1,
+        JSON.stringify(lessonsData || []),
+        departmentId || null,
+        unitId || null,
+        id
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizado plano de aula: ${name}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Erro em PUT /lesson-plans:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/lesson-plans/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    await pool.query('DELETE FROM lesson_plans WHERE id = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluído plano de aula ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // Weapon Boxes (Caixas de Armas de Aula)
 apiRouter.get('/weapon-boxes', async (req: Request, res: Response) => {
   try {
@@ -1721,6 +1825,8 @@ apiRouter.get('/course-movements', async (req: Request, res: Response) => {
       courseId: r.course_id,
       classId: r.class_id,
       turmaCode: r.turma_code,
+      lessonPlanId: r.lesson_plan_id || undefined,
+      lessonPlanName: r.lesson_plan_name || undefined,
       lessonNumber: r.lesson_number,
       teacherName: r.teacher_name,
       weaponBoxId: r.weapon_box_id || undefined,
@@ -1750,7 +1856,7 @@ apiRouter.get('/course-movements', async (req: Request, res: Response) => {
 apiRouter.post('/course-movements/saida', async (req: Request, res: Response) => {
   try {
     const {
-      courseId, classId, turmaCode, lessonNumber, teacherName,
+      courseId, classId, turmaCode, lessonPlanId, lessonPlanName, lessonNumber, teacherName,
       weaponBoxId, weaponBoxName, weaponIds, caliberId, vaultSpaceId,
       ammoSupplied, studentCount, shotsPerStudent, instructorShots, ammoUsed,
       extraMagazinesCount, issuedByUserName, actor
@@ -1761,13 +1867,13 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
 
     await pool.query(
       `INSERT INTO course_class_movements
-        (id, course_id, class_id, turma_code, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
+        (id, course_id, class_id, turma_code, lesson_plan_id, lesson_plan_name, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
       [
-        id, courseId, classId, turmaCode, lessonNumber, teacherName,
+        id, courseId || null, classId, turmaCode, lessonPlanId || null, lessonPlanName || null, Number(lessonNumber) || 1, teacherName,
         weaponBoxId || null, weaponBoxName || null, JSON.stringify(weaponIds || []),
-        caliberId || null, vaultSpaceId || null, ammoSupplied || 0, studentCount || 0,
-        shotsPerStudent || 0, instructorShots || 0, ammoUsed || 0, extraMagazinesCount || 0,
+        caliberId || null, vaultSpaceId || null, Number(ammoSupplied) || 0, Number(studentCount) || 0,
+        Number(shotsPerStudent) || 0, Number(instructorShots) || 0, Number(ammoUsed) || 0, Number(extraMagazinesCount) || 0,
         issuedByUserName || actor?.name || 'Armeiro'
       ]
     );

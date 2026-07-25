@@ -97,13 +97,19 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
                 1. Identificação da Aula
               </h3>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px]">TURMA / CURSO:</span>
-                <span className="font-bold text-slate-100 print:text-black">{movement.className} ({movement.courseName})</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px]">TURMA / PROFESSOR:</span>
+                <span className="font-bold text-slate-100 print:text-black text-sm">{movement.className} – PROFESSOR: {movement.teacherName}</span>
               </div>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px]">CARREIRA / MATÉRIA:</span>
-                <span className="font-bold text-slate-100 print:text-black">{movement.career} • Disciplina: {movement.subject}</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px]">CURSO / MATÉRIA:</span>
+                <span className="font-bold text-slate-100 print:text-black">{movement.courseName} ({movement.career}) • Disciplina: {movement.subject}</span>
               </div>
+              {movement.lessonPlanName && (
+                <div>
+                  <span className="text-slate-400 print:text-gray-600 block text-[10px]">PLANO DE AULA / Nº AULA:</span>
+                  <span className="font-bold text-amber-400 print:text-black">{movement.lessonPlanName} (Aula {movement.lessonNumber})</span>
+                </div>
+              )}
             </div>
 
             {/* Responsible Teacher / Officer */}
@@ -162,7 +168,7 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                   {weapons.map(w => (
                     <div key={w.id} className="bg-slate-900 print:bg-gray-100 p-2 rounded text-[11px] border border-slate-800 print:border-gray-300">
-                      <div className="font-bold text-slate-100 print:text-black">{w.type} {w.brand} {w.model}</div>
+                      <div className="font-bold text-slate-100 print:text-black">{w.type} {w.manufacturer || ''} {w.model}</div>
                       <div className="text-amber-400 print:text-black font-mono">Série: {w.serialNumber} • Cal: {w.caliber}</div>
                     </div>
                   ))}

@@ -10,7 +10,10 @@ import {
   WeaponBox,
   WeaponBoxReplacement,
   CourseClass,
-  CourseMovement
+  CourseMovement,
+  LessonPlan,
+  LessonPlanItem,
+  AcademyCareer
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
@@ -29,7 +32,10 @@ import {
   Search,
   BookOpen,
   HelpCircle,
-  FileText
+  FileText,
+  ClipboardList,
+  Layers,
+  Calendar
 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AcademyReceiptModal } from './AcademyReceiptModal';
@@ -55,7 +61,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   units,
   onRefresh
 }) => {
-  const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'caixas' | 'cursos'>('movements');
+  const [activeTab, setActiveTab] = useState<'movements' | 'planos' | 'turmas' | 'caixas' | 'cursos'>('movements');
 
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
@@ -82,11 +88,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const boxReplacements = storage.getWeaponBoxReplacements();
   const courseClasses = storage.getCourseClasses();
   const courseMovements = storage.getCourseMovements();
+  const lessonPlans = storage.getLessonPlans();
 
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class'; id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan'; id: string; name: string } | null>(null);
 
   // Selected receipt for printing
   const [selectedReceiptMovement, setSelectedReceiptMovement] = useState<CourseMovement | null>(null);
@@ -307,9 +314,99 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
   };
 
+  // --- 3.5 LESSON PLAN FORM STATE AND HANDLERS ---
+  const [showPlanModal, setShowPlanModal] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<LessonPlan | null>(null);
+  const [planName, setPlanName] = useState('');
+  const [planCareer, setPlanCareer] = useState<AcademyCareer>('Delegado');
+  const [planYear, setPlanYear] = useState<number>(new Date().getFullYear());
+  const [planType, setPlanType] = useState<'curso de formação' | 'curso ensino continuado'>('curso de formação');
+  const [planLessonCount, setPlanLessonCount] = useState<number>(5);
+  const [planLessonsData, setPlanLessonsData] = useState<LessonPlanItem[]>([]);
+
+  const handleOpenPlanModal = (plan?: LessonPlan) => {
+    if (plan) {
+      setEditingPlan(plan);
+      setPlanName(plan.name);
+      setPlanCareer(plan.career as AcademyCareer);
+      setPlanYear(plan.year);
+      setPlanType(plan.type);
+      setPlanLessonCount(plan.lessonCount);
+      setPlanLessonsData(plan.lessonsData || []);
+    } else {
+      setEditingPlan(null);
+      setPlanName('');
+      setPlanCareer('Delegado');
+      setPlanYear(new Date().getFullYear());
+      setPlanType('curso de formação');
+      setPlanLessonCount(5);
+
+      const defaultCaliber = ammoStocks[0]?.caliber || '9x19mm';
+      const initialItems: LessonPlanItem[] = Array.from({ length: 5 }, (_, i) => ({
+        lessonNumber: i + 1,
+        shotsPerStudent: 50,
+        caliberName: defaultCaliber,
+        instructorShots: 10
+      }));
+      setPlanLessonsData(initialItems);
+    }
+    setShowPlanModal(true);
+  };
+
+  const handlePlanLessonCountChange = (count: number) => {
+    const newCount = Math.max(1, Math.min(30, count));
+    setPlanLessonCount(newCount);
+    setPlanLessonsData(prev => {
+      const updated = [...prev];
+      if (newCount > updated.length) {
+        const defaultCaliber = ammoStocks[0]?.caliber || '9x19mm';
+        for (let i = updated.length; i < newCount; i++) {
+          updated.push({
+            lessonNumber: i + 1,
+            shotsPerStudent: 50,
+            caliberName: defaultCaliber,
+            instructorShots: 10
+          });
+        }
+      } else {
+        updated.length = newCount;
+      }
+      return updated;
+    });
+  };
+
+  const handleSavePlan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!planName.trim()) {
+      alert('Informe o nome do plano de aula.');
+      return;
+    }
+
+    try {
+      const res = await storage.saveLessonPlan({
+        id: editingPlan?.id,
+        name: planName.trim(),
+        career: planCareer,
+        year: Number(planYear) || new Date().getFullYear(),
+        type: planType,
+        lessonCount: Number(planLessonCount) || 1,
+        lessonsData: planLessonsData,
+        departmentId: currentUser.departmentId
+      });
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg(`Plano de aula "${planName}" salvo com sucesso!`);
+      setShowPlanModal(false);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar plano de aula.');
+    }
+  };
+
   // --- 4. COURSE MOVEMENT (SAÍDA / RETORNO) STATE ---
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [movClassId, setMovClassId] = useState('');
+  const [movPlanId, setMovPlanId] = useState('');
+  const [movLessonNumber, setMovLessonNumber] = useState<number>(1);
   const [movBoxId, setMovBoxId] = useState('');
   const [movAmmoStockId, setMovAmmoStockId] = useState('');
   const [movAmmoQuantity, setMovAmmoQuantity] = useState<number>(0);
@@ -326,12 +423,30 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const handleOpenSaidaModal = () => {
     setErrorMsg('');
-    setMovClassId(courseClasses[0]?.id || '');
+    const firstClass = courseClasses[0];
+    setMovClassId(firstClass?.id || '');
     setMovBoxId('');
-    setMovAmmoStockId(ammoStocks[0]?.id || '');
-    setMovAmmoQuantity(0);
+
+    // Filter plans with type 'curso de formação'
+    const formacaoPlans = lessonPlans.filter(p => p.type.toLowerCase().includes('formação'));
+    const initialPlan = formacaoPlans[0];
+    setMovPlanId(initialPlan?.id || '');
+    setMovLessonNumber(1);
+
+    const lessonItem = initialPlan?.lessonsData[0];
+    const targetCal = lessonItem?.caliberName || ammoStocks[0]?.caliber;
+    const matchingStock = ammoStocks.find(a => a.caliber.toLowerCase() === targetCal?.toLowerCase()) || ammoStocks[0];
+    setMovAmmoStockId(matchingStock?.id || '');
+
+    const studentCount = firstClass?.studentCount || 20;
+    const shotsPerStudent = lessonItem?.shotsPerStudent || 0;
+    const instructorShots = lessonItem?.instructorShots || 0;
+    const baseQty = (shotsPerStudent * studentCount) + instructorShots;
+    const suppliedQty = Math.round(baseQty * 1.10);
+    setMovAmmoQuantity(suppliedQty);
+
     setMovRecipientType('inside');
-    setMovTeacherUserId(teachers[0]?.id || '');
+    setMovTeacherUserId(firstClass?.teacherUserId || teachers[0]?.id || '');
     setMovTeacherNameOutside('');
     setMovNotes('');
     setShowMovementModal(true);
@@ -347,10 +462,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     const selectedClass = courseClasses.find(c => c.id === movClassId);
     if (!selectedClass) return;
 
+    const selectedPlan = lessonPlans.find(p => p.id === movPlanId);
+
     let teacherName = '';
     if (movRecipientType === 'inside') {
       const tUser = users.find(u => u.id === movTeacherUserId);
-      teacherName = tUser ? tUser.name : 'Professor';
+      teacherName = tUser ? tUser.name : (selectedClass.teacherName || 'Professor');
     } else {
       if (!movTeacherNameOutside.trim()) {
         alert('Informe o nome do responsável fora do sistema.');
@@ -369,6 +486,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         courseName: selectedClass.courseName,
         career: selectedClass.career,
         subject: selectedClass.subject,
+        lessonPlanId: selectedPlan?.id,
+        lessonPlanName: selectedPlan?.name,
+        lessonNumber: movLessonNumber,
         teacherName,
         teacherUserId: movRecipientType === 'inside' ? movTeacherUserId : undefined,
         boxId: selectedBox ? selectedBox.id : undefined,
@@ -435,6 +555,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       if (deleteTarget.type === 'course') await storage.deleteAcademyCourse(deleteTarget.id);
       if (deleteTarget.type === 'box') await storage.deleteWeaponBox(deleteTarget.id);
       if (deleteTarget.type === 'class') await storage.deleteCourseClass(deleteTarget.id);
+      if (deleteTarget.type === 'plan') await storage.deleteLessonPlan(deleteTarget.id);
       setSuccessMsg('Item excluído com sucesso.');
       onRefresh();
     } catch (err: any) {
@@ -473,6 +594,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           >
             <ArrowRightLeft className="w-3.5 h-3.5" />
             <span>Mapas de Aula ({courseMovements.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('planos')}
+            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
+              activeTab === 'planos'
+                ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <ClipboardList className="w-3.5 h-3.5" />
+            <span>Planos de Aula ({lessonPlans.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('turmas')}
@@ -659,6 +791,93 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       )}
 
       {/* ========================================================================= */}
+      {/* TAB: PLANOS DE AULA                                                      */}
+      {/* ========================================================================= */}
+      {activeTab === 'planos' && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-sm font-bold text-slate-100">Planos de Aula da Academia de Polícia</h2>
+              <p className="text-xs text-slate-400">
+                Cadastre e gerencie planos de aula com carreira, ano, quantidade de aulas, tiros por aluno, calibre e insumos do professor
+              </p>
+            </div>
+            <button
+              onClick={() => handleOpenPlanModal()}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Novo Plano de Aula</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {lessonPlans.length === 0 ? (
+              <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 italic">
+                Nenhum plano de aula cadastrado até o momento.
+              </div>
+            ) : (
+              lessonPlans.map((plan) => (
+                <div key={plan.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm hover:border-slate-700 transition">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-100">{plan.name}</h3>
+                      <div className="flex items-center space-x-2 pt-1 text-[11px]">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-300 font-bold border border-amber-800 uppercase">
+                          {plan.career}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase ${
+                          plan.type.toLowerCase().includes('formação')
+                            ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                            : 'bg-blue-950 text-blue-300 border-blue-800'
+                        }`}>
+                          {plan.type}
+                        </span>
+                        <span className="text-slate-400 font-mono">Ano: {plan.year}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => handleOpenPlanModal(plan)}
+                        className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg transition"
+                        title="Editar Plano de Aula"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget({ type: 'plan', id: plan.id, name: plan.name })}
+                        className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg transition"
+                        title="Excluir Plano de Aula"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 border-t border-slate-800 pt-3">
+                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
+                      <span>Aulas Previstas ({plan.lessonCount} aulas):</span>
+                    </div>
+                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                      {(plan.lessonsData || []).map((item, idx) => (
+                        <div key={idx} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px] flex items-center justify-between font-mono">
+                          <span className="font-bold text-amber-400">Aula {item.lessonNumber}</span>
+                          <span className="text-slate-300">{item.shotsPerStudent} tiros/aluno</span>
+                          <span className="text-slate-400">Cal: {item.caliberName}</span>
+                          <span className="text-emerald-400">Prof: +{item.instructorShots} un</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
       {/* TAB 2: TURMAS (CLASSES)                                                   */}
       {/* ========================================================================= */}
       {activeTab === 'turmas' && (
@@ -797,7 +1016,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           <div key={wId} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px]">
                             {w ? (
                               <>
-                                <div className="font-bold text-slate-100">{w.type} {w.model}</div>
+                                <div className="font-bold text-slate-100">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</div>
                                 <div className="text-amber-400 font-mono text-[10px]">Nº {w.serialNumber}</div>
                               </>
                             ) : (
@@ -1049,7 +1268,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           }}
                           className="rounded text-amber-500 focus:ring-0"
                         />
-                        <span className="text-slate-200 font-bold">{w.type} {w.model}</span>
+                        <span className="text-slate-200 font-bold">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</span>
                         <span className="text-amber-400">Nº {w.serialNumber}</span>
                         <span className="text-slate-500 text-[10px]">({w.caliber})</span>
                       </label>
@@ -1159,6 +1378,186 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl"
                 >
                   Confirmar Substituição
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 3.5 Modal Lesson Plan Edit/Add */}
+      {showPlanModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 my-8">
+            <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center space-x-2 text-amber-400">
+              <ClipboardList className="w-5 h-5" />
+              <span>{editingPlan ? 'Editar Plano de Aula' : 'Novo Plano de Aula'}</span>
+            </h3>
+
+            <form onSubmit={handleSavePlan} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-slate-300 font-semibold mb-1">Nome do Plano de Aula</label>
+                  <input
+                    type="text"
+                    value={planName}
+                    onChange={(e) => setPlanName(e.target.value)}
+                    placeholder="Ex: Plano Tiro Defensivo - Formação Delegados 2026"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Carreira</label>
+                  <select
+                    value={planCareer}
+                    onChange={(e) => setPlanCareer(e.target.value as AcademyCareer)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                  >
+                    <option value="Delegado">DELEGADO</option>
+                    <option value="Investigador">INVESTIGADOR</option>
+                    <option value="Escrivão">ESCRIVÃO</option>
+                    <option value="Perito">PERITO</option>
+                    <option value="Médico Legista">MÉDICO LEGISTA</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Ano do Plano</label>
+                  <input
+                    type="number"
+                    value={planYear}
+                    onChange={(e) => setPlanYear(Number(e.target.value))}
+                    min={2000}
+                    max={2099}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Tipo do Plano de Aula</label>
+                  <select
+                    value={planType}
+                    onChange={(e) => setPlanType(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                  >
+                    <option value="curso de formação">curso de formação</option>
+                    <option value="curso ensino continuado">curso ensino continuado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Quantidade de Aulas</label>
+                  <input
+                    type="number"
+                    value={planLessonCount}
+                    onChange={(e) => handlePlanLessonCountChange(Number(e.target.value))}
+                    min={1}
+                    max={30}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold text-amber-400"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Dynamic Lesson Config Grid */}
+              <div className="border border-slate-800 rounded-xl p-4 space-y-3 bg-slate-950/50">
+                <label className="block text-amber-400 font-bold uppercase tracking-wider text-[11px] flex items-center justify-between">
+                  <span>Configuração de Munição por Aula ({planLessonCount} Aulas)</span>
+                  <span className="text-slate-500 font-normal">Defina tiros/aluno, calibre e insumo do professor</span>
+                </label>
+
+                <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
+                  {planLessonsData.map((item, index) => (
+                    <div key={index} className="bg-slate-900 border border-slate-800 p-3 rounded-xl grid grid-cols-1 sm:grid-cols-3 gap-3 items-center">
+                      <div className="font-bold text-slate-100 text-xs">
+                        Aula {item.lessonNumber}
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Tiros por Aluno</label>
+                        <input
+                          type="number"
+                          value={item.shotsPerStudent}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setPlanLessonsData(prev => {
+                              const copy = [...prev];
+                              copy[index] = { ...copy[index], shotsPerStudent: val };
+                              return copy;
+                            });
+                          }}
+                          min={0}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 font-mono font-bold text-amber-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Calibre</label>
+                        <select
+                          value={item.caliberName}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setPlanLessonsData(prev => {
+                              const copy = [...prev];
+                              copy[index] = { ...copy[index], caliberName: val };
+                              return copy;
+                            });
+                          }}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 font-mono text-[11px]"
+                        >
+                          <option value="9x19mm">9x19mm</option>
+                          <option value=".40 S&W">.40 S&W</option>
+                          <option value="5,56x45mm">5,56x45mm</option>
+                          <option value=".12">.12</option>
+                          <option value=".38 SPL">.38 SPL</option>
+                          <option value=".380 ACP">.380 ACP</option>
+                          {ammoStocks.map(s => (
+                            <option key={s.id} value={s.caliber}>{s.caliber}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="col-span-1 sm:col-span-3 pt-1 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                        <span className="text-slate-400">Munições adicionais para Professor:</span>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            value={item.instructorShots}
+                            onChange={(e) => {
+                              const val = Number(e.target.value);
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[index] = { ...copy[index], instructorShots: val };
+                                return copy;
+                              });
+                            }}
+                            min={0}
+                            className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2 py-0.5 text-slate-100 font-mono font-bold text-emerald-400 text-right"
+                          />
+                          <span className="text-slate-400 font-mono">un</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowPlanModal(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl shadow"
+                >
+                  Salvar Plano de Aula
                 </button>
               </div>
             </form>
@@ -1331,16 +1730,95 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <label className="block text-slate-300 font-semibold mb-1">Selecione a Turma</label>
                 <select
                   value={movClassId}
-                  onChange={(e) => setMovClassId(e.target.value)}
+                  onChange={(e) => {
+                    const cId = e.target.value;
+                    setMovClassId(cId);
+                    const selectedC = courseClasses.find(c => c.id === cId);
+                    if (selectedC && movPlanId) {
+                      const selP = lessonPlans.find(p => p.id === movPlanId);
+                      const lessonItem = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
+                      if (lessonItem) {
+                        const baseSum = (lessonItem.shotsPerStudent * selectedC.studentCount) + lessonItem.instructorShots;
+                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                      }
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   required
                 >
                   {courseClasses.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.career} - {c.subject}) • Prof. {c.teacherName}
+                      {c.name} ({c.career} - {c.subject}) • Prof: {c.teacherName} ({c.studentCount} alunos)
                     </option>
                   ))}
                 </select>
+              </div>
+
+              {/* Plano de Aula Dropdown (Somente Curso de Formação) */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Plano de Aula</span>
+                    <span className="text-[10px] text-amber-400 font-normal">Somente Curso de Formação</span>
+                  </label>
+                  <select
+                    value={movPlanId}
+                    onChange={(e) => {
+                      const pId = e.target.value;
+                      setMovPlanId(pId);
+                      const selP = lessonPlans.find(p => p.id === pId);
+                      if (selP && selP.lessonsData && selP.lessonsData.length > 0) {
+                        const firstLesson = selP.lessonsData[0];
+                        setMovLessonNumber(firstLesson.lessonNumber);
+                        const selectedC = courseClasses.find(c => c.id === movClassId);
+                        const stCount = selectedC ? selectedC.studentCount : 20;
+                        const baseSum = (firstLesson.shotsPerStudent * stCount) + firstLesson.instructorShots;
+                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                  >
+                    <option value="">-- Sem Plano de Aula --</option>
+                    {lessonPlans
+                      .filter(p => p.type.toLowerCase().includes('formação'))
+                      .map(p => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} ({p.career} - {p.year})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Número da Aula</label>
+                  <select
+                    value={movLessonNumber}
+                    onChange={(e) => {
+                      const lNum = Number(e.target.value);
+                      setMovLessonNumber(lNum);
+                      const selP = lessonPlans.find(p => p.id === movPlanId);
+                      const lessonItem = selP?.lessonsData?.find(l => l.lessonNumber === lNum);
+                      if (lessonItem) {
+                        const selectedC = courseClasses.find(c => c.id === movClassId);
+                        const stCount = selectedC ? selectedC.studentCount : 20;
+                        const baseSum = (lessonItem.shotsPerStudent * stCount) + lessonItem.instructorShots;
+                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
+                    disabled={!movPlanId}
+                  >
+                    {(() => {
+                      const selP = lessonPlans.find(p => p.id === movPlanId);
+                      if (!selP || !selP.lessonsData) return <option value={1}>Aula 1</option>;
+                      return selP.lessonsData.map(l => (
+                        <option key={l.lessonNumber} value={l.lessonNumber}>
+                          Aula {l.lessonNumber} ({l.shotsPerStudent} t/aluno, Cal: {l.caliberName})
+                        </option>
+                      ));
+                    })()}
+                  </select>
+                </div>
               </div>
 
               <div>
@@ -1361,29 +1839,55 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Estoque de Munição</label>
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Estoque de Munição</span>
+                    <span className="text-[10px] text-amber-400 font-normal">Cofre MEAF</span>
+                  </label>
                   <select
                     value={movAmmoStockId}
                     onChange={(e) => setMovAmmoStockId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
                   >
                     <option value="">-- Sem munição --</option>
-                    {ammoStocks.map(a => (
-                      <option key={a.id} value={a.id}>
-                        {a.caliber} (Disp: {a.quantity} un)
-                      </option>
-                    ))}
+                    {(() => {
+                      const selP = lessonPlans.find(p => p.id === movPlanId);
+                      const currentLesson = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
+                      const targetCal = currentLesson?.caliberName || '';
+
+                      const meafVaultIds = vaultSpaces
+                        .filter(v => v.name.toUpperCase().includes('MEAF') || (v.location && v.location.toUpperCase().includes('MEAF')))
+                        .map(v => v.id);
+
+                      const filteredStocks = ammoStocks.filter(a => {
+                        const matchCal = !targetCal || a.caliber.toLowerCase() === targetCal.toLowerCase();
+                        const isMeaf = meafVaultIds.includes(a.vaultSpaceId) || (a.notes && a.notes.toUpperCase().includes('MEAF'));
+                        return matchCal && (meafVaultIds.length === 0 || isMeaf);
+                      });
+
+                      const listToDisplay = filteredStocks.length > 0
+                        ? filteredStocks
+                        : ammoStocks.filter(a => !targetCal || a.caliber.toLowerCase() === targetCal.toLowerCase());
+
+                      return listToDisplay.map(a => (
+                        <option key={a.id} value={a.id}>
+                          {a.caliber} (Disp: {a.quantity} un)
+                        </option>
+                      ));
+                    })()}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Quantidade Fornecida</label>
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Qtd. Fornecida</span>
+                    <span className="text-[10px] text-emerald-400 font-mono font-bold">+10% Margem</span>
+                  </label>
                   <input
                     type="number"
                     value={movAmmoQuantity}
                     onChange={(e) => setMovAmmoQuantity(Number(e.target.value))}
                     min={0}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold text-amber-400"
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold text-amber-400 text-sm"
                   />
                 </div>
               </div>

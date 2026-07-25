@@ -202,6 +202,27 @@ export interface AuditLog {
 export type AcademyCourseType = 'Formação' | 'Ensino Continuado';
 export type AcademyCareer = 'Delegado' | 'Médico Legista' | 'Perito' | 'Investigador' | 'Escrivão';
 
+export interface LessonPlanItem {
+  lessonNumber: number;
+  shotsPerStudent: number;
+  caliberId?: string;
+  caliberName: string;
+  instructorShots?: number;
+}
+
+export interface LessonPlan {
+  id: string;
+  name: string;
+  career: AcademyCareer;
+  year: number;
+  type: 'curso de formação' | 'curso ensino continuado';
+  lessonCount: number;
+  lessonsData: LessonPlanItem[];
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+}
+
 export interface AcademyLessonPlan {
   lessonNumber: number;
   title: string;
@@ -280,6 +301,8 @@ export interface CourseMovement {
   turmaCode?: string;
   career?: string;
   subject?: string;
+  lessonPlanId?: string;
+  lessonPlanName?: string;
   lessonNumber?: number;
   teacherName: string;
   teacherUserId?: string;

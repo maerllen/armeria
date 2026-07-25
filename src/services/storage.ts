@@ -14,7 +14,8 @@ import {
   WeaponBox,
   WeaponBoxReplacement,
   CourseClass,
-  CourseMovement
+  CourseMovement,
+  LessonPlan
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -36,6 +37,7 @@ export interface AppState {
   weaponBoxReplacements: WeaponBoxReplacement[];
   courseClasses: CourseClass[];
   courseMovements: CourseMovement[];
+  lessonPlans: LessonPlan[];
 }
 
 class StorageService {
@@ -56,7 +58,8 @@ class StorageService {
     weaponBoxes: [],
     weaponBoxReplacements: [],
     courseClasses: [],
-    courseMovements: []
+    courseMovements: [],
+    lessonPlans: []
   };
 
   constructor() {
@@ -90,7 +93,8 @@ class StorageService {
         weaponBoxesRes,
         weaponBoxRepsRes,
         courseClassesRes,
-        courseMovsRes
+        courseMovsRes,
+        lessonPlansRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -107,7 +111,8 @@ class StorageService {
         fetch('/api/weapon-boxes').then(r => r.ok ? r.json() : []),
         fetch('/api/weapon-box-replacements').then(r => r.ok ? r.json() : []),
         fetch('/api/course-classes').then(r => r.ok ? r.json() : []),
-        fetch('/api/course-movements').then(r => r.ok ? r.json() : [])
+        fetch('/api/course-movements').then(r => r.ok ? r.json() : []),
+        fetch('/api/lesson-plans').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -126,6 +131,7 @@ class StorageService {
       this.state.weaponBoxReplacements = weaponBoxRepsRes || [];
       this.state.courseClasses = courseClassesRes || [];
       this.state.courseMovements = courseMovsRes || [];
+      this.state.lessonPlans = lessonPlansRes || [];
 
       // Refresh current user reference if logged in
       if (this.state.currentUser) {
@@ -984,6 +990,44 @@ class StorageService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ammoReturned, returnedByUserName, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getLessonPlans(): LessonPlan[] {
+    return this.state.lessonPlans;
+  }
+
+  public async saveLessonPlan(planData: Partial<LessonPlan>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const method = planData.id ? 'PUT' : 'POST';
+      const url = planData.id ? `/api/lesson-plans/${planData.id}` : '/api/lesson-plans';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...planData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteLessonPlan(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/lesson-plans/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };

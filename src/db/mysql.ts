@@ -374,14 +374,34 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'course_classes' verificada/criada.");
 
+    // Lesson Plans Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`lesson_plans\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`name\` VARCHAR(255) NOT NULL,
+        \`career\` VARCHAR(64) NOT NULL,
+        \`year\` INT NOT NULL,
+        \`type\` VARCHAR(64) NOT NULL,
+        \`lesson_count\` INT NOT NULL DEFAULT 1,
+        \`lessons_data\` JSON NOT NULL,
+        \`department_id\` VARCHAR(64) DEFAULT NULL,
+        \`unit_id\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'lesson_plans' verificada/criada.");
+
     // Course Movements Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`course_class_movements\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`course_id\` VARCHAR(64) NOT NULL,
+        \`course_id\` VARCHAR(64) DEFAULT NULL,
         \`class_id\` VARCHAR(64) NOT NULL,
         \`turma_code\` VARCHAR(64) NOT NULL,
-        \`lesson_number\` INT NOT NULL,
+        \`lesson_plan_id\` VARCHAR(64) DEFAULT NULL,
+        \`lesson_plan_name\` VARCHAR(255) DEFAULT NULL,
+        \`lesson_number\` INT NOT NULL DEFAULT 1,
         \`teacher_name\` VARCHAR(255) NOT NULL,
         \`weapon_box_id\` VARCHAR(64) DEFAULT NULL,
         \`weapon_box_name\` VARCHAR(255) DEFAULT NULL,
@@ -404,6 +424,13 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'course_class_movements' verificada/criada.");
+
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`lesson_plan_id\` VARCHAR(64) DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`lesson_plan_name\` VARCHAR(255) DEFAULT NULL;`);
+    } catch (e) {}
 
     // Seed ACADEMIA DE POLICIA & MEAF unit
     const [acadRows]: any = await connection.query(`SELECT id FROM departments WHERE name LIKE '%ACADEMIA%' LIMIT 1;`);
