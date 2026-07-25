@@ -102,7 +102,15 @@ export interface AmmunitionMovement {
   vaultSpaceId: string;
   unitId: string;
   departmentId: string;
-  recipientOrReason: string; // Name of user or "Curso" | "Treinamento" | "Substituição"
+  recipientOrReason: string; // "Curso ou Teste" | "Treinamento" | "Substituição" | "Abastecimento do Cofre" | etc.
+  responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
+  responsibleUserId?: string;
+  responsibleName?: string;
+  responsibleMasp?: string;
+  observation?: string;
+  returnedQuantity?: number;
+  returnedAt?: string;
+  returnedByUserName?: string;
   userId: string;
   userName: string;
   createdAt: string;

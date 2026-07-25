@@ -231,12 +231,41 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`unit_id\` VARCHAR(64) DEFAULT NULL,
         \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
         \`recipient_or_reason\` VARCHAR(255) NOT NULL,
+        \`responsible_type\` VARCHAR(32) DEFAULT 'SISTEMA',
+        \`responsible_user_id\` VARCHAR(64) DEFAULT NULL,
+        \`responsible_name\` VARCHAR(255) DEFAULT NULL,
+        \`responsible_masp\` VARCHAR(64) DEFAULT NULL,
+        \`observation\` VARCHAR(500) DEFAULT NULL,
+        \`returned_quantity\` INT DEFAULT 0,
+        \`returned_at\` DATETIME DEFAULT NULL,
+        \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL,
         \`user_id\` VARCHAR(64) DEFAULT NULL,
         \`user_name\` VARCHAR(255) NOT NULL,
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Ensure columns exist on ammo_movements if table already existed
+    const ammoCols = ['responsible_type', 'responsible_user_id', 'responsible_name', 'responsible_masp', 'observation', 'returned_quantity', 'returned_at', 'returned_by_user_name'];
+    for (const col of ammoCols) {
+      try {
+        if (col === 'observation') {
+          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`observation\` VARCHAR(500) DEFAULT NULL;`);
+        } else if (col === 'returned_quantity') {
+          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_quantity\` INT DEFAULT 0;`);
+        } else if (col === 'returned_at') {
+          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_at\` DATETIME DEFAULT NULL;`);
+        } else if (col === 'returned_by_user_name') {
+          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
+        } else {
+          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`${col}\` VARCHAR(255) DEFAULT NULL;`);
+        }
+      } catch (e) {
+        // column already exists, ignore error
+      }
+    }
+
     logs.push("Tabela 'ammo_movements' verificada/criada.");
 
     // Create audit_logs

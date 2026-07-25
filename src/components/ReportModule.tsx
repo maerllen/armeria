@@ -1,38 +1,59 @@
 import React, { useState } from 'react';
-import { User, Movement, Department, Unit, Caliber, Weapon } from '../types';
+import { User, Movement, AmmunitionMovement, Department, Unit, Caliber, Weapon, VaultSpace } from '../types';
 import { formatTimestamp } from '../utils/masks';
-import { FileText, Printer, Download, Filter, Search, Calendar, Shield } from 'lucide-react';
+import { FileText, Printer, Download, Filter, Search, Calendar, Shield, Disc, Crosshair, UserX, UserCheck } from 'lucide-react';
 
 interface ReportModuleProps {
   currentUser: User;
   movements: Movement[];
+  ammoMovements?: AmmunitionMovement[];
   departments: Department[];
   units: Unit[];
   calibers: Caliber[];
   weapons: Weapon[];
   users: User[];
+  vaultSpaces?: VaultSpace[];
 }
 
 export const ReportModule: React.FC<ReportModuleProps> = ({
   currentUser,
-  movements,
-  departments,
-  units,
-  calibers,
-  weapons,
-  users
+  movements = [],
+  ammoMovements = [],
+  departments = [],
+  units = [],
+  calibers = [],
+  weapons = [],
+  users = [],
+  vaultSpaces = []
 }) => {
+  const [activeTab, setActiveTab] = useState<'ARMAS' | 'MUNICIONAL' | 'TODOS'>('TODOS');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
+  
   const [selectedUser, setSelectedUser] = useState('ALL');
   const [selectedCaliber, setSelectedCaliber] = useState('ALL');
-  const [selectedWeaponType, setSelectedWeaponType] = useState('ALL');
+  const [selectedVaultSpace, setSelectedVaultSpace] = useState('ALL');
   const [selectedDept, setSelectedDept] = useState('ALL');
   const [selectedUnit, setSelectedUnit] = useState('ALL');
+  const [recipientScope, setRecipientScope] = useState<'ALL' | 'SISTEMA' | 'FORA_DO_SISTEMA'>('ALL');
+  const [reasonFilter, setReasonFilter] = useState('ALL');
 
-  // Filter logic
-  const filteredMovements = movements.filter((m) => {
-    // Date filter
+  // Permission Scope Filter
+  const userRole = currentUser.role;
+
+  const isMovementAllowed = (deptId?: string | null, unitId?: string | null) => {
+    if (userRole === 'Geral') return true;
+    if (userRole === 'Administrador' || (userRole === 'Armeiro' && currentUser.managementScope !== 'unit')) {
+      return deptId === currentUser.departmentId;
+    }
+    return unitId === currentUser.unitId;
+  };
+
+  // Filter Weapon Movements
+  const filteredWeaponMovements = movements.filter((m) => {
+    if (!isMovementAllowed(m.departmentId, m.unitId)) return false;
+
+    // Date
     if (startDate) {
       const mDate = new Date(m.createdAt).getTime();
       const sDate = new Date(startDate + 'T00:00:00').getTime();
@@ -44,62 +65,117 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       if (mDate > eDate) return false;
     }
 
-    // User filter
+    // User / Recipient
     if (selectedUser !== 'ALL' && m.requesterId !== selectedUser) return false;
 
-    // Caliber filter
+    // Caliber
     if (selectedCaliber !== 'ALL' && m.caliber.toLowerCase() !== selectedCaliber.toLowerCase()) return false;
 
-    // Weapon Type filter
-    if (selectedWeaponType !== 'ALL' && m.weaponType.toLowerCase() !== selectedWeaponType.toLowerCase()) return false;
+    // Vault Space
+    if (selectedVaultSpace !== 'ALL' && m.withdrawalVaultSpaceId !== selectedVaultSpace && m.returnVaultSpaceId !== selectedVaultSpace) return false;
 
-    // Dept filter
+    // Dept & Unit
     if (selectedDept !== 'ALL' && m.departmentId !== selectedDept) return false;
-
-    // Unit filter
     if (selectedUnit !== 'ALL' && m.unitId !== selectedUnit) return false;
+
+    // Reason
+    if (reasonFilter !== 'ALL' && !('Cautela'.toLowerCase().includes(reasonFilter.toLowerCase()))) return false;
 
     return true;
   });
 
-  // Unique weapon types in system
-  const weaponTypes = Array.from(new Set(['Fuzil', 'Pistola', 'Submetralhadora', 'Espingarda', 'Carabina']));
+  // Filter Ammo Movements
+  const filteredAmmoMovements = ammoMovements.filter((m) => {
+    if (!isMovementAllowed(m.departmentId, m.unitId)) return false;
 
-  // Export CSV Handler
+    // Date
+    if (startDate) {
+      const mDate = new Date(m.createdAt).getTime();
+      const sDate = new Date(startDate + 'T00:00:00').getTime();
+      if (mDate < sDate) return false;
+    }
+    if (endDate) {
+      const mDate = new Date(m.createdAt).getTime();
+      const eDate = new Date(endDate + 'T23:59:59').getTime();
+      if (mDate > eDate) return false;
+    }
+
+    // Caliber
+    if (selectedCaliber !== 'ALL') {
+      const cal = calibers.find(c => c.id === m.caliberId);
+      const calName = cal ? cal.name : m.caliberId;
+      if (calName.toLowerCase() !== selectedCaliber.toLowerCase()) return false;
+    }
+
+    // Vault Space
+    if (selectedVaultSpace !== 'ALL' && m.vaultSpaceId !== selectedVaultSpace) return false;
+
+    // Dept & Unit
+    if (selectedDept !== 'ALL' && m.departmentId !== selectedDept) return false;
+    if (selectedUnit !== 'ALL' && m.unitId !== selectedUnit) return false;
+
+    // Recipient Scope (Sistema / Fora do Sistema)
+    if (recipientScope === 'SISTEMA' && m.responsibleType === 'FORA_DO_SISTEMA') return false;
+    if (recipientScope === 'FORA_DO_SISTEMA' && m.responsibleType !== 'FORA_DO_SISTEMA') return false;
+
+    // Specific User
+    if (selectedUser !== 'ALL' && m.responsibleUserId !== selectedUser && m.userId !== selectedUser) return false;
+
+    // Reason Filter
+    if (reasonFilter !== 'ALL' && !m.recipientOrReason.toLowerCase().includes(reasonFilter.toLowerCase())) return false;
+
+    return true;
+  });
+
+  // Export CSV
   const handleExportCSV = () => {
-    const headers = [
-      'Data/Hora',
-      'Policial',
-      'MASP',
-      'Arma Tipo',
-      'Modelo',
-      'Nº Serie',
-      'Calibre',
-      'Munições Levadas',
-      'Carregadores',
-      'Status',
-      'Aprovador'
-    ];
+    let csvRows: string[][] = [];
 
-    const rows = filteredMovements.map(m => [
-      formatTimestamp(m.createdAt),
-      `"${m.requesterName}"`,
-      m.requesterMasp,
-      m.weaponType,
-      m.weaponModel,
-      m.weaponSerialNumber,
-      m.caliber,
-      m.ammunitionCount,
-      m.magazineCount,
-      m.status,
-      `"${m.approvedByUserName || ''}"`
-    ]);
+    if (activeTab === 'ARMAS' || activeTab === 'TODOS') {
+      csvRows.push(['--- MOVIMENTAÇÕES DE ARMAMENTO ---']);
+      csvRows.push(['Data/Hora', 'Policial', 'MASP', 'Tipo Arma', 'Modelo', 'Nº Serie', 'Calibre', 'Munições', 'Status']);
+      filteredWeaponMovements.forEach(m => {
+        csvRows.push([
+          formatTimestamp(m.createdAt),
+          `"${m.requesterName}"`,
+          m.requesterMasp,
+          m.weaponType,
+          m.weaponModel,
+          m.weaponSerialNumber,
+          m.caliber,
+          `${m.ammunitionCount} un`,
+          m.status
+        ]);
+      });
+    }
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    if (activeTab === 'MUNICIONAL' || activeTab === 'TODOS') {
+      if (csvRows.length > 0) csvRows.push([]);
+      csvRows.push(['--- MOVIMENTAÇÕES DE MUNIÇÃO ---']);
+      csvRows.push(['Data/Hora', 'Tipo', 'Calibre', 'Quantidade', 'Devolvidos', 'Destino/Motivo', 'Responsavel', 'MASP', 'Vinculo', 'Observacao', 'Armeiro']);
+      filteredAmmoMovements.forEach(m => {
+        const cal = calibers.find(c => c.id === m.caliberId);
+        csvRows.push([
+          formatTimestamp(m.createdAt),
+          m.type,
+          cal ? cal.name : m.caliberId,
+          `${m.quantity} un`,
+          `${m.returnedQuantity || 0} un`,
+          `"${m.recipientOrReason}"`,
+          `"${m.responsibleName || m.recipientOrReason}"`,
+          m.responsibleMasp || '',
+          m.responsibleType === 'FORA_DO_SISTEMA' ? 'Fora do Sistema' : 'No Sistema',
+          `"${m.observation || ''}"`,
+          `"${m.userName}"`
+        ]);
+      });
+    }
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + csvRows.map(e => e.join(',')).join('\n');
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `relatorio_armeria_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `relatorio_pcmg_${new Date().toISOString().slice(0, 10)}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -121,7 +197,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           <div>
             <h1 className="text-xl font-bold text-slate-100">Relatórios Gerenciais e Operacionais</h1>
             <p className="text-xs text-slate-400">
-              Geração de relatórios analíticos de movimentações por período, módulo, usuário e unidade
+              Visualização e filtro completo de movimentações dentro do nível de permissão do usuário
             </p>
           </div>
         </div>
@@ -145,11 +221,50 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       </div>
 
-      {/* Filter Panel */}
+      {/* Tabs */}
+      <div className="flex items-center space-x-2 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
+        <button
+          onClick={() => setActiveTab('TODOS')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'TODOS'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <FileText className="w-4 h-4" />
+          <span>Visão Geral Unificada</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('ARMAS')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'ARMAS'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Crosshair className="w-4 h-4" />
+          <span>Cautelas de Armamento ({filteredWeaponMovements.length})</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('MUNICIONAL')}
+          className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'MUNICIONAL'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Disc className="w-4 h-4" />
+          <span>Saídas e Sobras de Munição ({filteredAmmoMovements.length})</span>
+        </button>
+      </div>
+
+      {/* Advanced Filter Panel */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 print:hidden">
         <div className="flex items-center space-x-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
           <Filter className="w-4 h-4" />
-          <span>Filtros do Relatório</span>
+          <span>Filtros do Relatório (Calibre, Cofre, Departamento, Destinatário e Motivo)</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
@@ -176,22 +291,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             />
           </div>
 
-          {/* User */}
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Policial</label>
-            <select
-              value={selectedUser}
-              onChange={(e) => setSelectedUser(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
-            >
-              <option value="ALL">Todos os Policiais</option>
-              {users.map(u => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Caliber */}
+          {/* Caliber Filter */}
           <div>
             <label className="block text-slate-400 mb-1 font-semibold">Calibre</label>
             <select
@@ -206,22 +306,68 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </select>
           </div>
 
-          {/* Weapon Type */}
+          {/* Vault Space Filter */}
           <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Tipo de Arma</label>
+            <label className="block text-slate-400 mb-1 font-semibold">Cofre / Espaço</label>
             <select
-              value={selectedWeaponType}
-              onChange={(e) => setSelectedWeaponType(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+              value={selectedVaultSpace}
+              onChange={(e) => setSelectedVaultSpace(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
             >
-              <option value="ALL">Todos os Tipos</option>
-              {weaponTypes.map(wt => (
-                <option key={wt} value={wt}>{wt}</option>
+              <option value="ALL">Todos os Espaços do Cofre</option>
+              {vaultSpaces.map(v => (
+                <option key={v.id} value={v.id}>{v.code} ({v.type})</option>
               ))}
             </select>
           </div>
 
-          {/* Dept */}
+          {/* Destinatário Scope Filter (Sistema / Fora do Sistema) */}
+          <div>
+            <label className="block text-slate-400 mb-1 font-semibold">Destinatário (Vínculo)</label>
+            <select
+              value={recipientScope}
+              onChange={(e) => setRecipientScope(e.target.value as any)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+            >
+              <option value="ALL">Todos (Sistema e Fora do Sistema)</option>
+              <option value="SISTEMA">Apenas Cadastrados no Sistema</option>
+              <option value="FORA_DO_SISTEMA">Apenas Fora do Sistema</option>
+            </select>
+          </div>
+
+          {/* User Filter */}
+          <div>
+            <label className="block text-slate-400 mb-1 font-semibold">Policial / Usuário</label>
+            <select
+              value={selectedUser}
+              onChange={(e) => setSelectedUser(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+            >
+              <option value="ALL">Todos os Policiais</option>
+              {users.map(u => (
+                <option key={u.id} value={u.id}>{u.name} ({u.masp})</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Motivo da Retirada */}
+          <div>
+            <label className="block text-slate-400 mb-1 font-semibold">Motivo da Retirada</label>
+            <select
+              value={reasonFilter}
+              onChange={(e) => setReasonFilter(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+            >
+              <option value="ALL">Todos os Motivos</option>
+              <option value="Curso">Curso ou Teste</option>
+              <option value="Treinamento">Treinamento</option>
+              <option value="Substituição">Substituição</option>
+              <option value="Abastecimento do Cofre">Abastecimento do Cofre</option>
+              <option value="Operacional">Operacional / Diligência</option>
+            </select>
+          </div>
+
+          {/* Dept Filter */}
           <div>
             <label className="block text-slate-400 mb-1 font-semibold">Departamento</label>
             <select
@@ -239,113 +385,181 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </select>
           </div>
 
-          {/* Unit */}
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Unidade</label>
-            <select
-              value={selectedUnit}
-              onChange={(e) => setSelectedUnit(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
-            >
-              <option value="ALL">Todas as Unidades</option>
-              {units
-                .filter(u => selectedDept === 'ALL' || u.departmentId === selectedDept)
-                .map(u => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-            </select>
-          </div>
+        </div>
 
-          {/* Reset Filters */}
-          <div className="flex items-end">
-            <button
-              onClick={() => {
-                setStartDate('');
-                setEndDate('');
-                setSelectedUser('ALL');
-                setSelectedCaliber('ALL');
-                setSelectedWeaponType('ALL');
-                setSelectedDept('ALL');
-                setSelectedUnit('ALL');
-              }}
-              className="w-full bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-xl text-xs"
-            >
-              Limpar Filtros
-            </button>
-          </div>
-
+        {/* Reset Filters */}
+        <div className="pt-2 flex justify-end">
+          <button
+            onClick={() => {
+              setStartDate('');
+              setEndDate('');
+              setSelectedUser('ALL');
+              setSelectedCaliber('ALL');
+              setSelectedVaultSpace('ALL');
+              setSelectedDept('ALL');
+              setSelectedUnit('ALL');
+              setRecipientScope('ALL');
+              setReasonFilter('ALL');
+            }}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2 rounded-xl text-xs"
+          >
+            Limpar Filtros
+          </button>
         </div>
       </div>
 
-      {/* Printable Report View */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm p-6 space-y-4 print:bg-white print:text-black print:p-0 print:border-none">
+      {/* Printable Report Content */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 space-y-6 print:bg-white print:text-black print:p-0 print:border-none">
         
         {/* Printable Header */}
         <div className="border-b border-slate-800 pb-4 flex justify-between items-center print:border-black">
           <div>
-            <h2 className="text-lg font-bold text-slate-100 print:text-black font-mono">
-              POLÍCIA CIVIL • ARMERIA
+            <h2 className="text-lg font-bold text-slate-100 print:text-black font-mono uppercase">
+              POLÍCIA CIVIL • ESTADO DE MINAS GERAIS
             </h2>
-            <p className="text-xs text-slate-400 print:text-gray-700">
-              Relatório de Movimentações e Controle de Armamento e Munições
+            <p className="text-xs text-amber-400 print:text-black font-semibold font-mono">
+              RELATÓRIO OFICIAL DE MOVIMENTAÇÃO DE ARMAMENTO E MUNIÇÕES
             </p>
           </div>
-          <div className="text-right text-xs text-slate-400 print:text-gray-700">
-            <p>Gerado por: <strong className="text-slate-200 print:text-black">{currentUser.name}</strong></p>
-            <p className="font-mono">{formatTimestamp(new Date().toISOString())}</p>
+          <div className="text-right text-xs text-slate-400 print:text-gray-700 font-mono">
+            <p>Emissor: <strong className="text-slate-200 print:text-black">{currentUser.name}</strong></p>
+            <p>{formatTimestamp(new Date().toISOString())}</p>
           </div>
         </div>
 
-        {/* Results Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300 print:text-black">
-            <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700 print:bg-gray-200 print:text-black">
-              <tr>
-                <th className="py-2.5 px-3">Data/Hora</th>
-                <th className="py-2.5 px-3">Policial / MASP</th>
-                <th className="py-2.5 px-3">Arma / Série</th>
-                <th className="py-2.5 px-3">Calibre</th>
-                <th className="py-2.5 px-3">Munição / Mags</th>
-                <th className="py-2.5 px-3">Status</th>
-                <th className="py-2.5 px-3">Aprovador</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800 print:divide-gray-300">
-              {filteredMovements.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="py-8 text-center text-slate-500 print:text-gray-600 italic">
-                    Nenhum registro encontrado para os filtros aplicados.
-                  </td>
-                </tr>
-              ) : (
-                filteredMovements.map((m) => (
-                  <tr key={m.id}>
-                    <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 print:text-black">
-                      {formatTimestamp(m.createdAt)}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="font-bold text-slate-200 print:text-black">{m.requesterName}</div>
-                      <div className="text-[10px] text-slate-400 font-mono print:text-gray-600">MASP: {m.requesterMasp}</div>
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <div className="font-bold text-slate-200 print:text-black">{m.weaponType} {m.weaponModel}</div>
-                      <div className="text-[10px] text-amber-400 font-mono print:text-gray-800">Série: {m.weaponSerialNumber}</div>
-                    </td>
-                    <td className="py-2.5 px-3 font-mono">{m.caliber}</td>
-                    <td className="py-2.5 px-3 font-mono">{m.ammunitionCount} un / {m.magazineCount} carreg.</td>
-                    <td className="py-2.5 px-3 font-bold">{m.status}</td>
-                    <td className="py-2.5 px-3 text-slate-300 print:text-black">{m.approvedByUserName || '-'}</td>
+        {/* Section 1: Weapons Movements */}
+        {(activeTab === 'ARMAS' || activeTab === 'TODOS') && (
+          <div className="space-y-3">
+            <h3 className="text-xs font-bold text-amber-400 print:text-black uppercase tracking-wider font-mono flex items-center space-x-1">
+              <Crosshair className="w-4 h-4 print:hidden" />
+              <span>1. Movimentações e Cautelas de Armamento ({filteredWeaponMovements.length})</span>
+            </h3>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300 print:text-black">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700 print:bg-gray-200 print:text-black">
+                  <tr>
+                    <th className="py-2.5 px-3">Data/Hora</th>
+                    <th className="py-2.5 px-3">Policial Solicitante</th>
+                    <th className="py-2.5 px-3">MASP</th>
+                    <th className="py-2.5 px-3">Arma / Série</th>
+                    <th className="py-2.5 px-3">Calibre</th>
+                    <th className="py-2.5 px-3">Munições / Mags</th>
+                    <th className="py-2.5 px-3">Status</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-800 print:divide-gray-300">
+                  {filteredWeaponMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-4 text-center text-slate-500 print:text-gray-600 italic">
+                        Nenhuma movimentação de arma encontrada com os filtros selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredWeaponMovements.map((m) => (
+                      <tr key={m.id}>
+                        <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 print:text-black">
+                          {formatTimestamp(m.createdAt)}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-slate-200 print:text-black">
+                          {m.requesterName}
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">{m.requesterMasp}</td>
+                        <td className="py-2.5 px-3">
+                          <span className="font-bold block text-slate-200 print:text-black">{m.weaponType} {m.weaponModel}</span>
+                          <span className="text-[10px] text-amber-400 font-mono print:text-gray-800">Série: {m.weaponSerialNumber}</span>
+                        </td>
+                        <td className="py-2.5 px-3 font-mono">{m.caliber}</td>
+                        <td className="py-2.5 px-3 font-mono">{m.ammunitionCount} un / {m.magazineCount} mag</td>
+                        <td className="py-2.5 px-3 font-bold">{m.status}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* Section 2: Ammunition Movements */}
+        {(activeTab === 'MUNICIONAL' || activeTab === 'TODOS') && (
+          <div className="space-y-3 pt-4 border-t border-slate-800 print:border-gray-400">
+            <h3 className="text-xs font-bold text-amber-400 print:text-black uppercase tracking-wider font-mono flex items-center space-x-1">
+              <Disc className="w-4 h-4 print:hidden" />
+              <span>2. Saídas e Devolução de Munição ({filteredAmmoMovements.length})</span>
+            </h3>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300 print:text-black">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700 print:bg-gray-200 print:text-black">
+                  <tr>
+                    <th className="py-2.5 px-3">Data/Hora</th>
+                    <th className="py-2.5 px-3">Tipo</th>
+                    <th className="py-2.5 px-3">Calibre</th>
+                    <th className="py-2.5 px-3">Qtd / Sobra Devolvida</th>
+                    <th className="py-2.5 px-3">Motivo / Destino</th>
+                    <th className="py-2.5 px-3">Policial Responsável</th>
+                    <th className="py-2.5 px-3">Vínculo</th>
+                    <th className="py-2.5 px-3">Observação</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 print:divide-gray-300">
+                  {filteredAmmoMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-center text-slate-500 print:text-gray-600 italic">
+                        Nenhuma movimentação de munição encontrada com os filtros selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredAmmoMovements.map((m) => {
+                      const cal = calibers.find(c => c.id === m.caliberId);
+                      return (
+                        <tr key={m.id}>
+                          <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400 print:text-black">
+                            {formatTimestamp(m.createdAt)}
+                          </td>
+                          <td className="py-2.5 px-3 font-bold">{m.type}</td>
+                          <td className="py-2.5 px-3 font-mono font-bold text-amber-400 print:text-black">
+                            {cal ? cal.name : m.caliberId}
+                          </td>
+                          <td className="py-2.5 px-3 font-mono">
+                            <span className="font-bold block">{m.quantity} un</span>
+                            {m.returnedQuantity !== undefined && m.returnedQuantity > 0 && (
+                              <span className="text-[10px] text-emerald-400 print:text-black block">
+                                Devolvidos: {m.returnedQuantity} un
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold">{m.recipientOrReason}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="font-bold block">{m.responsibleName || m.recipientOrReason}</span>
+                            {m.responsibleMasp && <span className="text-[10px] text-slate-400 font-mono block print:text-gray-700">MASP: {m.responsibleMasp}</span>}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px]">
+                            {m.responsibleType === 'FORA_DO_SISTEMA' ? (
+                              <span className="text-amber-400 font-bold print:text-black">Fora do Sistema</span>
+                            ) : (
+                              <span className="text-slate-400 print:text-black">No Sistema</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-[11px] text-slate-400 print:text-black max-w-xs truncate" title={m.observation}>
+                            {m.observation || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        <div className="pt-4 border-t border-slate-800 text-xs text-slate-500 flex justify-between print:text-gray-600 font-mono">
+          <span>Relatório gerado em conformidade com o Nível de Acesso: <strong>{currentUser.role}</strong></span>
+          <span>Armeria PCMG v2.0</span>
         </div>
 
-        <div className="pt-4 border-t border-slate-800 text-xs text-slate-500 flex justify-between print:text-gray-600">
-          <span>Total de registros listados: <strong className="text-slate-300 print:text-black">{filteredMovements.length}</strong></span>
-          <span>Armeria • Sistema Auditável da Polícia Civil</span>
-        </div>
       </div>
 
     </div>

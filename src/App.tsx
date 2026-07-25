@@ -242,6 +242,7 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               departments={departments}
               units={units}
+              users={allUsers}
               onRefresh={refreshData}
             />
           )}
@@ -273,16 +274,14 @@ export default function App() {
             <ReportModule
               currentUser={currentUser}
               movements={movements}
+              ammoMovements={ammoMovements}
               departments={departments}
               units={units}
               calibers={calibers}
               weapons={weapons}
               users={allUsers}
+              vaultSpaces={vaultSpaces}
             />
-          )}
-
-          {activeModule === 'manual' && (
-            <ManualModule />
           )}
 
           {/* Footer Bar with Audit Log Trigger */}

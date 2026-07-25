@@ -538,6 +538,11 @@ class StorageService {
     quantity: number;
     vaultSpaceId: string;
     recipientOrReason: string;
+    responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
+    responsibleUserId?: string;
+    responsibleName?: string;
+    responsibleMasp?: string;
+    observation?: string;
   }): Promise<AmmunitionMovement> {
     const res = await fetch('/api/ammo-movements', {
       method: 'POST',
@@ -556,8 +561,25 @@ class StorageService {
     quantity: number;
     vaultSpaceId: string;
     recipientOrReason: string;
+    responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
+    responsibleUserId?: string;
+    responsibleName?: string;
+    responsibleMasp?: string;
+    observation?: string;
   }) {
     return this.addAmmoMovement(data);
+  }
+
+  public async returnUnusedAmmo(id: string, returnQuantity: number): Promise<boolean> {
+    const res = await fetch(`/api/ammo-movements/${id}/return`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ returnQuantity, actor: this.state.currentUser })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao registrar devolução de munição.');
+    await this.refreshFromServer();
+    return true;
   }
 
   public async deleteAmmoStock(id: string): Promise<boolean> {

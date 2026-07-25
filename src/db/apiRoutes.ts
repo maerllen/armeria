@@ -759,7 +759,14 @@ apiRouter.get('/ammo-movements', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const [rows]: any = await pool.query(`
-      SELECT id, type, caliber_id as caliberId, quantity, department_id as departmentId, unit_id as unitId, vault_space_id as vaultSpaceId, recipient_or_reason as recipientOrReason, user_id as userId, user_name as userName, created_at as createdAt
+      SELECT 
+        id, type, caliber_id as caliberId, quantity, department_id as departmentId, 
+        unit_id as unitId, vault_space_id as vaultSpaceId, recipient_or_reason as recipientOrReason,
+        responsible_type as responsibleType, responsible_user_id as responsibleUserId,
+        responsible_name as responsibleName, responsible_masp as responsibleMasp,
+        observation, returned_quantity as returnedQuantity, returned_at as returnedAt,
+        returned_by_user_name as returnedByUserName, user_id as userId, user_name as userName, 
+        created_at as createdAt
       FROM ammo_movements ORDER BY created_at DESC
     `);
     return res.json(rows || []);
@@ -770,7 +777,11 @@ apiRouter.get('/ammo-movements', async (req: Request, res: Response) => {
 
 apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
   try {
-    const { type, caliberId, quantity, vaultSpaceId, recipientOrReason, actor } = req.body;
+    const { 
+      type, caliberId, quantity, vaultSpaceId, recipientOrReason,
+      responsibleType, responsibleUserId, responsibleName, responsibleMasp,
+      observation, actor 
+    } = req.body;
     if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
 
     const pool = getPool();
@@ -805,13 +816,21 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
     }
 
     const movId = `ammomov-${Date.now()}`;
+    const cleanObs = (observation || '').slice(0, 500);
+
     await pool.query(
-      `INSERT INTO ammo_movements (id, type, caliber_id, quantity, department_id, unit_id, vault_space_id, recipient_or_reason, user_id, user_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [movId, type, caliberId, quantity, vault.department_id, vault.unit_id, vaultSpaceId, recipientOrReason, actor.id, actor.name]
+      `INSERT INTO ammo_movements 
+       (id, type, caliber_id, quantity, department_id, unit_id, vault_space_id, recipient_or_reason, 
+        responsible_type, responsible_user_id, responsible_name, responsible_masp, observation, user_id, user_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        movId, type, caliberId, quantity, vault.department_id, vault.unit_id, vaultSpaceId, recipientOrReason,
+        responsibleType || 'SISTEMA', responsibleUserId || null, responsibleName || null, responsibleMasp || null,
+        cleanObs, actor.id, actor.name
+      ]
     );
 
-    await insertAuditLog('Munições', type === 'Entrada' ? 'Criar' : 'Excluir', `${type} de ${quantity} munições - Motivo: ${recipientOrReason}`, actor, req.ip);
+    await insertAuditLog('Munições', type === 'Entrada' ? 'Criar' : 'Excluir', `${type} de ${quantity} munições - Motivo/Destino: ${recipientOrReason}`, actor, req.ip);
 
     return res.json({
       id: movId,
@@ -822,10 +841,73 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
       unitId: vault.unit_id,
       departmentId: vault.department_id,
       recipientOrReason,
+      responsibleType: responsibleType || 'SISTEMA',
+      responsibleUserId: responsibleUserId || null,
+      responsibleName: responsibleName || null,
+      responsibleMasp: responsibleMasp || null,
+      observation: cleanObs,
+      returnedQuantity: 0,
       userId: actor.id,
       userName: actor.name,
       createdAt: new Date().toISOString()
     });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/ammo-movements/:id/return', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { returnQuantity, actor } = req.body;
+    if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
+
+    const numReturn = parseInt(returnQuantity, 10);
+    if (isNaN(numReturn) || numReturn <= 0) {
+      return res.status(400).json({ error: 'Informe uma quantidade válida para devolução.' });
+    }
+
+    const pool = getPool();
+    const [movs]: any = await pool.query('SELECT * FROM ammo_movements WHERE id = ?', [id]);
+    if (!movs || movs.length === 0) {
+      return res.status(404).json({ error: 'Registro de saída de munição não encontrado.' });
+    }
+
+    const mov = movs[0];
+    const prevReturned = mov.returned_quantity || 0;
+    const maxReturnable = mov.quantity - prevReturned;
+
+    if (numReturn > maxReturnable) {
+      return res.status(400).json({ error: `Quantidade de devolução (${numReturn}) excede o saldo restante pendente (${maxReturnable}).` });
+    }
+
+    // Add back to ammo stock
+    const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?', [mov.vault_space_id, mov.caliber_id]);
+    let currentQty = stocks && stocks.length > 0 ? stocks[0].quantity : 0;
+    let stockId = stocks && stocks.length > 0 ? stocks[0].id : null;
+
+    if (!stockId) {
+      stockId = `stock-${Date.now()}`;
+      await pool.query(
+        'INSERT INTO ammo_stocks (id, caliber_id, quantity, department_id, unit_id, vault_space_id) VALUES (?, ?, ?, ?, ?, ?)',
+        [stockId, mov.caliber_id, numReturn, mov.department_id, mov.unit_id, mov.vault_space_id]
+      );
+    } else {
+      currentQty += numReturn;
+      await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [currentQty, stockId]);
+    }
+
+    const newReturnedTotal = prevReturned + numReturn;
+    await pool.query(
+      `UPDATE ammo_movements 
+       SET returned_quantity = ?, returned_at = NOW(), returned_by_user_name = ?
+       WHERE id = ?`,
+      [newReturnedTotal, actor.name, id]
+    );
+
+    await insertAuditLog('Munições', 'Criar', `Devolução de ${numReturn} munições não utilizadas de saída ${id}`, actor, req.ip);
+
+    return res.json({ success: true, newReturnedTotal });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

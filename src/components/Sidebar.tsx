@@ -76,12 +76,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Relatórios',
       icon: FileText,
       visible: userRole === 'Geral' || userRole === 'Administrador' || userRole === 'Armeiro'
-    },
-    {
-      id: 'manual',
-      label: 'Manual do Sistema',
-      icon: BookOpen,
-      visible: true
     }
   ];
 

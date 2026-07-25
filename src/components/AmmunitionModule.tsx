@@ -2,8 +2,9 @@ import React, { useState } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search, Trash2 } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search, Trash2, Printer, RotateCcw, FileText, UserX, UserCheck } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { AmmunitionReceiptModal } from './AmmunitionReceiptModal';
 
 interface AmmunitionModuleProps {
   currentUser: User;
@@ -13,6 +14,7 @@ interface AmmunitionModuleProps {
   vaultSpaces: VaultSpace[];
   departments: Department[];
   units: Unit[];
+  users?: User[];
   onRefresh: () => void;
 }
 
@@ -24,6 +26,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   vaultSpaces,
   departments,
   units,
+  users = [],
   onRefresh
 }) => {
   const [showCaliberModal, setShowCaliberModal] = useState(false);
@@ -33,12 +36,29 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [caliberName, setCaliberName] = useState('');
 
   // Ammo Movement Form
-  const [movementType, setMovementType] = useState<AmmoMovementType>('Entrada');
+  const [movementType, setMovementType] = useState<AmmoMovementType>('Saída');
   const [selectedCaliberId, setSelectedCaliberId] = useState('');
   const [quantity, setQuantity] = useState(100);
   const [selectedVaultId, setSelectedVaultId] = useState('');
-  const [recipientOrReason, setRecipientOrReason] = useState('Treinamento');
-  const [customRecipientName, setCustomRecipientName] = useState('');
+  const [recipientOrReason, setRecipientOrReason] = useState('Curso ou Teste');
+
+  // Responsible Officer Form State
+  const [responsibleType, setResponsibleType] = useState<'SISTEMA' | 'FORA_DO_SISTEMA'>('SISTEMA');
+  const [selectedResponsibleUserId, setSelectedResponsibleUserId] = useState('');
+  const [customResponsibleName, setCustomResponsibleName] = useState('');
+  const [customResponsibleMasp, setCustomResponsibleMasp] = useState('');
+
+  // Observation (max 500 chars)
+  const [observation, setObservation] = useState('');
+
+  // Receipt Modal State
+  const [selectedReceiptMov, setSelectedReceiptMov] = useState<AmmunitionMovement | null>(null);
+  const [isReturnReceiptMode, setIsReturnReceiptMode] = useState(false);
+  const [lastReturnedAmount, setLastReturnedAmount] = useState<number | undefined>(undefined);
+
+  // Return Unused Ammo Modal State
+  const [returnTargetMov, setReturnTargetMov] = useState<AmmunitionMovement | null>(null);
+  const [returnQuantity, setReturnQuantity] = useState<number>(0);
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -56,12 +76,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   // Open Movement Modal
   const handleOpenMovementModal = () => {
     setErrorMsg('');
-    setMovementType('Entrada');
+    setMovementType('Saída');
     setSelectedCaliberId(calibers[0]?.id || '');
     setQuantity(100);
     setSelectedVaultId(ammoVaultSpaces[0]?.id || '');
-    setRecipientOrReason('Treinamento');
-    setCustomRecipientName('');
+    setRecipientOrReason('Curso ou Teste');
+    
+    setResponsibleType('SISTEMA');
+    setSelectedResponsibleUserId(users[0]?.id || '');
+    setCustomResponsibleName('');
+    setCustomResponsibleMasp('');
+    setObservation('');
+
     setShowMovementModal(true);
   };
 
@@ -141,29 +167,87 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       return;
     }
 
-    let finalReason = recipientOrReason;
-    if (recipientOrReason === 'outros_pessoa') {
-      if (!customRecipientName.trim()) {
-        setErrorMsg('Informe o nome do policial recebedor.');
+    let respName = '';
+    let respMasp = '';
+    let respUserId = '';
+
+    if (responsibleType === 'SISTEMA') {
+      const foundUser = users.find(u => u.id === selectedResponsibleUserId);
+      if (!foundUser) {
+        setErrorMsg('Selecione o policial responsável no sistema.');
         return;
       }
-      finalReason = customRecipientName.trim();
+      respName = foundUser.name;
+      respMasp = foundUser.masp;
+      respUserId = foundUser.id;
+    } else {
+      if (!customResponsibleName.trim()) {
+        setErrorMsg('Informe o nome do policial responsável (fora do sistema).');
+        return;
+      }
+      respName = customResponsibleName.trim();
+      respMasp = customResponsibleMasp.trim();
     }
 
     try {
-      await storage.recordAmmoMovement({
+      const createdMov = await storage.recordAmmoMovement({
         type: movementType,
         caliberId: selectedCaliberId,
         quantity,
         vaultSpaceId: selectedVaultId,
-        recipientOrReason: finalReason
+        recipientOrReason,
+        responsibleType,
+        responsibleUserId: respUserId,
+        responsibleName: respName,
+        responsibleMasp: respMasp,
+        observation: observation.slice(0, 500)
       });
 
       setSuccessMsg(`Movimentação de ${movementType} registrada com sucesso.`);
       setShowMovementModal(false);
       onRefresh();
+
+      // Automatically offer to print receipt
+      setSelectedReceiptMov(createdMov);
+      setIsReturnReceiptMode(false);
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao registrar movimentação.');
+    }
+  };
+
+  // Submit Unused Ammo Return
+  const handleConfirmReturnAmmo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!returnTargetMov) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const maxReturnable = returnTargetMov.quantity - (returnTargetMov.returnedQuantity || 0);
+    if (returnQuantity <= 0 || returnQuantity > maxReturnable) {
+      setErrorMsg(`A quantidade de devolução deve estar entre 1 e ${maxReturnable}.`);
+      return;
+    }
+
+    try {
+      await storage.returnUnusedAmmo(returnTargetMov.id, returnQuantity);
+      setSuccessMsg(`Devolução de ${returnQuantity} munições registrada com sucesso.`);
+      
+      const updatedMov = {
+        ...returnTargetMov,
+        returnedQuantity: (returnTargetMov.returnedQuantity || 0) + returnQuantity,
+        returnedAt: new Date().toISOString(),
+        returnedByUserName: currentUser.name
+      };
+
+      setReturnTargetMov(null);
+      onRefresh();
+
+      // Show Return Receipt Modal
+      setSelectedReceiptMov(updatedMov);
+      setIsReturnReceiptMode(true);
+      setLastReturnedAmount(returnQuantity);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao registrar devolução.');
     }
   };
 
@@ -179,7 +263,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           <div>
             <h1 className="text-xl font-bold text-slate-100">Gestão e Estoque de Munições</h1>
             <p className="text-xs text-slate-400">
-              Controle de calibres, movimentação de entrada/saída e balanço dos cofres
+              Controle de calibres, movimentação de entrada/saída, devoluções de sobra e recibos
             </p>
           </div>
         </div>
@@ -204,7 +288,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               onClick={handleOpenMovementModal}
               className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-4 h-4 text-slate-950" />
               <span>Entrada / Saída de Munição</span>
             </button>
           )}
@@ -339,14 +423,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <th className="py-3 px-4">Quantidade</th>
                 <th className="py-3 px-4">Local no Cofre</th>
                 <th className="py-3 px-4">Destino / Motivo</th>
-                <th className="py-3 px-4">Responsável</th>
-                {canManageStock && <th className="py-3 px-4 text-right">Ações</th>}
+                <th className="py-3 px-4">Policial Responsável</th>
+                <th className="py-3 px-4">Devolução (Curso/Teste)</th>
+                <th className="py-3 px-4 text-right">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {movements.length === 0 ? (
                 <tr>
-                  <td colSpan={canManageStock ? 8 : 7} className="py-8 text-center text-slate-500 italic">
+                  <td colSpan={9} className="py-8 text-center text-slate-500 italic">
                     Nenhuma movimentação de munição registrada.
                   </td>
                 </tr>
@@ -354,6 +439,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 movements.map((m) => {
                   const cal = calibers.find(c => c.id === m.caliberId);
                   const vault = vaultSpaces.find(v => v.id === m.vaultSpaceId);
+
+                  const isCourseOrTest = m.recipientOrReason.toLowerCase().includes('curso') || m.recipientOrReason.toLowerCase().includes('teste');
+                  const returnedQty = m.returnedQuantity || 0;
+                  const canReturnMore = m.type === 'Saída' && isCourseOrTest && returnedQty < m.quantity;
 
                   return (
                     <tr key={m.id} className="hover:bg-slate-800/50 transition">
@@ -382,13 +471,72 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                         {vault ? vault.code : 'N/A'}
                       </td>
                       <td className="py-3 px-4 font-semibold text-slate-200">
-                        {m.recipientOrReason}
+                        <div>
+                          <span>{m.recipientOrReason}</span>
+                          {m.observation && (
+                            <p className="text-[10px] text-slate-400 font-normal italic truncate max-w-xs" title={m.observation}>
+                              Obs: {m.observation}
+                            </p>
+                          )}
+                        </div>
                       </td>
                       <td className="py-3 px-4 text-slate-300">
-                        {m.userName}
+                        <div>
+                          <span className="font-bold block text-slate-100">
+                            {m.responsibleName || m.recipientOrReason}
+                          </span>
+                          {m.responsibleMasp && (
+                            <span className="text-[10px] text-slate-400 font-mono block">
+                              MASP: {m.responsibleMasp}
+                            </span>
+                          )}
+                          {m.responsibleType === 'FORA_DO_SISTEMA' && (
+                            <span className="inline-block mt-0.5 px-1.5 py-0.2 text-[9px] bg-slate-800 text-amber-400 border border-amber-500/30 rounded">
+                              Fora do Sistema
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      {canManageStock && (
-                        <td className="py-3 px-4 text-right">
+
+                      {/* Devolução Column */}
+                      <td className="py-3 px-4 text-xs font-mono">
+                        {m.type === 'Saída' && isCourseOrTest ? (
+                          <div className="space-y-1">
+                            <span className={`font-bold block ${returnedQty > 0 ? 'text-emerald-400' : 'text-slate-400'}`}>
+                              {returnedQty} / {m.quantity} devolvidos
+                            </span>
+                            {canReturnMore && (
+                              <button
+                                onClick={() => {
+                                  setReturnTargetMov(m);
+                                  setReturnQuantity(m.quantity - returnedQty);
+                                }}
+                                className="bg-emerald-950 hover:bg-emerald-900 border border-emerald-700 text-emerald-300 font-bold text-[10px] px-2 py-1 rounded-lg transition flex items-center space-x-1"
+                              >
+                                <RotateCcw className="w-3 h-3 text-emerald-400" />
+                                <span>Devolver Sobra</span>
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-slate-600 text-[10px]">N/A</span>
+                        )}
+                      </td>
+
+                      <td className="py-3 px-4 text-right space-x-1">
+                        <button
+                          onClick={() => {
+                            setSelectedReceiptMov(m);
+                            setIsReturnReceiptMode(false);
+                          }}
+                          className="p-1.5 text-amber-400 hover:text-amber-300 hover:bg-slate-800 rounded-lg transition inline-flex items-center space-x-1"
+                          title="Imprimir Recibo de Movimentação"
+                        >
+                          <Printer className="w-4 h-4" />
+                          <span className="text-[10px] font-bold">Recibo</span>
+                        </button>
+
+                        {canManageStock && (
                           <button
                             onClick={() => handleDeleteAmmoMovement(m)}
                             className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
@@ -396,8 +544,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
-                        </td>
-                      )}
+                        )}
+                      </td>
                     </tr>
                   );
                 })
@@ -452,10 +600,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
       {/* Modal Movement (Entrada / Saída) */}
       {showMovementModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
-            <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800">
-              Registrar Entrada ou Saída de Munição
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl my-8">
+            <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800 flex items-center space-x-2">
+              <Disc className="w-5 h-5 text-amber-400" />
+              <span>Registrar Entrada ou Saída de Munição</span>
             </h3>
 
             <form onSubmit={handleSaveMovement} className="space-y-4">
@@ -468,17 +617,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
-                    onClick={() => setMovementType('Entrada')}
-                    className={`py-2 text-xs font-bold rounded-xl border transition ${
-                      movementType === 'Entrada'
-                        ? 'bg-emerald-950 text-emerald-400 border-emerald-600'
-                        : 'bg-slate-950 text-slate-400 border-slate-800'
-                    }`}
-                  >
-                    ENTRADA
-                  </button>
-                  <button
-                    type="button"
                     onClick={() => setMovementType('Saída')}
                     className={`py-2 text-xs font-bold rounded-xl border transition ${
                       movementType === 'Saída'
@@ -486,43 +624,55 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                         : 'bg-slate-950 text-slate-400 border-slate-800'
                     }`}
                   >
-                    SAÍDA
+                    SAÍDA DE MUNIÇÃO
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMovementType('Entrada')}
+                    className={`py-2 text-xs font-bold rounded-xl border transition ${
+                      movementType === 'Entrada'
+                        ? 'bg-emerald-950 text-emerald-400 border-emerald-600'
+                        : 'bg-slate-950 text-slate-400 border-slate-800'
+                    }`}
+                  >
+                    ENTRADA / REABASTECIMENTO
                   </button>
                 </div>
               </div>
 
-              {/* Caliber */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Calibre
-                </label>
-                <select
-                  value={selectedCaliberId}
-                  onChange={(e) => setSelectedCaliberId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                  required
-                >
-                  {calibers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {/* Caliber & Quantity Grid */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Calibre
+                  </label>
+                  <select
+                    value={selectedCaliberId}
+                    onChange={(e) => setSelectedCaliberId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                    required
+                  >
+                    {calibers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              {/* Quantity */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Quantidade (unidades)
-                </label>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantity}
-                  onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                  required
-                />
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Quantidade (unidades)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={quantity}
+                    onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                    required
+                  />
+                </div>
               </div>
 
               {/* Vault Location */}
@@ -547,33 +697,117 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </select>
               </div>
 
-              {/* Recipient or Reason */}
+              {/* Reason */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Destinatário / Motivo da Retirada/Entrada
+                  Motivo / Destino da Munição
                 </label>
                 <select
                   value={recipientOrReason}
                   onChange={(e) => setRecipientOrReason(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 mb-2"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
                 >
-                  <option value="Curso">Curso</option>
+                  <option value="Curso ou Teste">Curso ou Teste (Permite retorno de sobras)</option>
                   <option value="Treinamento">Treinamento</option>
                   <option value="Substituição">Substituição</option>
                   <option value="Abastecimento do Cofre">Abastecimento do Cofre</option>
-                  <option value="outros_pessoa">Retirada para Policial Específico</option>
+                  <option value="Operacional">Operacional / Diligência</option>
+                  <option value="Outros">Outros</option>
                 </select>
+              </div>
 
-                {recipientOrReason === 'outros_pessoa' && (
-                  <input
-                    type="text"
-                    value={customRecipientName}
-                    onChange={(e) => setCustomRecipientName(e.target.value)}
-                    placeholder="Nome do Policial recebedor..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                    required
-                  />
+              {/* Policial Responsável pela Retirada */}
+              <div className="border border-slate-800 bg-slate-950/60 p-3.5 rounded-xl space-y-3">
+                <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  Policial Responsável pela Retirada
+                </label>
+
+                <div className="flex items-center space-x-4 text-xs font-semibold">
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-slate-200">
+                    <input
+                      type="radio"
+                      name="respType"
+                      checked={responsibleType === 'SISTEMA'}
+                      onChange={() => setResponsibleType('SISTEMA')}
+                      className="accent-amber-500"
+                    />
+                    <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Policial Cadastrado no Sistema</span>
+                  </label>
+
+                  <label className="flex items-center space-x-1.5 cursor-pointer text-slate-200">
+                    <input
+                      type="radio"
+                      name="respType"
+                      checked={responsibleType === 'FORA_DO_SISTEMA'}
+                      onChange={() => setResponsibleType('FORA_DO_SISTEMA')}
+                      className="accent-amber-500"
+                    />
+                    <UserX className="w-3.5 h-3.5 text-slate-400" />
+                    <span>Fora do Sistema</span>
+                  </label>
+                </div>
+
+                {responsibleType === 'SISTEMA' ? (
+                  <div>
+                    <select
+                      value={selectedResponsibleUserId}
+                      onChange={(e) => setSelectedResponsibleUserId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                      required
+                    >
+                      {users.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} (MASP: {u.masp}) - {u.role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-0.5">Nome do Policial</label>
+                      <input
+                        type="text"
+                        value={customResponsibleName}
+                        onChange={(e) => setCustomResponsibleName(e.target.value)}
+                        placeholder="Nome Completo..."
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-slate-400 mb-0.5">MASP / Documento</label>
+                      <input
+                        type="text"
+                        value={customResponsibleMasp}
+                        onChange={(e) => setCustomResponsibleMasp(e.target.value)}
+                        placeholder="Ex: 123.456-7"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono"
+                      />
+                    </div>
+                  </div>
                 )}
+              </div>
+
+              {/* Observação (até 500 caracteres) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Observação da Saída / Movimentação
+                  </label>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    {observation.length} / 500
+                  </span>
+                </div>
+                <textarea
+                  maxLength={500}
+                  rows={3}
+                  value={observation}
+                  onChange={(e) => setObservation(e.target.value)}
+                  placeholder="Descreva observações específicas da saída (máximo 500 caracteres)..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 resize-none"
+                />
               </div>
 
               <div className="pt-2 flex justify-end space-x-3">
@@ -586,14 +820,79 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5"
                 >
-                  Registrar Movimentação
+                  <Check className="w-4 h-4" />
+                  <span>Registrar e Gerar Recibo</span>
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {/* Modal Devolução de Sobras de Munição */}
+      {returnTargetMov && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+            <h3 className="text-lg font-bold text-slate-100 mb-2 pb-2 border-b border-slate-800 flex items-center space-x-2">
+              <RotateCcw className="w-5 h-5 text-emerald-400" />
+              <span>Devolução de Munições Não Utilizadas</span>
+            </h3>
+
+            <p className="text-xs text-slate-400 mb-4">
+              Policial: <strong className="text-slate-200">{returnTargetMov.responsibleName || returnTargetMov.recipientOrReason}</strong>
+              <br />
+              Retirada inicial: <strong className="text-amber-400">{returnTargetMov.quantity} un</strong>
+              {returnTargetMov.returnedQuantity ? ` (Já devolvidos: ${returnTargetMov.returnedQuantity} un)` : ''}
+            </p>
+
+            <form onSubmit={handleConfirmReturnAmmo} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Quantidade a Devolver (Restante max: {returnTargetMov.quantity - (returnTargetMov.returnedQuantity || 0)} un)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={returnTargetMov.quantity - (returnTargetMov.returnedQuantity || 0)}
+                  value={returnQuantity}
+                  onChange={(e) => setReturnQuantity(parseInt(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setReturnTargetMov(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
+                >
+                  Confirmar Devolução e Gerar Recibo
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Ammunition Receipt Modal */}
+      {selectedReceiptMov && (
+        <AmmunitionReceiptModal
+          movement={selectedReceiptMov}
+          calibers={calibers}
+          vaultSpaces={vaultSpaces}
+          onClose={() => setSelectedReceiptMov(null)}
+          isReturnReceipt={isReturnReceiptMode}
+          returnAmountPrinted={lastReturnedAmount}
+        />
       )}
 
       {/* Confirm Delete Modal */}
