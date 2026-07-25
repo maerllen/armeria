@@ -258,12 +258,16 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassSubject(cls.subject);
       setClassStudentCount(cls.studentCount);
     } else {
+      const initialSubject: 'MEAF' | 'TAP' | 'DP' = 'MEAF';
+      const initialMatching = teachers.filter(t => t.teacherSubject === initialSubject);
+      const defaultTeacherId = (initialMatching[0] || teachers[0])?.id || '';
+
       setEditingClass(null);
       setClassCourseId(academyCourses[0]?.id || '');
       setClassCareer('Delegado');
       setClassTurmaNum('01');
-      setClassTeacherId(teachers[0]?.id || '');
-      setClassSubject('MEAF');
+      setClassSubject(initialSubject);
+      setClassTeacherId(defaultTeacherId);
       setClassStudentCount(20);
     }
     setShowClassModal(true);
@@ -1224,34 +1228,60 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </p>
               </div>
 
+              {/* 1. Matéria Leccionada (Selecionada Primeiro) */}
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Professor Titular</label>
+                <label className="block text-slate-300 font-semibold mb-1">Matéria Leccionada</label>
+                <select
+                  value={classSubject}
+                  onChange={(e) => {
+                    const newSub = e.target.value as 'MEAF' | 'TAP' | 'DP';
+                    setClassSubject(newSub);
+                    const matching = teachers.filter(t => t.teacherSubject === newSub);
+                    if (matching.length > 0) {
+                      if (!matching.some(t => t.id === classTeacherId)) {
+                        setClassTeacherId(matching[0].id);
+                      }
+                    } else {
+                      setClassTeacherId('');
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                >
+                  <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                  <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                  <option value="DP">DP (Defesa Pessoal)</option>
+                </select>
+              </div>
+
+              {/* 2. Professor Titular (Exibe Apenas Professores da Matéria) */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                  <span>Professor Titular</span>
+                  <span className="text-[10px] text-amber-400 font-normal">
+                    Filtro ativo: {classSubject}
+                  </span>
+                </label>
                 <select
                   value={classTeacherId}
                   onChange={(e) => setClassTeacherId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   required
                 >
-                  <option value="">-- Selecione o Professor --</option>
-                  {teachers.map(t => (
+                  <option value="">-- Selecione o Professor ({classSubject}) --</option>
+                  {(teachers.filter(t => t.teacherSubject === classSubject).length > 0
+                    ? teachers.filter(t => t.teacherSubject === classSubject)
+                    : teachers
+                  ).map(t => (
                     <option key={t.id} value={t.id}>
                       {t.name} (MASP: {formatMasp(t.masp)}) {t.teacherSubject ? `• ${t.teacherSubject}` : ''}
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Matéria Leccionada</label>
-                <select
-                  value={classSubject}
-                  onChange={(e) => setClassSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
-                >
-                  <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
-                  <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
-                  <option value="DP">DP (Defesa Pessoal)</option>
-                </select>
+                {teachers.filter(t => t.teacherSubject === classSubject).length === 0 && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    Nenhum professor cadastrado para {classSubject}. Exibindo todos os professores disponíveis.
+                  </p>
+                )}
               </div>
 
               <div>
