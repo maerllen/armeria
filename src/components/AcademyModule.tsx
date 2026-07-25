@@ -1218,9 +1218,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   onChange={(e) => setClassSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                 >
-                  <option value="MEAF">MEAF (Manejo, Emprego e Armamento de Fogo)</option>
-                  <option value="TAP">TAP (Tática de Ação Policial)</option>
-                  <option value="DP">DP (Direito Processual / Penal)</option>
+                  <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                  <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                  <option value="DP">DP (Defesa Pessoal)</option>
                 </select>
               </div>
 

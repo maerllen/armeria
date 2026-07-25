@@ -53,6 +53,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [modalError, setModalError] = useState('');
+  const [modalSuccess, setModalSuccess] = useState('');
 
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
@@ -71,6 +73,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   const handleOpenWeaponModal = (weap?: Weapon) => {
     setErrorMsg('');
+    setSuccessMsg('');
+    setModalError('');
+    setModalSuccess('');
     if (weap) {
       setEditingWeapon(weap);
       setType(weap.type);
@@ -101,17 +106,29 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     setShowWeaponModal(true);
   };
 
-  const handleSaveWeapon = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSaveWeapon = async (e: React.FormEvent | React.MouseEvent, keepOpen: boolean = false) => {
+    if (e) e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
+    setModalError('');
+    setModalSuccess('');
 
     if (!serialNumber.trim()) {
-      setErrorMsg('Informe o número de série da arma.');
+      setModalError('Informe o número de série da arma.');
       return;
     }
     if (!vaultSpaceId) {
-      setErrorMsg('Selecione um local do cofre para guardar a arma.');
+      setModalError('Selecione um local do cofre para guardar a arma.');
+      return;
+    }
+
+    const serials = serialNumber
+      .split(/[\n,;]+/)
+      .map(s => s.trim().toUpperCase())
+      .filter(s => s.length > 0);
+
+    if (serials.length === 0) {
+      setModalError('Informe ao menos um número de série válido.');
       return;
     }
 
@@ -119,7 +136,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       if (editingWeapon) {
         await storage.updateWeapon(editingWeapon.id, {
           type,
-          serialNumber: serialNumber.trim().toUpperCase(),
+          serialNumber: serials[0],
           manufacturer: manufacturer.trim(),
           model: model.trim(),
           caliber,
@@ -128,25 +145,57 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           unitId,
           vaultSpaceId
         });
-        setSuccessMsg('Arma atualizada com sucesso.');
+        setSuccessMsg(`Arma ${serials[0]} atualizada com sucesso.`);
+        setShowWeaponModal(false);
       } else {
-        await storage.addWeapon({
-          type,
-          serialNumber: serialNumber.trim().toUpperCase(),
-          manufacturer: manufacturer.trim(),
-          model: model.trim(),
-          caliber,
-          magazineQuantity,
-          departmentId: deptId,
-          unitId,
-          vaultSpaceId
-        });
-        setSuccessMsg('Nova arma cadastrada no acervo com sucesso.');
+        let addedCount = 0;
+        const failedSerials: string[] = [];
+
+        for (const s of serials) {
+          try {
+            await storage.addWeapon({
+              type,
+              serialNumber: s,
+              manufacturer: manufacturer.trim(),
+              model: model.trim(),
+              caliber,
+              magazineQuantity,
+              departmentId: deptId,
+              unitId,
+              vaultSpaceId
+            });
+            addedCount++;
+          } catch (err: any) {
+            failedSerials.push(`${s}: ${err.message || 'Erro'}`);
+          }
+        }
+
+        if (failedSerials.length > 0) {
+          if (addedCount > 0) {
+            setModalError(`Cadastrada(s) ${addedCount} arma(s). Falha no(s) número(s) de série: ${failedSerials.join(' | ')}`);
+          } else {
+            setModalError(`Erro ao cadastrar arma(s): ${failedSerials.join(' | ')}`);
+            return;
+          }
+        } else {
+          const successText = serials.length === 1
+            ? `Arma (Série: ${serials[0]}) cadastrada no acervo com sucesso.`
+            : `${serials.length} armas cadastradas em lote no acervo com sucesso.`;
+
+          if (keepOpen) {
+            setModalSuccess(`✅ ${successText} Formulário mantido. Insira o próximo número de série.`);
+          } else {
+            setSuccessMsg(successText);
+            setShowWeaponModal(false);
+          }
+        }
+
+        // Limpa apenas o número de série para facilitar a criação de armas idênticas
+        setSerialNumber('');
       }
-      setShowWeaponModal(false);
       onRefresh();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao salvar arma.');
+      setModalError(err.message || 'Erro ao salvar arma.');
     }
   };
 
@@ -408,11 +457,30 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       {showWeaponModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl my-8">
-            <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800">
-              {editingWeapon ? 'Editar Arma' : 'Cadastrar Nova Arma'}
+            <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800 flex items-center justify-between">
+              <span>{editingWeapon ? 'Editar Arma' : 'Cadastrar Nova Arma'}</span>
+              {!editingWeapon && (
+                <span className="text-[11px] font-normal text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
+                  Modo Cadastro Rápido / Lote
+                </span>
+              )}
             </h3>
 
-            <form onSubmit={handleSaveWeapon} className="space-y-4">
+            {modalSuccess && (
+              <div className="mb-4 bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{modalSuccess}</span>
+              </div>
+            )}
+
+            {modalError && (
+              <div className="mb-4 bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{modalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={(e) => handleSaveWeapon(e, false)} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 
                 {/* Tipo */}
@@ -435,18 +503,40 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </div>
 
                 {/* Número de Série */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Número de Série
+                <div className={editingWeapon ? '' : 'sm:col-span-2'}>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Número de Série</span>
+                    {!editingWeapon && (
+                      <span className="text-[10px] text-amber-400 font-normal">
+                        (Aceita múltiplos números separando por vírgula ou linha)
+                      </span>
+                    )}
                   </label>
-                  <input
-                    type="text"
-                    value={serialNumber}
-                    onChange={(e) => setSerialNumber(e.target.value)}
-                    placeholder="Ex: EKG-5486"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                    required
-                  />
+                  {editingWeapon ? (
+                    <input
+                      type="text"
+                      value={serialNumber}
+                      onChange={(e) => setSerialNumber(e.target.value)}
+                      placeholder="Ex: EKG-5486"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                      required
+                    />
+                  ) : (
+                    <div>
+                      <textarea
+                        rows={2}
+                        value={serialNumber}
+                        onChange={(e) => setSerialNumber(e.target.value)}
+                        placeholder="Ex: EKG-5486 ou EKG-5486, EKG-5487, EKG-5488"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono resize-none focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                      <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+                        <Info className="w-3.5 h-3.5 inline shrink-0 text-amber-400" />
+                        <span>Você pode informar vários números de série para criar armas idênticas em lote de uma vez só.</span>
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Fabricante */}
@@ -585,19 +675,32 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </select>
               </div>
 
-              <div className="pt-2 flex justify-end space-x-3">
+              <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-end gap-2">
                 <button
                   type="button"
                   onClick={() => setShowWeaponModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                  className="px-3.5 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
                 >
                   Cancelar
                 </button>
+
+                {!editingWeapon && (
+                  <button
+                    type="button"
+                    onClick={(e) => handleSaveWeapon(e, true)}
+                    className="bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-400 font-semibold text-xs px-4 py-2.5 rounded-xl transition flex items-center space-x-1.5 shadow"
+                    title="Cadastra esta arma, mantém o formulário preenchido e limpa apenas o número de série"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>Salvar e Cadastrar Outra</span>
+                  </button>
+                )}
+
                 <button
                   type="submit"
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow transition"
                 >
-                  Salvar Arma
+                  {editingWeapon ? 'Atualizar Arma' : 'Salvar e Concluir'}
                 </button>
               </div>
             </form>

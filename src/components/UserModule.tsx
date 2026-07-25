@@ -153,14 +153,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const handleConfirmPromoteTeacher = async () => {
     if (!existingMaspUser) return;
     try {
-      const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
-      const acadUnits = units.filter(u => u.departmentId === academiaDept?.id);
-
       await storage.updateUser(existingMaspUser.id, {
         isTeacher: true,
-        teacherSubject: promoteSubject,
-        departmentId: academiaDept?.id || existingMaspUser.departmentId,
-        unitId: acadUnits[0]?.id || existingMaspUser.unitId
+        teacherSubject: promoteSubject
       });
 
       setSuccessMsg(`O policial ${existingMaspUser.name} (MASP: ${formatMasp(existingMaspUser.masp)}) foi tornado Professor da disciplina ${promoteSubject}!`);
@@ -190,20 +185,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
     }
 
     try {
-      // If user is designated as Teacher, ensure department is ACADEMIA DE POLICIA if creating/editing
       let targetDeptId = deptId;
       let targetUnitId = unitId;
-
-      if (isTeacher) {
-        const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
-        if (academiaDept) {
-          targetDeptId = academiaDept.id;
-          const acadUnits = units.filter(u => u.departmentId === academiaDept.id);
-          if (!acadUnits.some(u => u.id === targetUnitId)) {
-            targetUnitId = acadUnits[0]?.id || targetUnitId;
-          }
-        }
-      }
 
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
@@ -755,20 +738,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                       </label>
                       <select
                         value={isTeacher ? 'sim' : 'nao'}
-                        onChange={(e) => {
-                          const val = e.target.value === 'sim';
-                          setIsTeacher(val);
-                          if (val) {
-                            const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
-                            if (academiaDept) {
-                              setDeptId(academiaDept.id);
-                              const acadUnits = units.filter(u => u.departmentId === academiaDept.id);
-                              if (acadUnits.length > 0 && !acadUnits.some(u => u.id === unitId)) {
-                                setUnitId(acadUnits[0].id);
-                              }
-                            }
-                          }
-                        }}
+                        onChange={(e) => setIsTeacher(e.target.value === 'sim')}
                         className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
                       >
                         <option value="nao">Não</option>
@@ -786,9 +756,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
                           onChange={(e) => setTeacherSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
                           className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
                         >
-                          <option value="MEAF">MEAF (Manejo, Emprego e Armamento de Fogo)</option>
-                          <option value="TAP">TAP (Tática de Ação Policial)</option>
-                          <option value="DP">DP (Direito Processual / Penal)</option>
+                          <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                          <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                          <option value="DP">DP (Defesa Pessoal)</option>
                         </select>
                       </div>
                     )}
@@ -1143,9 +1113,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
                 onChange={(e) => setPromoteSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-semibold"
               >
-                <option value="MEAF">MEAF (Manejo, Emprego e Armamento de Fogo)</option>
-                <option value="TAP">TAP (Tática de Ação Policial)</option>
-                <option value="DP">DP (Direito Processual / Penal)</option>
+                <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                <option value="DP">DP (Defesa Pessoal)</option>
               </select>
             </div>
 
