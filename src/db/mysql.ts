@@ -286,6 +286,147 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'audit_logs' verificada/criada.");
 
+    // Column alters for users
+    try {
+      await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`is_teacher\` TINYINT(1) NOT NULL DEFAULT 0;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`teacher_subject\` VARCHAR(32) DEFAULT NULL;`);
+    } catch (e) {}
+
+    // Column alters for weapons
+    try {
+      await connection.query(`ALTER TABLE \`weapons\` ADD COLUMN \`location_note\` VARCHAR(255) DEFAULT NULL;`);
+    } catch (e) {}
+
+    // Academy Courses Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`academy_courses\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`name\` VARCHAR(255) NOT NULL,
+        \`type\` ENUM('Formação', 'Ensino Continuado') NOT NULL,
+        \`career\` VARCHAR(64) DEFAULT NULL,
+        \`start_date\` DATE DEFAULT NULL,
+        \`module_number\` INT DEFAULT NULL,
+        \`lesson_count\` INT NOT NULL DEFAULT 1,
+        \`lessons_data\` JSON NOT NULL,
+        \`department_id\` VARCHAR(64) DEFAULT NULL,
+        \`unit_id\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'academy_courses' verificada/criada.");
+
+    // Weapon Boxes Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`weapon_boxes\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`name\` VARCHAR(255) NOT NULL,
+        \`course_type\` VARCHAR(64) NOT NULL,
+        \`weapon_count\` INT NOT NULL,
+        \`weapon_ids\` JSON NOT NULL,
+        \`department_id\` VARCHAR(64) DEFAULT NULL,
+        \`unit_id\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'weapon_boxes' verificada/criada.");
+
+    // Weapon Box Replacements Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`weapon_box_replacements\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`box_id\` VARCHAR(64) NOT NULL,
+        \`box_name\` VARCHAR(255) NOT NULL,
+        \`old_weapon_id\` VARCHAR(64) NOT NULL,
+        \`old_weapon_desc\` VARCHAR(255) NOT NULL,
+        \`new_weapon_id\` VARCHAR(64) NOT NULL,
+        \`new_weapon_desc\` VARCHAR(255) NOT NULL,
+        \`reason\` VARCHAR(500) NOT NULL,
+        \`teacher_name\` VARCHAR(255) DEFAULT NULL,
+        \`responsible_user_name\` VARCHAR(255) NOT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'weapon_box_replacements' verificada/criada.");
+
+    // Course Classes (Turmas) Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`course_classes\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`course_id\` VARCHAR(64) NOT NULL,
+        \`course_name\` VARCHAR(255) NOT NULL,
+        \`subject\` ENUM('MEAF', 'TAP', 'DP') NOT NULL,
+        \`career\` VARCHAR(64) NOT NULL,
+        \`career_abbreviation\` VARCHAR(16) NOT NULL,
+        \`turma_number\` VARCHAR(32) NOT NULL,
+        \`code\` VARCHAR(64) NOT NULL,
+        \`student_count\` INT NOT NULL DEFAULT 1,
+        \`teacher_user_ids\` JSON NOT NULL,
+        \`department_id\` VARCHAR(64) DEFAULT NULL,
+        \`unit_id\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'course_classes' verificada/criada.");
+
+    // Course Movements Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`course_class_movements\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`course_id\` VARCHAR(64) NOT NULL,
+        \`class_id\` VARCHAR(64) NOT NULL,
+        \`turma_code\` VARCHAR(64) NOT NULL,
+        \`lesson_number\` INT NOT NULL,
+        \`teacher_name\` VARCHAR(255) NOT NULL,
+        \`weapon_box_id\` VARCHAR(64) DEFAULT NULL,
+        \`weapon_box_name\` VARCHAR(255) DEFAULT NULL,
+        \`weapon_ids\` JSON DEFAULT NULL,
+        \`caliber_id\` VARCHAR(64) DEFAULT NULL,
+        \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
+        \`ammo_supplied\` INT DEFAULT 0,
+        \`student_count\` INT DEFAULT 0,
+        \`shots_per_student\` INT DEFAULT 0,
+        \`instructor_shots\` INT DEFAULT 0,
+        \`ammo_used\` INT DEFAULT 0,
+        \`ammo_returned\` INT DEFAULT 0,
+        \`extra_magazines_count\` INT DEFAULT 0,
+        \`status\` ENUM('Em Aula', 'Finalizada') NOT NULL DEFAULT 'Em Aula',
+        \`issued_by_user_name\` VARCHAR(255) NOT NULL,
+        \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`returned_at\` DATETIME DEFAULT NULL,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'course_class_movements' verificada/criada.");
+
+    // Seed ACADEMIA DE POLICIA & MEAF unit
+    const [acadRows]: any = await connection.query(`SELECT id FROM departments WHERE name LIKE '%ACADEMIA%' LIMIT 1;`);
+    let acadDeptId = 'dept-acad';
+    if (acadRows.length === 0) {
+      await connection.query(`
+        INSERT INTO departments (id, name, code) VALUES
+        ('dept-acad', 'ACADEMIA DE POLICIA', 'ACADEPOL');
+      `);
+      logs.push("Departamento 'ACADEMIA DE POLICIA' inserido.");
+    } else {
+      acadDeptId = acadRows[0].id;
+    }
+
+    const [meafRows]: any = await connection.query(`SELECT id FROM units WHERE department_id = ? AND name LIKE '%MEAF%' LIMIT 1;`, [acadDeptId]);
+    if (meafRows.length === 0) {
+      await connection.query(`
+        INSERT INTO units (id, department_id, name) VALUES
+        ('unit-acad-meaf', ?, 'MEAF - Módulo de Ensino de Armamento e Tiro');
+      `, [acadDeptId]);
+      logs.push("Unidade 'MEAF' inserida.");
+    }
+
     // --- SEEDING INITIAL DATA IF EMPTY ---
     const [deptRows]: any = await connection.query('SELECT COUNT(*) as count FROM departments');
     if (deptRows[0].count === 0) {

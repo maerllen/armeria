@@ -41,6 +41,13 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [managementScope, setManagementScope] = useState<'department' | 'unit'>('unit');
   const [userCourses, setUserCourses] = useState<UserCourse[]>([]);
 
+  // Teacher states
+  const [isTeacher, setIsTeacher] = useState(false);
+  const [teacherSubject, setTeacherSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
+  const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
+  const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
+  const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
+
   // Course Management Form states
   const [showCourseAddForm, setShowCourseAddForm] = useState(false);
   const [newCourseName, setNewCourseName] = useState('');
@@ -54,6 +61,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
   const isPolicial = currentUser.role === 'Policial';
+
+  // Check if user has rights to manage teachers
+  const userDept = departments.find(d => d.id === currentUser.departmentId);
+  const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
+  const canManageTeachers = isGeral || (isAdminOrArmeiro && isAcademiaDept);
 
   // Available models from registered weapons & defaults
   const availableModels = Array.from(
@@ -96,6 +108,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setHasSystemAccess(usr.hasSystemAccess);
       setManagementScope(usr.managementScope || 'department');
       setUserCourses(usr.courses || []);
+      setIsTeacher(Boolean(usr.isTeacher));
+      setTeacherSubject(usr.teacherSubject || 'MEAF');
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -112,8 +126,51 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setHasSystemAccess(true);
       setManagementScope('unit');
       setUserCourses([]);
+      setIsTeacher(false);
+      setTeacherSubject('MEAF');
     }
     setShowUserModal(true);
+  };
+
+  // MASP blur check
+  const handleMaspBlur = () => {
+    if (editingUser) return;
+    const clean = cleanMasp(maspRaw);
+    if (!clean) return;
+
+    const existing = users.find(u => u.masp === clean);
+    if (existing) {
+      if (canManageTeachers) {
+        setExistingMaspUser(existing);
+        setPromoteSubject('MEAF');
+        setShowPromoteTeacherModal(true);
+      } else {
+        setErrorMsg(`O policial ${existing.name} (MASP: ${formatMasp(existing.masp)}) já está cadastrado no sistema.`);
+      }
+    }
+  };
+
+  const handleConfirmPromoteTeacher = async () => {
+    if (!existingMaspUser) return;
+    try {
+      const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
+      const acadUnits = units.filter(u => u.departmentId === academiaDept?.id);
+
+      await storage.updateUser(existingMaspUser.id, {
+        isTeacher: true,
+        teacherSubject: promoteSubject,
+        departmentId: academiaDept?.id || existingMaspUser.departmentId,
+        unitId: acadUnits[0]?.id || existingMaspUser.unitId
+      });
+
+      setSuccessMsg(`O policial ${existingMaspUser.name} (MASP: ${formatMasp(existingMaspUser.masp)}) foi tornado Professor da disciplina ${promoteSubject}!`);
+      setShowPromoteTeacherModal(false);
+      setShowUserModal(false);
+      setExistingMaspUser(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao promover policial para professor.');
+    }
   };
 
   const handleSaveUser = async (e: React.FormEvent) => {
@@ -133,6 +190,21 @@ export const UserModule: React.FC<UserModuleProps> = ({
     }
 
     try {
+      // If user is designated as Teacher, ensure department is ACADEMIA DE POLICIA if creating/editing
+      let targetDeptId = deptId;
+      let targetUnitId = unitId;
+
+      if (isTeacher) {
+        const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
+        if (academiaDept) {
+          targetDeptId = academiaDept.id;
+          const acadUnits = units.filter(u => u.departmentId === academiaDept.id);
+          if (!acadUnits.some(u => u.id === targetUnitId)) {
+            targetUnitId = acadUnits[0]?.id || targetUnitId;
+          }
+        }
+      }
+
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
           masp: cleanMaspInput,
@@ -140,13 +212,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
           phone: cleanPhone(phone),
           cargo,
           role,
-          departmentId: deptId,
-          unitId,
+          departmentId: targetDeptId,
+          unitId: targetUnitId,
           canMoveAmmunition: canMoveAmmo,
           canMoveWeapons: canMoveWeapons,
           hasSystemAccess,
           managementScope,
-          courses: userCourses
+          courses: userCourses,
+          isTeacher,
+          teacherSubject: isTeacher ? teacherSubject : undefined
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -156,13 +230,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
           phone: cleanPhone(phone),
           cargo,
           role,
-          departmentId: deptId,
-          unitId,
+          departmentId: targetDeptId,
+          unitId: targetUnitId,
           canMoveAmmunition: canMoveAmmo,
           canMoveWeapons: canMoveWeapons,
           hasSystemAccess,
           managementScope,
-          courses: userCourses
+          courses: userCourses,
+          isTeacher,
+          teacherSubject: isTeacher ? teacherSubject : undefined
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -527,6 +603,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     type="text"
                     value={formatMasp(maspRaw)}
                     onChange={(e) => setMaspRaw(cleanMasp(e.target.value))}
+                    onBlur={handleMaspBlur}
                     placeholder="Ex: 1255748"
                     disabled={!!editingUser}
                     className={`w-full border rounded-xl px-3.5 py-2 text-sm font-mono ${
@@ -539,7 +616,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   <p className="text-[10px] text-slate-500 mt-0.5">
                     {editingUser
                       ? 'O número de MASP é inalterável por qualquer perfil.'
-                      : 'Armazenado apenas números. Senha inicial do primeiro login = MASP.'}
+                      : 'Armazenado apenas números. Ao sair da caixa, verifica duplicidade.'}
                   </p>
                 </div>
 
@@ -667,6 +744,56 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     ))}
                   </select>
                 </div>
+
+                {/* Professor da Academia */}
+                {canManageTeachers && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1 flex items-center space-x-1">
+                        <GraduationCap className="w-3.5 h-3.5" />
+                        <span>Professor da Academia?</span>
+                      </label>
+                      <select
+                        value={isTeacher ? 'sim' : 'nao'}
+                        onChange={(e) => {
+                          const val = e.target.value === 'sim';
+                          setIsTeacher(val);
+                          if (val) {
+                            const academiaDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA'));
+                            if (academiaDept) {
+                              setDeptId(academiaDept.id);
+                              const acadUnits = units.filter(u => u.departmentId === academiaDept.id);
+                              if (acadUnits.length > 0 && !acadUnits.some(u => u.id === unitId)) {
+                                setUnitId(acadUnits[0].id);
+                              }
+                            }
+                          }
+                        }}
+                        className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                      >
+                        <option value="nao">Não</option>
+                        <option value="sim">Sim (Professor)</option>
+                      </select>
+                    </div>
+
+                    {isTeacher && (
+                      <div>
+                        <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                          Matéria Leccionada
+                        </label>
+                        <select
+                          value={teacherSubject}
+                          onChange={(e) => setTeacherSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                        >
+                          <option value="MEAF">MEAF (Manejo, Emprego e Armamento de Fogo)</option>
+                          <option value="TAP">TAP (Tática de Ação Policial)</option>
+                          <option value="DP">DP (Direito Processual / Penal)</option>
+                        </select>
+                      </div>
+                    )}
+                  </>
+                )}
 
                 {/* Permissões Especiais */}
                 <div>
@@ -987,6 +1114,60 @@ export const UserModule: React.FC<UserModuleProps> = ({
               </form>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* Promote Existing User to Teacher Modal */}
+      {showPromoteTeacherModal && existingMaspUser && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex items-center space-x-3 text-amber-400">
+              <GraduationCap className="w-6 h-6 shrink-0" />
+              <h3 className="text-base font-bold text-slate-100">Policial Já Cadastrado</h3>
+            </div>
+            
+            <p className="text-xs text-slate-300 leading-relaxed">
+              O policial <strong className="text-amber-400">{existingMaspUser.name}</strong> (MASP: <span className="font-mono">{formatMasp(existingMaspUser.masp)}</span>) já está cadastrado no sistema.
+            </p>
+            <p className="text-xs text-slate-300 font-semibold">
+              Deseja torná-lo professor da Academia de Polícia Civil?
+            </p>
+
+            <div className="space-y-2 pt-2 border-t border-slate-800">
+              <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider">
+                Informe a Matéria Leccionada
+              </label>
+              <select
+                value={promoteSubject}
+                onChange={(e) => setPromoteSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-semibold"
+              >
+                <option value="MEAF">MEAF (Manejo, Emprego e Armamento de Fogo)</option>
+                <option value="TAP">TAP (Tática de Ação Policial)</option>
+                <option value="DP">DP (Direito Processual / Penal)</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end space-x-3 pt-4 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowPromoteTeacherModal(false);
+                  setExistingMaspUser(null);
+                }}
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
+              >
+                Não (Cancelar)
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPromoteTeacher}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shadow transition"
+              >
+                Sim, Tornar Professor
+              </button>
+            </div>
           </div>
         </div>
       )}

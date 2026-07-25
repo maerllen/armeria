@@ -1,5 +1,5 @@
 import React from 'react';
-import { User as UserType, ModuleType } from '../types';
+import { User as UserType, Department, ModuleType } from '../types';
 import {
   User,
   Building2,
@@ -9,11 +9,13 @@ import {
   Crosshair,
   ArrowRightLeft,
   FileText,
-  BookOpen
+  BookOpen,
+  GraduationCap
 } from 'lucide-react';
 
 interface SidebarProps {
   currentUser: UserType | null;
+  departments?: Department[];
   activeModule: ModuleType;
   onSelectModule: (module: ModuleType) => void;
   pendingMovementsCount?: number;
@@ -21,11 +23,17 @@ interface SidebarProps {
 
 export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
+  departments = [],
   activeModule,
   onSelectModule,
   pendingMovementsCount = 0
 }) => {
   const userRole = currentUser?.role || 'Policial';
+
+  const userDept = departments.find(d => d.id === currentUser?.departmentId);
+  const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
+  const canManageCourses = userRole === 'Geral' || 
+    ((userRole === 'Administrador' || userRole === 'Armeiro') && isAcademiaDept);
 
   const navItems: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; visible: boolean; badge?: number }[] = [
     {
@@ -70,6 +78,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ArrowRightLeft,
       visible: true,
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
+    },
+    {
+      id: 'cursos',
+      label: 'Cursos',
+      icon: GraduationCap,
+      visible: canManageCourses
     },
     {
       id: 'relatorio',

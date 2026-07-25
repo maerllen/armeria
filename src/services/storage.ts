@@ -9,7 +9,12 @@ import {
   Weapon,
   Movement,
   Course,
-  AuditLog
+  AuditLog,
+  AcademyCourse,
+  WeaponBox,
+  WeaponBoxReplacement,
+  CourseClass,
+  CourseMovement
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -26,6 +31,11 @@ export interface AppState {
   movements: Movement[];
   courses: Course[];
   auditLogs: AuditLog[];
+  academyCourses: AcademyCourse[];
+  weaponBoxes: WeaponBox[];
+  weaponBoxReplacements: WeaponBoxReplacement[];
+  courseClasses: CourseClass[];
+  courseMovements: CourseMovement[];
 }
 
 class StorageService {
@@ -41,7 +51,12 @@ class StorageService {
     weapons: [],
     movements: [],
     courses: [],
-    auditLogs: []
+    auditLogs: [],
+    academyCourses: [],
+    weaponBoxes: [],
+    weaponBoxReplacements: [],
+    courseClasses: [],
+    courseMovements: []
   };
 
   constructor() {
@@ -70,7 +85,12 @@ class StorageService {
         ammoMovsRes,
         weaponsRes,
         movsRes,
-        auditLogsRes
+        auditLogsRes,
+        academyCoursesRes,
+        weaponBoxesRes,
+        weaponBoxRepsRes,
+        courseClassesRes,
+        courseMovsRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -82,7 +102,12 @@ class StorageService {
         fetch('/api/ammo-movements').then(r => r.ok ? r.json() : []),
         fetch('/api/weapons').then(r => r.ok ? r.json() : []),
         fetch('/api/movements').then(r => r.ok ? r.json() : []),
-        fetch('/api/audit-logs').then(r => r.ok ? r.json() : [])
+        fetch('/api/audit-logs').then(r => r.ok ? r.json() : []),
+        fetch('/api/academy-courses').then(r => r.ok ? r.json() : []),
+        fetch('/api/weapon-boxes').then(r => r.ok ? r.json() : []),
+        fetch('/api/weapon-box-replacements').then(r => r.ok ? r.json() : []),
+        fetch('/api/course-classes').then(r => r.ok ? r.json() : []),
+        fetch('/api/course-movements').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -96,6 +121,11 @@ class StorageService {
       this.state.weapons = weaponsRes || [];
       this.state.movements = movsRes || [];
       this.state.auditLogs = auditLogsRes || [];
+      this.state.academyCourses = academyCoursesRes || [];
+      this.state.weaponBoxes = weaponBoxesRes || [];
+      this.state.weaponBoxReplacements = weaponBoxRepsRes || [];
+      this.state.courseClasses = courseClassesRes || [];
+      this.state.courseMovements = courseMovsRes || [];
 
       // Refresh current user reference if logged in
       if (this.state.currentUser) {
@@ -775,6 +805,193 @@ class StorageService {
   // --- AUDIT LOGS ---
   public getAuditLogs(): AuditLog[] {
     return this.state.auditLogs;
+  }
+
+  // --- ACADEMIA DE POLÍCIA ---
+  public getAcademyCourses(): AcademyCourse[] {
+    return this.state.academyCourses;
+  }
+
+  public async saveAcademyCourse(courseData: Partial<AcademyCourse>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const method = courseData.id ? 'PUT' : 'POST';
+      const url = courseData.id ? `/api/academy-courses/${courseData.id}` : '/api/academy-courses';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...courseData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAcademyCourse(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/academy-courses/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getWeaponBoxes(): WeaponBox[] {
+    return this.state.weaponBoxes;
+  }
+
+  public getWeaponBoxReplacements(): WeaponBoxReplacement[] {
+    return this.state.weaponBoxReplacements;
+  }
+
+  public async saveWeaponBox(boxData: Partial<WeaponBox>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const method = boxData.id ? 'PUT' : 'POST';
+      const url = boxData.id ? `/api/weapon-boxes/${boxData.id}` : '/api/weapon-boxes';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...boxData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteWeaponBox(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/weapon-boxes/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async replaceWeaponInBox(
+    boxId: string,
+    oldWeaponId: string,
+    oldWeaponDesc: string,
+    newWeaponId: string,
+    newWeaponDesc: string,
+    reason: string,
+    teacherName?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/weapon-boxes/${boxId}/replace-weapon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          oldWeaponId,
+          oldWeaponDesc,
+          newWeaponId,
+          newWeaponDesc,
+          reason,
+          teacherName,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getCourseClasses(): CourseClass[] {
+    return this.state.courseClasses;
+  }
+
+  public async saveCourseClass(classData: Partial<CourseClass>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const method = classData.id ? 'PUT' : 'POST';
+      const url = classData.id ? `/api/course-classes/${classData.id}` : '/api/course-classes';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...classData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCourseClass(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/course-classes/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getCourseMovements(): CourseMovement[] {
+    return this.state.courseMovements;
+  }
+
+  public async darSaidaCurso(movementData: any): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch('/api/course-movements/saida', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...movementData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async darRetornoCurso(movementId: string, ammoReturned: number, returnedByUserName?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/course-movements/${movementId}/retorno`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ammoReturned, returnedByUserName, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
   }
 }
 

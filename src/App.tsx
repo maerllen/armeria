@@ -13,7 +13,7 @@ import { AmmunitionModule } from './components/AmmunitionModule';
 import { WeaponModule } from './components/WeaponModule';
 import { MovementModule } from './components/MovementModule';
 import { ReportModule } from './components/ReportModule';
-import { ManualModule } from './components/ManualModule';
+import { AcademyModule } from './components/AcademyModule';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -131,6 +131,7 @@ export default function App() {
         {/* Sidebar Navigation */}
         <Sidebar
           currentUser={currentUser}
+          departments={departments}
           activeModule={activeModule}
           onSelectModule={(mod) => setActiveModule(mod)}
           pendingMovementsCount={movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length}
@@ -266,6 +267,19 @@ export default function App() {
               weapons={weapons}
               vaultSpaces={vaultSpaces}
               courses={courses}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'cursos' && (
+            <AcademyModule
+              currentUser={currentUser}
+              users={allUsers}
+              weapons={weapons}
+              ammoStocks={ammoStocks}
+              vaultSpaces={vaultSpaces}
+              departments={departments}
+              units={units}
               onRefresh={refreshData}
             />
           )}

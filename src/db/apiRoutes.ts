@@ -350,6 +350,8 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         canMoveWeapons: Boolean(u.can_move_weapons),
         hasSystemAccess: Boolean(u.has_system_access),
         mustChangePassword: Boolean(u.must_change_password),
+        isTeacher: Boolean(u.is_teacher),
+        teacherSubject: u.teacher_subject || undefined,
         courses,
         createdAt: u.created_at
       };
@@ -363,7 +365,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { masp, name, phone, cargo, role, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, courses, actor } = req.body;
+    const { masp, name, phone, cargo, role, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, courses, actor } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
 
     const pool = getPool();
@@ -375,8 +377,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const id = `usr-${Date.now()}`;
     const hashedDefaultPass = hashPassword(cleanMasp);
     await pool.query(
-      `INSERT INTO users (id, masp, password, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, must_change_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+      `INSERT INTO users (id, masp, password, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, is_teacher, teacher_subject, must_change_password, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
       [
         id,
         cleanMasp,
@@ -389,7 +391,9 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
         unitId || null,
         canMoveAmmunition ? 1 : 0,
         canMoveWeapons ? 1 : 0,
-        hasSystemAccess ? 1 : 0
+        hasSystemAccess ? 1 : 0,
+        isTeacher ? 1 : 0,
+        teacherSubject || null
       ]
     );
 
@@ -420,6 +424,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       canMoveAmmunition,
       canMoveWeapons,
       hasSystemAccess,
+      isTeacher: Boolean(isTeacher),
+      teacherSubject,
       mustChangePassword: true,
       courses: courses || [],
       createdAt: new Date().toISOString()
@@ -472,7 +478,9 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
         unit_id = COALESCE(?, unit_id),
         can_move_ammo = COALESCE(?, can_move_ammo),
         can_move_weapons = COALESCE(?, can_move_weapons),
-        has_system_access = COALESCE(?, has_system_access)
+        has_system_access = COALESCE(?, has_system_access),
+        is_teacher = COALESCE(?, is_teacher),
+        teacher_subject = COALESCE(?, teacher_subject)
        WHERE id = ?`,
       [
         cleanMasp,
@@ -485,6 +493,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
         updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
         updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
         updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
+        updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
+        updates.teacherSubject !== undefined ? updates.teacherSubject : null,
         id
       ]
     );
@@ -1260,6 +1270,524 @@ apiRouter.post('/audit-logs', async (req: Request, res: Response) => {
   try {
     const { module, action, details, actor } = req.body;
     await insertAuditLog(module, action, details, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// ACADEMIA DE POLÍCIA - CURSOS E MOVIMENTAÇÃO
+// -------------------------------------------------------------
+
+// Academy Courses
+apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM academy_courses ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      type: r.type,
+      career: r.career || undefined,
+      startDate: r.start_date ? new Date(r.start_date).toISOString().split('T')[0] : undefined,
+      moduleNumber: r.module_number || undefined,
+      lessonCount: r.lesson_count,
+      lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
+      departmentId: r.department_id || undefined,
+      unitId: r.unit_id || undefined,
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
+  try {
+    const { name, type, career, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+    const id = `acad-crs-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO academy_courses (id, name, type, career, start_date, module_number, lesson_count, lessons_data, department_id, unit_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        id,
+        name,
+        type,
+        career || null,
+        startDate || null,
+        moduleNumber || null,
+        lessonCount || 1,
+        JSON.stringify(lessonsData || []),
+        departmentId || null,
+        unitId || null
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado curso da academia: ${name} (${type})`, actor, req.ip);
+    return res.json({ id, name, type, career, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, type, career, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+
+    await pool.query(
+      `UPDATE academy_courses SET
+        name = ?,
+        type = ?,
+        career = ?,
+        start_date = ?,
+        module_number = ?,
+        lesson_count = ?,
+        lessons_data = ?,
+        department_id = ?,
+        unit_id = ?
+       WHERE id = ?`,
+      [
+        name,
+        type,
+        career || null,
+        startDate || null,
+        moduleNumber || null,
+        lessonCount || 1,
+        JSON.stringify(lessonsData || []),
+        departmentId || null,
+        unitId || null,
+        id
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizado curso da academia: ${name}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    await pool.query('DELETE FROM academy_courses WHERE id = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluído curso da academia ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Weapon Boxes (Caixas de Armas de Aula)
+apiRouter.get('/weapon-boxes', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM weapon_boxes ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      name: r.name,
+      courseType: r.course_type,
+      weaponCount: r.weapon_count,
+      weaponIds: typeof r.weapon_ids === 'string' ? JSON.parse(r.weapon_ids) : (r.weapon_ids || []),
+      departmentId: r.department_id || undefined,
+      unitId: r.unit_id || undefined,
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/weapon-boxes', async (req: Request, res: Response) => {
+  try {
+    const { name, courseType, weaponCount, weaponIds, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+    const id = `wp-box-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO weapon_boxes (id, name, course_type, weapon_count, weapon_ids, department_id, unit_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        id,
+        name,
+        courseType,
+        weaponCount,
+        JSON.stringify(weaponIds || []),
+        departmentId || null,
+        unitId || null
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Criar', `Criada caixa de armas de aula: ${name} (${weaponCount} armas)`, actor, req.ip);
+    return res.json({ id, name, courseType, weaponCount, weaponIds, departmentId, unitId, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/weapon-boxes/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, courseType, weaponCount, weaponIds, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+
+    await pool.query(
+      `UPDATE weapon_boxes SET
+        name = ?,
+        course_type = ?,
+        weapon_count = ?,
+        weapon_ids = ?,
+        department_id = ?,
+        unit_id = ?
+       WHERE id = ?`,
+      [
+        name,
+        courseType,
+        weaponCount,
+        JSON.stringify(weaponIds || []),
+        departmentId || null,
+        unitId || null,
+        id
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizada caixa de armas de aula: ${name}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/weapon-boxes/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    await pool.query('DELETE FROM weapon_boxes WHERE id = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluída caixa de armas de aula ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Weapon Box Replacement (Substituição de arma na caixa)
+apiRouter.post('/weapon-boxes/:id/replace-weapon', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { oldWeaponId, oldWeaponDesc, newWeaponId, newWeaponDesc, reason, teacherName, actor } = req.body;
+    const pool = getPool();
+
+    const [boxes]: any = await pool.query('SELECT * FROM weapon_boxes WHERE id = ?', [id]);
+    if (!boxes || boxes.length === 0) return res.status(404).json({ error: 'Caixa de armas não encontrada' });
+    const box = boxes[0];
+    let wIds: string[] = typeof box.weapon_ids === 'string' ? JSON.parse(box.weapon_ids) : (box.weapon_ids || []);
+
+    wIds = wIds.map(wId => wId === oldWeaponId ? newWeaponId : wId);
+
+    await pool.query('UPDATE weapon_boxes SET weapon_ids = ? WHERE id = ?', [JSON.stringify(wIds), id]);
+
+    const repId = `rep-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO weapon_box_replacements (id, box_id, box_name, old_weapon_id, old_weapon_desc, new_weapon_id, new_weapon_desc, reason, teacher_name, responsible_user_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        repId,
+        id,
+        box.name,
+        oldWeaponId,
+        oldWeaponDesc,
+        newWeaponId,
+        newWeaponDesc,
+        reason,
+        teacherName || null,
+        actor?.name || 'Armeiro Responsável'
+      ]
+    );
+
+    const auditDetail = `Substituição na caixa '${box.name}': Troca da arma ${oldWeaponDesc} (${reason}) pela ${newWeaponDesc}.` + (teacherName ? ` Professor em aula: ${teacherName}.` : '');
+    await insertAuditLog('Cursos', 'Editar', auditDetail, actor, req.ip);
+
+    return res.json({ success: true, updatedWeaponIds: wIds });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/weapon-box-replacements', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM weapon_box_replacements ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      boxId: r.box_id,
+      boxName: r.box_name,
+      oldWeaponId: r.old_weapon_id,
+      oldWeaponDesc: r.old_weapon_desc,
+      newWeaponId: r.new_weapon_id,
+      newWeaponDesc: r.new_weapon_desc,
+      reason: r.reason,
+      teacherName: r.teacher_name || undefined,
+      responsibleUserName: r.responsible_user_name,
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Course Classes (Turmas)
+apiRouter.get('/course-classes', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM course_classes ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      courseId: r.course_id,
+      courseName: r.course_name,
+      subject: r.subject,
+      career: r.career,
+      careerAbbreviation: r.career_abbreviation,
+      turmaNumber: r.turma_number,
+      code: r.code,
+      studentCount: r.student_count,
+      teacherUserIds: typeof r.teacher_user_ids === 'string' ? JSON.parse(r.teacher_user_ids) : (r.teacher_user_ids || []),
+      departmentId: r.department_id || undefined,
+      unitId: r.unit_id || undefined,
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/course-classes', async (req: Request, res: Response) => {
+  try {
+    const { courseId, courseName, subject, career, careerAbbreviation, turmaNumber, studentCount, teacherUserIds, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+    const id = `class-${Date.now()}`;
+    const code = `${careerAbbreviation} ${turmaNumber.trim().padStart(2, '0')}`;
+
+    await pool.query(
+      `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, department_id, unit_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        id,
+        courseId,
+        courseName,
+        subject,
+        career,
+        careerAbbreviation,
+        turmaNumber,
+        code,
+        studentCount || 1,
+        JSON.stringify(teacherUserIds || []),
+        departmentId || null,
+        unitId || null
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject} - ${studentCount} alunos)`, actor, req.ip);
+    return res.json({ id, courseId, courseName, subject, career, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds, departmentId, unitId, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { courseId, courseName, subject, career, careerAbbreviation, turmaNumber, studentCount, teacherUserIds, departmentId, unitId, actor } = req.body;
+    const pool = getPool();
+    const code = `${careerAbbreviation} ${turmaNumber.trim().padStart(2, '0')}`;
+
+    await pool.query(
+      `UPDATE course_classes SET
+        course_id = ?,
+        course_name = ?,
+        subject = ?,
+        career = ?,
+        career_abbreviation = ?,
+        turma_number = ?,
+        code = ?,
+        student_count = ?,
+        teacher_user_ids = ?,
+        department_id = ?,
+        unit_id = ?
+       WHERE id = ?`,
+      [
+        courseId,
+        courseName,
+        subject,
+        career,
+        careerAbbreviation,
+        turmaNumber,
+        code,
+        studentCount || 1,
+        JSON.stringify(teacherUserIds || []),
+        departmentId || null,
+        unitId || null,
+        id
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizada turma de aula: ${code}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/course-classes/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    await pool.query('DELETE FROM course_classes WHERE id = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluída turma ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Course Movements (Saída e Devolução para Aula)
+apiRouter.get('/course-movements', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM course_class_movements ORDER BY created_at DESC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      courseId: r.course_id,
+      classId: r.class_id,
+      turmaCode: r.turma_code,
+      lessonNumber: r.lesson_number,
+      teacherName: r.teacher_name,
+      weaponBoxId: r.weapon_box_id || undefined,
+      weaponBoxName: r.weapon_box_name || undefined,
+      weaponIds: typeof r.weapon_ids === 'string' ? JSON.parse(r.weapon_ids) : (r.weapon_ids || []),
+      caliberId: r.caliber_id || undefined,
+      vaultSpaceId: r.vault_space_id || undefined,
+      ammoSupplied: r.ammo_supplied || 0,
+      studentCount: r.student_count || 0,
+      shotsPerStudent: r.shots_per_student || 0,
+      instructorShots: r.instructor_shots || 0,
+      ammoUsed: r.ammo_used || 0,
+      ammoReturned: r.ammo_returned || 0,
+      extraMagazinesCount: r.extra_magazines_count || 0,
+      status: r.status,
+      issuedByUserName: r.issued_by_user_name,
+      returnedByUserName: r.returned_by_user_name || undefined,
+      createdAt: r.created_at,
+      returnedAt: r.returned_at || undefined
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/course-movements/saida', async (req: Request, res: Response) => {
+  try {
+    const {
+      courseId, classId, turmaCode, lessonNumber, teacherName,
+      weaponBoxId, weaponBoxName, weaponIds, caliberId, vaultSpaceId,
+      ammoSupplied, studentCount, shotsPerStudent, instructorShots, ammoUsed,
+      extraMagazinesCount, issuedByUserName, actor
+    } = req.body;
+
+    const pool = getPool();
+    const id = `crs-mov-${Date.now()}`;
+
+    await pool.query(
+      `INSERT INTO course_class_movements
+        (id, course_id, class_id, turma_code, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
+      [
+        id, courseId, classId, turmaCode, lessonNumber, teacherName,
+        weaponBoxId || null, weaponBoxName || null, JSON.stringify(weaponIds || []),
+        caliberId || null, vaultSpaceId || null, ammoSupplied || 0, studentCount || 0,
+        shotsPerStudent || 0, instructorShots || 0, ammoUsed || 0, extraMagazinesCount || 0,
+        issuedByUserName || actor?.name || 'Armeiro'
+      ]
+    );
+
+    if (Array.isArray(weaponIds) && weaponIds.length > 0) {
+      const locNote = `Em Sala de Aula (${turmaCode} - Prof. ${teacherName})`;
+      for (const wId of weaponIds) {
+        await pool.query(
+          `UPDATE weapons SET status = 'Em Sala de Aula', location_note = ? WHERE id = ?`,
+          [locNote, wId]
+        );
+      }
+    }
+
+    if (ammoSupplied > 0 && vaultSpaceId && caliberId) {
+      const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?', [vaultSpaceId, caliberId]);
+      if (stocks && stocks.length > 0) {
+        const newQty = Math.max(0, stocks[0].quantity - ammoSupplied);
+        await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+      }
+    }
+
+    await insertAuditLog('Cursos', 'Solicitar', `Saída para aula da Turma ${turmaCode} (Aula ${lessonNumber}) - Caixa: ${weaponBoxName || 'N/A'}, Munições: ${ammoSupplied} un`, actor, req.ip);
+
+    return res.json({ id, success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/course-movements/:id/retorno', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { ammoReturned, returnedByUserName, actor } = req.body;
+
+    const pool = getPool();
+    const [movs]: any = await pool.query('SELECT * FROM course_class_movements WHERE id = ?', [id]);
+    if (!movs || movs.length === 0) return res.status(404).json({ error: 'Movimentação de curso não encontrada' });
+    const mov = movs[0];
+
+    const wIds: string[] = typeof mov.weapon_ids === 'string' ? JSON.parse(mov.weapon_ids) : (mov.weapon_ids || []);
+
+    if (Array.isArray(wIds) && wIds.length > 0) {
+      for (const wId of wIds) {
+        await pool.query(
+          `UPDATE weapons SET status = 'No Cofre', location_note = NULL WHERE id = ?`,
+          [wId]
+        );
+      }
+    }
+
+    if (ammoReturned > 0 && mov.vault_space_id && mov.caliber_id) {
+      const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?', [mov.vault_space_id, mov.caliber_id]);
+      if (stocks && stocks.length > 0) {
+        const newQty = stocks[0].quantity + ammoReturned;
+        await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+      }
+    }
+
+    await pool.query(
+      `UPDATE course_class_movements
+       SET status = 'Finalizada', ammo_returned = ?, returned_by_user_name = ?, returned_at = NOW()
+       WHERE id = ?`,
+      [ammoReturned || 0, returnedByUserName || actor?.name || 'Armeiro', id]
+    );
+
+    await insertAuditLog('Cursos', 'Devolver', `Retorno da aula Turma ${mov.turma_code} (Aula ${mov.lesson_number}) - Munição devolvida ao cofre: ${ammoReturned} un`, actor, req.ip);
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

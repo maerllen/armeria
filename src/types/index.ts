@@ -9,7 +9,8 @@ export type ModuleType =
   | 'armas' 
   | 'movimentacoes' 
   | 'relatorio'
-  | 'manual';
+  | 'manual'
+  | 'cursos';
 
 export type UserCargo = 
   | 'Delegado' 
@@ -18,6 +19,8 @@ export type UserCargo =
   | 'Perito' 
   | 'Médico Legista' 
   | 'Operador';
+
+export type TeacherSubject = 'MEAF' | 'TAP' | 'DP';
 
 export interface UserCourse {
   courseId: string;
@@ -40,6 +43,8 @@ export interface User {
   mustChangePassword: boolean;
   managementScope?: 'department' | 'unit';
   courses: UserCourse[];
+  isTeacher?: boolean;
+  teacherSubject?: TeacherSubject;
   createdAt: string;
 }
 
@@ -191,4 +196,116 @@ export interface AuditLog {
   action: 'Criar' | 'Editar' | 'Excluir' | 'Aprovar' | 'Solicitar' | 'Devolver' | 'Confirmar Recibo' | 'Login' | 'Alterar Senha' | 'Rejeitar';
   details: string;
   ipAddress: string;
+}
+
+// Academia de Policia Cursos & Movimentacao Interfaces
+export type AcademyCourseType = 'Formação' | 'Ensino Continuado';
+export type AcademyCareer = 'Delegado' | 'Médico Legista' | 'Perito' | 'Investigador' | 'Escrivão';
+
+export interface AcademyLessonPlan {
+  lessonNumber: number;
+  title: string;
+  materialsDescription: string;
+  suggestedTeachersCount: number;
+}
+
+export interface AcademyCourse {
+  id: string;
+  name: string;
+  type: AcademyCourseType;
+  career?: AcademyCareer;
+  code?: string;
+  startDate?: string;
+  moduleNumber?: number;
+  lessonCount?: number;
+  lessonsData?: AcademyLessonPlan[];
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+}
+
+export interface WeaponBox {
+  id: string;
+  name: string;
+  description?: string;
+  courseType?: AcademyCourseType;
+  weaponCount?: number;
+  weaponIds: string[];
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+}
+
+export interface WeaponBoxReplacement {
+  id: string;
+  boxId: string;
+  boxName?: string;
+  oldWeaponId: string;
+  oldWeaponDesc: string;
+  newWeaponId: string;
+  newWeaponDesc: string;
+  reason: string;
+  teacherName?: string;
+  responsibleUserName: string;
+  replacedByUserName?: string;
+  replacedAt?: string;
+  createdAt: string;
+}
+
+export interface CourseClass {
+  id: string;
+  courseId: string;
+  courseName: string;
+  name?: string;
+  subject: TeacherSubject;
+  career: AcademyCareer;
+  careerAbbreviation?: 'DL' | 'IP' | 'EP' | 'PC' | 'ML';
+  turmaNumber?: string;
+  code?: string;
+  studentCount: number;
+  teacherUserId?: string;
+  teacherName?: string;
+  teacherUserIds?: string[];
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+}
+
+export interface CourseMovement {
+  id: string;
+  courseId?: string;
+  courseName?: string;
+  classId?: string;
+  className?: string;
+  turmaCode?: string;
+  career?: string;
+  subject?: string;
+  lessonNumber?: number;
+  teacherName: string;
+  teacherUserId?: string;
+  weaponBoxId?: string;
+  weaponBoxName?: string;
+  boxId?: string;
+  boxName?: string;
+  weaponIds?: string[];
+  caliberId?: string;
+  vaultSpaceId?: string;
+  ammoStockId?: string;
+  ammoCaliber?: string;
+  ammoQuantity?: number;
+  ammoSupplied?: number;
+  studentCount?: number;
+  shotsPerStudent?: number;
+  instructorShots?: number;
+  ammoUsed?: number;
+  ammoReturned?: number;
+  extraMagazinesCount?: number;
+  status: 'Em Aula' | 'Finalizada' | 'Em Sala de Aula' | 'Devolvido';
+  notes?: string;
+  issuedByUserId?: string;
+  issuedByUserName: string;
+  returnedByUserName?: string;
+  issuedAt?: string;
+  createdAt: string;
+  returnedAt?: string;
 }
