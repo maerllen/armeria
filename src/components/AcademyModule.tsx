@@ -288,7 +288,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
     const abbr = getCareerAbbr(classCareer);
     const formattedNum = (classTurmaNum.trim() || '01').padStart(2, '0').slice(-2);
-    const fullName = `${abbr} ${formattedNum}`;
+    const fullName = `${abbr}-${formattedNum}`;
 
     try {
       const res = await storage.saveCourseClass({
@@ -318,6 +318,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<LessonPlan | null>(null);
   const [planName, setPlanName] = useState('');
+  const [planTurmaCode, setPlanTurmaCode] = useState('');
   const [planCareer, setPlanCareer] = useState<AcademyCareer>('Delegado');
   const [planYear, setPlanYear] = useState<number>(new Date().getFullYear());
   const [planType, setPlanType] = useState<'curso de formação' | 'curso ensino continuado'>('curso de formação');
@@ -328,6 +329,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     if (plan) {
       setEditingPlan(plan);
       setPlanName(plan.name);
+      setPlanTurmaCode(plan.turmaCode || '');
       setPlanCareer(plan.career as AcademyCareer);
       setPlanYear(plan.year);
       setPlanType(plan.type);
@@ -336,6 +338,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     } else {
       setEditingPlan(null);
       setPlanName('');
+      setPlanTurmaCode('');
       setPlanCareer('Delegado');
       setPlanYear(new Date().getFullYear());
       setPlanType('curso de formação');
@@ -386,6 +389,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       const res = await storage.saveLessonPlan({
         id: editingPlan?.id,
         name: planName.trim(),
+        turmaCode: planTurmaCode || undefined,
         career: planCareer,
         year: Number(planYear) || new Date().getFullYear(),
         type: planType,
@@ -714,16 +718,21 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       return (
                         <tr key={mov.id} className="hover:bg-slate-800/50 transition">
                           <td className="py-3 px-4">
-                            <div className="font-bold text-slate-100">{mov.className}</div>
-                            <div className="text-[11px] text-amber-400 font-mono">{mov.courseName}</div>
+                            <div className="font-extrabold text-amber-400 font-mono text-xs bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md inline-block mb-1">
+                              {mov.turmaCode || mov.className}
+                            </div>
+                            <div className="text-[11px] text-slate-300 font-semibold">{mov.courseName}</div>
                           </td>
                           <td className="py-3 px-4">
                             <div className="font-semibold text-slate-200">{mov.career}</div>
                             <div className="text-[10px] text-slate-400 font-mono">Disciplina: {mov.subject}</div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-slate-200">{mov.teacherName}</div>
-                            <div className="text-[10px] text-slate-400">Por: {mov.issuedByUserName}</div>
+                            <div className="font-bold text-slate-100 text-xs flex items-center space-x-1">
+                              <span className="text-emerald-400 font-extrabold">Prof.</span>
+                              <span className="text-emerald-300 font-bold">{mov.teacherName}</span>
+                            </div>
+                            <div className="text-[10px] text-slate-400">Emissor: {mov.issuedByUserName}</div>
                           </td>
                           <td className="py-3 px-4">
                             {mov.boxName ? (
@@ -821,9 +830,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <div key={plan.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm hover:border-slate-700 transition">
                   <div className="flex items-start justify-between">
                     <div>
+                      <div className="flex items-center space-x-2 mb-1">
+                        <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-400 font-extrabold border border-amber-500/40 text-xs font-mono uppercase">
+                          CÓDIGO TURMA: {plan.turmaCode || 'Geral'}
+                        </span>
+                        {(() => {
+                          const linkedC = courseClasses.find(c => (c.code || c.name) === plan.turmaCode || c.career === plan.career);
+                          if (!linkedC) return null;
+                          return (
+                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 text-[11px]">
+                              Prof: {linkedC.teacherName}
+                            </span>
+                          );
+                        })()}
+                      </div>
                       <h3 className="text-sm font-bold text-slate-100">{plan.name}</h3>
-                      <div className="flex items-center space-x-2 pt-1 text-[11px]">
-                        <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-300 font-bold border border-amber-800 uppercase">
+                      <div className="flex items-center space-x-2 pt-1 text-[11px] flex-wrap gap-y-1">
+                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold border border-slate-700 uppercase">
                           {plan.career}
                         </span>
                         <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase ${
@@ -907,8 +930,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               courseClasses.map((cls) => (
                 <div key={cls.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 relative hover:border-slate-700 transition">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold text-[10px] px-2.5 py-0.5 rounded-full uppercase">
-                      {cls.career}
+                    <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 font-extrabold text-xs px-3 py-1 rounded-lg uppercase font-mono">
+                      CÓDIGO: {cls.code || `${cls.careerAbbreviation || getCareerAbbr(cls.career)}-${cls.turmaNumber || '01'}`}
                     </span>
                     <div className="flex items-center space-x-1">
                       <button
@@ -927,14 +950,30 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   </div>
 
                   <div>
-                    <h3 className="text-base font-bold text-slate-100">{cls.name}</h3>
+                    <h3 className="text-base font-bold text-slate-100 flex items-center justify-between">
+                      <span>Turma {cls.code || cls.name}</span>
+                      <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
+                        {cls.career}
+                      </span>
+                    </h3>
                     <p className="text-xs font-mono text-amber-400 font-semibold">{cls.courseName}</p>
                   </div>
 
-                  <div className="space-y-1 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <div>Professor: <strong className="text-slate-100">{cls.teacherName}</strong></div>
-                    <div>Disciplina: <span className="text-amber-400 font-bold">{cls.subject}</span></div>
-                    <div>Qtd de Alunos: <span className="text-slate-100">{cls.studentCount} alunos</span></div>
+                  <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-sans">Professor:</span>
+                      <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
+                        Prof. {cls.teacherName}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-sans">Disciplina:</span>
+                      <span className="text-amber-400 font-bold">{cls.subject}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-sans">Alunos na Turma:</span>
+                      <span className="text-slate-100 font-bold">{cls.studentCount} alunos</span>
+                    </div>
                   </div>
                 </div>
               ))
@@ -1396,7 +1435,33 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
             <form onSubmit={handleSavePlan} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="col-span-2">
+                <div className="col-span-2 sm:col-span-1">
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Turma Referenciada (Código)</span>
+                    <span className="text-[10px] text-amber-400 font-bold">Identificação Oficial</span>
+                  </label>
+                  <select
+                    value={planTurmaCode}
+                    onChange={(e) => {
+                      const selCode = e.target.value;
+                      setPlanTurmaCode(selCode);
+                      const found = courseClasses.find(c => (c.code || c.name) === selCode);
+                      if (found && found.career) {
+                        setPlanCareer(found.career);
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2 text-amber-400 font-mono font-extrabold text-xs"
+                  >
+                    <option value="">-- Nenhuma (Plano Geral) --</option>
+                    {courseClasses.map(c => (
+                      <option key={c.id} value={c.code || c.name}>
+                        [{c.code || c.name}] • Prof: {c.teacherName} ({c.subject})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="col-span-2 sm:col-span-1">
                   <label className="block text-slate-300 font-semibold mb-1">Nome do Plano de Aula</label>
                   <input
                     type="text"
@@ -1748,10 +1813,37 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 >
                   {courseClasses.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.career} - {c.subject}) • Prof: {c.teacherName} ({c.studentCount} alunos)
+                      [{c.code || c.name}] • Prof: {c.teacherName} ({c.career} - {c.subject}) • {c.studentCount} alunos
                     </option>
                   ))}
                 </select>
+
+                {(() => {
+                  const selectedC = courseClasses.find(c => c.id === movClassId);
+                  if (!selectedC) return null;
+                  return (
+                    <div className="bg-slate-950 p-3 rounded-xl border border-amber-500/30 text-xs space-y-1 font-mono mt-2.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans font-semibold">CÓDIGO DA TURMA:</span>
+                        <span className="font-extrabold text-amber-400 text-sm bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                          {selectedC.code || selectedC.name}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans font-semibold">PROFESSOR RESPONSÁVEL:</span>
+                        <span className="font-bold text-emerald-400">Prof. {selectedC.teacherName}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans font-semibold">CURSO / CARREIRA:</span>
+                        <span className="text-slate-200">{selectedC.courseName} ({selectedC.career})</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans font-semibold">DISCIPLINA:</span>
+                        <span className="text-amber-300 font-bold">{selectedC.subject} ({selectedC.studentCount} alunos)</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* Plano de Aula Dropdown (Somente Curso de Formação) */}

@@ -213,6 +213,7 @@ export interface LessonPlanItem {
 export interface LessonPlan {
   id: string;
   name: string;
+  turmaCode?: string;
   career: AcademyCareer;
   year: number;
   type: 'curso de formação' | 'curso ensino continuado';

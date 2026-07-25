@@ -391,6 +391,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'lesson_plans' verificada/criada.");
+    try {
+      await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `turma_code` VARCHAR(64) DEFAULT NULL;");
+    } catch (e) {}
 
     // Course Movements Table
     await connection.query(`

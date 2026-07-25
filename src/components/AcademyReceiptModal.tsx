@@ -97,17 +97,21 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
                 1. Identificação da Aula
               </h3>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px]">TURMA / PROFESSOR:</span>
-                <span className="font-bold text-slate-100 print:text-black text-sm">{movement.className} – PROFESSOR: {movement.teacherName}</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">CÓDIGO DA TURMA:</span>
+                <span className="font-extrabold text-amber-400 print:text-black text-base font-mono">{movement.turmaCode || movement.className}</span>
               </div>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px]">CURSO / MATÉRIA:</span>
-                <span className="font-bold text-slate-100 print:text-black">{movement.courseName} ({movement.career}) • Disciplina: {movement.subject}</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">PROFESSOR RESPONSÁVEL:</span>
+                <span className="font-bold text-slate-100 print:text-black text-sm">{movement.teacherName}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">CURSO / CARREIRA:</span>
+                <span className="font-semibold text-slate-200 print:text-black">{movement.courseName} ({movement.career}) • Disciplina: {movement.subject}</span>
               </div>
               {movement.lessonPlanName && (
                 <div>
-                  <span className="text-slate-400 print:text-gray-600 block text-[10px]">PLANO DE AULA / Nº AULA:</span>
-                  <span className="font-bold text-amber-400 print:text-black">{movement.lessonPlanName} (Aula {movement.lessonNumber})</span>
+                  <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">PLANO DE AULA / AULA Nº:</span>
+                  <span className="font-bold text-slate-100 print:text-black">{movement.lessonPlanName} (Aula {movement.lessonNumber})</span>
                 </div>
               )}
             </div>
