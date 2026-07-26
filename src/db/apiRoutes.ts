@@ -2031,7 +2031,7 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
   try {
     const {
       courseId, classId, className, turmaCode, lessonPlanId, lessonPlanName, lessonNumber, teacherName,
-      weaponBoxId, boxId, weaponBoxName, boxName, weaponIds, caliberId, vaultSpaceId, ammoStockId,
+      weaponBoxId, boxId, weaponBoxName, boxName, weaponIds, caliberId, ammoCaliber, vaultSpaceId, ammoStockId,
       ammoSupplied, ammoQuantity, studentCount, shotsPerStudent, instructorShots, ammoUsed,
       extraMagazinesCount, issuedByUserName, actor
     } = req.body;
@@ -2047,6 +2047,19 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
     const finalAmmoSupplied = Number(ammoSupplied ?? ammoQuantity ?? req.body.ammo_supplied) || 0;
     const finalIssuedByUserName = issuedByUserName || req.body.issued_by_user_name || actor?.name || 'Armeiro';
 
+    let finalCourseId = courseId || req.body.course_id || '';
+    if (!finalCourseId && finalClassId) {
+      try {
+        const [cRows]: any = await pool.query('SELECT course_id FROM course_classes WHERE id = ?', [finalClassId]);
+        if (cRows && cRows.length > 0 && cRows[0].course_id) {
+          finalCourseId = cRows[0].course_id;
+        }
+      } catch (e) {}
+    }
+    if (!finalCourseId) {
+      finalCourseId = 'course-default';
+    }
+
     let finalWeaponIds: string[] = Array.isArray(weaponIds) ? weaponIds : [];
     if (finalWeaponIds.length === 0 && finalBoxId) {
       const [boxes]: any = await pool.query('SELECT weapon_ids FROM weapon_boxes WHERE id = ?', [finalBoxId]);
@@ -2056,33 +2069,46 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
       }
     }
 
-    await pool.query(
-      `INSERT INTO course_class_movements
-        (id, course_id, class_id, turma_code, lesson_plan_id, lesson_plan_name, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
-      [
-        id,
-        courseId || null,
-        finalClassId,
-        finalTurmaCode,
-        lessonPlanId || null,
-        lessonPlanName || null,
-        Number(lessonNumber) || 1,
-        finalTeacherName,
-        finalBoxId,
-        finalBoxName,
-        JSON.stringify(finalWeaponIds),
-        caliberId || null,
-        vaultSpaceId || null,
-        finalAmmoSupplied,
-        Number(studentCount) || 0,
-        Number(shotsPerStudent) || 0,
-        Number(instructorShots) || 0,
-        Number(ammoUsed) || 0,
-        Number(extraMagazinesCount) || 0,
-        finalIssuedByUserName
-      ]
-    );
+    const executeInsertMovement = async () => {
+      await pool.query(
+        `INSERT INTO course_class_movements
+          (id, course_id, class_id, turma_code, lesson_plan_id, lesson_plan_name, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
+        [
+          id,
+          finalCourseId,
+          finalClassId,
+          finalTurmaCode,
+          lessonPlanId || null,
+          lessonPlanName || null,
+          Number(lessonNumber) || 1,
+          finalTeacherName,
+          finalBoxId,
+          finalBoxName,
+          JSON.stringify(finalWeaponIds),
+          caliberId || null,
+          vaultSpaceId || null,
+          finalAmmoSupplied,
+          Number(studentCount) || 0,
+          Number(shotsPerStudent) || 0,
+          Number(instructorShots) || 0,
+          Number(ammoUsed) || 0,
+          Number(extraMagazinesCount) || 0,
+          finalIssuedByUserName
+        ]
+      );
+    };
+
+    try {
+      await executeInsertMovement();
+    } catch (insertErr: any) {
+      if (insertErr.message && (insertErr.message.includes('course_id') || insertErr.message.includes('cannot be null'))) {
+        try { await pool.query('ALTER TABLE course_class_movements MODIFY COLUMN course_id VARCHAR(64) NULL DEFAULT NULL;'); } catch (e) {}
+        await executeInsertMovement();
+      } else {
+        throw insertErr;
+      }
+    }
 
     if (finalWeaponIds.length > 0) {
       const locNote = `Em Sala de Aula (${finalTurmaCode} - Prof. ${finalTeacherName})`;
@@ -2095,22 +2121,55 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
     }
 
     if (finalAmmoSupplied > 0) {
+      let targetStock: any = null;
+
       if (ammoStockId) {
         const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE id = ?', [ammoStockId]);
+        if (stocks && stocks.length > 0) targetStock = stocks[0];
+      }
+
+      if (!targetStock && vaultSpaceId) {
+        const calName = ammoCaliber || req.body.ammoCaliber || '';
+        const [stocks]: any = await pool.query(
+          `SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND (caliber_id = ? OR caliber_id IN (SELECT id FROM calibers WHERE id = ? OR name = ?))`,
+          [vaultSpaceId, caliberId || '', caliberId || '', calName]
+        );
         if (stocks && stocks.length > 0) {
-          const newQty = Math.max(0, stocks[0].quantity - finalAmmoSupplied);
-          await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+          targetStock = stocks[0];
+        } else {
+          const [vStocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ?', [vaultSpaceId]);
+          if (vStocks && vStocks.length > 0) targetStock = vStocks[0];
         }
-      } else if (vaultSpaceId && caliberId) {
-        const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?', [vaultSpaceId, caliberId]);
-        if (stocks && stocks.length > 0) {
-          const newQty = Math.max(0, stocks[0].quantity - finalAmmoSupplied);
-          await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+      }
+
+      if (targetStock) {
+        const newQty = Math.max(0, targetStock.quantity - finalAmmoSupplied);
+        await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, targetStock.id]);
+
+        // Register movement in ammo_movements as (Aula CFTP)
+        try {
+          const ammoMovId = `ammo-mov-${Date.now()}`;
+          await pool.query(
+            `INSERT INTO ammo_movements (id, stock_id, caliber_id, vault_space_id, type, quantity, recipient_or_reason, responsible_user_name, department_id, created_at)
+             VALUES (?, ?, ?, ?, 'Saída', ?, ?, ?, ?, NOW())`,
+            [
+              ammoMovId,
+              targetStock.id,
+              targetStock.caliber_id || caliberId || null,
+              targetStock.vault_space_id || vaultSpaceId || null,
+              finalAmmoSupplied,
+              `(Aula CFTP) - Turma ${finalTurmaCode} (Prof. ${finalTeacherName})`,
+              finalIssuedByUserName,
+              targetStock.department_id || null
+            ]
+          );
+        } catch (mErr) {
+          console.error('Erro ao registrar ammo_movement para Aula CFTP:', mErr);
         }
       }
     }
 
-    await insertAuditLog('Cursos', 'Solicitar', `Saída para aula da Turma ${finalTurmaCode} (Aula ${lessonNumber || 1}) - Caixa: ${finalBoxName || 'N/A'}, Munições: ${finalAmmoSupplied} un`, actor, req.ip);
+    await insertAuditLog('Cursos', 'Solicitar', `Saída (Aula CFTP) da Turma ${finalTurmaCode} (Aula ${lessonNumber || 1}) - Caixa: ${finalBoxName || 'N/A'}, Munições: ${finalAmmoSupplied} un`, actor, req.ip);
 
     return res.json({ id, success: true });
   } catch (err: any) {

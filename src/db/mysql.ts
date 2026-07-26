@@ -394,7 +394,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`course_classes\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`course_id\` VARCHAR(64) NOT NULL,
+        \`course_id\` VARCHAR(64) DEFAULT NULL,
         \`course_name\` VARCHAR(255) NOT NULL,
         \`subject\` ENUM('MEAF', 'TAP', 'DP') NOT NULL,
         \`career\` VARCHAR(64) NOT NULL,
@@ -411,6 +411,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'course_classes' verificada/criada.");
     try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `teacher_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;"); } catch (e) {}
 
     // Lesson Plans Table
     await connection.query(`
@@ -431,6 +432,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     logs.push("Tabela 'lesson_plans' verificada/criada.");
     try {
       await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `turma_code` VARCHAR(64) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `course_class_movements` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;");
     } catch (e) {}
 
     // Course Movements Table

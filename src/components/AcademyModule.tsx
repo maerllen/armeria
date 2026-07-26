@@ -762,6 +762,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [movPlanId, setMovPlanId] = useState('');
   const [movLessonNumber, setMovLessonNumber] = useState<number>(1);
   const [movBoxId, setMovBoxId] = useState('');
+  const [movCaliberId, setMovCaliberId] = useState('');
+  const [movVaultSpaceId, setMovVaultSpaceId] = useState('');
   const [movAmmoStockId, setMovAmmoStockId] = useState('');
   const [movAmmoQuantity, setMovAmmoQuantity] = useState<number>(0);
   const [movRecipientType, setMovRecipientType] = useState<'inside' | 'outside'>('inside');
@@ -788,8 +790,15 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setMovLessonNumber(1);
 
     const lessonItem = initialPlan?.lessonsData[0];
-    const targetCal = lessonItem?.caliberName || ammoStocks[0]?.caliber || '';
-    const matchingStock = ammoStocks.find(a => (a.caliber || '').toLowerCase() === targetCal.toLowerCase()) || ammoStocks[0];
+    const targetCalName = lessonItem?.caliberName || ammoStocks[0]?.caliber || '';
+    const selCalObj = calibers.find(c => c.id === targetCalName || c.name.toLowerCase() === targetCalName.toLowerCase()) || calibers[0];
+    setMovCaliberId(selCalObj?.id || calibers[0]?.id || '');
+
+    const matchingStock = ammoStocks.find(a =>
+      selCalObj && (a.caliberId === selCalObj.id || (a.caliber && a.caliber.toLowerCase() === selCalObj.name.toLowerCase()))
+    ) || ammoStocks[0];
+
+    setMovVaultSpaceId(matchingStock?.vaultSpaceId || vaultSpaces[0]?.id || '');
     setMovAmmoStockId(matchingStock?.id || '');
 
     const studentCount = firstClass?.studentCount || 20;
@@ -831,12 +840,21 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
 
     const selectedBox = weaponBoxes.find(b => b.id === movBoxId);
-    const selectedAmmo = ammoStocks.find(a => a.id === movAmmoStockId);
+    
+    const selectedCaliber = calibers.find(c => c.id === movCaliberId || c.name === movCaliberId);
+    const caliberName = selectedCaliber ? selectedCaliber.name : movCaliberId;
+
+    const matchingStock = ammoStocks.find(a =>
+      (a.vaultSpaceId === movVaultSpaceId) &&
+      (a.caliberId === movCaliberId || (caliberName && a.caliber && a.caliber.toLowerCase() === caliberName.toLowerCase()))
+    ) || ammoStocks.find(a => a.id === movAmmoStockId);
 
     try {
       const res = await storage.darSaidaCurso({
+        courseId: selectedClass.courseId || selectedClass.id || 'course-default',
         classId: selectedClass.id,
         className: selectedClass.name,
+        turmaCode: selectedClass.code || selectedClass.name,
         courseName: selectedClass.courseName,
         career: selectedClass.career,
         subject: selectedClass.subject,
@@ -847,16 +865,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         teacherUserId: movRecipientType === 'inside' ? movTeacherUserId : undefined,
         boxId: selectedBox ? selectedBox.id : undefined,
         boxName: selectedBox ? selectedBox.name : undefined,
-        ammoStockId: selectedAmmo ? selectedAmmo.id : undefined,
-        ammoCaliber: selectedAmmo ? selectedAmmo.caliber : undefined,
+        caliberId: selectedCaliber ? selectedCaliber.id : movCaliberId,
+        ammoCaliber: caliberName,
+        vaultSpaceId: movVaultSpaceId,
+        ammoStockId: matchingStock ? matchingStock.id : undefined,
         ammoQuantity: Number(movAmmoQuantity) || 0,
+        ammoSupplied: Number(movAmmoQuantity) || 0,
         notes: movNotes.trim(),
         issuedByUserId: currentUser.id,
         issuedByUserName: currentUser.name
       });
 
       if (!res.success) throw new Error(res.error);
-      setSuccessMsg('Saída para aula realizada com sucesso!');
+      setSuccessMsg('Saída (Aula CFTP) realizada com sucesso!');
       setShowMovementModal(false);
       onRefresh();
 
@@ -866,7 +887,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         setSelectedReceiptMovement(createdMov);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao dar saída para aula.');
+      setErrorMsg(err.message || 'Erro ao dar saída (Aula CFTP).');
     }
   };
 
@@ -1125,9 +1146,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-100">Saídas e Retornos para Aulas da Academia</h2>
+              <h2 className="text-sm font-bold text-slate-100">Saídas e Retornos (Aula CFTP)</h2>
               <p className="text-xs text-slate-400">
-                Lançamento de saídas de armamentos e munições para instrução prática com retorno de insumos não utilizados
+                Lançamento de saídas de armamentos e munições para instrução prática (Aula CFTP) com retorno de insumos não utilizados
               </p>
             </div>
             <button
@@ -1135,7 +1156,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
-              <span>Nova Saída para Aula</span>
+              <span>Nova Saída (Aula CFTP)</span>
             </button>
           </div>
 
@@ -2624,7 +2645,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl my-8 space-y-4">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center space-x-2 text-amber-400">
               <ArrowRightLeft className="w-5 h-5" />
-              <span>Lançamento de Saída para Aula Prática</span>
+              <span>Lançamento de Saída (Aula CFTP)</span>
             </h3>
 
             <form onSubmit={handleExecuteSaida} className="space-y-4 text-xs">
@@ -2767,58 +2788,96 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Estoque de Munição</span>
-                    <span className="text-[10px] text-amber-400 font-normal">Cofre MEAF</span>
-                  </label>
-                  <select
-                    value={movAmmoStockId}
-                    onChange={(e) => setMovAmmoStockId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
-                  >
-                    <option value="">-- Sem munição --</option>
-                    {(() => {
-                      const selP = lessonPlans.find(p => p.id === movPlanId);
-                      const currentLesson = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
-                      const targetCal = currentLesson?.caliberName || '';
-
-                      const meafVaultIds = vaultSpaces
-                        .filter(v => (v.name || '').toUpperCase().includes('MEAF') || (v.location || '').toUpperCase().includes('MEAF'))
-                        .map(v => v.id);
-
-                      const filteredStocks = ammoStocks.filter(a => {
-                        const matchCal = !targetCal || (a.caliber || '').toLowerCase() === targetCal.toLowerCase();
-                        const isMeaf = meafVaultIds.includes(a.vaultSpaceId) || (a.notes && a.notes.toUpperCase().includes('MEAF'));
-                        return matchCal && (meafVaultIds.length === 0 || isMeaf);
-                      });
-
-                      const listToDisplay = filteredStocks.length > 0
-                        ? filteredStocks
-                        : ammoStocks.filter(a => !targetCal || (a.caliber || '').toLowerCase() === targetCal.toLowerCase());
-
-                      return listToDisplay.map(a => (
-                        <option key={a.id} value={a.id}>
-                          {a.caliber} (Disp: {a.quantity} un)
-                        </option>
-                      ));
-                    })()}
-                  </select>
+              {/* Seleção do Estoque: Calibre e Local do Cofre */}
+              <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3">
+                <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <span>Estoque de Munição para Subtração</span>
+                  <span className="text-[10px] text-slate-400 font-normal">Selecione o Calibre e o Cofre</span>
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Qtd. Fornecida</span>
-                    <span className="text-[10px] text-emerald-400 font-mono font-bold">+10% Margem</span>
-                  </label>
-                  <input
-                    type="number"
-                    value={movAmmoQuantity}
-                    onChange={(e) => setMovAmmoQuantity(Number(e.target.value))}
-                    min={0}
-                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold text-amber-400 text-sm"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                      Calibre da Munição
+                    </label>
+                    <select
+                      value={movCaliberId}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setMovCaliberId(val);
+                        const selC = calibers.find(c => c.id === val || c.name === val);
+                        const cName = selC ? selC.name : val;
+                        const match = ammoStocks.find(a =>
+                          a.caliberId === val || (cName && a.caliber && a.caliber.toLowerCase() === cName.toLowerCase())
+                        );
+                        if (match && match.vaultSpaceId) {
+                          setMovVaultSpaceId(match.vaultSpaceId);
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="">-- Selecione o Calibre --</option>
+                      {calibers.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-xs">
+                      Local do Cofre (Espaço no Cofre)
+                    </label>
+                    <select
+                      value={movVaultSpaceId}
+                      onChange={(e) => setMovVaultSpaceId(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="">-- Selecione o Cofre --</option>
+                      {vaultSpaces.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.name} ({v.spaceNumber || v.location || 'Cofre'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/60">
+                  <div className="flex items-center justify-between bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800">
+                    <span className="text-[11px] text-slate-400">Saldo no Cofre:</span>
+                    {(() => {
+                      const selCal = calibers.find(c => c.id === movCaliberId || c.name === movCaliberId);
+                      const calName = selCal ? selCal.name : movCaliberId;
+
+                      const match = ammoStocks.find(a =>
+                        (a.vaultSpaceId === movVaultSpaceId) &&
+                        (a.caliberId === movCaliberId || (calName && a.caliber && a.caliber.toLowerCase() === calName.toLowerCase()))
+                      );
+
+                      const avail = match ? match.quantity : 0;
+                      return (
+                        <strong className={`text-xs font-mono font-bold ${avail >= movAmmoQuantity ? 'text-emerald-400' : 'text-red-400'}`}>
+                          {avail} un
+                        </strong>
+                      );
+                    })()}
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 text-xs flex items-center justify-between">
+                      <span>Qtd. Fornecida</span>
+                      <span className="text-[10px] text-emerald-400 font-mono">+10% Margem</span>
+                    </label>
+                    <input
+                      type="number"
+                      value={movAmmoQuantity}
+                      onChange={(e) => setMovAmmoQuantity(Number(e.target.value))}
+                      min={0}
+                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-1.5 text-slate-100 font-mono font-bold text-amber-400 text-xs focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
 
