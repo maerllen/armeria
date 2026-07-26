@@ -3,7 +3,7 @@
  */
 export function cleanMasp(input: string): string {
   if (!input) return '';
-  return input.replace(/\D/g, '');
+  return input.replace(/\D/g, '').slice(0, 8);
 }
 
 /**

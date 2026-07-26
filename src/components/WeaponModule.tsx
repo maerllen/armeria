@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface WeaponModuleProps {
@@ -60,6 +60,108 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const isArmeiro = currentUser.role === 'Armeiro';
   const isAdmin = currentUser.role === 'Administrador';
   const isPolicial = currentUser.role === 'Policial';
+
+  // Available Weapon Types states
+  const [showAvailableWeaponsModal, setShowAvailableWeaponsModal] = useState(false);
+  const [editingWeaponTypeId, setEditingWeaponTypeId] = useState<string | null>(null);
+  const [typeNameInput, setTypeNameInput] = useState('');
+  const [newModelInputs, setNewModelInputs] = useState<Record<string, string>>({});
+  const [wtErrorMsg, setWtErrorMsg] = useState('');
+  const [wtSuccessMsg, setWtSuccessMsg] = useState('');
+
+  const availableWeaponTypes = storage.getAvailableWeaponTypes();
+
+  const handleCreateOrUpdateWeaponType = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWtErrorMsg('');
+    setWtSuccessMsg('');
+    if (!typeNameInput.trim()) {
+      setWtErrorMsg('Informe o nome do tipo de arma.');
+      return;
+    }
+    try {
+      if (editingWeaponTypeId) {
+        const existing = availableWeaponTypes.find(wt => wt.id === editingWeaponTypeId);
+        await storage.addOrUpdateAvailableWeaponType({
+          id: editingWeaponTypeId,
+          name: typeNameInput.trim(),
+          models: existing ? existing.models : []
+        });
+        setWtSuccessMsg('Tipo de arma atualizado com sucesso!');
+      } else {
+        await storage.addOrUpdateAvailableWeaponType({
+          name: typeNameInput.trim(),
+          models: []
+        });
+        setWtSuccessMsg('Novo tipo de arma cadastrado!');
+      }
+      setTypeNameInput('');
+      setEditingWeaponTypeId(null);
+      onRefresh();
+    } catch (err: any) {
+      setWtErrorMsg(err.message || 'Erro ao salvar tipo de arma.');
+    }
+  };
+
+  const handleAddModelToType = async (typeId: string) => {
+    const modelName = (newModelInputs[typeId] || '').trim();
+    if (!modelName) return;
+    const wt = availableWeaponTypes.find(item => item.id === typeId);
+    if (!wt) return;
+
+    if (wt.models.includes(modelName)) {
+      setWtErrorMsg(`O modelo "${modelName}" já está cadastrado para ${wt.name}.`);
+      return;
+    }
+
+    try {
+      setWtErrorMsg('');
+      setWtSuccessMsg('');
+      const updatedModels = [...wt.models, modelName];
+      await storage.addOrUpdateAvailableWeaponType({
+        id: wt.id,
+        name: wt.name,
+        models: updatedModels
+      });
+      setNewModelInputs(prev => ({ ...prev, [typeId]: '' }));
+      setWtSuccessMsg(`Modelo "${modelName}" adicionado a ${wt.name}.`);
+      onRefresh();
+    } catch (err: any) {
+      setWtErrorMsg(err.message || 'Erro ao adicionar modelo.');
+    }
+  };
+
+  const handleRemoveModelFromType = async (typeId: string, modelName: string) => {
+    const wt = availableWeaponTypes.find(item => item.id === typeId);
+    if (!wt) return;
+    try {
+      setWtErrorMsg('');
+      setWtSuccessMsg('');
+      const updatedModels = wt.models.filter(m => m !== modelName);
+      await storage.addOrUpdateAvailableWeaponType({
+        id: wt.id,
+        name: wt.name,
+        models: updatedModels
+      });
+      setWtSuccessMsg(`Modelo "${modelName}" removido.`);
+      onRefresh();
+    } catch (err: any) {
+      setWtErrorMsg(err.message || 'Erro ao remover modelo.');
+    }
+  };
+
+  const handleDeleteWeaponType = async (typeId: string, typeName: string) => {
+    if (!window.confirm(`Deseja realmente excluir o tipo de arma "${typeName}" e todos os seus modelos?`)) return;
+    try {
+      setWtErrorMsg('');
+      setWtSuccessMsg('');
+      await storage.deleteAvailableWeaponType(typeId);
+      setWtSuccessMsg(`Tipo de arma "${typeName}" excluído.`);
+      onRefresh();
+    } catch (err: any) {
+      setWtErrorMsg(err.message || 'Erro ao excluir tipo de arma.');
+    }
+  };
 
   const canAddEditWeapon = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
   const canDeleteWeapon = isGeral;
@@ -294,15 +396,31 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           </div>
         </div>
 
-        {canAddEditWeapon && (
-          <button
-            onClick={() => handleOpenWeaponModal()}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Cadastrar Nova Arma</span>
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {isGeral && (
+            <button
+              onClick={() => {
+                setWtErrorMsg('');
+                setWtSuccessMsg('');
+                setShowAvailableWeaponsModal(true);
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            >
+              <Layers className="w-4 h-4 text-amber-400" />
+              <span>Armas Disponíveis (Tipos e Modelos)</span>
+            </button>
+          )}
+
+          {canAddEditWeapon && (
+            <button
+              onClick={() => handleOpenWeaponModal()}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Cadastrar Nova Arma</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {successMsg && (
@@ -872,6 +990,185 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 Fechar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Armas Disponíveis (Tipos e Modelos) Modal - Exclusivo para Perfil Geral */}
+      {showAvailableWeaponsModal && isGeral && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5">
+            
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-2 text-amber-400">
+                <Layers className="w-5 h-5 shrink-0" />
+                <h3 className="text-base font-bold text-slate-100">Armas Disponíveis - Tipos e Modelos</h3>
+              </div>
+              <button
+                onClick={() => setShowAvailableWeaponsModal(false)}
+                className="text-slate-400 hover:text-slate-200 font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Cadastre e gerencie os tipos de armas disponíveis e os respectivos modelos cadastrados no sistema. Apenas usuários com perfil <strong className="text-amber-400">Geral</strong> têm acesso a esta configuração.
+            </p>
+
+            {wtSuccessMsg && (
+              <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{wtSuccessMsg}</span>
+              </div>
+            )}
+
+            {wtErrorMsg && (
+              <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{wtErrorMsg}</span>
+              </div>
+            )}
+
+            {/* Form to Add New Type */}
+            <form onSubmit={handleCreateOrUpdateWeaponType} className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                {editingWeaponTypeId ? 'Editar Tipo de Arma' : 'Cadastrar Novo Tipo de Arma'}
+              </h4>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={typeNameInput}
+                  onChange={(e) => setTypeNameInput(e.target.value)}
+                  placeholder="Ex: Carabina, Lança Granadas, Submetralhadora"
+                  className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  required
+                />
+                <button
+                  type="submit"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shrink-0 flex items-center space-x-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{editingWeaponTypeId ? 'Salvar' : 'Adicionar Tipo'}</span>
+                </button>
+                {editingWeaponTypeId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingWeaponTypeId(null);
+                      setTypeNameInput('');
+                    }}
+                    className="bg-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                )}
+              </div>
+            </form>
+
+            {/* Types and Models List */}
+            <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+              {availableWeaponTypes.length === 0 ? (
+                <div className="text-center py-6 text-slate-500 text-xs italic">
+                  Nenhum tipo de arma cadastrado.
+                </div>
+              ) : (
+                availableWeaponTypes.map((wt) => (
+                  <div key={wt.id} className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-slate-100 text-sm">{wt.name}</span>
+                        <span className="text-[10px] bg-slate-800 text-amber-400 border border-slate-700 px-2 py-0.5 rounded-full font-mono">
+                          {wt.models.length} modelo(s)
+                        </span>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingWeaponTypeId(wt.id);
+                            setTypeNameInput(wt.name);
+                          }}
+                          className="p-1 text-slate-400 hover:text-amber-400 rounded transition"
+                          title="Editar Nome do Tipo"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteWeaponType(wt.id, wt.name)}
+                          className="p-1 text-slate-400 hover:text-red-400 rounded transition"
+                          title="Excluir Tipo"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* List of models */}
+                    <div className="flex flex-wrap gap-1.5 min-h-[32px] items-center">
+                      {wt.models.length === 0 ? (
+                        <span className="text-[11px] text-slate-500 italic">Nenhum modelo cadastrado para este tipo.</span>
+                      ) : (
+                        wt.models.map((mdl) => (
+                          <span
+                            key={mdl}
+                            className="bg-slate-900 border border-slate-700 text-slate-200 text-[11px] px-2.5 py-1 rounded-lg font-mono flex items-center space-x-1.5"
+                          >
+                            <span>{mdl}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveModelFromType(wt.id, mdl)}
+                              className="text-slate-500 hover:text-red-400 font-bold ml-1"
+                              title="Remover este modelo"
+                            >
+                              &times;
+                            </button>
+                          </span>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Quick Add Model to this type */}
+                    <div className="flex gap-2 pt-1">
+                      <input
+                        type="text"
+                        value={newModelInputs[wt.id] || ''}
+                        onChange={(e) => setNewModelInputs(prev => ({ ...prev, [wt.id]: e.target.value }))}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddModelToType(wt.id);
+                          }
+                        }}
+                        placeholder={`Novo modelo para ${wt.name} (ex: PT100, TS9, T4)...`}
+                        className="flex-1 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddModelToType(wt.id)}
+                        className="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center space-x-1 shrink-0"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Adicionar Modelo</span>
+                      </button>
+                    </div>
+
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowAvailableWeaponsModal(false)}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
+              >
+                Concluir
+              </button>
+            </div>
+
           </div>
         </div>
       )}

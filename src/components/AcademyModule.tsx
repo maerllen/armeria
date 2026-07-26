@@ -7,6 +7,7 @@ import {
   Department,
   Unit,
   AcademyCourse,
+  Course,
   WeaponBox,
   WeaponBoxReplacement,
   CourseClass,
@@ -39,6 +40,33 @@ import {
 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AcademyReceiptModal } from './AcademyReceiptModal';
+
+const ACADEPOL_CATALOG = [
+  { name: 'Curso de Táticas Policiais Especiais', code: 'EC-TPE-2026' },
+  { name: 'Tiro Defensivo e Armamento Operacional', code: 'EC-TDAO-2026' },
+  { name: 'Operações em Ambientes Confinados (CQB)', code: 'EC-CQB-2026' },
+  { name: 'Sobrevivência Policial Urbana', code: 'EC-SPU-2026' },
+  { name: 'Atendimento Pré-Hospitalar Tático (APH-T)', code: 'EC-APHT-2026' },
+  { name: 'Cumprimento de Mandados de Alta Complexidade', code: 'EC-CMAC-2026' },
+  { name: 'Instrução e Habilitação em Fuzil e Submetralhadora', code: 'EC-IHFS-2026' },
+  { name: 'Gestão de Armeria e Munição', code: 'EC-GAM-2026' },
+  { name: 'Inteligência Policial e Investigação Cibernética', code: 'EC-IPIC-2026' }
+];
+
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
+
+function generateDateRange(startStr: string, endStr: string): string[] {
+  if (!startStr) return [];
+  if (!endStr || endStr < startStr) return [startStr];
+  const list: string[] = [];
+  const current = new Date(startStr + 'T00:00:00');
+  const last = new Date(endStr + 'T00:00:00');
+  while (current <= last) {
+    list.push(current.toISOString().split('T')[0]);
+    current.setDate(current.getDate() + 1);
+  }
+  return list;
+}
 
 interface AcademyModuleProps {
   currentUser: User;
@@ -84,11 +112,209 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   // Server state getters
   const academyCourses = storage.getAcademyCourses();
+  const qualCourses = storage.getCourses();
+  const availableWeaponTypes = storage.getAvailableWeaponTypes();
   const weaponBoxes = storage.getWeaponBoxes();
   const boxReplacements = storage.getWeaponBoxReplacements();
   const courseClasses = storage.getCourseClasses();
   const courseMovements = storage.getCourseMovements();
   const lessonPlans = storage.getLessonPlans();
+
+  // --- QUALIFICATION / HABILITAÇÃO COURSES MANAGEMENT STATE ---
+  const [showManageCoursesModal, setShowManageCoursesModal] = useState(false);
+  const [editingQualCourse, setEditingQualCourse] = useState<Course | null>(null);
+  const [qualCourseName, setQualCourseName] = useState('');
+  const [qualSelectedWeaponTypes, setQualSelectedWeaponTypes] = useState<string[]>([]);
+  const [qualSelectedModels, setQualSelectedModels] = useState<string[]>([]);
+  const [qualShotsPerStudent, setQualShotsPerStudent] = useState<number>(50);
+  const [qualDeptId, setQualDeptId] = useState<string>('');
+  const [qualModalError, setQualModalError] = useState('');
+  const [qualModalSuccess, setQualModalSuccess] = useState('');
+
+  const handleOpenQualCourseModal = (c?: Course) => {
+    setQualModalError('');
+    setQualModalSuccess('');
+    if (c) {
+      setEditingQualCourse(c);
+      setQualCourseName(c.name);
+      setQualSelectedWeaponTypes(c.allowedWeaponTypes || []);
+      setQualSelectedModels(c.allowedModels || []);
+      setQualShotsPerStudent(c.shotsPerStudent || 50);
+      setQualDeptId(c.departmentId || '');
+    } else {
+      setEditingQualCourse(null);
+      setQualCourseName('');
+      setQualSelectedWeaponTypes([]);
+      setQualSelectedModels([]);
+      setQualShotsPerStudent(50);
+      setQualDeptId(departments[0]?.id || '');
+    }
+    setShowManageCoursesModal(true);
+  };
+
+  const handleSaveQualCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setQualModalError('');
+    setQualModalSuccess('');
+    if (!qualCourseName.trim()) {
+      setQualModalError('Informe o nome do curso.');
+      return;
+    }
+    if (qualSelectedWeaponTypes.length === 0) {
+      setQualModalError('Selecione pelo menos um Tipo de Arma para o curso.');
+      return;
+    }
+
+    try {
+      if (editingQualCourse) {
+        await storage.updateCourse(editingQualCourse.id, {
+          name: qualCourseName.trim(),
+          allowedWeaponTypes: qualSelectedWeaponTypes,
+          allowedModels: qualSelectedModels,
+          shotsPerStudent: qualShotsPerStudent,
+          departmentId: qualDeptId
+        });
+        setQualModalSuccess('Curso de Habilitação atualizado com sucesso!');
+      } else {
+        await storage.addCourse({
+          name: qualCourseName.trim(),
+          allowedWeaponTypes: qualSelectedWeaponTypes,
+          allowedModels: qualSelectedModels,
+          allowedCalibers: [],
+          shotsPerStudent: qualShotsPerStudent,
+          departmentId: qualDeptId
+        });
+        setQualModalSuccess('Novo curso de Habilitação cadastrado com sucesso!');
+      }
+      setQualCourseName('');
+      setQualSelectedWeaponTypes([]);
+      setQualSelectedModels([]);
+      setQualShotsPerStudent(50);
+      setEditingQualCourse(null);
+      onRefresh();
+    } catch (err: any) {
+      setQualModalError(err.message || 'Erro ao salvar curso de habilitação.');
+    }
+  };
+
+  const handleDeleteQualCourse = async (id: string, name: string) => {
+    if (!window.confirm(`Deseja realmente excluir o curso "${name}"?`)) return;
+    try {
+      await storage.deleteCourse(id);
+      setQualModalSuccess(`Curso "${name}" excluído com sucesso.`);
+      onRefresh();
+    } catch (err: any) {
+      setQualModalError(err.message || 'Erro ao excluir curso.');
+    }
+  };
+
+  // --- CURSOS TAB FILTERS ---
+  const [courseSearchName, setCourseSearchName] = useState('');
+  const [courseDeptFilter, setCourseDeptFilter] = useState('');
+  const [courseTypeFilter, setCourseTypeFilter] = useState('');
+  const [courseMonthFilter, setCourseMonthFilter] = useState('');
+  const [courseYearFilter, setCourseYearFilter] = useState('');
+  const [courseDateStatusFilter, setCourseDateStatusFilter] = useState<'futuros' | 'todos' | 'passados'>('futuros');
+
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  const allUnifiedCourses = [
+    ...academyCourses.map(ac => ({
+      id: ac.id,
+      name: ac.name,
+      type: ac.type as 'Formação' | 'Ensino Continuado' | 'Habilitação',
+      code: ac.code || 'N/A',
+      departmentId: departments.find(d => d.name === ac.departmentName)?.id || '',
+      departmentName: ac.departmentName || 'ACADEPOL',
+      dates: ac.dates || [],
+      allowedWeaponTypes: [] as string[],
+      allowedModels: [] as string[],
+      shotsPerStudent: 0,
+      isQualification: false,
+      rawAcademy: ac,
+      rawQual: null as Course | null
+    })),
+    ...qualCourses.map(qc => {
+      const dept = departments.find(d => d.id === qc.departmentId);
+      return {
+        id: qc.id,
+        name: qc.name,
+        type: 'Habilitação' as const,
+        code: 'HABILITAÇÃO',
+        departmentId: qc.departmentId || '',
+        departmentName: dept?.name || 'Geral',
+        dates: [] as string[],
+        allowedWeaponTypes: qc.allowedWeaponTypes || [],
+        allowedModels: qc.allowedModels || [],
+        shotsPerStudent: qc.shotsPerStudent || 0,
+        isQualification: true,
+        rawAcademy: null as AcademyCourse | null,
+        rawQual: qc
+      };
+    })
+  ];
+
+  const filteredUnifiedCourses = allUnifiedCourses.filter(c => {
+    if (courseSearchName.trim()) {
+      const term = courseSearchName.toLowerCase();
+      const matchName = c.name.toLowerCase().includes(term);
+      const matchModels = c.allowedModels.some(m => m.toLowerCase().includes(term));
+      const matchTypes = c.allowedWeaponTypes.some(wt => wt.toLowerCase().includes(term));
+      if (!matchName && !matchModels && !matchTypes) return false;
+    }
+
+    if (courseDeptFilter && courseDeptFilter !== 'TODOS') {
+      if (c.departmentId !== courseDeptFilter && c.departmentName !== courseDeptFilter) return false;
+    }
+
+    if (courseTypeFilter && courseTypeFilter !== 'TODOS') {
+      if (c.type !== courseTypeFilter) return false;
+    }
+
+    if (courseMonthFilter && courseMonthFilter !== 'TODOS') {
+      const hasMonth = c.dates.some(d => {
+        const parts = d.split('-');
+        return parts.length >= 2 && parts[1] === courseMonthFilter;
+      });
+      if (c.dates.length > 0 && !hasMonth) return false;
+    }
+
+    if (courseYearFilter && courseYearFilter !== 'TODOS') {
+      const hasYear = c.dates.some(d => d.startsWith(courseYearFilter));
+      if (c.dates.length > 0 && !hasYear) return false;
+    }
+
+    if (courseDateStatusFilter === 'futuros') {
+      if (c.dates.length > 0) {
+        const hasFutureDate = c.dates.some(d => d >= todayStr);
+        if (!hasFutureDate) return false;
+      }
+    } else if (courseDateStatusFilter === 'passados') {
+      if (c.dates.length === 0) return false;
+      const allPast = c.dates.every(d => d < todayStr);
+      if (!allPast) return false;
+    }
+
+    return true;
+  });
+
+  // Ordenação cronológica por data (mais próximos de ocorrer primeiro)
+  const sortedUnifiedCourses = [...filteredUnifiedCourses].sort((a, b) => {
+    const getPrimaryDate = (c: typeof a) => {
+      if (c.dates && c.dates.length > 0) {
+        const futureDates = c.dates.filter(d => d >= todayStr).sort();
+        if (futureDates.length > 0) return futureDates[0];
+        return [...c.dates].sort()[0];
+      }
+      return '9999-12-31';
+    };
+    const dateA = getPrimaryDate(a);
+    const dateB = getPrimaryDate(b);
+    return dateA.localeCompare(dateB);
+  });
+
+  // Permission check for deleting courses (only Geral)
+  const canDeleteCourse = currentUser.role === 'Geral';
 
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
@@ -109,8 +335,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [editingCourse, setEditingCourse] = useState<AcademyCourse | null>(null);
   const [courseName, setCourseName] = useState('');
   const [courseType, setCourseType] = useState<'Formação' | 'Ensino Continuado'>('Formação');
+  const [courseModuleRoman, setCourseModuleRoman] = useState<string>('I');
   const [courseCode, setCourseCode] = useState('');
   const [courseDepartment, setCourseDepartment] = useState('');
+  const [courseStartDate, setCourseStartDate] = useState('');
+  const [courseEndDate, setCourseEndDate] = useState('');
   const [courseDates, setCourseDates] = useState<string[]>([]);
   const [calendarDate, setCalendarDate] = useState<Date>(new Date());
 
@@ -120,19 +349,49 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setCourseName(param.name);
       setCourseType(param.type);
       setCourseCode(param.code || '');
-      setCourseDepartment(param.departmentName || '');
+      setCourseDepartment(param.departmentName || (param.type === 'Formação' ? 'ACADEPOL' : ''));
       setCourseDates(param.dates || []);
+      setCourseStartDate(param.dates && param.dates.length > 0 ? param.dates[0] : '');
+      setCourseEndDate(param.dates && param.dates.length > 1 ? param.dates[param.dates.length - 1] : (param.dates && param.dates.length === 1 ? param.dates[0] : ''));
+      setCourseModuleRoman('I');
     } else {
       const selectedType = param || 'Formação';
       setEditingCourse(null);
-      setCourseName('');
       setCourseType(selectedType);
-      setCourseCode('');
-      setCourseDepartment('');
       setCourseDates([]);
+      setCourseStartDate('');
+      setCourseEndDate('');
+
+      if (selectedType === 'Formação') {
+        setCourseName('Curso de Formação de Policiais Civis');
+        setCourseModuleRoman('I');
+        setCourseCode('CFTP - Módulo I');
+        setCourseDepartment('ACADEPOL');
+      } else {
+        const firstCat = ACADEPOL_CATALOG[0];
+        setCourseName(firstCat.name);
+        setCourseCode(firstCat.code);
+        setCourseDepartment(departments[0]?.name || 'ACADEPOL');
+      }
     }
     setCalendarDate(new Date());
     setShowCourseModal(true);
+  };
+
+  const handleModuleRomanChange = (roman: string) => {
+    setCourseModuleRoman(roman);
+    setCourseCode(`CFTP - Módulo ${roman}`);
+  };
+
+  const handleEnsinoContinuadoNameChange = (nameVal: string) => {
+    setCourseName(nameVal);
+    const found = ACADEPOL_CATALOG.find(c => c.name === nameVal);
+    if (found) {
+      setCourseCode(found.code);
+    } else {
+      const initials = nameVal.split(' ').map(w => w[0]).join('').toUpperCase().replace(/[^A-Z]/g, '');
+      setCourseCode(`EC-${initials.slice(0, 4)}-2026`);
+    }
   };
 
   const handleSaveCourse = async (e: React.FormEvent) => {
@@ -142,11 +401,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       return;
     }
     if (!courseCode.trim()) {
-      alert('Informe o código do curso (ex: CFTP-2026).');
+      alert('Informe o código do curso.');
       return;
     }
-    if (courseType === 'Ensino Continuado' && courseDates.length === 0) {
-      alert('Selecione ao menos um dia no calendário para o Curso de Ensino Continuado.');
+
+    let finalDates = [...courseDates];
+    if (courseStartDate && courseEndDate) {
+      finalDates = generateDateRange(courseStartDate, courseEndDate);
+    } else if (courseStartDate) {
+      finalDates = [courseStartDate];
+    }
+
+    if (courseType === 'Ensino Continuado' && finalDates.length === 0) {
+      alert('Informe a data de início e término do curso de Ensino Continuado.');
       return;
     }
 
@@ -156,8 +423,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         name: courseName.trim(),
         type: courseType,
         code: courseCode.trim(),
-        departmentName: courseType === 'Ensino Continuado' ? courseDepartment.trim() : undefined,
-        dates: courseType === 'Ensino Continuado' ? courseDates : []
+        departmentName: courseType === 'Formação' ? 'ACADEPOL' : courseDepartment.trim(),
+        dates: finalDates
       });
       if (!res.success) throw new Error(res.error);
       setSuccessMsg('Curso salvo com sucesso!');
@@ -1267,18 +1534,25 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 4: CURSOS DA ACADEMIA                                                */}
+      {/* TAB 4: CURSOS DA ACADEMIA & GERENCIAR CURSOS                            */}
       {/* ========================================================================= */}
       {activeTab === 'cursos' && (
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
             <div>
-              <h2 className="text-sm font-bold text-slate-100">Catálogo de Cursos da Academia</h2>
+              <h2 className="text-sm font-bold text-slate-100">Catálogo e Gerenciamento de Cursos</h2>
               <p className="text-xs text-slate-400">
-                Divisão entre Cursos de Formação e Ensino Continuado da Polícia Civil
+                Gestão de Cursos de Formação, Ensino Continuado e Cursos de Habilitação de Armamentos
               </p>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => handleOpenQualCourseModal()}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>GERENCIAR CURSOS (Habilitação)</span>
+              </button>
               <button
                 onClick={() => handleOpenCourseModal('Formação')}
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
@@ -1296,6 +1570,127 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             </div>
           </div>
 
+          {/* BARRA DE FILTROS */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-md">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-2">
+                <Search className="w-3.5 h-3.5 text-amber-400" />
+                <span>Filtro de Cursos</span>
+              </h3>
+              <span className="text-[11px] text-slate-400 font-mono">
+                Exibindo <strong>{filteredUnifiedCourses.length}</strong> de <strong>{allUnifiedCourses.length}</strong> cursos
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+              {/* Pesquisa por Nome */}
+              <div className="lg:col-span-2">
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                  Nome do Curso / Modelo / Arma
+                </label>
+                <input
+                  type="text"
+                  value={courseSearchName}
+                  onChange={(e) => setCourseSearchName(e.target.value)}
+                  placeholder="Buscar por nome do curso..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Departamento */}
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                  Departamento
+                </label>
+                <select
+                  value={courseDeptFilter}
+                  onChange={(e) => setCourseDeptFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100"
+                >
+                  <option value="TODOS">Todos os Deptos</option>
+                  {departments.map((d) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Tipo de Curso */}
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                  Tipo de Curso
+                </label>
+                <select
+                  value={courseTypeFilter}
+                  onChange={(e) => setCourseTypeFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-100"
+                >
+                  <option value="TODOS">Todos os Tipos</option>
+                  <option value="Formação">Formação</option>
+                  <option value="Ensino Continuado">Ensino Continuado</option>
+                  <option value="Habilitação">Habilitação</option>
+                </select>
+              </div>
+
+              {/* Mês / Ano */}
+              <div>
+                <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">
+                  Mês / Ano
+                </label>
+                <div className="grid grid-cols-2 gap-1">
+                  <select
+                    value={courseMonthFilter}
+                    onChange={(e) => setCourseMonthFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-1.5 text-[11px] text-slate-100"
+                  >
+                    <option value="TODOS">Mês</option>
+                    <option value="01">Jan</option>
+                    <option value="02">Fev</option>
+                    <option value="03">Mar</option>
+                    <option value="04">Abr</option>
+                    <option value="05">Mai</option>
+                    <option value="06">Jun</option>
+                    <option value="07">Jul</option>
+                    <option value="08">Ago</option>
+                    <option value="09">Set</option>
+                    <option value="10">Out</option>
+                    <option value="11">Nov</option>
+                    <option value="12">Dez</option>
+                  </select>
+                  <select
+                    value={courseYearFilter}
+                    onChange={(e) => setCourseYearFilter(e.target.value)}
+                    className="bg-slate-950 border border-slate-800 rounded-xl px-2 py-1.5 text-[11px] text-slate-100"
+                  >
+                    <option value="TODOS">Ano</option>
+                    <option value="2026">2026</option>
+                    <option value="2025">2025</option>
+                    <option value="2027">2027</option>
+                    <option value="2024">2024</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Status de Data (Padrão: Futuros / Não Ocorridos) */}
+              <div>
+                <label className="block text-[10px] font-semibold text-amber-400 uppercase mb-1">
+                  Status de Realização
+                </label>
+                <select
+                  value={courseDateStatusFilter}
+                  onChange={(e) => setCourseDateStatusFilter(e.target.value as any)}
+                  className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3 py-1.5 text-xs text-amber-300 font-semibold"
+                >
+                  <option value="futuros">Futuros / Não Ocorridos (Padrão)</option>
+                  <option value="todos">Todos os Cursos</option>
+                  <option value="passados">Cursos Concluídos / Passados</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* TABELA DE CURSOS UNIFICADA */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs text-slate-300">
@@ -1303,20 +1698,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   <tr>
                     <th className="py-3 px-4">Nome do Curso</th>
                     <th className="py-3 px-4">Tipo</th>
-                    <th className="py-3 px-4">Código</th>
+                    <th className="py-3 px-4">Armamento / Modelos / Tiros</th>
                     <th className="py-3 px-4">Departamento / Datas do Curso</th>
                     <th className="py-3 px-4 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {academyCourses.length === 0 ? (
+                  {sortedUnifiedCourses.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-8 text-center text-slate-500 italic">
-                        Nenhum curso cadastrado no catálogo.
+                        Nenhum curso encontrado com os filtros aplicados.
                       </td>
                     </tr>
                   ) : (
-                    academyCourses.map((crs) => (
+                    sortedUnifiedCourses.map((crs) => (
                       <tr key={crs.id} className="hover:bg-slate-800/50 transition">
                         <td className="py-3 px-4 font-bold text-slate-100">{crs.name}</td>
                         <td className="py-3 px-4">
@@ -1324,47 +1719,98 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
                               crs.type === 'Formação'
                                 ? 'bg-amber-950 text-amber-300 border-amber-800'
-                                : 'bg-blue-950 text-blue-300 border-blue-800'
+                                : crs.type === 'Ensino Continuado'
+                                ? 'bg-blue-950 text-blue-300 border-blue-800'
+                                : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                             }`}
                           >
                             {crs.type}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono font-bold text-amber-400">{crs.code || 'N/A'}</td>
-                        <td className="py-3 px-4 text-slate-300">
-                          {crs.type === 'Ensino Continuado' ? (
+                        <td className="py-3 px-4">
+                          {crs.isQualification ? (
                             <div className="space-y-1">
-                              <div className="font-semibold text-slate-200">Dept: {crs.departmentName || 'N/I'}</div>
-                              {crs.dates && crs.dates.length > 0 ? (
+                              {crs.allowedWeaponTypes.length > 0 && (
+                                <div className="text-[11px] text-amber-400 font-semibold">
+                                  Tipos: {crs.allowedWeaponTypes.join(', ')}
+                                </div>
+                              )}
+                              {crs.allowedModels.length > 0 && (
                                 <div className="flex flex-wrap gap-1">
-                                  {crs.dates.map(d => (
-                                    <span key={d} className="bg-slate-950 text-amber-300 border border-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono">
-                                      {d.split('-').reverse().join('/')}
+                                  {crs.allowedModels.map(m => (
+                                    <span key={m} className="bg-slate-950 text-slate-300 border border-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono">
+                                      {m}
                                     </span>
                                   ))}
                                 </div>
-                              ) : (
-                                <span className="text-slate-500 italic text-[10px]">Sem datas selecionadas</span>
+                              )}
+                              {crs.shotsPerStudent > 0 && (
+                                <div className="text-[10px] text-slate-400">
+                                  Tiros/Aluno: <strong className="text-amber-400">{crs.shotsPerStudent}</strong>
+                                </div>
                               )}
                             </div>
                           ) : (
-                            <span className="text-slate-500 italic">-</span>
+                            <span className="text-slate-500 italic font-mono">{crs.code}</span>
                           )}
+                        </td>
+                        <td className="py-3 px-4 text-slate-300">
+                          <div className="space-y-1">
+                            <div className="font-semibold text-slate-200">Dept: {crs.departmentName || 'ACADEPOL'}</div>
+                            {crs.dates && crs.dates.length > 0 ? (
+                              <div className="flex flex-wrap gap-1">
+                                {crs.dates.map(d => (
+                                  <span key={d} className={`text-[10px] px-1.5 py-0.5 rounded font-mono border ${
+                                    d >= todayStr
+                                      ? 'bg-amber-950/60 text-amber-300 border-amber-800/60'
+                                      : 'bg-slate-950 text-slate-500 border-slate-800'
+                                  }`}>
+                                    {d.split('-').reverse().join('/')}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-500 italic text-[10px]">Sem restrição de data</span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end space-x-2">
                             <button
-                              onClick={() => handleOpenCourseModal(crs)}
+                              onClick={() => {
+                                if (crs.isQualification && crs.rawQual) {
+                                  handleOpenQualCourseModal(crs.rawQual);
+                                } else if (crs.rawAcademy) {
+                                  handleOpenCourseModal(crs.rawAcademy);
+                                }
+                              }}
                               className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Editar Curso"
                             >
                               <Edit2 className="w-4 h-4" />
                             </button>
-                            <button
-                              onClick={() => setDeleteTarget({ type: 'course', id: crs.id, name: crs.name })}
-                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
+                            {canDeleteCourse ? (
+                              <button
+                                onClick={() => {
+                                  if (crs.isQualification) {
+                                    handleDeleteQualCourse(crs.id, crs.name);
+                                  } else {
+                                    setDeleteTarget({ type: 'course', id: crs.id, name: crs.name });
+                                  }
+                                }}
+                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Excluir Curso (Perfil Geral)"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            ) : (
+                              <span
+                                className="p-1.5 text-slate-600 cursor-not-allowed"
+                                title="Apenas usuários do perfil Geral podem excluir cursos"
+                              >
+                                <Trash2 className="w-4 h-4 opacity-30" />
+                              </span>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1404,56 +1850,145 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             </div>
 
             <form onSubmit={handleSaveCourse} className="space-y-4 text-xs">
+              {/* NOME DO CURSO */}
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome do Curso <span className="text-red-400">*</span></label>
-                <input
-                  type="text"
-                  value={courseName}
-                  onChange={(e) => setCourseName(e.target.value)}
-                  placeholder={courseType === 'Formação' ? "Ex: Curso de Formação de Investigadores" : "Ex: Táticas Especiais e Ações Táticas"}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  required
-                />
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Nome do Curso <span className="text-red-400">*</span>
+                </label>
+                {courseType === 'Ensino Continuado' ? (
+                  <select
+                    value={courseName}
+                    onChange={(e) => handleEnsinoContinuadoNameChange(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    <option value="">-- Selecione o Curso da ACADEPOL --</option>
+                    {ACADEPOL_CATALOG.map((item) => (
+                      <option key={item.name} value={item.name}>
+                        {item.name}
+                      </option>
+                    ))}
+                    {Array.from(new Set(academyCourses.map(ac => ac.name)))
+                      .filter(n => !ACADEPOL_CATALOG.some(cat => cat.name === n))
+                      .map(n => (
+                        <option key={n} value={n}>{n}</option>
+                      ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={courseName}
+                    onChange={(e) => setCourseName(e.target.value)}
+                    placeholder="Ex: Curso de Formação de Policiais Civis"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                    required
+                  />
+                )}
               </div>
 
+              {/* MÓDULO EM NUMERAÇÃO ROMANA (Para Formação) */}
+              {courseType === 'Formação' && (
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Módulo do Curso (Numeração Romana 1 a 10) <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={courseModuleRoman}
+                    onChange={(e) => handleModuleRomanChange(e.target.value)}
+                    className="w-full bg-slate-950 border border-amber-500/50 text-amber-300 font-bold rounded-xl px-3.5 py-2 focus:border-amber-400 focus:outline-none"
+                    required
+                  >
+                    {ROMAN_NUMERALS.map((rom) => (
+                      <option key={rom} value={rom}>
+                        Módulo {rom}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* CÓDIGO DO CURSO */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
                   <span>Código do Curso <span className="text-red-400">*</span></span>
-                  <span className="text-[10px] text-amber-400 font-mono font-bold">Ex: CFTP-2026</span>
+                  <span className="text-[10px] text-amber-400 font-mono font-bold">Seleção Automática</span>
                 </label>
                 <input
                   type="text"
                   value={courseCode}
                   onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
-                  placeholder="Ex: CFTP-2026 ou CC-2026"
+                  placeholder="Ex: CFTP - Módulo I ou EC-TPE-2026"
                   className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2 text-amber-400 font-mono font-extrabold tracking-wider focus:border-amber-400 focus:outline-none"
                   required
                 />
-                <p className="text-[10px] text-slate-400 mt-1">Campo obrigatório. Abreviação identificadora do curso.</p>
               </div>
 
-              {courseType === 'Ensino Continuado' && (
-                <>
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">Departamento onde ocorrerá o Curso <span className="text-red-400">*</span></label>
-                    <input
-                      type="text"
-                      value={courseDepartment}
-                      onChange={(e) => setCourseDepartment(e.target.value)}
-                      placeholder="Ex: DEIC / ACADEPOL / UNIDADE CENTRAL"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                      required
-                    />
-                  </div>
+              {/* DEPARTAMENTO */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Departamento Responsável <span className="text-red-400">*</span>
+                </label>
+                {courseType === 'Formação' ? (
+                  <input
+                    type="text"
+                    value="ACADEPOL"
+                    disabled
+                    className="w-full bg-slate-950/60 border border-slate-800 text-amber-400 font-bold rounded-xl px-3.5 py-2 cursor-not-allowed"
+                  />
+                ) : (
+                  <select
+                    value={courseDepartment}
+                    onChange={(e) => setCourseDepartment(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.name}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
 
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                      <span>Calendário Dinâmico de Dias de Curso <span className="text-red-400">*</span></span>
-                      <span className="text-amber-400 font-bold font-mono text-[10px]">Clique para selecionar</span>
-                    </label>
-                    {renderCalendar()}
-                  </div>
-                </>
+              {/* DATAS DE INÍCIO E FIM DO CURSO */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Data de Início do Curso <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={courseStartDate}
+                    onChange={(e) => setCourseStartDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Data do Fim do Curso <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={courseEndDate}
+                    min={courseStartDate}
+                    onChange={(e) => setCourseEndDate(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* CALENDÁRIO DINÂMICO DE DIAS */}
+              {courseType === 'Ensino Continuado' && (
+                <div className="pt-2">
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Ajuste Fino no Calendário de Dias</span>
+                    <span className="text-amber-400 font-bold font-mono text-[10px]">Opcional</span>
+                  </label>
+                  {renderCalendar()}
+                </div>
               )}
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
@@ -2397,6 +2932,216 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Gerenciar Cursos de Habilitação Modal */}
+      {showManageCoursesModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-2 text-amber-400">
+                <GraduationCap className="w-5 h-5 shrink-0" />
+                <h3 className="text-base font-bold text-slate-100">Gerenciar Cursos de Habilitação em Armas</h3>
+              </div>
+              <button
+                onClick={() => setShowManageCoursesModal(false)}
+                className="text-slate-400 hover:text-slate-200 font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              Cadastre e gerencie cursos de habilitação operacional com nome livre, seleção de tipos de armas, modelos de armamento e quantidade de tiros por aluno.
+            </p>
+
+            {qualModalSuccess && (
+              <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{qualModalSuccess}</span>
+              </div>
+            )}
+
+            {qualModalError && (
+              <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{qualModalError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSaveQualCourse} className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-4">
+              <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                {editingQualCourse ? 'Editar Curso' : 'Cadastrar Novo Curso'}
+              </h4>
+
+              {/* Nome do Curso */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Nome do Curso (Livre)
+                </label>
+                <input
+                  type="text"
+                  value={qualCourseName}
+                  onChange={(e) => setQualCourseName(e.target.value)}
+                  placeholder="Ex: Habilitação em Fuzil 5.56mm e Pistola 9mm"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              {/* Select List: Tipo de Arma (Pode selecionar mais de uma) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Tipo de Arma (Select List de Armas Disponíveis)
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {availableWeaponTypes.map((wt) => {
+                    const isSelected = qualSelectedWeaponTypes.includes(wt.name);
+                    return (
+                      <button
+                        type="button"
+                        key={wt.id}
+                        onClick={() => {
+                          if (isSelected) {
+                            setQualSelectedWeaponTypes(prev => prev.filter(t => t !== wt.name));
+                          } else {
+                            setQualSelectedWeaponTypes(prev => [...prev, wt.name]);
+                          }
+                        }}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center space-x-1 ${
+                          isSelected
+                            ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                            : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-500'
+                        }`}
+                      >
+                        <span>{wt.name}</span>
+                        {isSelected && <CheckCircle2 className="w-3.5 h-3.5 ml-1 shrink-0" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Modelos Habilitados (Baseado nos Tipos Selecionados ou Todos) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Modelos de Armas Habilitados no Curso
+                </label>
+                {(() => {
+                  const relevantTypes = availableWeaponTypes.filter(
+                    wt => qualSelectedWeaponTypes.length === 0 || qualSelectedWeaponTypes.includes(wt.name)
+                  );
+                  const allModels = Array.from(new Set(relevantTypes.flatMap(wt => wt.models)));
+
+                  if (allModels.length === 0) {
+                    return (
+                      <p className="text-xs text-slate-500 italic">
+                        Nenhum modelo cadastrado nos tipos selecionados em "Armas Disponíveis".
+                      </p>
+                    );
+                  }
+
+                  return (
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto p-2 bg-slate-900 border border-slate-800 rounded-xl">
+                      {allModels.map((mdl) => {
+                        const isMdlSelected = qualSelectedModels.includes(mdl);
+                        return (
+                          <button
+                            type="button"
+                            key={mdl}
+                            onClick={() => {
+                              if (isMdlSelected) {
+                                setQualSelectedModels(prev => prev.filter(m => m !== mdl));
+                              } else {
+                                setQualSelectedModels(prev => [...prev, mdl]);
+                              }
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border transition flex items-center ${
+                              isMdlSelected
+                                ? 'bg-amber-950 border-amber-500 text-amber-300 font-bold'
+                                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                            }`}
+                          >
+                            <span>{mdl}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Quantidade de Tiros por Aluno */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Quantidade de Tiros por Aluno
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={qualShotsPerStudent}
+                    onChange={(e) => setQualShotsPerStudent(parseInt(e.target.value) || 0)}
+                    placeholder="Ex: 50, 100, 200"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Departamento Responsável
+                  </label>
+                  <select
+                    value={qualDeptId}
+                    onChange={(e) => setQualDeptId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100"
+                  >
+                    {departments.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                {editingQualCourse && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingQualCourse(null);
+                      setQualCourseName('');
+                      setQualSelectedWeaponTypes([]);
+                      setQualSelectedModels([]);
+                    }}
+                    className="px-3 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                  >
+                    Cancelar
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shadow flex items-center space-x-1"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{editingQualCourse ? 'Atualizar Curso' : 'Cadastrar Curso'}</span>
+                </button>
+              </div>
+            </form>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowManageCoursesModal(false)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-5 py-2.5 rounded-xl"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

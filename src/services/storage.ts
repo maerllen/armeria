@@ -15,7 +15,8 @@ import {
   WeaponBoxReplacement,
   CourseClass,
   CourseMovement,
-  LessonPlan
+  LessonPlan,
+  AvailableWeaponType
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -31,6 +32,7 @@ export interface AppState {
   weapons: Weapon[];
   movements: Movement[];
   courses: Course[];
+  availableWeaponTypes: AvailableWeaponType[];
   auditLogs: AuditLog[];
   academyCourses: AcademyCourse[];
   weaponBoxes: WeaponBox[];
@@ -53,6 +55,7 @@ class StorageService {
     weapons: [],
     movements: [],
     courses: [],
+    availableWeaponTypes: [],
     auditLogs: [],
     academyCourses: [],
     weaponBoxes: [],
@@ -84,6 +87,7 @@ class StorageService {
         vaultsRes,
         calibersRes,
         coursesRes,
+        availableWeaponTypesRes,
         ammoStocksRes,
         ammoMovsRes,
         weaponsRes,
@@ -102,6 +106,7 @@ class StorageService {
         fetch('/api/vault-spaces').then(r => r.ok ? r.json() : []),
         fetch('/api/calibers').then(r => r.ok ? r.json() : []),
         fetch('/api/courses').then(r => r.ok ? r.json() : []),
+        fetch('/api/available-weapon-types').then(r => r.ok ? r.json() : []),
         fetch('/api/ammo-stocks').then(r => r.ok ? r.json() : []),
         fetch('/api/ammo-movements').then(r => r.ok ? r.json() : []),
         fetch('/api/weapons').then(r => r.ok ? r.json() : []),
@@ -121,6 +126,7 @@ class StorageService {
       this.state.vaultSpaces = vaultsRes || [];
       this.state.calibers = calibersRes || [];
       this.state.courses = coursesRes || [];
+      this.state.availableWeaponTypes = availableWeaponTypesRes || [];
       this.state.ammoStocks = ammoStocksRes || [];
       this.state.ammoMovements = ammoMovsRes || [];
       this.state.weapons = weaponsRes || [];
@@ -445,7 +451,7 @@ class StorageService {
     return this.state.courses;
   }
 
-  public async addCourse(data: Omit<Course, 'id' | 'createdAt'>): Promise<Course> {
+  public async addCourse(data: Partial<Course> & { name: string }): Promise<Course> {
     const res = await fetch('/api/courses', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -453,6 +459,18 @@ class StorageService {
     });
     const course = await res.json();
     if (!res.ok) throw new Error(course.error || 'Erro ao adicionar curso.');
+    await this.refreshFromServer();
+    return course;
+  }
+
+  public async updateCourse(id: string, data: Partial<Course>): Promise<Course> {
+    const res = await fetch('/api/courses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, id, actor: this.state.currentUser })
+    });
+    const course = await res.json();
+    if (!res.ok) throw new Error(course.error || 'Erro ao atualizar curso.');
     await this.refreshFromServer();
     return course;
   }
@@ -465,6 +483,35 @@ class StorageService {
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir curso.');
+    await this.refreshFromServer();
+    return true;
+  }
+
+  // --- AVAILABLE WEAPON TYPES ---
+  public getAvailableWeaponTypes(): AvailableWeaponType[] {
+    return this.state.availableWeaponTypes || [];
+  }
+
+  public async addOrUpdateAvailableWeaponType(data: { id?: string; name: string; models: string[] }): Promise<AvailableWeaponType> {
+    const res = await fetch('/api/available-weapon-types', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, actor: this.state.currentUser })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao salvar tipo de arma disponível.');
+    await this.refreshFromServer();
+    return result;
+  }
+
+  public async deleteAvailableWeaponType(id: string): Promise<boolean> {
+    const res = await fetch(`/api/available-weapon-types/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor: this.state.currentUser })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao excluir tipo de arma disponível.');
     await this.refreshFromServer();
     return true;
   }

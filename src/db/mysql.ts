@@ -125,12 +125,26 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`name\` VARCHAR(255) NOT NULL,
         \`allowed_models\` JSON NOT NULL,
         \`allowed_calibers\` JSON NOT NULL,
+        \`allowed_weapon_types\` JSON DEFAULT NULL,
+        \`shots_per_student\` INT DEFAULT 0,
         \`department_id\` VARCHAR(64) DEFAULT NULL,
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'courses' verificada/criada.");
+
+    // Create available_weapon_types
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`available_weapon_types\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`name\` VARCHAR(100) NOT NULL,
+        \`models\` JSON NOT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'available_weapon_types' verificada/criada.");
 
     // Create user_courses
     await connection.query(`
@@ -469,6 +483,12 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     try {
       await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`issued_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
     } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`allowed_weapon_types\` JSON DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`shots_per_student\` INT DEFAULT 0;`);
+    } catch (e) {}
 
     // Seed ACADEMIA DE POLICIA & MEAF unit
     const [acadRows]: any = await connection.query(`SELECT id FROM departments WHERE name LIKE '%ACADEMIA%' LIMIT 1;`);
@@ -513,6 +533,20 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         ('unit-coe-grt', 'dept-coe', 'GRUPO DE RESGATE TÁTICO (GRT)'),
         ('unit-dhpp-1', 'dept-dhpp', '1ª DELEGACIA DE HOMICÍDIOS'),
         ('unit-dic-cargas', 'dept-dic', 'DELEGACIA DE REPRESSÃO AO ROUBO DE CARGAS');
+      `);
+    }
+
+    const [wtRows]: any = await connection.query('SELECT COUNT(*) as count FROM available_weapon_types');
+    if (wtRows[0].count === 0) {
+      logs.push("Inserindo dados iniciais em 'available_weapon_types'...");
+      await connection.query(`
+        INSERT INTO available_weapon_types (id, name, models) VALUES
+        ('wt-pistola', 'Pistola', '["PT100", "PT24/7", "TS9", "Glock G22", "Glock G17", "Glock G19", "PT840", "PT92", "M&P9", "APX"]'),
+        ('wt-fuzil', 'Fuzil', '["T4", "IA2", "MD97", "FAL 7.62", "M4A1", "AR-15", "HK416"]'),
+        ('wt-submet', 'Submetralhadora', '["SMT40", "MT12", "MP5", "UMP40", "SAF 9mm"]'),
+        ('wt-espingarda', 'Espingarda', '["Calibre 12 CBC 586", "Calibre 12 Benelli M4", "Calibre 12 Mossberg 500", "Calibre 12 Boito"]'),
+        ('wt-revolver', 'Revólver', '["RT 889", "RT 85", "RT 82", "RT 357"]'),
+        ('wt-carabina', 'Carabina', '["CT40", "CT9", "CCT9"]');
       `);
     }
 

@@ -344,25 +344,14 @@ export const UserModule: React.FC<UserModuleProps> = ({
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-100">Gestão de Usuários e Cursos</h1>
+            <h1 className="text-xl font-bold text-slate-100">Gestão de Policiais e Efetivo</h1>
             <p className="text-xs text-slate-400">
-              Cadastro de policiais, concessão de permissões operacionais e qualificação por cursos
+              Cadastro de policiais, concessão de permissões operacionais e cursos concluídos
             </p>
           </div>
         </div>
 
         <div className="flex items-center space-x-3">
-          {/* Gestão de Cursos Button */}
-          {!isPolicial && (
-            <button
-              onClick={() => setShowCourseManagementModal(true)}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-            >
-              <GraduationCap className="w-4 h-4 text-amber-400" />
-              <span>Gerenciar Cursos ({courses.length})</span>
-            </button>
-          )}
-
           {/* New User Button */}
           {!isPolicial && (
             <button
@@ -587,7 +576,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     value={formatMasp(maspRaw)}
                     onChange={(e) => setMaspRaw(cleanMasp(e.target.value))}
                     onBlur={handleMaspBlur}
-                    placeholder="Ex: 1255748"
+                    placeholder="MASP com dígito"
+                    maxLength={11}
                     disabled={!!editingUser}
                     className={`w-full border rounded-xl px-3.5 py-2 text-sm font-mono ${
                       editingUser

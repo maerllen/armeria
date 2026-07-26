@@ -552,17 +552,84 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
 });
 
 // -------------------------------------------------------------
+// AVAILABLE WEAPON TYPES & MODELS
+// -------------------------------------------------------------
+apiRouter.get('/available-weapon-types', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT id, name, models, created_at as createdAt FROM available_weapon_types ORDER BY name ASC');
+    const mapped = (rows || []).map((wt: any) => ({
+      id: wt.id,
+      name: wt.name,
+      models: typeof wt.models === 'string' ? JSON.parse(wt.models) : (wt.models || []),
+      createdAt: wt.createdAt
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/available-weapon-types', async (req: Request, res: Response) => {
+  try {
+    const { id, name, models, actor } = req.body;
+    const pool = getPool();
+    const cleanName = (name || '').trim();
+    if (!cleanName) return res.status(400).json({ error: 'Nome do tipo de arma é obrigatório.' });
+
+    const finalId = id || `wt-${Date.now()}`;
+    const modelsArr = Array.isArray(models) ? models : [];
+
+    // Check if updating or inserting
+    const [existing]: any = await pool.query('SELECT id FROM available_weapon_types WHERE id = ?', [finalId]);
+    if (existing && existing.length > 0) {
+      await pool.query(
+        'UPDATE available_weapon_types SET name = ?, models = ? WHERE id = ?',
+        [cleanName, JSON.stringify(modelsArr), finalId]
+      );
+      await insertAuditLog('Armas', 'Editar', `Atualizado tipo de arma disponível: ${cleanName}`, actor, req.ip);
+    } else {
+      await pool.query(
+        'INSERT INTO available_weapon_types (id, name, models, created_at) VALUES (?, ?, ?, NOW())',
+        [finalId, cleanName, JSON.stringify(modelsArr)]
+      );
+      await insertAuditLog('Armas', 'Criar', `Criado tipo de arma disponível: ${cleanName}`, actor, req.ip);
+    }
+
+    return res.json({ id: finalId, name: cleanName, models: modelsArr });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/available-weapon-types/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    await pool.query('DELETE FROM available_weapon_types WHERE id = ?', [id]);
+    await insertAuditLog('Armas', 'Excluir', `Excluído tipo de arma disponível ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
 // COURSES
 // -------------------------------------------------------------
 apiRouter.get('/courses', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT id, name, allowed_models, allowed_calibers, department_id as departmentId, created_at as createdAt FROM courses');
+    const [rows]: any = await pool.query('SELECT id, name, allowed_weapon_types, allowed_models, allowed_calibers, shots_per_student, department_id as departmentId, created_at as createdAt FROM courses');
     const mapped = (rows || []).map((c: any) => ({
       id: c.id,
       name: c.name,
+      allowedWeaponTypes: typeof c.allowed_weapon_types === 'string' ? JSON.parse(c.allowed_weapon_types) : (c.allowed_weapon_types || []),
       allowedModels: typeof c.allowed_models === 'string' ? JSON.parse(c.allowed_models) : (c.allowed_models || []),
       allowedCalibers: typeof c.allowed_calibers === 'string' ? JSON.parse(c.allowed_calibers) : (c.allowed_calibers || []),
+      shotsPerStudent: Number(c.shots_per_student) || 0,
       departmentId: c.departmentId || '',
       createdAt: c.createdAt
     }));
@@ -574,16 +641,56 @@ apiRouter.get('/courses', async (req: Request, res: Response) => {
 
 apiRouter.post('/courses', async (req: Request, res: Response) => {
   try {
-    const { name, allowedModels, allowedCalibers, departmentId, actor } = req.body;
+    const { id, name, allowedWeaponTypes, allowedModels, allowedCalibers, shotsPerStudent, departmentId, actor } = req.body;
     const pool = getPool();
-    const id = `course-${Date.now()}`;
-    await pool.query(
-      'INSERT INTO courses (id, name, allowed_models, allowed_calibers, department_id, created_at) VALUES (?, ?, ?, ?, ?, NOW())',
-      [id, name, JSON.stringify(allowedModels || []), JSON.stringify(allowedCalibers || []), departmentId || null]
-    );
+    
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Nome do curso é obrigatório.' });
+    }
 
-    await insertAuditLog('Cursos', 'Criar', `Criado curso: ${name}`, actor, req.ip);
-    return res.json({ id, name, allowedModels, allowedCalibers, departmentId, createdAt: new Date().toISOString() });
+    const finalId = id || `course-${Date.now()}`;
+    const [existing]: any = await pool.query('SELECT id FROM courses WHERE id = ?', [finalId]);
+
+    if (existing && existing.length > 0) {
+      await pool.query(
+        'UPDATE courses SET name = ?, allowed_weapon_types = ?, allowed_models = ?, allowed_calibers = ?, shots_per_student = ?, department_id = ? WHERE id = ?',
+        [
+          name,
+          JSON.stringify(allowedWeaponTypes || []),
+          JSON.stringify(allowedModels || []),
+          JSON.stringify(allowedCalibers || []),
+          Number(shotsPerStudent) || 0,
+          departmentId || null,
+          finalId
+        ]
+      );
+      await insertAuditLog('Cursos', 'Editar', `Atualizado curso: ${name}`, actor, req.ip);
+    } else {
+      await pool.query(
+        'INSERT INTO courses (id, name, allowed_weapon_types, allowed_models, allowed_calibers, shots_per_student, department_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
+        [
+          finalId,
+          name,
+          JSON.stringify(allowedWeaponTypes || []),
+          JSON.stringify(allowedModels || []),
+          JSON.stringify(allowedCalibers || []),
+          Number(shotsPerStudent) || 0,
+          departmentId || null
+        ]
+      );
+      await insertAuditLog('Cursos', 'Criar', `Criado curso: ${name}`, actor, req.ip);
+    }
+
+    return res.json({
+      id: finalId,
+      name,
+      allowedWeaponTypes: allowedWeaponTypes || [],
+      allowedModels: allowedModels || [],
+      allowedCalibers: allowedCalibers || [],
+      shotsPerStudent: Number(shotsPerStudent) || 0,
+      departmentId,
+      createdAt: new Date().toISOString()
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

@@ -139,7 +139,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
                 type="text"
                 value={formatMasp(maspRaw)}
                 onChange={handleMaspChange}
-                placeholder="Ex: 1.255.748-0"
+                placeholder="MASP com dígito"
+                maxLength={11}
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition font-mono"
                 required
               />

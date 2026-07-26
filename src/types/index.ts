@@ -62,11 +62,20 @@ export interface Unit {
   createdAt: string;
 }
 
+export interface AvailableWeaponType {
+  id: string;
+  name: string; // e.g. "Pistola", "Fuzil", "Espingarda"
+  models: string[]; // e.g. ["PT100", "TS9", "G22"]
+  createdAt?: string;
+}
+
 export interface Course {
   id: string;
   name: string; // e.g., "Operador de fuzil"
+  allowedWeaponTypes?: string[]; // e.g., ["Pistola", "Fuzil"]
   allowedModels: string[]; // e.g., ["T4", "IA2"]
   allowedCalibers: string[]; // e.g., ["5,56x45mm"]
+  shotsPerStudent?: number; // e.g., 50
   departmentId?: string;
   createdAt: string;
 }
