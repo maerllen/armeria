@@ -76,6 +76,7 @@ export interface Course {
   allowedModels: string[]; // e.g., ["T4", "IA2"]
   allowedCalibers: string[]; // e.g., ["5,56x45mm"]
   shotsPerStudent?: number; // e.g., 50
+  shotsPerWeaponType?: Record<string, number>; // e.g., { "Pistola": 50, "Fuzil": 100 }
   departmentId?: string;
   createdAt: string;
 }

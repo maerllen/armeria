@@ -127,27 +127,36 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [qualSelectedWeaponTypes, setQualSelectedWeaponTypes] = useState<string[]>([]);
   const [qualSelectedModels, setQualSelectedModels] = useState<string[]>([]);
   const [qualShotsPerStudent, setQualShotsPerStudent] = useState<number>(50);
+  const [qualShotsPerWeaponType, setQualShotsPerWeaponType] = useState<Record<string, number>>({});
   const [qualDeptId, setQualDeptId] = useState<string>('');
   const [qualModalError, setQualModalError] = useState('');
   const [qualModalSuccess, setQualModalSuccess] = useState('');
 
+  const getAcadepolDeptId = () => {
+    const acadDept = departments.find(d => d.name.toUpperCase().includes('ACADEMIA') || d.code === 'ACADEPOL') || departments[0];
+    return acadDept?.id || 'dept-acad';
+  };
+
   const handleOpenQualCourseModal = (c?: Course) => {
     setQualModalError('');
     setQualModalSuccess('');
+    const acadId = getAcadepolDeptId();
     if (c) {
       setEditingQualCourse(c);
       setQualCourseName(c.name);
       setQualSelectedWeaponTypes(c.allowedWeaponTypes || []);
       setQualSelectedModels(c.allowedModels || []);
       setQualShotsPerStudent(c.shotsPerStudent || 50);
-      setQualDeptId(c.departmentId || '');
+      setQualShotsPerWeaponType(c.shotsPerWeaponType || {});
+      setQualDeptId(c.departmentId || acadId);
     } else {
       setEditingQualCourse(null);
       setQualCourseName('');
       setQualSelectedWeaponTypes([]);
       setQualSelectedModels([]);
       setQualShotsPerStudent(50);
-      setQualDeptId(departments[0]?.id || '');
+      setQualShotsPerWeaponType({});
+      setQualDeptId(acadId);
     }
     setShowManageCoursesModal(true);
   };
@@ -165,14 +174,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       return;
     }
 
+    const acadId = getAcadepolDeptId();
+
+    // Calculate total shots per student
+    let totalShots = 0;
+    qualSelectedWeaponTypes.forEach(type => {
+      totalShots += Number(qualShotsPerWeaponType[type] || 0);
+    });
+    if (totalShots === 0) totalShots = qualShotsPerStudent || 50;
+
     try {
       if (editingQualCourse) {
         await storage.updateCourse(editingQualCourse.id, {
           name: qualCourseName.trim(),
           allowedWeaponTypes: qualSelectedWeaponTypes,
           allowedModels: qualSelectedModels,
-          shotsPerStudent: qualShotsPerStudent,
-          departmentId: qualDeptId
+          shotsPerStudent: totalShots,
+          shotsPerWeaponType: qualShotsPerWeaponType,
+          departmentId: acadId
         });
         setQualModalSuccess('Curso de Habilitação atualizado com sucesso!');
       } else {
@@ -181,8 +200,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           allowedWeaponTypes: qualSelectedWeaponTypes,
           allowedModels: qualSelectedModels,
           allowedCalibers: [],
-          shotsPerStudent: qualShotsPerStudent,
-          departmentId: qualDeptId
+          shotsPerStudent: totalShots,
+          shotsPerWeaponType: qualShotsPerWeaponType,
+          departmentId: acadId
         });
         setQualModalSuccess('Novo curso de Habilitação cadastrado com sucesso!');
       }
@@ -190,6 +210,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setQualSelectedWeaponTypes([]);
       setQualSelectedModels([]);
       setQualShotsPerStudent(50);
+      setQualShotsPerWeaponType({});
       setEditingQualCourse(null);
       onRefresh();
     } catch (err: any) {
@@ -405,16 +426,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       return;
     }
 
-    let finalDates = [...courseDates];
-    if (courseStartDate && courseEndDate) {
-      finalDates = generateDateRange(courseStartDate, courseEndDate);
-    } else if (courseStartDate) {
-      finalDates = [courseStartDate];
-    }
-
-    if (courseType === 'Ensino Continuado' && finalDates.length === 0) {
-      alert('Informe a data de início e término do curso de Ensino Continuado.');
-      return;
+    let finalDates: string[] = [];
+    if (courseType === 'Formação') {
+      if (!courseStartDate || !courseEndDate) {
+        alert('Informe a data de início e a data do fim do curso de Formação.');
+        return;
+      }
+      finalDates = [courseStartDate, courseEndDate];
+    } else {
+      // Ensino Continuado
+      finalDates = [...courseDates].sort();
+      if (finalDates.length === 0) {
+        alert('Selecione pelo menos uma data no calendário para o curso de Ensino Continuado.');
+        return;
+      }
     }
 
     try {
@@ -1744,10 +1769,26 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                   ))}
                                 </div>
                               )}
-                              {crs.shotsPerStudent > 0 && (
-                                <div className="text-[10px] text-slate-400">
-                                  Tiros/Aluno: <strong className="text-amber-400">{crs.shotsPerStudent}</strong>
+                              {crs.shotsPerWeaponType && Object.keys(crs.shotsPerWeaponType).length > 0 ? (
+                                <div className="text-[10px] text-slate-400 space-y-0.5 pt-0.5">
+                                  {Object.entries(crs.shotsPerWeaponType).map(([type, shots]) => (
+                                    <div key={type} className="flex items-center space-x-1">
+                                      <span className="text-slate-300 font-medium">{type}:</span>
+                                      <span className="text-amber-400 font-bold font-mono">{shots} tiros</span>
+                                    </div>
+                                  ))}
+                                  {Object.keys(crs.shotsPerWeaponType).length > 1 && (
+                                    <div className="text-[9px] text-slate-500 font-mono">
+                                      Total: {crs.shotsPerStudent} tiros/aluno
+                                    </div>
+                                  )}
                                 </div>
+                              ) : (
+                                crs.shotsPerStudent > 0 && (
+                                  <div className="text-[10px] text-slate-400">
+                                    Tiros/Aluno: <strong className="text-amber-400">{crs.shotsPerStudent}</strong>
+                                  </div>
+                                )
                               )}
                             </div>
                           ) : (
@@ -1951,41 +1992,41 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 )}
               </div>
 
-              {/* DATAS DE INÍCIO E FIM DO CURSO */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Data de Início do Curso <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={courseStartDate}
-                    onChange={(e) => setCourseStartDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                    required
-                  />
+              {/* DATAS DE INÍCIO E FIM DO CURSO (Apenas para Formação) */}
+              {courseType === 'Formação' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Data de Início do Curso <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={courseStartDate}
+                      onChange={(e) => setCourseStartDate(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Data do Fim do Curso <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="date"
+                      value={courseEndDate}
+                      min={courseStartDate}
+                      onChange={(e) => setCourseEndDate(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Data do Fim do Curso <span className="text-red-400">*</span>
-                  </label>
-                  <input
-                    type="date"
-                    value={courseEndDate}
-                    min={courseStartDate}
-                    onChange={(e) => setCourseEndDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* CALENDÁRIO DINÂMICO DE DIAS */}
-              {courseType === 'Ensino Continuado' && (
+              ) : (
+                /* CALENDÁRIO DINÂMICO DE DIAS (Apenas para Ensino Continuado) */
                 <div className="pt-2">
                   <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Ajuste Fino no Calendário de Dias</span>
-                    <span className="text-amber-400 font-bold font-mono text-[10px]">Opcional</span>
+                    <span>Datas do Curso (Selecione os dias no calendário) <span className="text-red-400">*</span></span>
+                    <span className="text-amber-400 font-bold font-mono text-[10px]">Pode pular dias no período</span>
                   </label>
                   {renderCalendar()}
                 </div>
@@ -3006,8 +3047,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         onClick={() => {
                           if (isSelected) {
                             setQualSelectedWeaponTypes(prev => prev.filter(t => t !== wt.name));
+                            setQualShotsPerWeaponType(prev => {
+                              const next = { ...prev };
+                              delete next[wt.name];
+                              return next;
+                            });
                           } else {
                             setQualSelectedWeaponTypes(prev => [...prev, wt.name]);
+                            setQualShotsPerWeaponType(prev => ({
+                              ...prev,
+                              [wt.name]: prev[wt.name] || 50
+                            }));
                           }
                         }}
                         className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition flex items-center space-x-1 ${
@@ -3073,39 +3123,62 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 })()}
               </div>
 
-              {/* Quantidade de Tiros por Aluno */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Quantidade de Tiros por Aluno
+              {/* Quantidade de Tiros por Aluno por Tipo de Arma */}
+              <div className="bg-slate-900/60 p-3.5 rounded-xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Quantidade de Tiros por Aluno por Tipo de Arma
                   </label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={qualShotsPerStudent}
-                    onChange={(e) => setQualShotsPerStudent(parseInt(e.target.value) || 0)}
-                    placeholder="Ex: 50, 100, 200"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                    required
-                  />
+                  {qualSelectedWeaponTypes.length > 0 && (
+                    <span className="text-xs text-amber-400 font-mono font-bold">
+                      Total: {qualSelectedWeaponTypes.reduce((acc, t) => acc + (Number(qualShotsPerWeaponType[t]) || 0), 0)} tiros/aluno
+                    </span>
+                  )}
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Departamento Responsável
-                  </label>
-                  <select
-                    value={qualDeptId}
-                    onChange={(e) => setQualDeptId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100"
-                  >
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
+                {qualSelectedWeaponTypes.length === 0 ? (
+                  <div className="text-xs text-slate-500 italic p-2.5 bg-slate-950 rounded-xl border border-slate-800/80">
+                    Selecione um ou mais tipos de arma acima para definir a quantidade de tiros de cada uma.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {qualSelectedWeaponTypes.map((wtName) => (
+                      <div key={wtName} className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1">
+                        <label className="block text-xs font-bold text-amber-300">
+                          Tiros de {wtName}
+                        </label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="number"
+                            min="0"
+                            value={qualShotsPerWeaponType[wtName] ?? 50}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              setQualShotsPerWeaponType(prev => ({ ...prev, [wtName]: val }));
+                            }}
+                            placeholder="Ex: 50"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                            required
+                          />
+                          <span className="text-xs text-slate-400 font-semibold">tiros</span>
+                        </div>
+                      </div>
                     ))}
-                  </select>
-                </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Departamento Responsável (Sempre ACADEPOL) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Departamento Responsável
+                </label>
+                <input
+                  type="text"
+                  value="ACADEMIA DE POLICIA"
+                  disabled
+                  className="w-full bg-slate-900/60 border border-slate-800 text-amber-400 font-bold rounded-xl px-3.5 py-2 text-xs cursor-not-allowed"
+                />
               </div>
 
               <div className="flex justify-end space-x-2 pt-2">

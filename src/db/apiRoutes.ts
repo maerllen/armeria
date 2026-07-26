@@ -622,7 +622,7 @@ apiRouter.delete('/available-weapon-types/:id', async (req: Request, res: Respon
 apiRouter.get('/courses', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT id, name, allowed_weapon_types, allowed_models, allowed_calibers, shots_per_student, department_id as departmentId, created_at as createdAt FROM courses');
+    const [rows]: any = await pool.query('SELECT * FROM courses');
     const mapped = (rows || []).map((c: any) => ({
       id: c.id,
       name: c.name,
@@ -630,8 +630,9 @@ apiRouter.get('/courses', async (req: Request, res: Response) => {
       allowedModels: typeof c.allowed_models === 'string' ? JSON.parse(c.allowed_models) : (c.allowed_models || []),
       allowedCalibers: typeof c.allowed_calibers === 'string' ? JSON.parse(c.allowed_calibers) : (c.allowed_calibers || []),
       shotsPerStudent: Number(c.shots_per_student) || 0,
-      departmentId: c.departmentId || '',
-      createdAt: c.createdAt
+      shotsPerWeaponType: typeof c.shots_per_weapon_type === 'string' ? JSON.parse(c.shots_per_weapon_type) : (c.shots_per_weapon_type || {}),
+      departmentId: c.department_id || c.departmentId || '',
+      createdAt: c.created_at || c.createdAt
     }));
     return res.json(mapped);
   } catch (err: any) {
@@ -641,7 +642,7 @@ apiRouter.get('/courses', async (req: Request, res: Response) => {
 
 apiRouter.post('/courses', async (req: Request, res: Response) => {
   try {
-    const { id, name, allowedWeaponTypes, allowedModels, allowedCalibers, shotsPerStudent, departmentId, actor } = req.body;
+    const { id, name, allowedWeaponTypes, allowedModels, allowedCalibers, shotsPerStudent, shotsPerWeaponType, departmentId, actor } = req.body;
     const pool = getPool();
     
     if (!name || !name.trim()) {
@@ -649,36 +650,55 @@ apiRouter.post('/courses', async (req: Request, res: Response) => {
     }
 
     const finalId = id || `course-${Date.now()}`;
-    const [existing]: any = await pool.query('SELECT id FROM courses WHERE id = ?', [finalId]);
 
-    if (existing && existing.length > 0) {
-      await pool.query(
-        'UPDATE courses SET name = ?, allowed_weapon_types = ?, allowed_models = ?, allowed_calibers = ?, shots_per_student = ?, department_id = ? WHERE id = ?',
-        [
-          name,
-          JSON.stringify(allowedWeaponTypes || []),
-          JSON.stringify(allowedModels || []),
-          JSON.stringify(allowedCalibers || []),
-          Number(shotsPerStudent) || 0,
-          departmentId || null,
-          finalId
-        ]
-      );
-      await insertAuditLog('Cursos', 'Editar', `Atualizado curso: ${name}`, actor, req.ip);
-    } else {
-      await pool.query(
-        'INSERT INTO courses (id, name, allowed_weapon_types, allowed_models, allowed_calibers, shots_per_student, department_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())',
-        [
-          finalId,
-          name,
-          JSON.stringify(allowedWeaponTypes || []),
-          JSON.stringify(allowedModels || []),
-          JSON.stringify(allowedCalibers || []),
-          Number(shotsPerStudent) || 0,
-          departmentId || null
-        ]
-      );
-      await insertAuditLog('Cursos', 'Criar', `Criado curso: ${name}`, actor, req.ip);
+    const executeSave = async () => {
+      const [existing]: any = await pool.query('SELECT id FROM courses WHERE id = ?', [finalId]);
+
+      if (existing && existing.length > 0) {
+        await pool.query(
+          'UPDATE courses SET name = ?, allowed_weapon_types = ?, allowed_models = ?, allowed_calibers = ?, shots_per_student = ?, shots_per_weapon_type = ?, department_id = ? WHERE id = ?',
+          [
+            name,
+            JSON.stringify(allowedWeaponTypes || []),
+            JSON.stringify(allowedModels || []),
+            JSON.stringify(allowedCalibers || []),
+            Number(shotsPerStudent) || 0,
+            JSON.stringify(shotsPerWeaponType || {}),
+            departmentId || null,
+            finalId
+          ]
+        );
+        await insertAuditLog('Cursos', 'Editar', `Atualizado curso: ${name}`, actor, req.ip);
+      } else {
+        await pool.query(
+          'INSERT INTO courses (id, name, allowed_weapon_types, allowed_models, allowed_calibers, shots_per_student, shots_per_weapon_type, department_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+          [
+            finalId,
+            name,
+            JSON.stringify(allowedWeaponTypes || []),
+            JSON.stringify(allowedModels || []),
+            JSON.stringify(allowedCalibers || []),
+            Number(shotsPerStudent) || 0,
+            JSON.stringify(shotsPerWeaponType || {}),
+            departmentId || null
+          ]
+        );
+        await insertAuditLog('Cursos', 'Criar', `Criado curso: ${name}`, actor, req.ip);
+      }
+    };
+
+    try {
+      await executeSave();
+    } catch (saveErr: any) {
+      // If error is caused by missing column, dynamically add columns and retry
+      if (saveErr.message && (saveErr.message.includes('allowed_weapon_types') || saveErr.message.includes('shots_per_weapon_type') || saveErr.message.includes('Unknown column'))) {
+        try { await pool.query('ALTER TABLE courses ADD COLUMN allowed_weapon_types JSON DEFAULT NULL;'); } catch (e) {}
+        try { await pool.query('ALTER TABLE courses ADD COLUMN shots_per_weapon_type JSON DEFAULT NULL;'); } catch (e) {}
+        try { await pool.query('ALTER TABLE courses ADD COLUMN shots_per_student INT DEFAULT 0;'); } catch (e) {}
+        await executeSave(); // Retry after ALTER
+      } else {
+        throw saveErr;
+      }
     }
 
     return res.json({
@@ -688,6 +708,7 @@ apiRouter.post('/courses', async (req: Request, res: Response) => {
       allowedModels: allowedModels || [],
       allowedCalibers: allowedCalibers || [],
       shotsPerStudent: Number(shotsPerStudent) || 0,
+      shotsPerWeaponType: shotsPerWeaponType || {},
       departmentId,
       createdAt: new Date().toISOString()
     });

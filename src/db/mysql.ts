@@ -127,6 +127,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`allowed_calibers\` JSON NOT NULL,
         \`allowed_weapon_types\` JSON DEFAULT NULL,
         \`shots_per_student\` INT DEFAULT 0,
+        \`shots_per_weapon_type\` JSON DEFAULT NULL,
         \`department_id\` VARCHAR(64) DEFAULT NULL,
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
@@ -488,6 +489,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     } catch (e) {}
     try {
       await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`shots_per_student\` INT DEFAULT 0;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`shots_per_weapon_type\` JSON DEFAULT NULL;`);
     } catch (e) {}
 
     // Seed ACADEMIA DE POLICIA & MEAF unit
