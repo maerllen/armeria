@@ -981,15 +981,49 @@ export const UserModule: React.FC<UserModuleProps> = ({
                 <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Novo Curso</h4>
                 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-400 mb-1">Nome do Curso</label>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">Nome do Curso (Cursos de Habilitação)</label>
                   <input
                     type="text"
+                    list="userCoursesDatalist"
                     value={newCourseName}
-                    onChange={(e) => setNewCourseName(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setNewCourseName(val);
+                      const matched = courses.find(c => c.name.toLowerCase() === val.trim().toLowerCase());
+                      if (matched) {
+                        if (matched.allowedModels && matched.allowedModels.length > 0) {
+                          setSelectedModels(matched.allowedModels);
+                        }
+                        if (matched.allowedCalibers && matched.allowedCalibers.length > 0) {
+                          setSelectedCalibers(matched.allowedCalibers);
+                        }
+                      }
+                    }}
                     placeholder="Ex: Operador de fuzil"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100"
                     required
                   />
+                  <datalist id="userCoursesDatalist">
+                    {courses.map(c => (
+                      <option key={c.id} value={c.name} />
+                    ))}
+                  </datalist>
+
+                  {(() => {
+                    const matched = courses.find(c => c.name.toLowerCase() === newCourseName.trim().toLowerCase());
+                    if (!matched) return null;
+                    return (
+                      <div className="bg-amber-950/40 border border-amber-500/40 p-2.5 rounded-xl text-xs space-y-1 mt-2">
+                        <div className="font-bold text-amber-400">Dados Herdados do Curso de Habilitação</div>
+                        <div className="text-slate-300">
+                          <strong>Tipo/Modelos:</strong> {matched.allowedModels?.join(', ') || 'N/A'}
+                        </div>
+                        <div className="text-slate-300">
+                          <strong>Quantidade de Tiros:</strong> <span className="text-amber-400 font-bold">{matched.shotsPerStudent || 50} tiros/aluno</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* Select Models */}

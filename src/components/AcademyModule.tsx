@@ -1924,28 +1924,68 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                     required
                   >
-                    <option value="">-- Selecione o Curso da ACADEPOL --</option>
-                    {ACADEPOL_CATALOG.map((item) => (
-                      <option key={item.name} value={item.name}>
-                        {item.name}
-                      </option>
-                    ))}
+                    <option value="">-- Selecione o Curso (ACADEPOL ou Cursos de Habilitação) --</option>
+                    <optgroup label="Cursos da ACADEPOL / Catálogo">
+                      {ACADEPOL_CATALOG.map((item) => (
+                        <option key={item.name} value={item.name}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                    <optgroup label="Cursos de Habilitação Cadastrados">
+                      {qualCourses.map((qc) => (
+                        <option key={qc.id} value={qc.name}>
+                          {qc.name} (Habilitação)
+                        </option>
+                      ))}
+                    </optgroup>
                     {Array.from(new Set(academyCourses.map(ac => ac.name)))
-                      .filter(n => !ACADEPOL_CATALOG.some(cat => cat.name === n))
+                      .filter(n => !ACADEPOL_CATALOG.some(cat => cat.name === n) && !qualCourses.some(qc => qc.name === n))
                       .map(n => (
                         <option key={n} value={n}>{n}</option>
                       ))}
                   </select>
                 ) : (
-                  <input
-                    type="text"
-                    value={courseName}
-                    onChange={(e) => setCourseName(e.target.value)}
-                    placeholder="Ex: Curso de Formação de Policiais Civis"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                    required
-                  />
+                  <div>
+                    <input
+                      type="text"
+                      list="qualCoursesList"
+                      value={courseName}
+                      onChange={(e) => setCourseName(e.target.value)}
+                      placeholder="Ex: Operador de Fuzil / Curso de Formação de Policiais Civis"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                    <datalist id="qualCoursesList">
+                      {qualCourses.map((qc) => (
+                        <option key={qc.id} value={qc.name} />
+                      ))}
+                    </datalist>
+                  </div>
                 )}
+
+                {/* Exibição de Dados Herdados do Curso de Habilitação */}
+                {(() => {
+                  const matchedQual = qualCourses.find(c => c.name.toLowerCase() === courseName.trim().toLowerCase());
+                  if (!matchedQual) return null;
+                  const shotsCount = matchedQual.shotsPerStudent || 
+                    (matchedQual.shotsPerWeaponType ? Object.values(matchedQual.shotsPerWeaponType).reduce((a, b) => a + b, 0) : 50);
+                  return (
+                    <div className="bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl space-y-1 text-xs mt-2.5">
+                      <div className="font-bold text-amber-400 flex items-center space-x-1.5">
+                        <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Curso de Habilitação Identificado — Dados Herdados:</span>
+                      </div>
+                      <div className="text-slate-300">
+                        <strong className="text-slate-100">Tipo de Arma:</strong> {matchedQual.allowedWeaponTypes?.join(', ') || 'N/A'}
+                      </div>
+                      <div className="text-slate-300">
+                        <strong className="text-slate-100">Quantidade de Tiros Herdada:</strong>{' '}
+                        <span className="text-amber-400 font-mono font-bold">{shotsCount} tiros por aluno</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {/* MÓDULO EM NUMERAÇÃO ROMANA (Para Formação) */}
@@ -1985,10 +2025,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 />
               </div>
 
-              {/* DEPARTAMENTO */}
+              {/* DEPARTAMENTO DO CURSO */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Departamento Responsável <span className="text-red-400">*</span>
+                  Departamento do curso <span className="text-red-400">*</span>
                 </label>
                 {courseType === 'Formação' ? (
                   <input
@@ -2484,10 +2524,53 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   required
                 >
                   <option value="">-- Selecione o Curso --</option>
-                  {academyCourses.map(c => (
-                    <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
-                  ))}
+                  <optgroup label="Cursos da ACADEPOL (Formação / Ensino Continuado)">
+                    {academyCourses.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Cursos de Habilitação Cadastrados">
+                    {qualCourses.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} (Habilitação)</option>
+                    ))}
+                  </optgroup>
                 </select>
+
+                {/* Exibição de Dados Herdados para a Turma */}
+                {(() => {
+                  const acadC = academyCourses.find(c => c.id === classCourseId);
+                  const qualC = qualCourses.find(c => c.id === classCourseId || c.name === acadC?.name);
+                  if (!acadC && !qualC) return null;
+
+                  const courseNameDisp = acadC?.name || qualC?.name || '';
+                  const weaponTypesDisp = qualC?.allowedWeaponTypes?.join(', ') || 'Armamento Padrão (Pistola/Fuzil)';
+                  const shotsDisp = qualC?.shotsPerStudent || 
+                    (qualC?.shotsPerWeaponType ? Object.values(qualC.shotsPerWeaponType).reduce((a, b) => a + b, 0) : 50);
+                  const deptDisp = acadC?.departmentName || departments.find(d => d.id === qualC?.departmentId)?.name || 'ACADEMIA DE POLICIA';
+
+                  return (
+                    <div className="bg-slate-950/80 p-3 rounded-xl border border-amber-500/30 text-xs space-y-1.5 mt-2">
+                      <div className="text-amber-400 font-sans font-bold flex items-center justify-between border-b border-slate-800 pb-1">
+                        <span>Dados Herdados do Curso de Habilitação</span>
+                        <span className="text-[10px] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
+                          {courseNameDisp}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between pt-0.5">
+                        <span className="text-slate-400 font-sans">Tipo de Arma:</span>
+                        <span className="text-slate-200 font-semibold">{weaponTypesDisp}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans">Quantidade de Tiros:</span>
+                        <span className="text-amber-400 font-bold font-mono">{shotsDisp} tiros por aluno</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-400 font-sans">Departamento do curso:</span>
+                        <span className="text-emerald-400 font-semibold">{deptDisp}</span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div>
@@ -3079,17 +3162,64 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               {/* Nome do Curso */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Nome do Curso (Livre)
+                  Nome do Curso (Buscar em Cursos de Habilitação)
                 </label>
                 <input
                   type="text"
+                  list="manageQualCoursesDatalist"
                   value={qualCourseName}
-                  onChange={(e) => setQualCourseName(e.target.value)}
-                  placeholder="Ex: Habilitação em Fuzil 5.56mm e Pistola 9mm"
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setQualCourseName(val);
+                    const matched = qualCourses.find(c => c.name.toLowerCase() === val.trim().toLowerCase());
+                    if (matched) {
+                      if (matched.allowedWeaponTypes && matched.allowedWeaponTypes.length > 0) {
+                        setQualSelectedWeaponTypes(matched.allowedWeaponTypes);
+                      }
+                      if (matched.allowedModels && matched.allowedModels.length > 0) {
+                        setQualSelectedModels(matched.allowedModels);
+                      }
+                      if (matched.shotsPerWeaponType && Object.keys(matched.shotsPerWeaponType).length > 0) {
+                        setQualShotsPerWeaponType(matched.shotsPerWeaponType);
+                      } else if (matched.shotsPerStudent) {
+                        const defaultWT = matched.allowedWeaponTypes?.[0] || 'Fuzil';
+                        setQualShotsPerWeaponType({ [defaultWT]: matched.shotsPerStudent });
+                      }
+                    }
+                  }}
+                  placeholder="Ex: Operador de Fuzil / Habilitação em Fuzil e Pistola"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
                   required
                 />
+                <datalist id="manageQualCoursesDatalist">
+                  {qualCourses.map((qc) => (
+                    <option key={qc.id} value={qc.name} />
+                  ))}
+                </datalist>
               </div>
+
+              {/* Informações Herdadas */}
+              {(() => {
+                const matched = qualCourses.find(c => c.name.toLowerCase() === qualCourseName.trim().toLowerCase());
+                if (!matched) return null;
+                const totalShots = matched.shotsPerStudent || 
+                  (matched.shotsPerWeaponType ? Object.values(matched.shotsPerWeaponType).reduce((a, b) => a + b, 0) : 50);
+                return (
+                  <div className="bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl text-xs space-y-1">
+                    <div className="font-bold text-amber-400 flex items-center space-x-1.5">
+                      <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span>Dados do Curso Cadastrado Anteriores Herdados:</span>
+                    </div>
+                    <div className="text-slate-300">
+                      <strong className="text-slate-100">Tipo de Arma:</strong> {matched.allowedWeaponTypes?.join(', ') || 'N/A'}
+                    </div>
+                    <div className="text-slate-300">
+                      <strong className="text-slate-100">Quantidade de Tiros Herdada:</strong>{' '}
+                      <span className="text-amber-400 font-mono font-bold">{totalShots} tiros por aluno</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Select List: Tipo de Arma (Pode selecionar mais de uma) */}
               <div>
@@ -3227,10 +3357,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 )}
               </div>
 
-              {/* Departamento Responsável (Sempre ACADEPOL) */}
+              {/* Departamento do curso */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Departamento Responsável
+                  Departamento do curso
                 </label>
                 <input
                   type="text"
