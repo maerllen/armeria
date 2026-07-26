@@ -236,11 +236,9 @@ export interface AcademyCourse {
   name: string;
   type: AcademyCourseType;
   career?: AcademyCareer;
-  code?: string;
-  startDate?: string;
-  moduleNumber?: number;
-  lessonCount?: number;
-  lessonsData?: AcademyLessonPlan[];
+  code: string;
+  dates?: string[];
+  departmentName?: string;
   departmentId?: string;
   unitId?: string;
   createdAt: string;

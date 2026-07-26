@@ -110,31 +110,54 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [courseName, setCourseName] = useState('');
   const [courseType, setCourseType] = useState<'Formação' | 'Ensino Continuado'>('Formação');
   const [courseCode, setCourseCode] = useState('');
+  const [courseDepartment, setCourseDepartment] = useState('');
+  const [courseDates, setCourseDates] = useState<string[]>([]);
+  const [calendarDate, setCalendarDate] = useState<Date>(new Date());
 
-  const handleOpenCourseModal = (course?: AcademyCourse) => {
-    if (course) {
-      setEditingCourse(course);
-      setCourseName(course.name);
-      setCourseType(course.type);
-      setCourseCode(course.code || '');
+  const handleOpenCourseModal = (param?: 'Formação' | 'Ensino Continuado' | AcademyCourse) => {
+    if (typeof param === 'object' && param !== null) {
+      setEditingCourse(param);
+      setCourseName(param.name);
+      setCourseType(param.type);
+      setCourseCode(param.code || '');
+      setCourseDepartment(param.departmentName || '');
+      setCourseDates(param.dates || []);
     } else {
+      const selectedType = param || 'Formação';
       setEditingCourse(null);
       setCourseName('');
-      setCourseType('Formação');
+      setCourseType(selectedType);
       setCourseCode('');
+      setCourseDepartment('');
+      setCourseDates([]);
     }
+    setCalendarDate(new Date());
     setShowCourseModal(true);
   };
 
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!courseName.trim()) return;
+    if (!courseName.trim()) {
+      alert('Informe o nome do curso.');
+      return;
+    }
+    if (!courseCode.trim()) {
+      alert('Informe o código do curso (ex: CFTP-2026).');
+      return;
+    }
+    if (courseType === 'Ensino Continuado' && courseDates.length === 0) {
+      alert('Selecione ao menos um dia no calendário para o Curso de Ensino Continuado.');
+      return;
+    }
+
     try {
       const res = await storage.saveAcademyCourse({
         id: editingCourse?.id,
         name: courseName.trim(),
         type: courseType,
-        code: courseCode.trim()
+        code: courseCode.trim(),
+        departmentName: courseType === 'Ensino Continuado' ? courseDepartment.trim() : undefined,
+        dates: courseType === 'Ensino Continuado' ? courseDates : []
       });
       if (!res.success) throw new Error(res.error);
       setSuccessMsg('Curso salvo com sucesso!');
@@ -159,6 +182,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [newWeaponId, setNewWeaponId] = useState('');
   const [replaceReason, setReplaceReason] = useState('');
   const [replaceTeacherName, setReplaceTeacherName] = useState('');
+  const [replaceResponsibleName, setReplaceResponsibleName] = useState('');
 
   const handleOpenBoxModal = (box?: WeaponBox) => {
     if (box) {
@@ -200,6 +224,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setNewWeaponId('');
     setReplaceReason('');
     setReplaceTeacherName('');
+    setReplaceResponsibleName(currentUser.name || '');
     setShowReplaceModal(true);
   };
 
@@ -212,8 +237,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
     const oldW = weapons.find(w => w.id === oldWeaponId);
     const newW = weapons.find(w => w.id === newWeaponId);
-    const oldDesc = oldW ? `${oldW.type} ${oldW.brand} ${oldW.model} (${oldW.serialNumber})` : oldWeaponId;
-    const newDesc = newW ? `${newW.type} ${newW.brand} ${newW.model} (${newW.serialNumber})` : newWeaponId;
+    
+    const oldBrand = oldW?.brand || oldW?.manufacturer || 'N/A';
+    const oldModel = oldW?.model || 'N/A';
+    const oldSerial = oldW?.serialNumber || 'N/A';
+    const oldDesc = `MARCA: ${oldBrand} | MODELO: ${oldModel} | N/S: ${oldSerial}`;
+
+    const newBrand = newW?.brand || newW?.manufacturer || 'N/A';
+    const newModel = newW?.model || 'N/A';
+    const newSerial = newW?.serialNumber || 'N/A';
+    const newDesc = `MARCA: ${newBrand} | MODELO: ${newModel} | N/S: ${newSerial}`;
+
+    const responsibleName = replaceResponsibleName.trim() || currentUser.name;
 
     try {
       const res = await storage.replaceWeaponInBox(
@@ -223,7 +258,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         newWeaponId,
         newDesc,
         replaceReason.trim(),
-        replaceTeacherName.trim()
+        replaceTeacherName.trim(),
+        responsibleName
       );
       if (!res.success) throw new Error(res.error);
       setSuccessMsg('Arma substituída na caixa com sucesso e histórico gravado.');
@@ -241,6 +277,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [classCareer, setClassCareer] = useState('Delegado');
   const [classTurmaNum, setClassTurmaNum] = useState('01');
   const [classTeacherId, setClassTeacherId] = useState('');
+  const [classTeacherName, setClassTeacherName] = useState('');
   const [classSubject, setClassSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [classStudentCount, setClassStudentCount] = useState<number>(20);
 
@@ -261,20 +298,22 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassCareer(cls.career);
       const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
       setClassTurmaNum(digits ? digits.padStart(2, '0').slice(-2) : '01');
-      setClassTeacherId(cls.teacherUserId);
+      setClassTeacherId(cls.teacherUserId || '');
+      setClassTeacherName(cls.teacherName || '');
       setClassSubject(cls.subject);
       setClassStudentCount(cls.studentCount);
     } else {
       const initialSubject: 'MEAF' | 'TAP' | 'DP' = 'MEAF';
       const initialMatching = teachers.filter(t => t.teacherSubject === initialSubject);
-      const defaultTeacherId = (initialMatching[0] || teachers[0])?.id || '';
+      const defaultTeacher = initialMatching[0] || teachers[0];
 
       setEditingClass(null);
       setClassCourseId(academyCourses[0]?.id || '');
       setClassCareer('Delegado');
       setClassTurmaNum('01');
       setClassSubject(initialSubject);
-      setClassTeacherId(defaultTeacherId);
+      setClassTeacherId(defaultTeacher?.id || '');
+      setClassTeacherName(defaultTeacher?.name || '');
       setClassStudentCount(20);
     }
     setShowClassModal(true);
@@ -282,13 +321,31 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!classCourseId) return;
+    if (!classCourseId) {
+      alert('Selecione um curso.');
+      return;
+    }
     const selectedCourse = academyCourses.find(c => c.id === classCourseId);
     const selectedTeacher = teachers.find(t => t.id === classTeacherId);
 
     const abbr = getCareerAbbr(classCareer);
     const formattedNum = (classTurmaNum.trim() || '01').padStart(2, '0').slice(-2);
     const fullName = `${abbr}-${formattedNum}`;
+
+    // Check duplicate turma in same course & career
+    const isDuplicate = courseClasses.some(c =>
+      c.id !== editingClass?.id &&
+      c.courseId === classCourseId &&
+      c.career === classCareer &&
+      (c.turmaNumber === formattedNum || (c.code && c.code.endsWith(`-${formattedNum}`)))
+    );
+
+    if (isDuplicate) {
+      alert(`Não é possível salvar duas turmas com o mesmo número (${formattedNum}) para a carreira "${classCareer}" neste mesmo curso.`);
+      return;
+    }
+
+    const finalTeacherName = classTeacherName.trim() || selectedTeacher?.name || 'Professor';
 
     try {
       const res = await storage.saveCourseClass({
@@ -301,9 +358,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         code: fullName,
         name: fullName,
         teacherUserId: classTeacherId,
-        teacherName: selectedTeacher?.name || 'Professor',
+        teacherName: finalTeacherName,
         subject: classSubject,
-        studentCount: Number(classStudentCount) || 0
+        studentCount: Number(classStudentCount) || 1,
+        departmentId: currentUser.departmentId
       });
       if (!res.success) throw new Error(res.error);
       setSuccessMsg(`Turma ${fullName} salva com sucesso!`);
@@ -567,6 +625,107 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     } finally {
       setDeleteTarget(null);
     }
+  };
+
+  const renderCalendar = () => {
+    const year = calendarDate.getFullYear();
+    const month = calendarDate.getMonth();
+
+    const firstDay = new Date(year, month, 1).getDay();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+    const monthNames = [
+      'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+      'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+    ];
+
+    const prevMonth = () => setCalendarDate(new Date(year, month - 1, 1));
+    const nextMonth = () => setCalendarDate(new Date(year, month + 1, 1));
+
+    const toggleDate = (dateStr: string) => {
+      setCourseDates(prev =>
+        prev.includes(dateStr) ? prev.filter(d => d !== dateStr) : [...prev, dateStr].sort()
+      );
+    };
+
+    const dayCells = [];
+    for (let i = 0; i < firstDay; i++) {
+      dayCells.push(<div key={`empty-${i}`} className="p-2" />);
+    }
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const monthStr = String(month + 1).padStart(2, '0');
+      const dayStr = String(d).padStart(2, '0');
+      const fullDate = `${year}-${monthStr}-${dayStr}`;
+      const isSelected = courseDates.includes(fullDate);
+
+      dayCells.push(
+        <button
+          key={fullDate}
+          type="button"
+          onClick={() => toggleDate(fullDate)}
+          className={`p-2 text-xs font-semibold rounded-xl transition-all flex flex-col items-center justify-center border ${
+            isSelected
+              ? 'bg-amber-500 text-slate-950 border-amber-400 font-extrabold shadow-md scale-105'
+              : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800'
+          }`}
+        >
+          <span>{d}</span>
+          {isSelected && <span className="text-[9px] font-bold">✓</span>}
+        </button>
+      );
+    }
+
+    return (
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+          <button
+            type="button"
+            onClick={prevMonth}
+            className="px-2.5 py-1 text-slate-300 hover:text-amber-400 bg-slate-900 rounded-lg border border-slate-800 text-xs font-bold"
+          >
+            &larr; Mês Anterior
+          </button>
+          <span className="font-bold text-amber-400 text-sm font-mono uppercase tracking-wider">
+            {monthNames[month]} / {year}
+          </span>
+          <button
+            type="button"
+            onClick={nextMonth}
+            className="px-2.5 py-1 text-slate-300 hover:text-amber-400 bg-slate-900 rounded-lg border border-slate-800 text-xs font-bold"
+          >
+            Próximo Mês &rarr;
+          </button>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+          <span>Dom</span>
+          <span>Seg</span>
+          <span>Ter</span>
+          <span>Qua</span>
+          <span>Qui</span>
+          <span>Sex</span>
+          <span>Sáb</span>
+        </div>
+
+        <div className="grid grid-cols-7 gap-1">{dayCells}</div>
+
+        <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-[11px]">
+          <span className="text-slate-400 font-mono">
+            Datas Selecionadas: <strong className="text-amber-400 font-extrabold">{courseDates.length} dia(s)</strong>
+          </span>
+          {courseDates.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setCourseDates([])}
+              className="text-red-400 hover:underline text-[10px] font-semibold"
+            >
+              Limpar Seleção
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -1112,20 +1271,29 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'cursos' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3">
             <div>
               <h2 className="text-sm font-bold text-slate-100">Catálogo de Cursos da Academia</h2>
               <p className="text-xs text-slate-400">
                 Divisão entre Cursos de Formação e Ensino Continuado da Polícia Civil
               </p>
             </div>
-            <button
-              onClick={() => handleOpenCourseModal()}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Curso</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => handleOpenCourseModal('Formação')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Curso Formação</span>
+              </button>
+              <button
+                onClick={() => handleOpenCourseModal('Ensino Continuado')}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Curso Ensino Continuado</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
@@ -1136,13 +1304,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     <th className="py-3 px-4">Nome do Curso</th>
                     <th className="py-3 px-4">Tipo</th>
                     <th className="py-3 px-4">Código</th>
+                    <th className="py-3 px-4">Departamento / Datas do Curso</th>
                     <th className="py-3 px-4 text-right">Ações</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {academyCourses.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-slate-500 italic">
+                      <td colSpan={5} className="py-8 text-center text-slate-500 italic">
                         Nenhum curso cadastrado no catálogo.
                       </td>
                     </tr>
@@ -1161,7 +1330,27 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             {crs.type}
                           </span>
                         </td>
-                        <td className="py-3 px-4 font-mono text-slate-400">{crs.code || 'N/A'}</td>
+                        <td className="py-3 px-4 font-mono font-bold text-amber-400">{crs.code || 'N/A'}</td>
+                        <td className="py-3 px-4 text-slate-300">
+                          {crs.type === 'Ensino Continuado' ? (
+                            <div className="space-y-1">
+                              <div className="font-semibold text-slate-200">Dept: {crs.departmentName || 'N/I'}</div>
+                              {crs.dates && crs.dates.length > 0 ? (
+                                <div className="flex flex-wrap gap-1">
+                                  {crs.dates.map(d => (
+                                    <span key={d} className="bg-slate-950 text-amber-300 border border-slate-800 text-[10px] px-1.5 py-0.5 rounded font-mono">
+                                      {d.split('-').reverse().join('/')}
+                                    </span>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic text-[10px]">Sem datas selecionadas</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-slate-500 italic">-</span>
+                          )}
+                        </td>
                         <td className="py-3 px-4 text-right">
                           <div className="flex items-center justify-end space-x-2">
                             <button
@@ -1194,48 +1383,80 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* 1. Modal Course Edit/Add */}
       {showCourseModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2">
-              {editingCourse ? 'Editar Curso da Academia' : 'Novo Curso da Academia'}
-            </h3>
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
+                <GraduationCap className="w-5 h-5 text-amber-400" />
+                <span>
+                  {editingCourse
+                    ? `Editar Curso (${courseType})`
+                    : `Novo Curso de ${courseType}`}
+                </span>
+              </h3>
+              <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border uppercase ${
+                courseType === 'Formação'
+                  ? 'bg-amber-950 text-amber-300 border-amber-800'
+                  : 'bg-blue-950 text-blue-300 border-blue-800'
+              }`}>
+                {courseType}
+              </span>
+            </div>
+
             <form onSubmit={handleSaveCourse} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome do Curso</label>
+                <label className="block text-slate-300 font-semibold mb-1">Nome do Curso <span className="text-red-400">*</span></label>
                 <input
                   type="text"
                   value={courseName}
                   onChange={(e) => setCourseName(e.target.value)}
-                  placeholder="Ex: Curso de Formação de Investigadores"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  placeholder={courseType === 'Formação' ? "Ex: Curso de Formação de Investigadores" : "Ex: Táticas Especiais e Ações Táticas"}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Tipo de Curso</label>
-                <select
-                  value={courseType}
-                  onChange={(e) => setCourseType(e.target.value as 'Formação' | 'Ensino Continuado')}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
-                >
-                  <option value="Formação">Formação</option>
-                  <option value="Ensino Continuado">Ensino Continuado</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Código (Opcional)</label>
+                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                  <span>Código do Curso <span className="text-red-400">*</span></span>
+                  <span className="text-[10px] text-amber-400 font-mono font-bold">Ex: CFTP-2026</span>
+                </label>
                 <input
                   type="text"
                   value={courseCode}
-                  onChange={(e) => setCourseCode(e.target.value)}
-                  placeholder="Ex: CFI-2025"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
+                  placeholder="Ex: CFTP-2026 ou CC-2026"
+                  className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2 text-amber-400 font-mono font-extrabold tracking-wider focus:border-amber-400 focus:outline-none"
+                  required
                 />
+                <p className="text-[10px] text-slate-400 mt-1">Campo obrigatório. Abreviação identificadora do curso.</p>
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              {courseType === 'Ensino Continuado' && (
+                <>
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Departamento onde ocorrerá o Curso <span className="text-red-400">*</span></label>
+                    <input
+                      type="text"
+                      value={courseDepartment}
+                      onChange={(e) => setCourseDepartment(e.target.value)}
+                      placeholder="Ex: DEIC / ACADEPOL / UNIDADE CENTRAL"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                      <span>Calendário Dinâmico de Dias de Curso <span className="text-red-400">*</span></span>
+                      <span className="text-amber-400 font-bold font-mono text-[10px]">Clique para selecionar</span>
+                    </label>
+                    {renderCalendar()}
+                  </div>
+                </>
+              )}
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowCourseModal(false)}
@@ -1245,9 +1466,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl"
+                  className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl hover:bg-amber-400 transition"
                 >
-                  Salvar
+                  Salvar Curso
                 </button>
               </div>
             </form>
@@ -1339,7 +1560,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       {/* 3. Modal Replace Weapon in Box */}
       {showReplaceModal && replaceBox && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center space-x-2 text-amber-400">
               <RefreshCw className="w-5 h-5" />
               <span>Substituição de Arma na Caixa {replaceBox.name}</span>
@@ -1350,14 +1571,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <select
                   value={oldWeaponId}
                   onChange={(e) => setOldWeaponId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono text-xs"
                   required
                 >
                   {replaceBox.weaponIds.map(wId => {
                     const w = weapons.find(item => item.id === wId);
+                    const brand = w?.brand || w?.manufacturer || 'N/A';
+                    const model = w?.model || 'N/A';
+                    const serial = w?.serialNumber || 'N/A';
                     return (
                       <option key={wId} value={wId}>
-                        {w ? `${w.type} ${w.model} (Série: ${w.serialNumber})` : wId}
+                        MARCA: {brand} | MODELO: {model} | N/S: {serial}
                       </option>
                     );
                   })}
@@ -1369,20 +1593,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <select
                   value={newWeaponId}
                   onChange={(e) => setNewWeaponId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono text-xs"
                   required
                 >
                   <option value="">-- Selecione uma arma disponível --</option>
-                  {availableWeapons.map(w => (
-                    <option key={w.id} value={w.id}>
-                      {w.type} {w.brand} {w.model} (Série: {w.serialNumber})
-                    </option>
-                  ))}
+                  {availableWeapons.map(w => {
+                    const brand = w.brand || w.manufacturer || 'N/A';
+                    return (
+                      <option key={w.id} value={w.id}>
+                        MARCA: {brand} | MODELO: {w.model} | N/S: {w.serialNumber}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Motivo da Substituição</label>
+                <label className="block text-slate-300 font-semibold mb-1">Motivo da Substituição <span className="text-red-400">*</span></label>
                 <input
                   type="text"
                   value={replaceReason}
@@ -1394,7 +1621,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Professor Responsável (Opcional)</label>
+                <label className="block text-slate-300 font-semibold mb-1">Nome do Responsável pela Troca <span className="text-red-400">*</span></label>
+                <input
+                  type="text"
+                  value={replaceResponsibleName}
+                  onChange={(e) => setReplaceResponsibleName(e.target.value)}
+                  placeholder="Ex: Nome do Armeiro / Policial Responsável"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  required
+                />
+                <p className="text-[10px] text-slate-400 mt-1">Pode ser qualquer usuário responsável pela troca da arma na caixa.</p>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Professor da Aula (Opcional)</label>
                 <input
                   type="text"
                   value={replaceTeacherName}
@@ -1670,25 +1910,31 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                  <span>Número / Identificador da Turma (2 Dígitos)</span>
+                  <span>Número Identificador da Turma (2 Dígitos)</span>
                   <span className="text-amber-400 font-bold text-xs bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
-                    Identificador: {getCareerAbbr(classCareer)} {classTurmaNum.padStart(2, '0').slice(-2)}
+                    Código Final: {getCareerAbbr(classCareer)} {classTurmaNum.padStart(2, '0').slice(-2)}
                   </span>
                 </label>
-                <input
-                  type="text"
-                  maxLength={2}
-                  value={classTurmaNum}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 2);
-                    setClassTurmaNum(val);
-                  }}
-                  placeholder="Ex: 01"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono text-sm tracking-wider focus:border-amber-500 focus:outline-none"
-                  required
-                />
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Ao selecionar a carreira, a sigla ({getCareerAbbr(classCareer)}) será combinada com o número de dois dígitos (Ex: DL 01, IP 02).
+                <div className="flex items-center space-x-3">
+                  <span className="text-sm font-bold text-slate-300 font-mono bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
+                    {getCareerAbbr(classCareer)}
+                  </span>
+                  <input
+                    type="text"
+                    maxLength={2}
+                    value={classTurmaNum}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 2);
+                      setClassTurmaNum(val);
+                    }}
+                    placeholder="01"
+                    className="w-24 bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2 text-amber-400 font-mono font-extrabold text-base text-center tracking-widest focus:border-amber-400 focus:outline-none"
+                    required
+                  />
+                  <span className="text-xs text-slate-400">Ex: 01, 02, 03</span>
+                </div>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Não é possível salvar duas turmas com o mesmo número na mesma carreira e curso.
                 </p>
               </div>
 
@@ -1704,9 +1950,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     if (matching.length > 0) {
                       if (!matching.some(t => t.id === classTeacherId)) {
                         setClassTeacherId(matching[0].id);
+                        setClassTeacherName(matching[0].name);
                       }
                     } else {
                       setClassTeacherId('');
+                      setClassTeacherName('');
                     }
                   }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
@@ -1717,7 +1965,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </select>
               </div>
 
-              {/* 2. Professor Titular (Exibe Apenas Professores da Matéria) */}
+              {/* 2. Professor Titular */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
                   <span>Professor Titular</span>
@@ -1727,7 +1975,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </label>
                 <select
                   value={classTeacherId}
-                  onChange={(e) => setClassTeacherId(e.target.value)}
+                  onChange={(e) => {
+                    const selectedId = e.target.value;
+                    setClassTeacherId(selectedId);
+                    const found = teachers.find(t => t.id === selectedId);
+                    if (found) {
+                      setClassTeacherName(found.name);
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   required
                 >
@@ -1741,11 +1996,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </option>
                   ))}
                 </select>
-                {teachers.filter(t => t.teacherSubject === classSubject).length === 0 && (
-                  <p className="text-[11px] text-amber-400 mt-1">
-                    Nenhum professor cadastrado para {classSubject}. Exibindo todos os professores disponíveis.
-                  </p>
-                )}
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Nome do Professor (Salvo como Texto)</label>
+                <input
+                  type="text"
+                  value={classTeacherName}
+                  onChange={(e) => setClassTeacherName(e.target.value)}
+                  placeholder="Nome do Professor"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
+                  required
+                />
               </div>
 
               <div>

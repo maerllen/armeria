@@ -901,7 +901,8 @@ class StorageService {
     newWeaponId: string,
     newWeaponDesc: string,
     reason: string,
-    teacherName?: string
+    teacherName?: string,
+    responsibleUserName?: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/weapon-boxes/${boxId}/replace-weapon`, {
@@ -914,6 +915,7 @@ class StorageService {
           newWeaponDesc,
           reason,
           teacherName,
+          responsibleUserName,
           actor: this.state.currentUser
         })
       });

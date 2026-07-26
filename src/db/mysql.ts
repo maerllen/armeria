@@ -132,6 +132,22 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'courses' verificada/criada.");
 
+    // Create user_courses
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`user_courses\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`user_id\` VARCHAR(64) NOT NULL,
+        \`course_id\` VARCHAR(64) NOT NULL,
+        \`completion_date\` DATE DEFAULT NULL,
+        \`expiration_date\` DATE DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_uc_user\` (\`user_id\`),
+        KEY \`idx_uc_course\` (\`course_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'user_courses' verificada/criada.");
+
     // Create vault_spaces
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`vault_spaces\` (
@@ -306,6 +322,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`name\` VARCHAR(255) NOT NULL,
         \`type\` ENUM('Formação', 'Ensino Continuado') NOT NULL,
         \`career\` VARCHAR(64) DEFAULT NULL,
+        \`code\` VARCHAR(64) DEFAULT NULL,
+        \`dates\` JSON DEFAULT NULL,
+        \`department_name\` VARCHAR(255) DEFAULT NULL,
         \`start_date\` DATE DEFAULT NULL,
         \`module_number\` INT DEFAULT NULL,
         \`lesson_count\` INT NOT NULL DEFAULT 1,
@@ -317,6 +336,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'academy_courses' verificada/criada.");
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `code` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `dates` JSON DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
 
     // Weapon Boxes Table
     await connection.query(`
@@ -373,6 +395,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'course_classes' verificada/criada.");
+    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `teacher_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
 
     // Lesson Plans Table
     await connection.query(`
@@ -433,6 +456,18 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     } catch (e) {}
     try {
       await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`lesson_plan_name\` VARCHAR(255) DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`class_id\` VARCHAR(64) DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`turma_code\` VARCHAR(64) DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`teacher_name\` VARCHAR(255) DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`issued_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
     } catch (e) {}
 
     // Seed ACADEMIA DE POLICIA & MEAF unit
