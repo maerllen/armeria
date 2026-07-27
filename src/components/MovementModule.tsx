@@ -3,6 +3,7 @@ import { User, Movement, Weapon, VaultSpace, Course } from '../types';
 import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
 import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2, FileText, Printer } from 'lucide-react';
+import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { MovementReceiptModal } from './MovementReceiptModal';
 
@@ -191,6 +192,104 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
     }
   };
 
+  // Direct Print PDF function for Movement Receipt
+  const handleDirectPrintMovement = (mov: Movement) => {
+    const withdrawalVault = vaultSpaces.find(v => v.id === mov.withdrawalVaultSpaceId);
+    const returnVault = vaultSpaces.find(v => v.id === mov.returnVaultSpaceId);
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Recibo de Cautela - ${mov.weaponSerialNumber} - PCMG</title>
+        <style>
+          @page { size: A4; margin: 15mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
+          .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
+          .subtitle { font-size: 11px; font-weight: 700; color: #374151; margin-top: 2px; }
+          .reg-id { font-family: monospace; font-size: 12px; font-weight: bold; text-align: right; }
+          .status-bar { background: #f3f4f6; border: 1px solid #d1d5db; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; font-family: monospace; font-size: 11px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+          .box { border: 1px solid #9ca3af; border-radius: 8px; padding: 12px; font-family: monospace; }
+          .box-title { font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111827; letter-spacing: 0.5px; }
+          .field { margin-bottom: 6px; }
+          .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
+          .val { font-size: 12px; font-weight: bold; color: #000; }
+          .signatures { margin-top: 45px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
+          .sig-line { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; }
+          .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
+            <div class="subtitle">SISTEMA DE ARMERIA • TERMO DE MOVIMENTAÇÃO DE CARGA</div>
+          </div>
+          <div class="reg-id">
+            Nº REGISTRO<br>
+            <span style="font-size: 15px; font-weight: 900;">#${mov.id}</span>
+          </div>
+        </div>
+
+        <div class="status-bar">
+          <div><strong>STATUS:</strong> ${(mov.status || 'FINALIZADO').toUpperCase()}</div>
+          <div><strong>Data:</strong> ${formatTimestamp(mov.createdAt)}</div>
+        </div>
+
+        <div class="box" style="margin-bottom: 14px;">
+          <div class="box-title">1. Dados do Policial (Cautelante)</div>
+          <div class="grid" style="margin-bottom: 0;">
+            <div class="field"><span class="label">Nome Completo:</span> <span class="val">${mov.requesterName}</span></div>
+            <div class="field"><span class="label">MASP:</span> <span class="val">${mov.requesterMasp}</span></div>
+          </div>
+        </div>
+
+        <div class="box" style="margin-bottom: 14px;">
+          <div class="box-title">2. Especificação do Armamento e Munição</div>
+          <div class="grid" style="margin-bottom: 0;">
+            <div class="field"><span class="label">Tipo / Modelo:</span> <span class="val">${mov.weaponType} ${mov.weaponModel}</span></div>
+            <div class="field"><span class="label">Nº de Série:</span> <span class="val">${mov.weaponSerialNumber}</span></div>
+            <div class="field"><span class="label">Calibre:</span> <span class="val">${mov.caliber}</span></div>
+            <div class="field"><span class="label">Munição Cautelada:</span> <span class="val">${mov.ammunitionCount} un</span></div>
+            <div class="field"><span class="label">Carregadores:</span> <span class="val">${mov.magazineCount} un</span></div>
+            <div class="field"><span class="label">Cofre Retirada:</span> <span class="val">${withdrawalVault?.code || 'Cofre Principal'}</span></div>
+            ${returnVault ? `<div class="field"><span class="label">Cofre Devolução:</span> <span class="val">${returnVault.code}</span></div>` : ''}
+          </div>
+        </div>
+
+        <div class="box" style="margin-bottom: 14px;">
+          <div class="box-title">3. Auditoria e Armeiros Responsáveis</div>
+          <div class="grid" style="margin-bottom: 0;">
+            <div class="field"><span class="label">Armeiro Aprovador:</span> <span class="val">${mov.approvedByUserName || 'Pendente'}</span></div>
+            <div class="field"><span class="label">Confirmado Por (Devolução):</span> <span class="val">${mov.returnConfirmedByUserName || 'Não Devolvido'}</span></div>
+          </div>
+          ${mov.divergenceJustification ? `<div class="field" style="margin-top: 6px;"><span class="label">Justificativa de Divergência:</span> <span class="val" style="font-weight: normal; color: #b91c1c;">${mov.divergenceJustification}</span></div>` : ''}
+        </div>
+
+        <div class="signatures">
+          <div class="sig-line">
+            ${mov.requesterName}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Policial Cautelante (MASP: ${mov.requesterMasp})</span>
+          </div>
+          <div class="sig-line">
+            ${mov.returnConfirmedByUserName || mov.approvedByUserName || 'Armeiro Responsável'}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro da Unidade</span>
+          </div>
+        </div>
+
+        <div class="footer">
+          Documento gerado eletronicamente pelo Sistema de Armeria da Polícia Civil em ${new Date().toLocaleString('pt-BR')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    printDocumentInPage(html);
+  };
+
   return (
     <div className="space-y-6">
       
@@ -355,7 +454,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
 
                           {/* Print Receipt Button */}
                           <button
-                            onClick={() => setReceiptTargetMov(m)}
+                            onClick={() => handleDirectPrintMovement(m)}
                             className="bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 font-bold text-[11px] px-2.5 py-1.5 rounded-lg border border-slate-700 flex items-center space-x-1 shadow transition"
                             title="Gerar/Imprimir Recibo da Movimentação"
                           >
