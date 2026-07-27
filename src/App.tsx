@@ -14,6 +14,7 @@ import { WeaponModule } from './components/WeaponModule';
 import { MovementModule } from './components/MovementModule';
 import { ReportModule } from './components/ReportModule';
 import { AcademyModule } from './components/AcademyModule';
+import { CourseManagementModule } from './components/CourseManagementModule';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -280,6 +281,17 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               departments={departments}
               units={units}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'gerencia-cursos' && (
+            <CourseManagementModule
+              currentUser={currentUser}
+              weapons={weapons}
+              departments={departments}
+              units={units}
+              calibers={calibers}
               onRefresh={refreshData}
             />
           )}

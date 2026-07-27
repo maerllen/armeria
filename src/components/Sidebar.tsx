@@ -81,8 +81,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'cursos',
-      label: 'Cursos',
+      label: 'Cursos & Aulas',
       icon: GraduationCap,
+      visible: canManageCourses
+    },
+    {
+      id: 'gerencia-cursos',
+      label: 'Gerência de Cursos',
+      icon: BookOpen,
       visible: canManageCourses
     },
     {

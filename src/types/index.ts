@@ -10,7 +10,8 @@ export type ModuleType =
   | 'movimentacoes' 
   | 'relatorio'
   | 'manual'
-  | 'cursos';
+  | 'cursos'
+  | 'gerencia-cursos';
 
 export type UserCargo = 
   | 'Delegado' 
