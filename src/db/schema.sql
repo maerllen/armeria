@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS `audit_logs` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2.14 Academia de Polícia: Cursos
+-- 2.14 Academia de Polícia: Cursos (Formação, Ensino Continuado, etc.)
 CREATE TABLE IF NOT EXISTS `academy_courses` (
     `id` VARCHAR(64) NOT NULL,
     `name` VARCHAR(255) NOT NULL,
@@ -245,7 +245,15 @@ CREATE TABLE IF NOT EXISTS `academy_courses` (
     `dates` JSON DEFAULT NULL,
     `department_name` VARCHAR(255) DEFAULT NULL,
     `start_date` DATE DEFAULT NULL,
+    `end_date` DATE DEFAULT NULL,
+    `module` VARCHAR(64) DEFAULT NULL,
     `module_number` INT DEFAULT NULL,
+    `teaching_department_name` VARCHAR(255) DEFAULT NULL,
+    `teaching_department_id` VARCHAR(64) DEFAULT NULL,
+    `location_department_name` VARCHAR(255) DEFAULT NULL,
+    `location_department_id` VARCHAR(64) DEFAULT NULL,
+    `duration_days` INT DEFAULT 1,
+    `subject` VARCHAR(100) DEFAULT NULL,
     `lesson_count` INT NOT NULL DEFAULT 1,
     `lessons_data` JSON NOT NULL,
     `department_id` VARCHAR(64) DEFAULT NULL,
@@ -340,6 +348,8 @@ CREATE TABLE IF NOT EXISTS `course_class_movements` (
     `ammo_used` INT DEFAULT 0,
     `ammo_returned` INT DEFAULT 0,
     `extra_magazines_count` INT DEFAULT 0,
+    `returned_materials` TEXT DEFAULT NULL,
+    `notes` TEXT DEFAULT NULL,
     `status` ENUM('Em Aula', 'Finalizada') NOT NULL DEFAULT 'Em Aula',
     `issued_by_user_name` VARCHAR(255) DEFAULT NULL,
     `returned_by_user_name` VARCHAR(255) DEFAULT NULL,
@@ -391,6 +401,30 @@ BEGIN
     IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='department_name') THEN
         ALTER TABLE `academy_courses` ADD COLUMN `department_name` VARCHAR(255) DEFAULT NULL;
     END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='end_date') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `end_date` DATE DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='module') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `module` VARCHAR(64) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='teaching_department_name') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_name` VARCHAR(255) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='teaching_department_id') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_id` VARCHAR(64) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='location_department_name') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `location_department_name` VARCHAR(255) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='location_department_id') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `location_department_id` VARCHAR(64) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='duration_days') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `duration_days` INT DEFAULT 1;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='academy_courses' AND COLUMN_NAME='subject') THEN
+        ALTER TABLE `academy_courses` ADD COLUMN `subject` VARCHAR(100) DEFAULT NULL;
+    END IF;
 
     -- course_classes
     IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='course_classes' AND COLUMN_NAME='teacher_name') THEN
@@ -408,6 +442,12 @@ BEGIN
     END IF;
     IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='course_class_movements' AND COLUMN_NAME='lesson_plan_name') THEN
         ALTER TABLE `course_class_movements` ADD COLUMN `lesson_plan_name` VARCHAR(255) DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='course_class_movements' AND COLUMN_NAME='returned_materials') THEN
+        ALTER TABLE `course_class_movements` ADD COLUMN `returned_materials` TEXT DEFAULT NULL;
+    END IF;
+    IF NOT EXISTS (SELECT * FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='course_class_movements' AND COLUMN_NAME='notes') THEN
+        ALTER TABLE `course_class_movements` ADD COLUMN `notes` TEXT DEFAULT NULL;
     END IF;
 
     -- ammo_movements

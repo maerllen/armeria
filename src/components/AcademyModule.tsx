@@ -1831,13 +1831,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         className="w-full bg-slate-950 border border-amber-500/50 text-amber-300 font-bold rounded-xl px-3.5 py-2 focus:border-amber-400 focus:outline-none"
                         required
                       >
-                        <option value="MEAF">MEAF (Manejo e Emprego de Armamento e Amassamento de Fogo)</option>
-                        <option value="TAP">TAP (Táticas e Armamento Policial)</option>
+                        <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                        <option value="TAP">TAP (Tecnicas de Ações Policiais)</option>
                         <option value="DP">DP (Defesa Pessoal)</option>
-                        <option value="MEAF / TAP">MEAF e TAP</option>
-                        <option value="MEAF / DP">MEAF e DP</option>
-                        <option value="TAP / DP">TAP e DP</option>
-                        <option value="MEAF / TAP / DP">MEAF, TAP e DP (Completo)</option>
                       </select>
                     </div>
                   </div>
