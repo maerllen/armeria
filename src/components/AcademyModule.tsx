@@ -36,8 +36,10 @@ import {
   FileText,
   ClipboardList,
   Layers,
-  Calendar
+  Calendar,
+  RotateCcw
 } from 'lucide-react';
+import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AcademyReceiptModal } from './AcademyReceiptModal';
 
@@ -966,17 +968,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   // Direct Print PDF function
   const handleDirectPrint = (mov: CourseMovement) => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert('Por favor, permita janelas pop-up para abrir o documento em PDF.');
-      return;
-    }
-
     const totalAmmo = mov.ammoQuantity || mov.ammoSupplied || 0;
     const ammoReturned = mov.ammoReturned || 0;
     const ammoUsed = (mov.ammoUsed !== undefined) ? mov.ammoUsed : Math.max(0, totalAmmo - ammoReturned);
 
-    printWindow.document.write(`
+    const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
@@ -1077,16 +1073,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         <div class="footer">
           Documento gerado eletronicamente pelo Sistema de Armeria da Polícia Civil em ${new Date().toLocaleString('pt-BR')}
         </div>
-
-        <script>
-          window.onload = function() {
-            window.print();
-          };
-        </script>
       </body>
       </html>
-    `);
-    printWindow.document.close();
+    `;
+
+    printDocumentInPage(html);
   };
 
   // Edit Mapa handlers
@@ -1327,13 +1318,30 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 Lançamento de saídas de armamentos e munições para instrução prática (Aula CFTP) com retorno de insumos não utilizados
               </p>
             </div>
-            <button
-              onClick={handleOpenSaidaModal}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nova Saída (Aula CFTP)</span>
-            </button>
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  const activeMovs = courseMovements.filter(m => m.status === 'Em Sala de Aula' || m.status === 'Em Aula');
+                  if (activeMovs.length === 0) {
+                    alert('Nenhuma aula em andamento encontrada para retorno.');
+                    return;
+                  }
+                  handleOpenRetornoModal(activeMovs[0]);
+                }}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Registrar retorno de materiais e devolução de munições não utilizadas"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Retorno de Aula (Aula CFTP)</span>
+              </button>
+              <button
+                onClick={handleOpenSaidaModal}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nova Saída (Aula CFTP)</span>
+              </button>
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">

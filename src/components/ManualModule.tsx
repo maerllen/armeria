@@ -18,6 +18,7 @@ import {
   Award
 } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { printDocumentInPage } from '../utils/printHelper';
 import html2canvas from 'html2canvas';
 
 import bannerImg from '../assets/images/manual_banner_1784916894069.jpg';
@@ -73,7 +74,38 @@ export const ManualModule: React.FC = () => {
   };
 
   const handlePrint = () => {
-    window.print();
+    if (reportRef.current) {
+      const contentHtml = reportRef.current.innerHTML;
+      const html = `
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+        <head>
+          <meta charset="UTF-8">
+          <title>Manual Operacional do Sistema de Armeria - PCMG</title>
+          <style>
+            @page { size: A4; margin: 15mm; }
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 11px; line-height: 1.5; }
+            h1, h2, h3, h4 { color: #000; font-family: monospace; text-transform: uppercase; }
+            .bg-slate-900, .bg-slate-950, .bg-slate-800 { background: #f9fafb !important; color: #000 !important; border: 1px solid #d1d5db !important; padding: 10px; border-radius: 8px; margin-bottom: 12px; }
+            .text-amber-400, .text-amber-500, .text-emerald-400 { color: #000 !important; font-weight: bold; }
+            .text-slate-100, .text-slate-200, .text-slate-300, .text-slate-400 { color: #1f2937 !important; }
+            .border-slate-800, .border-slate-700 { border-color: #d1d5db !important; }
+            img { max-width: 100%; height: auto; border-radius: 6px; }
+          </style>
+        </head>
+        <body>
+          <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; text-align: center;">
+            <h1 style="margin:0; font-size: 16px;">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h1>
+            <p style="margin: 2px 0 0 0; font-weight: bold; font-size: 12px;">MANUAL OPERACIONAL DO SISTEMA DE ARMERIA</p>
+          </div>
+          ${contentHtml}
+        </body>
+        </html>
+      `;
+      printDocumentInPage(html);
+    } else {
+      window.print();
+    }
   };
 
   return (

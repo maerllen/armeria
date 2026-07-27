@@ -2,6 +2,7 @@ import React from 'react';
 import { CourseMovement, Weapon, VaultSpace } from '../types';
 import { formatTimestamp, formatMasp } from '../utils/masks';
 import { ShieldCheck, Printer, X, FileText, GraduationCap } from 'lucide-react';
+import { printDocumentInPage } from '../utils/printHelper';
 
 interface AcademyReceiptModalProps {
   movement: CourseMovement;
@@ -16,13 +17,118 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
   vaultSpaces = [],
   onClose
 }) => {
-  const handlePrint = () => {
-    window.print();
-  };
-
   const totalAmmo = movement.ammoQuantity || movement.ammoSupplied || 0;
   const ammoReturned = movement.ammoReturned || 0;
   const ammoUsed = (movement.ammoUsed !== undefined) ? movement.ammoUsed : Math.max(0, totalAmmo - ammoReturned);
+
+  const handlePrint = () => {
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Recibo Mapa de Aula - ${movement.turmaCode || movement.className} - PCMG</title>
+        <style>
+          @page { size: A4; margin: 15mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
+          .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
+          .subtitle { font-size: 11px; font-weight: 700; color: #374151; margin-top: 2px; }
+          .reg-id { font-family: monospace; font-size: 12px; font-weight: bold; text-align: right; }
+          .status-bar { background: #f3f4f6; border: 1px solid #d1d5db; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; font-family: monospace; font-size: 11px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+          .full-width { grid-column: span 2; }
+          .box { border: 1px solid #9ca3af; border-radius: 8px; padding: 12px; font-family: monospace; }
+          .box-title { font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111827; letter-spacing: 0.5px; }
+          .field { margin-bottom: 6px; }
+          .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
+          .val { font-size: 12px; font-weight: bold; color: #000; }
+          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; margin-top: 6px; }
+          .stat-item { background: #f9fafb; border: 1px solid #e5e7eb; padding: 8px; border-radius: 6px; }
+          .signatures { margin-top: 45px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
+          .sig-line { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; }
+          .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
+            <div class="subtitle">ACADEMIA DE POLÍCIA CIVIL • MAPA DE AULA E MOVIMENTAÇÃO DE MATERIAL</div>
+          </div>
+          <div class="reg-id">
+            REGISTRO DE AULA<br>
+            <span style="font-size: 15px; font-weight: 900;">#${movement.id}</span>
+          </div>
+        </div>
+
+        <div class="status-bar">
+          <div><strong>STATUS DO MAPA:</strong> ${(movement.status || 'EM AULA').toUpperCase()}</div>
+          <div><strong>Emissão:</strong> ${formatTimestamp(movement.issuedAt)}</div>
+        </div>
+
+        <div class="grid">
+          <div class="box">
+            <div class="box-title">1. Identificação da Aula</div>
+            <div class="field"><span class="label">Turma:</span> <span class="val">${movement.turmaCode || movement.className}</span></div>
+            <div class="field"><span class="label">Curso / Carreira:</span> <span class="val">${movement.courseName} (${movement.career || 'N/A'})</span></div>
+            <div class="field"><span class="label">Disciplina:</span> <span class="val">${movement.subject || 'MEAF'}</span></div>
+            <div class="field"><span class="label">Plano de Aula:</span> <span class="val">${movement.lessonPlanName || 'Plano Padrão'} (Aula ${movement.lessonNumber || 1})</span></div>
+          </div>
+
+          <div class="box">
+            <div class="box-title">2. Pessoal Responsável</div>
+            <div class="field"><span class="label">Professor Responsável:</span> <span class="val">${movement.teacherName}</span></div>
+            <div class="field"><span class="label">Emitido por (Armeiro):</span> <span class="val">${movement.issuedByUserName || 'Armeiro Responsável'}</span></div>
+            ${movement.returnedByUserName ? `<div class="field"><span class="label">Recebido por (Devolução):</span> <span class="val">${movement.returnedByUserName}</span></div>` : ''}
+          </div>
+
+          <div class="box full-width">
+            <div class="box-title">3. Armamento e Materiais Fornecidos</div>
+            <div class="field"><span class="label">Caixa de Armas / Conjunto:</span> <span class="val">${movement.boxName || 'Sem Caixa Vinculada'}</span></div>
+            ${movement.returnedMaterials ? `<div class="field"><span class="label">Materiais Registrados no Fechamento:</span> <span class="val">${movement.returnedMaterials}</span></div>` : ''}
+          </div>
+
+          ${totalAmmo > 0 ? `
+          <div class="box full-width">
+            <div class="box-title">4. Balanço de Munições</div>
+            <div class="stats-grid">
+              <div class="stat-item"><span class="label">Calibre</span><span class="val">${movement.ammoCaliber || 'N/A'}</span></div>
+              <div class="stat-item"><span class="label">Fornecida</span><span class="val">${totalAmmo} un</span></div>
+              <div class="stat-item"><span class="label">Utilizada</span><span class="val">${movement.status === 'Devolvido' || movement.status === 'Finalizada' ? ammoUsed + ' un' : '-'}</span></div>
+              <div class="stat-item"><span class="label">Devolvida ao Cofre</span><span class="val">${movement.status === 'Devolvido' || movement.status === 'Finalizada' ? ammoReturned + ' un' : '-'}</span></div>
+            </div>
+          </div>
+          ` : ''}
+
+          ${movement.notes ? `
+          <div class="box full-width">
+            <div class="box-title">5. Observações</div>
+            <div style="font-size: 11px;">${movement.notes}</div>
+          </div>
+          ` : ''}
+        </div>
+
+        <div class="signatures">
+          <div class="sig-line">
+            ${movement.issuedByUserName || 'Armeiro Responsável'}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro Emissor</span>
+          </div>
+          <div class="sig-line">
+            ${movement.teacherName}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Professor / Policial Responsável</span>
+          </div>
+        </div>
+
+        <div class="footer">
+          Documento gerado eletronicamente pelo Sistema de Armeria da Polícia Civil em ${new Date().toLocaleString('pt-BR')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    printDocumentInPage(html);
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">

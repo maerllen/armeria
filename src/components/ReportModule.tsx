@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Movement, AmmunitionMovement, Department, Unit, Caliber, Weapon, VaultSpace } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { FileText, Printer, Download, Filter, Search, Calendar, Shield, Disc, Crosshair, UserX, UserCheck } from 'lucide-react';
+import { printDocumentInPage } from '../utils/printHelper';
 
 interface ReportModuleProps {
   currentUser: User;
@@ -182,7 +183,73 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   };
 
   const handlePrint = () => {
-    window.print();
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Relatório Operacional - PCMG</title>
+        <style>
+          @page { size: A4 landscape; margin: 12mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 15px; font-size: 11px; line-height: 1.3; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 14px; }
+          .title { font-size: 15px; font-weight: 900; text-transform: uppercase; color: #000; }
+          .subtitle { font-size: 10px; font-weight: 700; color: #374151; margin-top: 2px; }
+          .meta { font-family: monospace; font-size: 10px; text-align: right; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 10px; font-family: monospace; }
+          th { background: #f3f4f6; border: 1px solid #9ca3af; padding: 6px; text-align: left; font-weight: bold; text-transform: uppercase; }
+          td { border: 1px solid #d1d5db; padding: 6px; }
+          tr:nth-child(even) { background: #f9fafb; }
+          .footer { margin-top: 25px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
+            <div class="subtitle">RELATÓRIO DE MOVIMENTAÇÕES DE ARMAMENTO E MUNIÇÕES</div>
+          </div>
+          <div class="meta">
+            Gerado em: ${new Date().toLocaleString('pt-BR')}<br>
+            Filtros Ativos: ${reportType.toUpperCase()}
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Data</th>
+              <th>Solicitante / MASP</th>
+              <th>Armamento / Material</th>
+              <th>Série / Qtd</th>
+              <th>Status</th>
+              <th>Aprovador / Armeiro</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filteredMovements.slice(0, 100).map(m => `
+              <tr>
+                <td>#${m.id}</td>
+                <td>${formatTimestamp(m.createdAt)}</td>
+                <td>${m.requesterName} (${m.requesterMasp})</td>
+                <td>${m.weaponType} ${m.weaponModel}</td>
+                <td>${m.weaponSerialNumber}</td>
+                <td><strong>${m.status}</strong></td>
+                <td>${m.approvedByUserName || m.userName || '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="footer">
+          Documento extraído do Sistema de Armeria da Polícia Civil do Estado de Minas Gerais.
+        </div>
+      </body>
+      </html>
+    `;
+
+    printDocumentInPage(html);
   };
 
   return (
