@@ -113,6 +113,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Server state getters
   const academyCourses = storage.getAcademyCourses();
   const qualCourses = storage.getCourses();
+  const calibers = storage.getCalibers();
   const availableWeaponTypes = storage.getAvailableWeaponTypes();
   const weaponBoxes = storage.getWeaponBoxes();
   const boxReplacements = storage.getWeaponBoxReplacements();
@@ -251,6 +252,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       allowedWeaponTypes: [] as string[],
       allowedModels: [] as string[],
       shotsPerStudent: 0,
+      shotsPerWeaponType: undefined as Record<string, number> | undefined,
       isQualification: false,
       rawAcademy: ac,
       rawQual: null as Course | null
@@ -268,6 +270,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         allowedWeaponTypes: qc.allowedWeaponTypes || [],
         allowedModels: qc.allowedModels || [],
         shotsPerStudent: qc.shotsPerStudent || 0,
+        shotsPerWeaponType: qc.shotsPerWeaponType,
         isQualification: true,
         rawAcademy: null as AcademyCourse | null,
         rawQual: qc
@@ -1921,29 +1924,15 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   <select
                     value={courseName}
                     onChange={(e) => handleEnsinoContinuadoNameChange(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none font-medium"
                     required
                   >
-                    <option value="">-- Selecione o Curso (ACADEPOL ou Cursos de Habilitação) --</option>
-                    <optgroup label="Cursos da ACADEPOL / Catálogo">
-                      {ACADEPOL_CATALOG.map((item) => (
-                        <option key={item.name} value={item.name}>
-                          {item.name}
-                        </option>
-                      ))}
-                    </optgroup>
-                    <optgroup label="Cursos de Habilitação Cadastrados">
-                      {qualCourses.map((qc) => (
-                        <option key={qc.id} value={qc.name}>
-                          {qc.name} (Habilitação)
-                        </option>
-                      ))}
-                    </optgroup>
-                    {Array.from(new Set(academyCourses.map(ac => ac.name)))
-                      .filter(n => !ACADEPOL_CATALOG.some(cat => cat.name === n) && !qualCourses.some(qc => qc.name === n))
-                      .map(n => (
-                        <option key={n} value={n}>{n}</option>
-                      ))}
+                    <option value="">-- Selecione o Curso de Habilitação --</option>
+                    {qualCourses.map((qc) => (
+                      <option key={qc.id} value={qc.name}>
+                        {qc.name}
+                      </option>
+                    ))}
                   </select>
                 ) : (
                   <div>
