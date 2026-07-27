@@ -343,6 +343,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [courseModuleRoman, setCourseModuleRoman] = useState<string>('I');
   const [courseCode, setCourseCode] = useState('');
   const [courseDepartment, setCourseDepartment] = useState('');
+  const [courseTeachingDept, setCourseTeachingDept] = useState('');
+  const [courseLocationDept, setCourseLocationDept] = useState('');
+  const [courseDurationDays, setCourseDurationDays] = useState<number>(1);
+  const [courseSubject, setCourseSubject] = useState<string>('MEAF');
   const [courseStartDate, setCourseStartDate] = useState('');
   const [courseEndDate, setCourseEndDate] = useState('');
   const [courseDates, setCourseDates] = useState<string[]>([]);
@@ -355,10 +359,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setCourseType(param.type);
       setCourseCode(param.code || '');
       setCourseDepartment(param.departmentName || (param.type === 'Formação' ? 'ACADEPOL' : ''));
+      setCourseTeachingDept(param.teachingDepartmentName || param.departmentName || 'ACADEPOL');
+      setCourseLocationDept(param.locationDepartmentName || 'ACADEPOL');
+      setCourseDurationDays(param.durationDays || (param.dates && param.dates.length ? param.dates.length : 1));
+      setCourseSubject(param.subject || 'MEAF');
       setCourseDates(param.dates || []);
-      setCourseStartDate(param.dates && param.dates.length > 0 ? param.dates[0] : '');
-      setCourseEndDate(param.dates && param.dates.length > 1 ? param.dates[param.dates.length - 1] : (param.dates && param.dates.length === 1 ? param.dates[0] : ''));
-      setCourseModuleRoman('I');
+      setCourseStartDate(param.startDate || (param.dates && param.dates.length > 0 ? param.dates[0] : ''));
+      setCourseEndDate(param.endDate || (param.dates && param.dates.length > 1 ? param.dates[param.dates.length - 1] : (param.dates && param.dates.length === 1 ? param.dates[0] : '')));
+      setCourseModuleRoman(param.module ? param.module.replace('Módulo ', '') : 'I');
     } else {
       const selectedType = param || 'Formação';
       setEditingCourse(null);
@@ -372,11 +380,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         setCourseModuleRoman('I');
         setCourseCode('CFTP - Módulo I');
         setCourseDepartment('ACADEPOL');
+        setCourseTeachingDept('ACADEPOL');
+        setCourseLocationDept('ACADEPOL');
+        setCourseDurationDays(1);
+        setCourseSubject('MEAF');
       } else {
         const firstCat = ACADEPOL_CATALOG[0];
         setCourseName(firstCat.name);
         setCourseCode(firstCat.code);
-        setCourseDepartment(departments[0]?.name || 'ACADEPOL');
+        const defaultDept = departments[0]?.name || 'ACADEPOL';
+        setCourseDepartment(defaultDept);
+        setCourseTeachingDept('ACADEPOL');
+        setCourseLocationDept(defaultDept);
+        setCourseDurationDays(1);
+        setCourseSubject('MEAF');
       }
     }
     setCalendarDate(new Date());
@@ -413,7 +430,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     let finalDates: string[] = [];
     if (courseType === 'Formação') {
       if (!courseStartDate || !courseEndDate) {
-        alert('Informe a data de início e a data do fim do curso de Formação.');
+        alert('Informe a data de início e a data final do curso de Formação.');
         return;
       }
       finalDates = [courseStartDate, courseEndDate];
@@ -432,7 +449,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         name: courseName.trim(),
         type: courseType,
         code: courseCode.trim(),
-        departmentName: courseType === 'Formação' ? 'ACADEPOL' : courseDepartment.trim(),
+        departmentName: courseType === 'Formação' ? courseDepartment.trim() || 'ACADEPOL' : courseTeachingDept.trim() || 'ACADEPOL',
+        startDate: courseType === 'Formação' ? courseStartDate : undefined,
+        endDate: courseType === 'Formação' ? courseEndDate : undefined,
+        module: courseType === 'Formação' ? `Módulo ${courseModuleRoman}` : undefined,
+        teachingDepartmentName: courseType === 'Ensino Continuado' ? (courseTeachingDept.trim() || 'ACADEPOL') : undefined,
+        locationDepartmentName: courseType === 'Ensino Continuado' ? (courseLocationDept.trim() || 'ACADEPOL') : undefined,
+        durationDays: courseType === 'Ensino Continuado' ? (Number(courseDurationDays) || finalDates.length || 1) : undefined,
+        subject: courseType === 'Ensino Continuado' ? courseSubject : undefined,
         dates: finalDates
       });
       if (!res.success) throw new Error(res.error);
@@ -1664,63 +1688,40 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   Nome do Curso <span className="text-red-400">*</span>
                 </label>
                 {courseType === 'Ensino Continuado' ? (
-                  <select
-                    value={courseName}
-                    onChange={(e) => handleEnsinoContinuadoNameChange(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none font-medium"
-                    required
-                  >
-                    <option value="">-- Selecione o Curso de Habilitação --</option>
-                    {qualCourses.map((qc) => (
-                      <option key={qc.id} value={qc.name}>
-                        {qc.name}
-                      </option>
-                    ))}
-                  </select>
+                  <div>
+                    <input
+                      type="text"
+                      list="ecCoursesList"
+                      value={courseName}
+                      onChange={(e) => handleEnsinoContinuadoNameChange(e.target.value)}
+                      placeholder="Ex: Operador de Fuzil / Táticas Especiais"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                    <datalist id="ecCoursesList">
+                      {qualCourses.map((qc) => (
+                        <option key={qc.id} value={qc.name} />
+                      ))}
+                      {ACADEPOL_CATALOG.map((c) => (
+                        <option key={c.code} value={c.name} />
+                      ))}
+                    </datalist>
+                  </div>
                 ) : (
                   <div>
                     <input
                       type="text"
-                      list="qualCoursesList"
                       value={courseName}
                       onChange={(e) => setCourseName(e.target.value)}
-                      placeholder="Ex: Operador de Fuzil / Curso de Formação de Policiais Civis"
+                      placeholder="Ex: Curso de Formação de Policiais Civis"
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                       required
                     />
-                    <datalist id="qualCoursesList">
-                      {qualCourses.map((qc) => (
-                        <option key={qc.id} value={qc.name} />
-                      ))}
-                    </datalist>
                   </div>
                 )}
-
-                {/* Exibição de Dados Herdados do Curso de Habilitação */}
-                {(() => {
-                  const matchedQual = qualCourses.find(c => c.name.toLowerCase() === courseName.trim().toLowerCase());
-                  if (!matchedQual) return null;
-                  const shotsCount = matchedQual.shotsPerStudent || 
-                    (matchedQual.shotsPerWeaponType ? Object.values(matchedQual.shotsPerWeaponType).reduce((a, b) => a + b, 0) : 50);
-                  return (
-                    <div className="bg-amber-950/40 border border-amber-500/40 p-3 rounded-xl space-y-1 text-xs mt-2.5">
-                      <div className="font-bold text-amber-400 flex items-center space-x-1.5">
-                        <GraduationCap className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Curso de Habilitação Identificado — Dados Herdados:</span>
-                      </div>
-                      <div className="text-slate-300">
-                        <strong className="text-slate-100">Tipo de Arma:</strong> {matchedQual.allowedWeaponTypes?.join(', ') || 'N/A'}
-                      </div>
-                      <div className="text-slate-300">
-                        <strong className="text-slate-100">Quantidade de Tiros Herdada:</strong>{' '}
-                        <span className="text-amber-400 font-mono font-bold">{shotsCount} tiros por aluno</span>
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
 
-              {/* MÓDULO EM NUMERAÇÃO ROMANA (Para Formação) */}
+              {/* MÓDULO EM NUMERAÇÃO ROMANA (Apenas para Formação) */}
               {courseType === 'Formação' && (
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
@@ -1745,7 +1746,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               <div>
                 <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
                   <span>Código do Curso <span className="text-red-400">*</span></span>
-                  <span className="text-[10px] text-amber-400 font-mono font-bold">Seleção Automática</span>
+                  <span className="text-[10px] text-amber-400 font-mono font-bold">Seleção / Auto</span>
                 </label>
                 <input
                   type="text"
@@ -1757,72 +1758,148 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 />
               </div>
 
-              {/* DEPARTAMENTO DO CURSO */}
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">
-                  Departamento do curso <span className="text-red-400">*</span>
-                </label>
-                {courseType === 'Formação' ? (
-                  <input
-                    type="text"
-                    value="ACADEPOL"
-                    disabled
-                    className="w-full bg-slate-950/60 border border-slate-800 text-amber-400 font-bold rounded-xl px-3.5 py-2 cursor-not-allowed"
-                  />
-                ) : (
-                  <select
-                    value={courseDepartment}
-                    onChange={(e) => setCourseDepartment(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.name}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
+              {/* FORM FIELDS ESPECÍFICOS DE ENSINO CONTINUADO */}
+              {courseType === 'Ensino Continuado' ? (
+                <>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* DEPARTAMENTO QUE IRÁ MINISTRAR O CURSO */}
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Departamento que irá ministrar o curso <span className="text-red-400">*</span>
+                      </label>
+                      <select
+                        value={courseTeachingDept}
+                        onChange={(e) => setCourseTeachingDept(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        <option value="ACADEPOL">ACADEPOL</option>
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-              {/* DATAS DE INÍCIO E FIM DO CURSO (Apenas para Formação) */}
-              {courseType === 'Formação' ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Data de Início do Curso <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={courseStartDate}
-                      onChange={(e) => setCourseStartDate(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                      required
-                    />
+                    {/* DEPARTAMENTO QUE IRÁ ACONTECER O CURSO */}
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Departamento onde irá acontecer <span className="text-red-400">*</span>
+                      </label>
+                      <select
+                        value={courseLocationDept}
+                        onChange={(e) => setCourseLocationDept(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.name}>
+                            {d.name}
+                          </option>
+                        ))}
+                        <option value="ACADEPOL">ACADEPOL</option>
+                      </select>
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1">
-                      Data do Fim do Curso <span className="text-red-400">*</span>
-                    </label>
-                    <input
-                      type="date"
-                      value={courseEndDate}
-                      min={courseStartDate}
-                      onChange={(e) => setCourseEndDate(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                      required
-                    />
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {/* QUANTIDADE DE DIAS DO CURSO */}
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Quantidade de dias do curso <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={courseDurationDays}
+                        onChange={(e) => setCourseDurationDays(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    {/* MATÉRIA DO CURSO (MEAF, TAP e DP) */}
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Matéria do Curso <span className="text-red-400">*</span>
+                      </label>
+                      <select
+                        value={courseSubject}
+                        onChange={(e) => setCourseSubject(e.target.value)}
+                        className="w-full bg-slate-950 border border-amber-500/50 text-amber-300 font-bold rounded-xl px-3.5 py-2 focus:border-amber-400 focus:outline-none"
+                        required
+                      >
+                        <option value="MEAF">MEAF (Manejo e Emprego de Armamento e Amassamento de Fogo)</option>
+                        <option value="TAP">TAP (Táticas e Armamento Policial)</option>
+                        <option value="DP">DP (Defesa Pessoal)</option>
+                        <option value="MEAF / TAP">MEAF e TAP</option>
+                        <option value="MEAF / DP">MEAF e DP</option>
+                        <option value="TAP / DP">TAP e DP</option>
+                        <option value="MEAF / TAP / DP">MEAF, TAP e DP (Completo)</option>
+                      </select>
+                    </div>
                   </div>
-                </div>
+
+                  {/* SELEÇÃO DAS DATAS DO CURSO */}
+                  <div className="pt-2">
+                    <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                      <span>Seleção das Datas do Curso (Calendário) <span className="text-red-400">*</span></span>
+                      <span className="text-amber-400 font-bold font-mono text-[10px]">
+                        {courseDates.length} dia(s) selecionado(s)
+                      </span>
+                    </label>
+                    {renderCalendar()}
+                  </div>
+                </>
               ) : (
-                /* CALENDÁRIO DINÂMICO DE DIAS (Apenas para Ensino Continuado) */
-                <div className="pt-2">
-                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                    <span>Datas do Curso (Selecione os dias no calendário) <span className="text-red-400">*</span></span>
-                    <span className="text-amber-400 font-bold font-mono text-[10px]">Pode pular dias no período</span>
-                  </label>
-                  {renderCalendar()}
-                </div>
+                /* FORM FIELDS ESPECÍFICOS DE FORMAÇÃO */
+                <>
+                  {/* DEPARTAMENTO DO CURSO */}
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">
+                      Departamento do curso <span className="text-red-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={courseDepartment || 'ACADEPOL'}
+                      onChange={(e) => setCourseDepartment(e.target.value)}
+                      placeholder="ACADEPOL"
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 font-bold rounded-xl px-3.5 py-2 focus:border-amber-500 focus:outline-none"
+                      required
+                    />
+                  </div>
+
+                  {/* DATAS DE INÍCIO E FIM DO CURSO */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Data de Início do Curso <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={courseStartDate}
+                        onChange={(e) => setCourseStartDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-slate-300 font-semibold mb-1">
+                        Data Final do Curso <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={courseEndDate}
+                        min={courseStartDate}
+                        onChange={(e) => setCourseEndDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+                </>
               )}
 
               <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">

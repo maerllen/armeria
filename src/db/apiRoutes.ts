@@ -1422,7 +1422,15 @@ apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
       dates: typeof r.dates === 'string' ? JSON.parse(r.dates) : (Array.isArray(r.dates) ? r.dates : []),
       departmentName: r.department_name || undefined,
       startDate: r.start_date ? new Date(r.start_date).toISOString().split('T')[0] : undefined,
+      endDate: r.end_date ? new Date(r.end_date).toISOString().split('T')[0] : undefined,
       moduleNumber: r.module_number || undefined,
+      module: r.module || undefined,
+      teachingDepartmentName: r.teaching_department_name || undefined,
+      teachingDepartmentId: r.teaching_department_id || undefined,
+      locationDepartmentName: r.location_department_name || undefined,
+      locationDepartmentId: r.location_department_id || undefined,
+      durationDays: r.duration_days ? Number(r.duration_days) : undefined,
+      subject: r.subject || undefined,
       lessonCount: r.lesson_count || 1,
       lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
       departmentId: r.department_id || undefined,
@@ -1437,34 +1445,73 @@ apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
 
 apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
   try {
-    const { name, type, career, code, dates, departmentName, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const {
+      name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module,
+      teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId,
+      durationDays, subject, lessonCount, lessonsData, departmentId, unitId, actor
+    } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nome do curso é obrigatório' });
     if (!code || !code.trim()) return res.status(400).json({ error: 'Código do curso é obrigatório' });
 
     const pool = getPool();
     const id = `acad-crs-${Date.now()}`;
-    await pool.query(
-      `INSERT INTO academy_courses (id, name, type, career, code, dates, department_name, start_date, module_number, lesson_count, lessons_data, department_id, unit_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        id,
-        name.trim(),
-        type || 'Formação',
-        career || null,
-        code.trim(),
-        JSON.stringify(dates || []),
-        departmentName ? departmentName.trim() : null,
-        startDate || null,
-        moduleNumber || null,
-        lessonCount || 1,
-        JSON.stringify(lessonsData || []),
-        departmentId || null,
-        unitId || null
-      ]
-    );
+
+    try {
+      await pool.query(
+        `INSERT INTO academy_courses (
+          id, name, type, career, code, dates, department_name, start_date, end_date, module_number, module,
+          teaching_department_name, teaching_department_id, location_department_name, location_department_id,
+          duration_days, subject, lesson_count, lessons_data, department_id, unit_id, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          name.trim(),
+          type || 'Formação',
+          career || null,
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          endDate || null,
+          moduleNumber || null,
+          module || null,
+          teachingDepartmentName ? teachingDepartmentName.trim() : null,
+          teachingDepartmentId || null,
+          locationDepartmentName ? locationDepartmentName.trim() : null,
+          locationDepartmentId || null,
+          durationDays ? Number(durationDays) : 1,
+          subject || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    } catch (dbErr: any) {
+      // Fallback query if some newly added columns do not exist yet
+      await pool.query(
+        `INSERT INTO academy_courses (id, name, type, career, code, dates, department_name, start_date, module_number, lesson_count, lessons_data, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          name.trim(),
+          type || 'Formação',
+          career || null,
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          moduleNumber || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    }
 
     await insertAuditLog('Cursos', 'Criar', `Cadastrado curso da academia: ${name} (${type} - Cód: ${code})`, actor, req.ip);
-    return res.json({ id, name, type, career, code, dates, departmentName, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
+    return res.json({ id, name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module, teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId, durationDays, subject, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1473,43 +1520,98 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
 apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, type, career, code, dates, departmentName, startDate, moduleNumber, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const {
+      name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module,
+      teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId,
+      durationDays, subject, lessonCount, lessonsData, departmentId, unitId, actor
+    } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nome do curso é obrigatório' });
     if (!code || !code.trim()) return res.status(400).json({ error: 'Código do curso é obrigatório' });
 
     const pool = getPool();
 
-    await pool.query(
-      `UPDATE academy_courses SET
-        name = ?,
-        type = ?,
-        career = ?,
-        code = ?,
-        dates = ?,
-        department_name = ?,
-        start_date = ?,
-        module_number = ?,
-        lesson_count = ?,
-        lessons_data = ?,
-        department_id = ?,
-        unit_id = ?
-       WHERE id = ?`,
-      [
-        name.trim(),
-        type,
-        career || null,
-        code.trim(),
-        JSON.stringify(dates || []),
-        departmentName ? departmentName.trim() : null,
-        startDate || null,
-        moduleNumber || null,
-        lessonCount || 1,
-        JSON.stringify(lessonsData || []),
-        departmentId || null,
-        unitId || null,
-        id
-      ]
-    );
+    try {
+      await pool.query(
+        `UPDATE academy_courses SET
+          name = ?,
+          type = ?,
+          career = ?,
+          code = ?,
+          dates = ?,
+          department_name = ?,
+          start_date = ?,
+          end_date = ?,
+          module_number = ?,
+          module = ?,
+          teaching_department_name = ?,
+          teaching_department_id = ?,
+          location_department_name = ?,
+          location_department_id = ?,
+          duration_days = ?,
+          subject = ?,
+          lesson_count = ?,
+          lessons_data = ?,
+          department_id = ?,
+          unit_id = ?
+         WHERE id = ?`,
+        [
+          name.trim(),
+          type,
+          career || null,
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          endDate || null,
+          moduleNumber || null,
+          module || null,
+          teachingDepartmentName ? teachingDepartmentName.trim() : null,
+          teachingDepartmentId || null,
+          locationDepartmentName ? locationDepartmentName.trim() : null,
+          locationDepartmentId || null,
+          durationDays ? Number(durationDays) : 1,
+          subject || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    } catch (dbErr: any) {
+      // Fallback update
+      await pool.query(
+        `UPDATE academy_courses SET
+          name = ?,
+          type = ?,
+          career = ?,
+          code = ?,
+          dates = ?,
+          department_name = ?,
+          start_date = ?,
+          module_number = ?,
+          lesson_count = ?,
+          lessons_data = ?,
+          department_id = ?,
+          unit_id = ?
+         WHERE id = ?`,
+        [
+          name.trim(),
+          type,
+          career || null,
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          moduleNumber || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    }
 
     await insertAuditLog('Cursos', 'Editar', `Atualizado curso da academia: ${name} (Cód: ${code})`, actor, req.ip);
     return res.json({ success: true });

@@ -249,12 +249,52 @@ export interface AcademyCourse {
   type: AcademyCourseType;
   career?: AcademyCareer;
   code: string;
-  dates?: string[];
+  // Formação specific:
+  moduleNumber?: number;
+  module?: string;
+  startDate?: string;
+  endDate?: string;
   departmentName?: string;
   departmentId?: string;
+  // Ensino Continuado specific:
+  teachingDepartmentName?: string;
+  teachingDepartmentId?: string;
+  locationDepartmentName?: string;
+  locationDepartmentId?: string;
+  durationDays?: number;
+  subject?: string;
+  dates?: string[];
   unitId?: string;
   createdAt: string;
 }
+
+export interface CourseFormacao {
+  id: string;
+  name: string;
+  module: string;
+  code: string;
+  departmentName: string;
+  departmentId?: string;
+  startDate: string;
+  endDate: string;
+  createdAt?: string;
+}
+
+export interface CourseEnsinoContinuado {
+  id: string;
+  name: string;
+  code: string;
+  teachingDepartmentName: string;
+  teachingDepartmentId?: string;
+  locationDepartmentName: string;
+  locationDepartmentId?: string;
+  durationDays: number;
+  subject: string;
+  dates: string[];
+  createdAt?: string;
+}
+
+export type CourseHabilitacao = Course;
 
 export interface WeaponBox {
   id: string;

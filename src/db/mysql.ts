@@ -354,6 +354,14 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `code` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
     try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `dates` JSON DEFAULT NULL;"); } catch (e) {}
     try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `end_date` DATE DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `module` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_id` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `location_department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `location_department_id` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `duration_days` INT DEFAULT 1;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `subject` VARCHAR(100) DEFAULT NULL;"); } catch (e) {}
 
     // Weapon Boxes Table
     await connection.query(`
