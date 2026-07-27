@@ -347,6 +347,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<LessonPlan | null>(null);
   const [planName, setPlanName] = useState('');
+  const [planSubject, setPlanSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [planCareer, setPlanCareer] = useState<'Delegado' | 'Médico Legista' | 'Perito' | 'Investigador' | 'Escrivão'>('Investigador');
   const [planYear, setPlanYear] = useState<number>(new Date().getFullYear());
   const [planType, setPlanType] = useState<'curso de formação' | 'curso ensino continuado'>('curso de formação');
@@ -360,6 +361,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
     if (plan) {
       setEditingPlan(plan);
       setPlanName(plan.name);
+      setPlanSubject((plan.subject as 'MEAF' | 'TAP' | 'DP') || 'MEAF');
       setPlanCareer(plan.career || 'Investigador');
       setPlanYear(plan.year || new Date().getFullYear());
       setPlanType(plan.type || 'curso de formação');
@@ -369,6 +371,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
     } else {
       setEditingPlan(null);
       setPlanName('');
+      setPlanSubject('MEAF');
       setPlanCareer('Investigador');
       setPlanYear(new Date().getFullYear());
       setPlanType('curso de formação');
@@ -419,6 +422,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       await storage.saveLessonPlan({
         id: editingPlan?.id,
         name: planName.trim(),
+        subject: planSubject,
         career: planCareer,
         year: planYear,
         type: planType,
@@ -825,13 +829,11 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                 <div key={plan.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm hover:border-slate-700 transition">
                   <div className="flex items-start justify-between">
                     <div>
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-400 font-extrabold border border-amber-500/40 text-xs font-mono uppercase">
-                          CÓDIGO TURMA: {plan.turmaCode || 'Geral'}
-                        </span>
-                      </div>
                       <h3 className="text-sm font-bold text-slate-100">{plan.name}</h3>
                       <div className="flex items-center space-x-2 pt-1 text-[11px] flex-wrap gap-y-1">
+                        <span className="px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-400 font-extrabold border border-amber-500/40 uppercase font-mono">
+                          MATÉRIA: {plan.subject || 'MEAF'}
+                        </span>
                         <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold border border-slate-700 uppercase">
                           {plan.career}
                         </span>
@@ -1332,22 +1334,26 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Matéria <span className="text-red-400">*</span>
+                  </label>
+                  <select
+                    value={planSubject}
+                    onChange={(e) => setPlanSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-amber-400 font-extrabold"
+                  >
+                    <option value="MEAF">MEAF</option>
+                    <option value="TAP">TAP</option>
+                    <option value="DP">DP</option>
+                  </select>
+                </div>
+
+                <div>
                   <label className="block text-slate-300 font-semibold mb-1">Ano</label>
                   <input
                     type="number"
                     value={planYear}
                     onChange={(e) => setPlanYear(parseInt(e.target.value) || new Date().getFullYear())}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Código da Turma</label>
-                  <input
-                    type="text"
-                    value={planTurmaCode}
-                    onChange={(e) => setPlanTurmaCode(e.target.value)}
-                    placeholder="Ex: T01 / Geral"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   />
                 </div>

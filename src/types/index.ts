@@ -224,6 +224,7 @@ export interface LessonPlanItem {
 export interface LessonPlan {
   id: string;
   name: string;
+  subject?: 'MEAF' | 'TAP' | 'DP' | string;
   turmaCode?: string;
   career: AcademyCareer;
   year: number;

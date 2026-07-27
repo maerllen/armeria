@@ -434,6 +434,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `turma_code` VARCHAR(64) DEFAULT NULL;");
     } catch (e) {}
     try {
+      await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `subject` VARCHAR(32) DEFAULT 'MEAF';");
+    } catch (e) {}
+    try {
       await connection.query("ALTER TABLE `course_class_movements` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;");
     } catch (e) {}
 

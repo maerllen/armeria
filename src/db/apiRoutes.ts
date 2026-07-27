@@ -1540,6 +1540,7 @@ apiRouter.get('/lesson-plans', async (req: Request, res: Response) => {
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
       name: r.name,
+      subject: r.subject || 'MEAF',
       turmaCode: r.turma_code || undefined,
       career: r.career,
       year: r.year,
@@ -1558,15 +1559,16 @@ apiRouter.get('/lesson-plans', async (req: Request, res: Response) => {
 
 apiRouter.post('/lesson-plans', async (req: Request, res: Response) => {
   try {
-    const { name, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const { name, subject, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
     const pool = getPool();
     const id = req.body.id || `plano-${Date.now()}`;
     await pool.query(
-      `INSERT INTO lesson_plans (id, name, turma_code, career, year, type, lesson_count, lessons_data, department_id, unit_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO lesson_plans (id, name, subject, turma_code, career, year, type, lesson_count, lessons_data, department_id, unit_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         id,
         name,
+        subject || 'MEAF',
         turmaCode || null,
         career || 'Delegado',
         Number(year) || new Date().getFullYear(),
@@ -1578,8 +1580,8 @@ apiRouter.post('/lesson-plans', async (req: Request, res: Response) => {
       ]
     );
 
-    await insertAuditLog('Cursos', 'Criar', `Cadastrado plano de aula: ${name} (${career} - ${type})`, actor, req.ip);
-    return res.json({ id, name, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado plano de aula: ${name} (${subject || 'MEAF'} - ${career} - ${type})`, actor, req.ip);
+    return res.json({ id, name, subject: subject || 'MEAF', turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     console.error('Erro em POST /lesson-plans:', err);
     return res.status(500).json({ error: err.message });
@@ -1589,12 +1591,13 @@ apiRouter.post('/lesson-plans', async (req: Request, res: Response) => {
 apiRouter.put('/lesson-plans/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
+    const { name, subject, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
     const pool = getPool();
 
     await pool.query(
       `UPDATE lesson_plans SET
         name = ?,
+        subject = ?,
         turma_code = ?,
         career = ?,
         year = ?,
@@ -1606,6 +1609,7 @@ apiRouter.put('/lesson-plans/:id', async (req: Request, res: Response) => {
        WHERE id = ?`,
       [
         name,
+        subject || 'MEAF',
         turmaCode || null,
         career || 'Delegado',
         Number(year) || new Date().getFullYear(),

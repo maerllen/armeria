@@ -242,40 +242,21 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const allUnifiedCourses = [
     ...academyCourses.map(ac => ({
-      id: ac.id,
-      name: ac.name,
-      type: ac.type as 'Formação' | 'Ensino Continuado' | 'Habilitação',
-      code: ac.code || 'N/A',
-      departmentId: departments.find(d => d.name === ac.departmentName)?.id || '',
-      departmentName: ac.departmentName || 'ACADEPOL',
-      dates: ac.dates || [],
-      allowedWeaponTypes: [] as string[],
-      allowedModels: [] as string[],
-      shotsPerStudent: 0,
-      shotsPerWeaponType: undefined as Record<string, number> | undefined,
-      isQualification: false,
-      rawAcademy: ac,
-      rawQual: null as Course | null
-    })),
-    ...qualCourses.map(qc => {
-      const dept = departments.find(d => d.id === qc.departmentId);
-      return {
-        id: qc.id,
-        name: qc.name,
-        type: 'Habilitação' as const,
-        code: 'HABILITAÇÃO',
-        departmentId: qc.departmentId || '',
-        departmentName: dept?.name || 'Geral',
-        dates: [] as string[],
-        allowedWeaponTypes: qc.allowedWeaponTypes || [],
-        allowedModels: qc.allowedModels || [],
-        shotsPerStudent: qc.shotsPerStudent || 0,
-        shotsPerWeaponType: qc.shotsPerWeaponType,
-        isQualification: true,
-        rawAcademy: null as AcademyCourse | null,
-        rawQual: qc
-      };
-    })
+        id: ac.id,
+        name: ac.name,
+        type: ac.type as 'Formação' | 'Ensino Continuado',
+        code: ac.code || 'N/A',
+        departmentId: departments.find(d => d.name === ac.departmentName)?.id || '',
+        departmentName: ac.departmentName || 'ACADEPOL',
+        dates: ac.dates || [],
+        allowedWeaponTypes: [] as string[],
+        allowedModels: [] as string[],
+        shotsPerStudent: 0,
+        shotsPerWeaponType: undefined as Record<string, number> | undefined,
+        isQualification: false,
+        rawAcademy: ac,
+        rawQual: null as Course | null
+      }))
   ];
 
   const filteredUnifiedCourses = allUnifiedCourses.filter(c => {
@@ -568,6 +549,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // --- 3. COURSE CLASS FORM STATE ---
   const [showClassModal, setShowClassModal] = useState(false);
   const [editingClass, setEditingClass] = useState<CourseClass | null>(null);
+  const [classModalCourseType, setClassModalCourseType] = useState<'Formação' | 'Ensino Continuado'>('Formação');
   const [classCourseId, setClassCourseId] = useState('');
   const [classCareer, setClassCareer] = useState('Delegado');
   const [classTurmaNum, setClassTurmaNum] = useState('01');
@@ -586,9 +568,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return 'DL';
   };
 
-  const handleOpenClassModal = (cls?: CourseClass) => {
+  const handleOpenClassModal = (cls?: CourseClass, targetType: 'Formação' | 'Ensino Continuado' = 'Formação') => {
     if (cls) {
+      const linked = academyCourses.find(c => c.id === cls.courseId);
+      const effectiveType = linked?.type || targetType;
       setEditingClass(cls);
+      setClassModalCourseType(effectiveType);
       setClassCourseId(cls.courseId);
       setClassCareer(cls.career);
       const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
@@ -602,8 +587,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       const initialMatching = teachers.filter(t => t.teacherSubject === initialSubject);
       const defaultTeacher = initialMatching[0] || teachers[0];
 
+      const matchingCourses = academyCourses.filter(c => c.type === targetType);
+
       setEditingClass(null);
-      setClassCourseId(academyCourses[0]?.id || '');
+      setClassModalCourseType(targetType);
+      setClassCourseId(matchingCourses[0]?.id || '');
       setClassCareer('Delegado');
       setClassTurmaNum('01');
       setClassSubject(initialSubject);
@@ -1266,13 +1254,22 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 Cadastro de turmas vinculadas a cursos, carreiras policiais, professores e disciplinas
               </p>
             </div>
-            <button
-              onClick={() => handleOpenClassModal()}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nova Turma</span>
-            </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => handleOpenClassModal(undefined, 'Formação')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nova Turma Formação</span>
+              </button>
+              <button
+                onClick={() => handleOpenClassModal(undefined, 'Ensino Continuado')}
+                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Nova Turma Ensino Continuado</span>
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1425,7 +1422,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   <option value="TODOS">Todos os Tipos</option>
                   <option value="Formação">Formação</option>
                   <option value="Ensino Continuado">Ensino Continuado</option>
-                  <option value="Habilitação">Habilitação</option>
                 </select>
               </div>
 
@@ -2248,61 +2244,52 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2">
-              {editingClass ? 'Editar Turma' : 'Nova Turma'}
+              {editingClass ? `Editar Turma (${classModalCourseType})` : `Nova Turma - ${classModalCourseType}`}
             </h3>
             <form onSubmit={handleSaveClass} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Curso Vinculado</label>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Curso Vinculado <span className="text-amber-400 font-mono">({classModalCourseType})</span>
+                </label>
                 <select
                   value={classCourseId}
                   onChange={(e) => setClassCourseId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   required
                 >
-                  <option value="">-- Selecione o Curso --</option>
-                  <optgroup label="Cursos da ACADEPOL (Formação / Ensino Continuado)">
-                    {academyCourses.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} ({c.type})</option>
+                  <option value="">-- Selecione o Curso de {classModalCourseType} --</option>
+                  {academyCourses
+                    .filter(c => c.type === classModalCourseType)
+                    .map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
-                  </optgroup>
-                  <optgroup label="Cursos de Habilitação Cadastrados">
-                    {qualCourses.map(c => (
-                      <option key={c.id} value={c.id}>{c.name} (Habilitação)</option>
-                    ))}
-                  </optgroup>
                 </select>
+                {academyCourses.filter(c => c.type === classModalCourseType).length === 0 && (
+                  <p className="text-[11px] text-amber-400 mt-1">
+                    Nenhum curso do tipo "{classModalCourseType}" cadastrado. Crie um curso de {classModalCourseType} no catálogo.
+                  </p>
+                )}
 
                 {/* Exibição de Dados Herdados para a Turma */}
                 {(() => {
                   const acadC = academyCourses.find(c => c.id === classCourseId);
-                  const qualC = qualCourses.find(c => c.id === classCourseId || c.name === acadC?.name);
-                  if (!acadC && !qualC) return null;
-
-                  const courseNameDisp = acadC?.name || qualC?.name || '';
-                  const weaponTypesDisp = qualC?.allowedWeaponTypes?.join(', ') || 'Armamento Padrão (Pistola/Fuzil)';
-                  const shotsDisp = qualC?.shotsPerStudent || 
-                    (qualC?.shotsPerWeaponType ? Object.values(qualC.shotsPerWeaponType).reduce((a, b) => a + b, 0) : 50);
-                  const deptDisp = acadC?.departmentName || departments.find(d => d.id === qualC?.departmentId)?.name || 'ACADEMIA DE POLICIA';
+                  if (!acadC) return null;
 
                   return (
                     <div className="bg-slate-950/80 p-3 rounded-xl border border-amber-500/30 text-xs space-y-1.5 mt-2">
                       <div className="text-amber-400 font-sans font-bold flex items-center justify-between border-b border-slate-800 pb-1">
-                        <span>Dados Herdados do Curso de Habilitação</span>
+                        <span>Dados do Curso Vinculado</span>
                         <span className="text-[10px] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
-                          {courseNameDisp}
+                          {acadC.name}
                         </span>
                       </div>
                       <div className="flex items-center justify-between pt-0.5">
-                        <span className="text-slate-400 font-sans">Tipo de Arma:</span>
-                        <span className="text-slate-200 font-semibold">{weaponTypesDisp}</span>
+                        <span className="text-slate-400 font-sans">Tipo do Curso:</span>
+                        <span className="text-slate-200 font-semibold">{acadC.type}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 font-sans">Quantidade de Tiros:</span>
-                        <span className="text-amber-400 font-bold font-mono">{shotsDisp} tiros por aluno</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 font-sans">Departamento do curso:</span>
-                        <span className="text-emerald-400 font-semibold">{deptDisp}</span>
+                        <span className="text-slate-400 font-sans">Código do Curso:</span>
+                        <span className="text-amber-400 font-mono">{acadC.code || 'N/A'}</span>
                       </div>
                     </div>
                   );
