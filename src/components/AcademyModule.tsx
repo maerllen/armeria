@@ -241,14 +241,30 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const todayStr = new Date().toISOString().split('T')[0];
 
   const allUnifiedCourses = [
-    ...academyCourses.map(ac => ({
+    ...academyCourses.map(ac => {
+      const locationDept = ac.type === 'Formação'
+        ? 'ACADEPOL'
+        : (ac.locationDepartmentName || ac.departmentName || 'ACADEPOL');
+      const teachingDept = ac.type === 'Formação'
+        ? 'ACADEPOL'
+        : (ac.teachingDepartmentName || ac.departmentName || 'ACADEPOL');
+      const deptId = departments.find(d => d.name === locationDept)?.id || '';
+
+      return {
         id: ac.id,
         name: ac.name,
         type: ac.type as 'Formação' | 'Ensino Continuado',
         code: ac.code || 'N/A',
-        departmentId: departments.find(d => d.name === ac.departmentName)?.id || '',
-        departmentName: ac.departmentName || 'ACADEPOL',
+        departmentId: deptId,
+        departmentName: locationDept,
+        locationDepartmentName: locationDept,
+        teachingDepartmentName: teachingDept,
         dates: ac.dates || [],
+        startDate: ac.startDate,
+        endDate: ac.endDate,
+        subject: ac.subject,
+        durationDays: ac.durationDays,
+        module: ac.module,
         allowedWeaponTypes: [] as string[],
         allowedModels: [] as string[],
         shotsPerStudent: 0,
@@ -256,7 +272,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         isQualification: false,
         rawAcademy: ac,
         rawQual: null as Course | null
-      }))
+      };
+    })
   ];
 
   const filteredUnifiedCourses = allUnifiedCourses.filter(c => {
@@ -1515,7 +1532,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     <th className="py-3 px-4">Nome do Curso</th>
                     <th className="py-3 px-4">Tipo</th>
                     <th className="py-3 px-4">Armamento / Modelos / Tiros</th>
-                    <th className="py-3 px-4">Departamento / Datas do Curso</th>
+                    <th className="py-3 px-4">Local do Curso / Datas</th>
                     <th className="py-3 px-4 text-right">Ações</th>
                   </tr>
                 </thead>
@@ -1588,9 +1605,22 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         </td>
                         <td className="py-3 px-4 text-slate-300">
                           <div className="space-y-1">
-                            <div className="font-semibold text-slate-200">Dept: {crs.departmentName || 'ACADEPOL'}</div>
+                            <div className="font-semibold text-slate-200 flex items-center space-x-1.5">
+                              <span className="text-[10px] text-amber-400 font-bold uppercase">Local:</span>
+                              <span className="text-slate-100 font-bold">{crs.type === 'Formação' ? 'ACADEPOL' : (crs.locationDepartmentName || crs.departmentName || 'ACADEPOL')}</span>
+                            </div>
+                            {crs.type === 'Ensino Continuado' && crs.teachingDepartmentName && (
+                              <div className="text-[10px] text-slate-400">
+                                Ministrante: <span className="text-slate-300 font-medium">{crs.teachingDepartmentName}</span>
+                              </div>
+                            )}
+                            {crs.type === 'Ensino Continuado' && crs.subject && (
+                              <div className="text-[10px] text-slate-400">
+                                Matéria: <span className="text-amber-300 font-semibold">{crs.subject}</span>
+                              </div>
+                            )}
                             {crs.dates && crs.dates.length > 0 ? (
-                              <div className="flex flex-wrap gap-1">
+                              <div className="flex flex-wrap gap-1 pt-0.5">
                                 {crs.dates.map(d => (
                                   <span key={d} className={`text-[10px] px-1.5 py-0.5 rounded font-mono border ${
                                     d >= todayStr
