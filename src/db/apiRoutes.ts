@@ -2355,3 +2355,59 @@ apiRouter.post('/course-movements/:id/retorno', async (req: Request, res: Respon
     return res.status(500).json({ error: err.message });
   }
 });
+
+apiRouter.put('/course-movements/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { teacherName, lessonNumber, lessonPlanName, ammoSupplied, notes, actor } = req.body;
+    const pool = getPool();
+    await pool.query(
+      `UPDATE course_class_movements SET
+         teacher_name = COALESCE(?, teacher_name),
+         lesson_number = COALESCE(?, lesson_number),
+         lesson_plan_name = COALESCE(?, lesson_plan_name),
+         ammo_supplied = COALESCE(?, ammo_supplied),
+         notes = COALESCE(?, notes)
+       WHERE id = ?`,
+      [
+        teacherName || null,
+        lessonNumber || null,
+        lessonPlanName || null,
+        ammoSupplied !== undefined ? Number(ammoSupplied) : null,
+        notes !== undefined ? notes : null,
+        id
+      ]
+    );
+    await insertAuditLog('Cursos', 'Editar', `Atualizado Mapa de Aula ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/course-movements/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor;
+    const pool = getPool();
+
+    const [movs]: any = await pool.query('SELECT * FROM course_class_movements WHERE id = ?', [id]);
+    if (movs && movs.length > 0) {
+      const mov = movs[0];
+      if (mov.status === 'Em Aula' || mov.status === 'Em Sala de Aula') {
+        const wIds: string[] = typeof mov.weapon_ids === 'string' ? JSON.parse(mov.weapon_ids) : (mov.weapon_ids || []);
+        if (Array.isArray(wIds) && wIds.length > 0) {
+          for (const wId of wIds) {
+            await pool.query(`UPDATE weapons SET status = 'No Cofre', location_note = NULL WHERE id = ?`, [wId]);
+          }
+        }
+      }
+      await pool.query('DELETE FROM course_class_movements WHERE id = ?', [id]);
+      await insertAuditLog('Cursos', 'Excluir', `Excluído Mapa de Aula ID ${id}`, actor, req.ip);
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});

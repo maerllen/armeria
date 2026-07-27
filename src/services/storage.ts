@@ -1061,6 +1061,38 @@ class StorageService {
     }
   }
 
+  public async updateCourseMovement(id: string, movementData: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/course-movements/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...movementData, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCourseMovement(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/course-movements/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public getLessonPlans(): LessonPlan[] {
     return this.state.lessonPlans;
   }

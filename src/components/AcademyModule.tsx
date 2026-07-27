@@ -341,7 +341,16 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan'; id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan' | 'movement'; id: string; name: string } | null>(null);
+
+  // Edit Mapa de Aula state
+  const [showEditMovModal, setShowEditMovModal] = useState(false);
+  const [editingMovement, setEditingMovement] = useState<CourseMovement | null>(null);
+  const [editMovTeacherName, setEditMovTeacherName] = useState('');
+  const [editMovLessonNumber, setEditMovLessonNumber] = useState<number>(1);
+  const [editMovLessonPlanName, setEditMovLessonPlanName] = useState('');
+  const [editMovAmmoSupplied, setEditMovAmmoSupplied] = useState<number>(0);
+  const [editMovNotes, setEditMovNotes] = useState('');
 
   // Selected receipt for printing
   const [selectedReceiptMovement, setSelectedReceiptMovement] = useState<CourseMovement | null>(null);
@@ -955,6 +964,162 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
   };
 
+  // Direct Print PDF function
+  const handleDirectPrint = (mov: CourseMovement) => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Por favor, permita janelas pop-up para abrir o documento em PDF.');
+      return;
+    }
+
+    const totalAmmo = mov.ammoQuantity || mov.ammoSupplied || 0;
+    const ammoReturned = mov.ammoReturned || 0;
+    const ammoUsed = (mov.ammoUsed !== undefined) ? mov.ammoUsed : Math.max(0, totalAmmo - ammoReturned);
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Mapa de Aula - ${mov.turmaCode || mov.className} - PCMG</title>
+        <style>
+          @page { size: A4; margin: 15mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
+          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
+          .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
+          .subtitle { font-size: 11px; font-weight: 700; color: #374151; margin-top: 2px; }
+          .reg-id { font-family: monospace; font-size: 12px; font-weight: bold; text-align: right; }
+          .status-bar { background: #f3f4f6; border: 1px solid #d1d5db; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; font-family: monospace; font-size: 11px; }
+          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+          .full-width { grid-column: span 2; }
+          .box { border: 1px solid #9ca3af; border-radius: 8px; padding: 12px; font-family: monospace; }
+          .box-title { font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111827; letter-spacing: 0.5px; }
+          .field { margin-bottom: 6px; }
+          .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
+          .val { font-size: 12px; font-weight: bold; color: #000; }
+          .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; text-align: center; margin-top: 6px; }
+          .stat-item { background: #f9fafb; border: 1px solid #e5e7eb; padding: 8px; border-radius: 6px; }
+          .signatures { margin-top: 45px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
+          .sig-line { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; }
+          .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
+            <div class="subtitle">ACADEMIA DE POLÍCIA CIVIL • MAPA DE AULA E MOVIMENTAÇÃO DE MATERIAL</div>
+          </div>
+          <div class="reg-id">
+            REGISTRO DE AULA<br>
+            <span style="font-size: 15px; font-weight: 900;">#${mov.id}</span>
+          </div>
+        </div>
+
+        <div class="status-bar">
+          <div><strong>STATUS DO MAPA:</strong> ${(mov.status || 'EM AULA').toUpperCase()}</div>
+          <div><strong>Emissão:</strong> ${new Date(mov.issuedAt).toLocaleString('pt-BR')}</div>
+        </div>
+
+        <div class="grid">
+          <div class="box">
+            <div class="box-title">1. Identificação da Aula</div>
+            <div class="field"><span class="label">Turma:</span> <span class="val">${mov.turmaCode || mov.className}</span></div>
+            <div class="field"><span class="label">Curso / Carreira:</span> <span class="val">${mov.courseName} (${mov.career || 'N/A'})</span></div>
+            <div class="field"><span class="label">Disciplina:</span> <span class="val">${mov.subject || 'MEAF'}</span></div>
+            <div class="field"><span class="label">Plano de Aula:</span> <span class="val">${mov.lessonPlanName || 'Plano Padrão'} (Aula ${mov.lessonNumber || 1})</span></div>
+          </div>
+
+          <div class="box">
+            <div class="box-title">2. Pessoal Responsável</div>
+            <div class="field"><span class="label">Professor Responsável:</span> <span class="val">${mov.teacherName}</span></div>
+            <div class="field"><span class="label">Emitido por (Armeiro):</span> <span class="val">${mov.issuedByUserName || 'Armeiro Responsável'}</span></div>
+            ${mov.returnedByUserName ? `<div class="field"><span class="label">Recebido por (Devolução):</span> <span class="val">${mov.returnedByUserName}</span></div>` : ''}
+          </div>
+
+          <div class="box full-width">
+            <div class="box-title">3. Armamento e Materiais Fornecidos</div>
+            <div class="field"><span class="label">Caixa de Armas / Conjunto:</span> <span class="val">${mov.boxName || 'Sem Caixa Vinculada'}</span></div>
+            ${mov.returnedMaterials ? `<div class="field"><span class="label">Materiais Registrados no Fechamento:</span> <span class="val">${mov.returnedMaterials}</span></div>` : ''}
+          </div>
+
+          ${totalAmmo > 0 ? `
+          <div class="box full-width">
+            <div class="box-title">4. Balanço de Munições</div>
+            <div class="stats-grid">
+              <div class="stat-item"><span class="label">Calibre</span><span class="val">${mov.ammoCaliber || 'N/A'}</span></div>
+              <div class="stat-item"><span class="label">Fornecida</span><span class="val">${totalAmmo} un</span></div>
+              <div class="stat-item"><span class="label">Utilizada</span><span class="val">${mov.status === 'Devolvido' || mov.status === 'Finalizada' ? ammoUsed + ' un' : '-'}</span></div>
+              <div class="stat-item"><span class="label">Devolvida ao Cofre</span><span class="val">${mov.status === 'Devolvido' || mov.status === 'Finalizada' ? ammoReturned + ' un' : '-'}</span></div>
+            </div>
+          </div>
+          ` : ''}
+
+          ${mov.notes ? `
+          <div class="box full-width">
+            <div class="box-title">5. Observações</div>
+            <div style="font-size: 11px;">${mov.notes}</div>
+          </div>
+          ` : ''}
+        </div>
+
+        <div class="signatures">
+          <div class="sig-line">
+            ${mov.issuedByUserName || 'Armeiro Responsável'}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro Emissor</span>
+          </div>
+          <div class="sig-line">
+            ${mov.teacherName}<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Professor / Policial Responsável</span>
+          </div>
+        </div>
+
+        <div class="footer">
+          Documento gerado eletronicamente pelo Sistema de Armeria da Polícia Civil em ${new Date().toLocaleString('pt-BR')}
+        </div>
+
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  // Edit Mapa handlers
+  const handleOpenEditMovModal = (mov: CourseMovement) => {
+    setEditingMovement(mov);
+    setEditMovTeacherName(mov.teacherName || '');
+    setEditMovLessonNumber(mov.lessonNumber || 1);
+    setEditMovLessonPlanName(mov.lessonPlanName || '');
+    setEditMovAmmoSupplied(mov.ammoSupplied || mov.ammoQuantity || 0);
+    setEditMovNotes(mov.notes || '');
+    setShowEditMovModal(true);
+  };
+
+  const handleExecuteEditMov = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingMovement) return;
+    try {
+      const res = await storage.updateCourseMovement(editingMovement.id, {
+        teacherName: editMovTeacherName.trim(),
+        lessonNumber: Number(editMovLessonNumber),
+        lessonPlanName: editMovLessonPlanName.trim(),
+        ammoSupplied: Number(editMovAmmoSupplied),
+        notes: editMovNotes.trim()
+      });
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg('Mapa de aula atualizado com sucesso!');
+      setShowEditMovModal(false);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao atualizar mapa de aula.');
+    }
+  };
+
   // Delete handler
   const confirmExecuteDelete = async () => {
     if (!deleteTarget) return;
@@ -963,6 +1128,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       if (deleteTarget.type === 'box') await storage.deleteWeaponBox(deleteTarget.id);
       if (deleteTarget.type === 'class') await storage.deleteCourseClass(deleteTarget.id);
       if (deleteTarget.type === 'plan') await storage.deleteLessonPlan(deleteTarget.id);
+      if (deleteTarget.type === 'movement') await storage.deleteCourseMovement(deleteTarget.id);
       setSuccessMsg('Item excluído com sucesso.');
       onRefresh();
     } catch (err: any) {
@@ -1251,22 +1417,37 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             </span>
                           </td>
                           <td className="py-3 px-4 text-right">
-                            <div className="flex items-center justify-end space-x-2">
+                            <div className="flex items-center justify-end space-x-1.5">
                               {isEmAula && (
                                 <button
                                   onClick={() => handleOpenRetornoModal(mov)}
-                                  className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                                  className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                                  title="Fechar Mapa de Aula / Devolução de Material"
                                 >
                                   <RefreshCw className="w-3.5 h-3.5" />
                                   <span>Fechar Mapa</span>
                                 </button>
                               )}
                               <button
-                                onClick={() => setSelectedReceiptMovement(mov)}
+                                onClick={() => handleDirectPrint(mov)}
                                 className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                                title="Imprimir Recibo / Mapa de Aula"
+                                title="Imprimir PDF / Documento do Mapa de Aula"
                               >
                                 <Printer className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => handleOpenEditMovModal(mov)}
+                                className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Editar Mapa de Aula"
+                              >
+                                <Edit2 className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteTarget({ id: mov.id, type: 'movement', name: `Mapa de Aula ${mov.turmaCode || mov.className} (Aula ${mov.lessonNumber || 1})` })}
+                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Excluir Mapa de Aula"
+                              >
+                                <Trash2 className="w-4 h-4" />
                               </button>
                             </div>
                           </td>
@@ -2880,7 +3061,112 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       )}
 
-      {/* 6. Modal Fechar Mapa / Devolução de Aula */}
+      {/* Modal Editar Mapa de Aula */}
+      {showEditMovModal && editingMovement && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+            <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-amber-400">
+                <Edit2 className="w-5 h-5" />
+                <span>Editar Mapa de Aula</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEditMovModal(false)}
+                className="text-slate-400 hover:text-slate-200 font-bold text-lg"
+              >
+                &times;
+              </button>
+            </h3>
+
+            <form onSubmit={handleExecuteEditMov} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Professor Responsável <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={editMovTeacherName}
+                  onChange={(e) => setEditMovTeacherName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Plano de Aula
+                  </label>
+                  <input
+                    type="text"
+                    value={editMovLessonPlanName}
+                    onChange={(e) => setEditMovLessonPlanName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Aula Nº
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editMovLessonNumber}
+                    onChange={(e) => setEditMovLessonNumber(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Quantidade de Munição Fornecida
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editMovAmmoSupplied}
+                  onChange={(e) => setEditMovAmmoSupplied(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono font-bold focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Observações / Ocorrências
+                </label>
+                <textarea
+                  value={editMovNotes}
+                  onChange={(e) => setEditMovNotes(e.target.value)}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 placeholder:text-slate-600 focus:border-amber-500 transition"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowEditMovModal(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl shadow transition flex items-center space-x-1.5"
+                >
+                  <Edit2 className="w-4 h-4" />
+                  <span>Salvar Alterações</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Fechar Mapa / Devolução de Aula */}
       {showRetornoModal && retornoMovement && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
