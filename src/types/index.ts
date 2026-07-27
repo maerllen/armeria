@@ -336,6 +336,7 @@ export interface CourseMovement {
   extraMagazinesCount?: number;
   status: 'Em Aula' | 'Finalizada' | 'Em Sala de Aula' | 'Devolvido';
   notes?: string;
+  returnedMaterials?: string;
   issuedByUserId?: string;
   issuedByUserName: string;
   returnedByUserName?: string;

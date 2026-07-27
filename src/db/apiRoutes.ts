@@ -2020,6 +2020,8 @@ apiRouter.get('/course-movements', async (req: Request, res: Response) => {
       ammoReturned: r.ammo_returned || 0,
       extraMagazinesCount: r.extra_magazines_count || 0,
       status: r.status,
+      notes: r.notes || undefined,
+      returnedMaterials: r.returned_materials || undefined,
       issuedByUserName: r.issued_by_user_name,
       returnedByUserName: r.returned_by_user_name || undefined,
       createdAt: r.created_at,
@@ -2185,7 +2187,7 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
 apiRouter.post('/course-movements/:id/retorno', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { ammoReturned, returnedByUserName, actor } = req.body;
+    const { ammoReturned, ammoUsed, returnedMaterials, notes, returnedByUserName, actor } = req.body;
 
     const pool = getPool();
     const [movs]: any = await pool.query('SELECT * FROM course_class_movements WHERE id = ?', [id]);
@@ -2203,20 +2205,46 @@ apiRouter.post('/course-movements/:id/retorno', async (req: Request, res: Respon
       }
     }
 
-    if (ammoReturned > 0 && mov.vault_space_id && mov.caliber_id) {
+    const calcAmmoReturned = ammoReturned !== undefined ? Number(ammoReturned) : Math.max(0, (mov.ammo_supplied || 0) - (Number(ammoUsed) || 0));
+    const calcAmmoUsed = ammoUsed !== undefined ? Number(ammoUsed) : Math.max(0, (mov.ammo_supplied || 0) - calcAmmoReturned);
+
+    if (calcAmmoReturned > 0 && mov.vault_space_id && mov.caliber_id) {
       const [stocks]: any = await pool.query('SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?', [mov.vault_space_id, mov.caliber_id]);
       if (stocks && stocks.length > 0) {
-        const newQty = stocks[0].quantity + ammoReturned;
+        const newQty = stocks[0].quantity + calcAmmoReturned;
         await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
       }
     }
 
-    await pool.query(
-      `UPDATE course_class_movements
-       SET status = 'Finalizada', ammo_returned = ?, returned_by_user_name = ?, returned_at = NOW()
-       WHERE id = ?`,
-      [ammoReturned || 0, returnedByUserName || actor?.name || 'Armeiro', id]
-    );
+    try {
+      await pool.query(
+        `UPDATE course_class_movements
+         SET status = 'Finalizada',
+             ammo_used = ?,
+             ammo_returned = ?,
+             returned_materials = ?,
+             notes = COALESCE(?, notes),
+             returned_by_user_name = ?,
+             returned_at = NOW()
+         WHERE id = ?`,
+        [
+          calcAmmoUsed,
+          calcAmmoReturned,
+          returnedMaterials || null,
+          notes ? notes.trim() : null,
+          returnedByUserName || actor?.name || 'Armeiro',
+          id
+        ]
+      );
+    } catch (updateErr) {
+      // Fallback if returned_materials column isn't present
+      await pool.query(
+        `UPDATE course_class_movements
+         SET status = 'Finalizada', ammo_used = ?, ammo_returned = ?, returned_by_user_name = ?, returned_at = NOW()
+         WHERE id = ?`,
+        [calcAmmoUsed, calcAmmoReturned, returnedByUserName || actor?.name || 'Armeiro', id]
+      );
+    }
 
     await insertAuditLog('Cursos', 'Devolver', `Retorno da aula Turma ${mov.turma_code} (Aula ${mov.lesson_number}) - Munição devolvida ao cofre: ${ammoReturned} un`, actor, req.ip);
 

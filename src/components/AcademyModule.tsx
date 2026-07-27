@@ -762,10 +762,13 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [movTeacherNameOutside, setMovTeacherNameOutside] = useState('');
   const [movNotes, setMovNotes] = useState('');
 
-  // Retorno modal
+  // Retorno / Fechar Mapa modal
   const [showRetornoModal, setShowRetornoModal] = useState(false);
   const [retornoMovement, setRetornoMovement] = useState<CourseMovement | null>(null);
+  const [retornoAmmoUsed, setRetornoAmmoUsed] = useState<number>(0);
   const [retornoAmmoReturned, setRetornoAmmoReturned] = useState<number>(0);
+  const [retornoMaterials, setRetornoMaterials] = useState('');
+  const [retornoNotes, setRetornoNotes] = useState('');
   const [retornoUserName, setRetornoUserName] = useState('');
 
   const handleOpenSaidaModal = () => {
@@ -871,12 +874,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setSuccessMsg('Saída (Aula CFTP) realizada com sucesso!');
       setShowMovementModal(false);
       onRefresh();
-
-      // Find created movement for receipt print
-      const createdMov = storage.getCourseMovements().find(m => m.id === res.id);
-      if (createdMov) {
-        setSelectedReceiptMovement(createdMov);
-      }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao dar saída (Aula CFTP).');
     }
@@ -884,8 +881,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const handleOpenRetornoModal = (mov: CourseMovement) => {
     setRetornoMovement(mov);
-    setRetornoAmmoReturned(mov.ammoQuantity); // Default all returned
-    setRetornoUserName(mov.teacherName);
+    const supplied = mov.ammoQuantity || mov.ammoSupplied || 0;
+    setRetornoAmmoUsed(supplied); // Default all used
+    setRetornoAmmoReturned(0);
+    setRetornoMaterials('Caixas de armamento e acessórios devolvidos em perfeito estado');
+    setRetornoNotes(mov.notes || '');
+    setRetornoUserName(mov.teacherName || currentUser.name);
     setShowRetornoModal(true);
   };
 
@@ -897,20 +898,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       const res = await storage.darRetornoCurso(
         retornoMovement.id,
         Number(retornoAmmoReturned) || 0,
-        retornoUserName.trim()
+        retornoUserName.trim(),
+        {
+          ammoUsed: Number(retornoAmmoUsed) || 0,
+          returnedMaterials: retornoMaterials.trim(),
+          notes: retornoNotes.trim()
+        }
       );
       if (!res.success) throw new Error(res.error);
-      setSuccessMsg('Devolução de aula efetuada e estoque atualizado com sucesso!');
+      setSuccessMsg('Mapa de aula fechado e devolução efetuada com sucesso!');
       setShowRetornoModal(false);
       onRefresh();
-
-      // Show receipt modal
-      const updatedMov = storage.getCourseMovements().find(m => m.id === retornoMovement.id);
-      if (updatedMov) {
-        setSelectedReceiptMovement(updatedMov);
-      }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao efetuar devolução de aula.');
+      setErrorMsg(err.message || 'Erro ao fechar mapa de aula.');
     }
   };
 
@@ -1217,7 +1217,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                   className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1"
                                 >
                                   <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>Dar Devolução</span>
+                                  <span>Fechar Mapa</span>
                                 </button>
                               )}
                               <button
@@ -2777,42 +2777,143 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       )}
 
-      {/* 6. Modal Retorno / Devolução de Aula */}
+      {/* 6. Modal Fechar Mapa / Devolução de Aula */}
       {showRetornoModal && retornoMovement && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
-            <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center space-x-2 text-emerald-400">
-              <RefreshCw className="w-5 h-5" />
-              <span>Devolução e Retorno da Aula</span>
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-emerald-400">
+                <CheckCircle2 className="w-5 h-5" />
+                <span>Fechamento do Mapa de Aula / Devolução</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRetornoModal(false)}
+                className="text-slate-400 hover:text-slate-200 font-bold text-lg"
+              >
+                &times;
+              </button>
             </h3>
 
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
-              <div>Turma: <strong className="text-slate-100">{retornoMovement.className}</strong></div>
-              <div>Professor: <span className="text-amber-400 font-bold">{retornoMovement.teacherName}</span></div>
-              <div>Munição Fornecida Inicialmente: <strong className="text-amber-400 font-mono">{retornoMovement.ammoQuantity} un ({retornoMovement.ammoCaliber})</strong></div>
+            <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Turma / Aula:</span>
+                <strong className="text-slate-100 font-semibold">{retornoMovement.className || retornoMovement.turmaCode} (Aula {retornoMovement.lessonNumber || 1})</strong>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Professor Responsável:</span>
+                <span className="text-amber-400 font-bold">{retornoMovement.teacherName}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400">Munição Cautelada Inicialmente:</span>
+                <strong className="text-amber-400 font-mono">{retornoMovement.ammoQuantity || retornoMovement.ammoSupplied} un ({retornoMovement.ammoCaliber || 'Padrão'})</strong>
+              </div>
+              {retornoMovement.weaponBoxName && (
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-400">Caixa de Armamento:</span>
+                  <span className="text-slate-200 font-medium">{retornoMovement.weaponBoxName}</span>
+                </div>
+              )}
             </div>
 
             <form onSubmit={handleExecuteRetorno} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">
-                  Munições NÃO Utilizadas (Quantidade Devolvida ao Cofre)
-                </label>
-                <input
-                  type="number"
-                  value={retornoAmmoReturned}
-                  onChange={(e) => setRetornoAmmoReturned(Number(e.target.value))}
-                  min={0}
-                  max={retornoMovement.ammoQuantity}
-                  className="w-full bg-slate-950 border border-emerald-500/50 rounded-xl px-3.5 py-2 text-slate-100 font-mono text-base font-bold text-emerald-400"
-                  required
-                />
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Munição Utilizada em Aula: <strong className="text-slate-100 font-mono">{retornoMovement.ammoQuantity - Number(retornoAmmoReturned)} un</strong>
-                </p>
+              {/* Quantidade de Munições Utilizadas x Devolvidas */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Munições Utilizadas em Aula <span className="text-red-400">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={retornoAmmoUsed}
+                    onChange={(e) => {
+                      const val = Math.max(0, Number(e.target.value));
+                      const total = retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0;
+                      setRetornoAmmoUsed(val);
+                      setRetornoAmmoReturned(Math.max(0, total - val));
+                    }}
+                    min={0}
+                    max={retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0}
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-amber-400 font-mono text-base font-bold"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Deflagradas / consumidas na aula
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Munições Devolvidas ao Cofre
+                  </label>
+                  <input
+                    type="number"
+                    value={retornoAmmoReturned}
+                    onChange={(e) => {
+                      const ret = Math.max(0, Number(e.target.value));
+                      const total = retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0;
+                      setRetornoAmmoReturned(ret);
+                      setRetornoAmmoUsed(Math.max(0, total - ret));
+                    }}
+                    min={0}
+                    max={retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0}
+                    className="w-full bg-slate-950 border border-emerald-500/50 rounded-xl px-3.5 py-2 text-emerald-400 font-mono text-base font-bold"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Não utilizadas (retornam ao estoque)
+                  </p>
+                </div>
               </div>
 
+              {/* Materiais Devolvidos */}
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome de Quem Efetuou a Devolução</label>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Materiais e Armamentos Devolvidos <span className="text-red-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={retornoMaterials}
+                  onChange={(e) => setRetornoMaterials(e.target.value)}
+                  placeholder="Ex: Caixas de armas, alvos, abafadores e óculos de proteção"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  required
+                />
+                <div className="flex flex-wrap gap-1.5 mt-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setRetornoMaterials('Caixas de armamento e acessórios devolvidos em perfeito estado')}
+                    className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700"
+                  >
+                    + Tudo Conforme
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRetornoMaterials('Armas devolvidas ao cofre, caixas e carregadores conferidos')}
+                    className="text-[10px] bg-slate-800 hover:bg-slate-700 text-slate-300 px-2 py-0.5 rounded border border-slate-700"
+                  >
+                    + Armas Conferidas
+                  </button>
+                </div>
+              </div>
+
+              {/* Observações da Aula / Texto livre */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Observações / Ocorrências da Aula (Texto Livre)
+                </label>
+                <textarea
+                  value={retornoNotes}
+                  onChange={(e) => setRetornoNotes(e.target.value)}
+                  rows={3}
+                  placeholder="Informe aqui qualquer observação sobre a aula, pane em armamento, extravio de cartucho ou registro relevante..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 placeholder:text-slate-600 focus:border-amber-500 transition"
+                />
+              </div>
+
+              {/* Nome do Responsável */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Nome do Professor / Usuário Responsável pelo Fechamento</label>
                 <input
                   type="text"
                   value={retornoUserName}
@@ -2832,9 +2933,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="bg-emerald-500 text-slate-950 font-bold px-4 py-2 rounded-xl shadow"
+                  className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold px-4 py-2 rounded-xl shadow transition flex items-center space-x-1.5"
                 >
-                  Confirmar Retorno e Atualizar Recibo
+                  <CheckCircle2 className="w-4 h-4" />
+                  <span>Fechar Mapa de Aula</span>
                 </button>
               </div>
             </form>

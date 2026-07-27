@@ -492,6 +492,12 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`issued_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
     } catch (e) {}
     try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`returned_materials\` TEXT DEFAULT NULL;`);
+    } catch (e) {}
+    try {
+      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`notes\` TEXT DEFAULT NULL;`);
+    } catch (e) {}
+    try {
       await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`allowed_weapon_types\` JSON DEFAULT NULL;`);
     } catch (e) {}
     try {

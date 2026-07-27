@@ -1033,12 +1033,24 @@ class StorageService {
     }
   }
 
-  public async darRetornoCurso(movementId: string, ammoReturned: number, returnedByUserName?: string): Promise<{ success: boolean; error?: string }> {
+  public async darRetornoCurso(
+    movementId: string,
+    ammoReturned: number,
+    returnedByUserName?: string,
+    options?: { ammoUsed?: number; returnedMaterials?: string; notes?: string }
+  ): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/course-movements/${movementId}/retorno`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ammoReturned, returnedByUserName, actor: this.state.currentUser })
+        body: JSON.stringify({
+          ammoReturned,
+          ammoUsed: options?.ammoUsed,
+          returnedMaterials: options?.returnedMaterials,
+          notes: options?.notes,
+          returnedByUserName,
+          actor: this.state.currentUser
+        })
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
