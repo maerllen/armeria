@@ -89,7 +89,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   units,
   onRefresh
 }) => {
-  const [activeTab, setActiveTab] = useState<'movements' | 'planos' | 'turmas' | 'caixas' | 'cursos'>('movements');
+  const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'cursos'>('movements');
 
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
@@ -1075,17 +1075,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             <span>Mapas de Aula ({courseMovements.length})</span>
           </button>
           <button
-            onClick={() => setActiveTab('planos')}
-            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
-              activeTab === 'planos'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ClipboardList className="w-3.5 h-3.5" />
-            <span>Planos de Aula ({lessonPlans.length})</span>
-          </button>
-          <button
             onClick={() => setActiveTab('turmas')}
             className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
               activeTab === 'turmas'
@@ -1095,17 +1084,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           >
             <Users className="w-3.5 h-3.5" />
             <span>Turmas ({courseClasses.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('caixas')}
-            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
-              activeTab === 'caixas'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Box className="w-3.5 h-3.5" />
-            <span>Caixas de Armas ({weaponBoxes.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('cursos')}
@@ -1274,106 +1252,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* TAB: PLANOS DE AULA                                                      */}
-      {/* ========================================================================= */}
-      {activeTab === 'planos' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-100">Planos de Aula da Academia de Polícia</h2>
-              <p className="text-xs text-slate-400">
-                Cadastre e gerencie planos de aula com carreira, ano, quantidade de aulas, tiros por aluno, calibre e insumos do professor
-              </p>
-            </div>
-            <button
-              onClick={() => handleOpenPlanModal()}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Plano de Aula</span>
-            </button>
-          </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {lessonPlans.length === 0 ? (
-              <div className="col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 italic">
-                Nenhum plano de aula cadastrado até o momento.
-              </div>
-            ) : (
-              lessonPlans.map((plan) => (
-                <div key={plan.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-sm hover:border-slate-700 transition">
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="px-2.5 py-0.5 rounded-md bg-amber-500/20 text-amber-400 font-extrabold border border-amber-500/40 text-xs font-mono uppercase">
-                          CÓDIGO TURMA: {plan.turmaCode || 'Geral'}
-                        </span>
-                        {(() => {
-                          const linkedC = courseClasses.find(c => (c.code || c.name) === plan.turmaCode || c.career === plan.career);
-                          if (!linkedC) return null;
-                          return (
-                            <span className="px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 text-[11px]">
-                              Prof: {linkedC.teacherName}
-                            </span>
-                          );
-                        })()}
-                      </div>
-                      <h3 className="text-sm font-bold text-slate-100">{plan.name}</h3>
-                      <div className="flex items-center space-x-2 pt-1 text-[11px] flex-wrap gap-y-1">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-800 text-slate-200 font-bold border border-slate-700 uppercase">
-                          {plan.career}
-                        </span>
-                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase ${
-                          (plan.type || '').toLowerCase().includes('formação')
-                            ? 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                            : 'bg-blue-950 text-blue-300 border-blue-800'
-                        }`}>
-                          {plan.type}
-                        </span>
-                        <span className="text-slate-400 font-mono">Ano: {plan.year}</span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleOpenPlanModal(plan)}
-                        className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg transition"
-                        title="Editar Plano de Aula"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget({ type: 'plan', id: plan.id, name: plan.name })}
-                        className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg transition"
-                        title="Excluir Plano de Aula"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2 border-t border-slate-800 pt-3">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
-                      <span>Aulas Previstas ({plan.lessonCount} aulas):</span>
-                    </div>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                      {(plan.lessonsData || []).map((item, idx) => (
-                        <div key={idx} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px] flex items-center justify-between font-mono">
-                          <span className="font-bold text-amber-400">Aula {item.lessonNumber}</span>
-                          <span className="text-slate-300">{item.shotsPerStudent} tiros/aluno</span>
-                          <span className="text-slate-400">Cal: {item.caliberName}</span>
-                          <span className="text-emerald-400">Prof: +{item.instructorShots} un</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
 
       {/* ========================================================================= */}
       {/* TAB 2: TURMAS (CLASSES)                                                   */}
@@ -1458,132 +1337,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       )}
 
       {/* ========================================================================= */}
-      {/* TAB 3: CAIXAS DE ARMAS DE AULA & HISTÓRICO DE SUBSTITUIÇÃO                */}
-      {/* ========================================================================= */}
-      {activeTab === 'caixas' && (
-        <div className="space-y-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
-            <div>
-              <h2 className="text-sm font-bold text-slate-100">Caixas de Armamento para Instrução</h2>
-              <p className="text-xs text-slate-400">
-                Agrupamento de armas em caixas organizadas por tipo/modelo para saídas rápidas de aulas
-              </p>
-            </div>
-            <button
-              onClick={() => handleOpenBoxModal()}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Nova Caixa de Armas</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {weaponBoxes.length === 0 ? (
-              <div className="col-span-full bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center text-slate-500 italic text-xs">
-                Nenhuma caixa de armas cadastrada.
-              </div>
-            ) : (
-              weaponBoxes.map((box) => (
-                <div key={box.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 hover:border-slate-700 transition">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center space-x-2.5">
-                      <Box className="w-5 h-5 text-amber-400" />
-                      <h3 className="text-base font-bold text-slate-100">{box.name}</h3>
-                    </div>
-                    <div className="flex items-center space-x-1.5">
-                      <button
-                        onClick={() => handleOpenReplaceModal(box)}
-                        className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center space-x-1"
-                        title="Substituir Arma Defeituosa na Caixa"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Substituir Arma</span>
-                      </button>
-                      <button
-                        onClick={() => handleOpenBoxModal(box)}
-                        className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg transition"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget({ type: 'box', id: box.id, name: box.name })}
-                        className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {box.description && (
-                    <p className="text-xs text-slate-400">{box.description}</p>
-                  )}
-
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      Armas na Caixa ({box.weaponIds.length}):
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {box.weaponIds.map(wId => {
-                        const w = weapons.find(item => item.id === wId);
-                        return (
-                          <div key={wId} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px]">
-                            {w ? (
-                              <>
-                                <div className="font-bold text-slate-100">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</div>
-                                <div className="text-amber-400 font-mono text-[10px]">Nº {w.serialNumber}</div>
-                              </>
-                            ) : (
-                              <span className="text-slate-500 italic">{wId}</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Replacement Logs Table */}
-          {boxReplacements.length > 0 && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
-              <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-2">
-                <RefreshCw className="w-4 h-4" />
-                <span>Histórico de Substituição de Armas em Caixas de Aula</span>
-              </h3>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
-                    <tr>
-                      <th className="py-2.5 px-3">Data</th>
-                      <th className="py-2.5 px-3">Arma Anterior (Removida)</th>
-                      <th className="py-2.5 px-3">Nova Arma (Inserida)</th>
-                      <th className="py-2.5 px-3">Motivo da Substituição</th>
-                      <th className="py-2.5 px-3">Professor / Responsável</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800 font-mono">
-                    {boxReplacements.map(rep => (
-                      <tr key={rep.id} className="hover:bg-slate-800/50">
-                        <td className="py-2.5 px-3 text-slate-400">{formatTimestamp(rep.replacedAt)}</td>
-                        <td className="py-2.5 px-3 text-red-400 font-semibold">{rep.oldWeaponDesc}</td>
-                        <td className="py-2.5 px-3 text-emerald-400 font-semibold">{rep.newWeaponDesc}</td>
-                        <td className="py-2.5 px-3 text-slate-200">{rep.reason}</td>
-                        <td className="py-2.5 px-3 text-amber-400">{rep.teacherName || rep.replacedByUserName}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* TAB 4: CURSOS DA ACADEMIA & GERENCIAR CURSOS                            */}
+      {/* TAB 3: CURSOS DA ACADEMIA                                                */}
       {/* ========================================================================= */}
       {activeTab === 'cursos' && (
         <div className="space-y-4">
@@ -1591,17 +1345,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             <div>
               <h2 className="text-sm font-bold text-slate-100">Catálogo e Gerenciamento de Cursos</h2>
               <p className="text-xs text-slate-400">
-                Gestão de Cursos de Formação, Ensino Continuado e Cursos de Habilitação de Armamentos
+                Gestão de Cursos de Formação e Ensino Continuado
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleOpenQualCourseModal()}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              >
-                <GraduationCap className="w-4 h-4" />
-                <span>GERENCIAR CURSOS (Habilitação)</span>
-              </button>
               <button
                 onClick={() => handleOpenCourseModal('Formação')}
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
@@ -3108,8 +2855,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       )}
 
-      {/* Gerenciar Cursos de Habilitação Modal */}
-      {showManageCoursesModal && (
+      {/* Gerenciar Cursos de Habilitação Modal - Moved to CourseManagementModule */}
+      {false && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
