@@ -341,6 +341,7 @@ export interface CourseClass {
   teacherUserIds?: string[];
   lessonPlanId?: string;
   lessonPlanName?: string;
+  plano_de_aula?: string;
   departmentId?: string;
   unitId?: string;
   createdAt: string;

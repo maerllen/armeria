@@ -411,6 +411,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`code\` VARCHAR(64) NOT NULL,
         \`student_count\` INT NOT NULL DEFAULT 1,
         \`teacher_user_ids\` JSON NOT NULL,
+        \`plano_de_aula\` VARCHAR(64) DEFAULT NULL,
         \`department_id\` VARCHAR(64) DEFAULT NULL,
         \`unit_id\` VARCHAR(64) DEFAULT NULL,
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -418,7 +419,8 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'course_classes' verificada/criada.");
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `teacher_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `plano_de_aula` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` DROP COLUMN `teacher_name`;"); } catch (e) {}
     try { await connection.query("ALTER TABLE `course_classes` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;"); } catch (e) {}
 
     // Plano de Aula (Curso de Formação) Main Table

@@ -127,7 +127,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const filteredMovements = courseMovements.filter(mov => {
     if (courseTypeFilterProp) {
-      if (mov.type && mov.type !== courseTypeFilterProp) return false;
+      if ((mov as any).type && (mov as any).type !== courseTypeFilterProp) return false;
       const linkedCourse = academyCourses.find(ac => ac.name === mov.courseName || ac.id === mov.courseId);
       if (linkedCourse && linkedCourse.type !== courseTypeFilterProp) return false;
     }
@@ -136,7 +136,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const filteredClasses = courseClasses.filter(cls => {
     if (courseTypeFilterProp) {
-      if (cls.type && cls.type !== courseTypeFilterProp) return false;
+      if ((cls as any).type && (cls as any).type !== courseTypeFilterProp) return false;
       const linkedCourse = academyCourses.find(ac => ac.id === cls.courseId);
       if (linkedCourse && linkedCourse.type !== courseTypeFilterProp) return false;
     }
@@ -643,6 +643,31 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return 'DL';
   };
 
+  const getTeacherDisplayName = (cls: CourseClass) => {
+    if (cls.teacherUserIds && cls.teacherUserIds.length > 0) {
+      const names = cls.teacherUserIds
+        .map(id => teachers.find(t => t.id === id || t.userId === id || t.masp === id)?.name)
+        .filter(Boolean);
+      if (names.length > 0) return names.join(', ');
+    }
+    if (cls.teacherUserId) {
+      const found = teachers.find(t => t.id === cls.teacherUserId || t.userId === cls.teacherUserId || t.masp === cls.teacherUserId);
+      if (found) return found.name;
+    }
+    if (cls.teacherName) return cls.teacherName;
+    return 'Não informado';
+  };
+
+  const getLessonPlanDisplayName = (cls: CourseClass) => {
+    const planId = cls.plano_de_aula || cls.lessonPlanId;
+    if (planId) {
+      const found = lessonPlans.find(p => p.id === planId);
+      if (found) return found.name;
+    }
+    if (cls.lessonPlanName) return cls.lessonPlanName;
+    return 'Nenhum vinculado';
+  };
+
   const handleOpenClassModal = (cls?: CourseClass, targetType: 'Formação' | 'Ensino Continuado' = 'Formação') => {
     if (cls) {
       const linked = academyCourses.find(c => c.id === cls.courseId);
@@ -653,11 +678,13 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassCareer(cls.career);
       const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
       setClassTurmaNum(digits ? digits.padStart(2, '0').slice(-2) : '01');
-      setClassTeacherId(cls.teacherUserId || '');
-      setClassTeacherName(cls.teacherName || '');
+      const primaryTeacher = cls.teacherUserId || (cls.teacherUserIds && cls.teacherUserIds[0]) || '';
+      setClassTeacherId(primaryTeacher);
+      const teacherObj = teachers.find(t => t.id === primaryTeacher || t.userId === primaryTeacher);
+      setClassTeacherName(teacherObj?.name || cls.teacherName || '');
       setClassSubject(cls.subject);
       setClassStudentCount(cls.studentCount);
-      setClassLessonPlanId(cls.lessonPlanId || '');
+      setClassLessonPlanId(cls.plano_de_aula || cls.lessonPlanId || '');
     } else {
       const initialSubject: 'MEAF' | 'TAP' | 'DP' = 'MEAF';
       const initialMatching = teachers.filter(t => t.teacherSubject === initialSubject);
@@ -719,9 +746,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         code: fullName,
         name: fullName,
         teacherUserId: classTeacherId,
+        teacherUserIds: classTeacherId ? [classTeacherId] : [],
         teacherName: finalTeacherName,
         subject: classSubject,
         studentCount: Number(classStudentCount) || 1,
+        plano_de_aula: classLessonPlanId || undefined,
         lessonPlanId: classLessonPlanId || undefined,
         lessonPlanName: selectedPlan ? selectedPlan.name : undefined,
         departmentId: currentUser.departmentId
@@ -1526,14 +1555,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
               >
                 <Plus className="w-4 h-4" />
-                <span>Nova Turma Formação</span>
-              </button>
-              <button
-                onClick={() => handleOpenClassModal(undefined, 'Ensino Continuado')}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nova Turma Ensino Continuado</span>
+                <span>Nova Turma</span>
               </button>
             </div>
           </div>
@@ -1580,7 +1602,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 font-sans">Professor:</span>
                       <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
-                        Prof. {cls.teacherName}
+                        Prof. {getTeacherDisplayName(cls)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -1589,8 +1611,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 font-sans">Plano de Aula:</span>
-                      <span className={`font-bold truncate max-w-[170px] ${cls.lessonPlanName ? 'text-amber-400' : 'text-slate-500 italic'}`} title={cls.lessonPlanName}>
-                        {cls.lessonPlanName || 'Nenhum vinculado'}
+                      <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
+                        {getLessonPlanDisplayName(cls)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between">
@@ -2737,18 +2759,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </option>
                   ))}
                 </select>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Nome do Professor (Salvo como Texto)</label>
-                <input
-                  type="text"
-                  value={classTeacherName}
-                  onChange={(e) => setClassTeacherName(e.target.value)}
-                  placeholder="Nome do Professor"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
-                  required
-                />
               </div>
 
               <div>

@@ -303,7 +303,7 @@ CREATE TABLE IF NOT EXISTS `course_classes` (
     `code` VARCHAR(64) NOT NULL,
     `student_count` INT NOT NULL DEFAULT 1,
     `teacher_user_ids` JSON NOT NULL,
-    `teacher_name` VARCHAR(255) DEFAULT NULL,
+    `plano_de_aula` VARCHAR(64) DEFAULT NULL,
     `department_id` VARCHAR(64) DEFAULT NULL,
     `unit_id` VARCHAR(64) DEFAULT NULL,
     `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

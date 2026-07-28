@@ -139,6 +139,49 @@ ON DUPLICATE KEY UPDATE
     `calibre_usado` = VALUES(`calibre_usado`),
     `insumo_do_instrutor` = VALUES(`insumo_do_instrutor`);
 
+-- --------------------------------------------------------------------
+-- 4. ATUALIZAÇÃO DA TABELA TURMAS (course_classes)
+-- - Adiciona coluna 'plano_de_aula'
+-- - Remove coluna 'teacher_name'
+-- - Garante a coluna 'teacher_user_ids'
+-- --------------------------------------------------------------------
+
+DROP PROCEDURE IF EXISTS `update_course_classes_schema_proc`;
+DELIMITER //
+CREATE PROCEDURE `update_course_classes_schema_proc`()
+BEGIN
+    IF NOT EXISTS (
+        SELECT * FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'course_classes' 
+          AND COLUMN_NAME = 'plano_de_aula'
+    ) THEN
+        ALTER TABLE `course_classes` ADD COLUMN `plano_de_aula` VARCHAR(64) DEFAULT NULL AFTER `teacher_user_ids`;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT * FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'course_classes' 
+          AND COLUMN_NAME = 'teacher_user_ids'
+    ) THEN
+        ALTER TABLE `course_classes` ADD COLUMN `teacher_user_ids` JSON DEFAULT NULL;
+    END IF;
+
+    IF EXISTS (
+        SELECT * FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() 
+          AND TABLE_NAME = 'course_classes' 
+          AND COLUMN_NAME = 'teacher_name'
+    ) THEN
+        ALTER TABLE `course_classes` DROP COLUMN `teacher_name`;
+    END IF;
+END //
+DELIMITER ;
+
+CALL `update_course_classes_schema_proc`();
+DROP PROCEDURE IF EXISTS `update_course_classes_schema_proc`;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- SCRIPT EXECUTADO COM SUCESSO!

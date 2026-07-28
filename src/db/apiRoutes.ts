@@ -2108,23 +2108,49 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const [rows]: any = await pool.query('SELECT * FROM course_classes ORDER BY created_at DESC');
-    const mapped = (rows || []).map((r: any) => ({
-      id: r.id,
-      courseId: r.course_id,
-      courseName: r.course_name,
-      subject: r.subject,
-      career: r.career,
-      careerAbbreviation: r.career_abbreviation,
-      turmaNumber: r.turma_number,
-      code: r.code,
-      studentCount: r.student_count,
-      teacherUserId: r.teacher_user_id || undefined,
-      teacherName: r.teacher_name || undefined,
-      teacherUserIds: typeof r.teacher_user_ids === 'string' ? JSON.parse(r.teacher_user_ids) : (r.teacher_user_ids || []),
-      departmentId: r.department_id || undefined,
-      unitId: r.unit_id || undefined,
-      createdAt: r.created_at
-    }));
+
+    let teacherMap: Record<string, string> = {};
+    try {
+      const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+      (tchRows || []).forEach((t: any) => {
+        if (t.id) teacherMap[t.id] = t.name;
+        if (t.user_id) teacherMap[t.user_id] = t.name;
+      });
+    } catch (e) {}
+
+    const mapped = (rows || []).map((r: any) => {
+      const teacherUserIds = typeof r.teacher_user_ids === 'string' ? JSON.parse(r.teacher_user_ids) : (r.teacher_user_ids || []);
+      const primaryTeacherId = r.teacher_user_id || (teacherUserIds.length > 0 ? teacherUserIds[0] : undefined);
+      
+      let teacherName = r.teacher_name || undefined;
+      if (!teacherName && teacherUserIds.length > 0) {
+        const names = teacherUserIds.map((tid: string) => teacherMap[tid]).filter(Boolean);
+        if (names.length > 0) teacherName = names.join(', ');
+      }
+      if (!teacherName && primaryTeacherId && teacherMap[primaryTeacherId]) {
+        teacherName = teacherMap[primaryTeacherId];
+      }
+
+      return {
+        id: r.id,
+        courseId: r.course_id,
+        courseName: r.course_name,
+        subject: r.subject,
+        career: r.career,
+        careerAbbreviation: r.career_abbreviation,
+        turmaNumber: r.turma_number,
+        code: r.code,
+        studentCount: r.student_count,
+        teacherUserId: primaryTeacherId,
+        teacherName: teacherName || undefined,
+        teacherUserIds: teacherUserIds,
+        lessonPlanId: r.plano_de_aula || r.lesson_plan_id || undefined,
+        plano_de_aula: r.plano_de_aula || r.lesson_plan_id || undefined,
+        departmentId: r.department_id || undefined,
+        unitId: r.unit_id || undefined,
+        createdAt: r.created_at
+      };
+    });
     return res.json(mapped);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -2143,7 +2169,8 @@ function computeCareerAbbreviation(career?: string): string {
 
 apiRouter.post('/course-classes', async (req: Request, res: Response) => {
   try {
-    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, teacherName, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const planoDeAula = req.body.plano_de_aula || req.body.lessonPlanId || req.body.lesson_plan_id || null;
     const finalCareer = career || 'Delegado';
     const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
     
@@ -2166,28 +2193,50 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
     const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
     const id = req.body.id || `class-${Date.now()}`;
 
-    await pool.query(
-      `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_name, teacher_user_ids, department_id, unit_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        id,
-        courseId || '',
-        courseName || '',
-        subject || 'MEAF',
-        finalCareer,
-        careerAbbreviation,
-        turmaNumber,
-        code,
-        Number(studentCount) || 1,
-        teacherName || '',
-        JSON.stringify(finalTeacherUserIds),
-        departmentId || null,
-        unitId || null
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, plano_de_aula, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          courseId || '',
+          courseName || '',
+          subject || 'MEAF',
+          finalCareer,
+          careerAbbreviation,
+          turmaNumber,
+          code,
+          Number(studentCount) || 1,
+          JSON.stringify(finalTeacherUserIds),
+          planoDeAula,
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    } catch (dbErr: any) {
+      // Fallback
+      await pool.query(
+        `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          courseId || '',
+          courseName || '',
+          subject || 'MEAF',
+          finalCareer,
+          careerAbbreviation,
+          turmaNumber,
+          code,
+          Number(studentCount) || 1,
+          JSON.stringify(finalTeacherUserIds),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    }
 
-    await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject} - Prof: ${teacherName || 'N/A'})`, actor, req.ip);
-    return res.json({ id, courseId, courseName, subject, career: finalCareer, careerAbbreviation, turmaNumber, code, studentCount, teacherName, teacherUserIds: finalTeacherUserIds, departmentId, unitId, createdAt: new Date().toISOString() });
+    await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject})`, actor, req.ip);
+    return res.json({ id, courseId, courseName, subject, career: finalCareer, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds: finalTeacherUserIds, plano_de_aula: planoDeAula, lessonPlanId: planoDeAula, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     console.error('Erro em POST /course-classes:', err);
     return res.status(500).json({ error: err.message });
@@ -2197,7 +2246,8 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
 apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, teacherName, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const planoDeAula = req.body.plano_de_aula || req.body.lessonPlanId || req.body.lesson_plan_id || null;
     const finalCareer = career || 'Delegado';
     const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
     
@@ -2219,37 +2269,69 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
 
     const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
 
-    await pool.query(
-      `UPDATE course_classes SET
-        course_id = ?,
-        course_name = ?,
-        subject = ?,
-        career = ?,
-        career_abbreviation = ?,
-        turma_number = ?,
-        code = ?,
-        student_count = ?,
-        teacher_name = ?,
-        teacher_user_ids = ?,
-        department_id = ?,
-        unit_id = ?
-       WHERE id = ?`,
-      [
-        courseId || '',
-        courseName || '',
-        subject || 'MEAF',
-        finalCareer,
-        careerAbbreviation,
-        turmaNumber,
-        code,
-        Number(studentCount) || 1,
-        teacherName || '',
-        JSON.stringify(finalTeacherUserIds),
-        departmentId || null,
-        unitId || null,
-        id
-      ]
-    );
+    try {
+      await pool.query(
+        `UPDATE course_classes SET
+          course_id = ?,
+          course_name = ?,
+          subject = ?,
+          career = ?,
+          career_abbreviation = ?,
+          turma_number = ?,
+          code = ?,
+          student_count = ?,
+          teacher_user_ids = ?,
+          plano_de_aula = ?,
+          department_id = ?,
+          unit_id = ?
+         WHERE id = ?`,
+        [
+          courseId || '',
+          courseName || '',
+          subject || 'MEAF',
+          finalCareer,
+          careerAbbreviation,
+          turmaNumber,
+          code,
+          Number(studentCount) || 1,
+          JSON.stringify(finalTeacherUserIds),
+          planoDeAula,
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    } catch (dbErr: any) {
+      await pool.query(
+        `UPDATE course_classes SET
+          course_id = ?,
+          course_name = ?,
+          subject = ?,
+          career = ?,
+          career_abbreviation = ?,
+          turma_number = ?,
+          code = ?,
+          student_count = ?,
+          teacher_user_ids = ?,
+          department_id = ?,
+          unit_id = ?
+         WHERE id = ?`,
+        [
+          courseId || '',
+          courseName || '',
+          subject || 'MEAF',
+          finalCareer,
+          careerAbbreviation,
+          turmaNumber,
+          code,
+          Number(studentCount) || 1,
+          JSON.stringify(finalTeacherUserIds),
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    }
 
     await insertAuditLog('Cursos', 'Editar', `Atualizada turma de aula: ${code}`, actor, req.ip);
     return res.json({ success: true });
