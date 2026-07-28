@@ -1443,14 +1443,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       return (
                         <tr key={mov.id} className="hover:bg-slate-800/50 transition">
                           <td className="py-3 px-4">
-                            <div className="font-extrabold text-amber-400 font-mono text-xs bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md inline-block mb-1">
-                              {mov.turmaCode || mov.className}
+                            <div className="font-bold text-slate-100 text-xs">
+                              {mov.className || mov.turmaCode}
                             </div>
-                            <div className="text-[11px] text-slate-300 font-semibold">{mov.courseName}</div>
+                            <div className="text-[11px] text-slate-400">{mov.courseName}</div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-slate-200">{mov.career}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">Disciplina: {mov.subject}</div>
+                            <div className="font-semibold text-slate-200">{mov.career || 'N/A'}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">Matéria: {mov.subject || 'N/A'}</div>
                           </td>
                           <td className="py-3 px-4">
                             <div className="font-bold text-slate-100 text-xs flex items-center space-x-1">
@@ -1461,22 +1461,26 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           </td>
                           <td className="py-3 px-4">
                             {mov.boxName ? (
-                              <span className="bg-slate-800 text-slate-200 px-2 py-1 rounded font-mono text-[11px] font-semibold border border-slate-700">
+                              <div className="text-slate-200 font-mono text-[11px] font-semibold">
                                 {mov.boxName}
-                              </span>
+                              </div>
                             ) : (
                               <span className="text-slate-500 italic text-[11px]">Sem caixa</span>
                             )}
                           </td>
-                          <td className="py-3 px-4 font-mono">
-                            {mov.ammoQuantity > 0 ? (
-                              <div>
-                                <div className="text-slate-100 font-bold">{mov.ammoQuantity} un ({mov.ammoCaliber})</div>
-                                {!isEmAula && (
-                                  <div className="text-[10px] text-emerald-400">
-                                    Devolvido: {ammoRet} un • Usado: {ammoUsed} un
-                                  </div>
-                                )}
+                          <td className="py-3 px-4 font-mono text-xs">
+                            {mov.ammoQuantity > 0 || mov.ammoSupplied > 0 ? (
+                              <div className="space-y-0.5">
+                                <div className="text-slate-100 font-bold text-[11px]">{mov.ammoCaliber || 'Calibre N/I'}</div>
+                                <div className="text-[10px] text-amber-300">
+                                  Entregue: <strong className="text-amber-400 font-mono">{mov.ammoQuantity || mov.ammoSupplied || 0} un</strong>
+                                </div>
+                                <div className="text-[10px] text-emerald-400">
+                                  Devolvido: <strong className="font-mono">{ammoRet} un</strong>
+                                </div>
+                                <div className="text-[10px] text-red-400">
+                                  Não devolvido: <strong className="font-mono">{ammoUsed < 0 ? 0 : ammoUsed} un</strong>
+                                </div>
                               </div>
                             ) : (
                               <span className="text-slate-500 italic text-[11px]">Sem munição</span>
@@ -1497,9 +1501,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                 <button
                                   onClick={() => handleOpenRetornoModal(mov)}
                                   className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer hover:scale-105 transition"
-                                  title="Clique para registrar retorno de aula"
+                                  title="Clique para realizar a devolução das caixas e munições"
                                 >
-                                  (retorno de aula)
+                                  (devolver)
                                 </button>
                               )}
                             </div>
@@ -2878,13 +2882,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     const cId = e.target.value;
                     setMovClassId(cId);
                     const selectedC = courseClasses.find(c => c.id === cId);
-                    if (selectedC && movPlanId) {
-                      const selP = lessonPlans.find(p => p.id === movPlanId);
-                      const lessonItem = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
-                      if (lessonItem) {
-                        const baseSum = (lessonItem.shotsPerStudent * selectedC.studentCount) + lessonItem.instructorShots;
-                        const newQty = Math.round(baseSum * 1.10);
-                        setMovAmmoItems(prev => prev.length > 0 ? [{ ...prev[0], quantity: newQty }, ...prev.slice(1)] : prev);
+                    if (selectedC) {
+                      const primaryTeacher = selectedC.teacherUserId || (selectedC.teacherUserIds && selectedC.teacherUserIds[0]) || '';
+                      if (primaryTeacher) {
+                        setMovTeacherUserId(primaryTeacher);
+                        setMovRecipientType('inside');
+                      } else if (selectedC.teacherName) {
+                        setMovTeacherNameOutside(selectedC.teacherName);
+                        setMovRecipientType('outside');
+                      }
+
+                      if (movPlanId) {
+                        const selP = lessonPlans.find(p => p.id === movPlanId);
+                        const lessonItem = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
+                        if (lessonItem) {
+                          const baseSum = (lessonItem.shotsPerStudent * selectedC.studentCount) + lessonItem.instructorShots;
+                          const newQty = Math.round(baseSum * 1.10);
+                          setMovAmmoItems(prev => prev.length > 0 ? [{ ...prev[0], quantity: newQty }, ...prev.slice(1)] : prev);
+                        }
                       }
                     }
                   }}
