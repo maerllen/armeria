@@ -1489,13 +1489,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           </td>
                           <td className="py-3 px-4 text-center">
                             <div className="flex items-center justify-center space-x-2">
-                              <span
-                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
-                                  isEmAula
-                                    ? 'bg-amber-950/80 text-amber-400 border-amber-800 animate-pulse'
-                                    : 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
-                                }`}
-                              >
+                              <span className="text-slate-300 font-medium text-xs">
                                 {mov.status}
                               </span>
                               {isEmAula && (
@@ -1511,16 +1505,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end space-x-1.5">
-                              {isEmAula && (
-                                <button
-                                  onClick={() => handleOpenRetornoModal(mov)}
-                                  className="bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1"
-                                  title="Fechar Mapa de Aula / Devolução de Material"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5" />
-                                  <span>Fechar Mapa</span>
-                                </button>
-                              )}
                               <button
                                 onClick={() => handleDirectPrint(mov)}
                                 className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
