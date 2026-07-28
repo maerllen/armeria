@@ -1638,7 +1638,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-100">Turmas da Academia de Polícia</h2>
+              <h2 className="text-sm font-bold text-slate-100">f</h2>
               <p className="text-xs text-slate-400">
                 Cadastro de turmas vinculadas a cursos, carreiras policiais, professores e disciplinas
               </p>
