@@ -28,6 +28,8 @@ import {
   BookOpen,
   Building2,
   ListPlus,
+  Award,
+  Eye,
   CheckSquare
 } from 'lucide-react';
 
@@ -344,6 +346,9 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   // =========================================================================
   // TAB 3: PLANOS DE AULA
   // =========================================================================
+  const [planCategoryTab, setPlanCategoryTab] = useState<'curso de formação' | 'curso ensino continuado'>('curso de formação');
+  const [viewingBoxWeaponsModal, setViewingBoxWeaponsModal] = useState<WeaponBox | null>(null);
+
   const [showPlanModal, setShowPlanModal] = useState(false);
   const [editingPlan, setEditingPlan] = useState<LessonPlan | null>(null);
   const [planName, setPlanName] = useState('');
@@ -364,7 +369,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       setPlanSubject((plan.subject as 'MEAF' | 'TAP' | 'DP') || 'MEAF');
       setPlanCareer(plan.career || 'Investigador');
       setPlanYear(plan.year || new Date().getFullYear());
-      setPlanType(plan.type || 'curso de formação');
+      setPlanType(plan.type || planCategoryTab);
       setPlanTurmaCode(plan.turmaCode || '');
       setPlanLessonCount(plan.lessonCount || plan.lessonsData?.length || 5);
       setPlanLessonsData(plan.lessonsData || []);
@@ -374,7 +379,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       setPlanSubject('MEAF');
       setPlanCareer('Investigador');
       setPlanYear(new Date().getFullYear());
-      setPlanType('curso de formação');
+      setPlanType(planCategoryTab);
       setPlanTurmaCode('');
       setPlanLessonCount(5);
 
@@ -391,7 +396,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   };
 
   const handlePlanLessonCountChange = (count: number) => {
-    const validCount = Math.max(1, Math.min(20, count));
+    const validCount = Math.max(1, Math.min(100, count));
     setPlanLessonCount(validCount);
     const defaultCaliber = calibers[0]?.name || '.40 S&W';
 
@@ -649,11 +654,28 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                       </div>
                     </div>
 
-                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between text-xs bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
-                      <span className="text-slate-400 font-semibold">Carga de Tiros:</span>
-                      <span className="text-amber-400 font-mono font-bold text-sm">
-                        {totalShots} tiros / aluno
-                      </span>
+                    <div className="pt-3 border-t border-slate-800 space-y-1.5 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-slate-400 font-semibold">Carga de Tiros (Separada por Tipo):</span>
+                        <span className="text-amber-400 font-mono font-bold text-xs">Total: {totalShots} tiros / aluno</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 pt-1">
+                        {course.shotsPerWeaponType && Object.keys(course.shotsPerWeaponType).length > 0 ? (
+                          Object.entries(course.shotsPerWeaponType).map(([wType, shots]) => (
+                            <div key={wType} className="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center justify-between font-mono text-[11px]">
+                              <span className="text-slate-300 font-medium">{wType}:</span>
+                              <span className="text-amber-400 font-bold">{shots} tiros</span>
+                            </div>
+                          ))
+                        ) : (
+                          (course.allowedWeaponTypes || ['Pistola']).map(wType => (
+                            <div key={wType} className="bg-slate-900 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center justify-between font-mono text-[11px]">
+                              <span className="text-slate-300 font-medium">{wType}:</span>
+                              <span className="text-amber-400 font-bold">{course.shotsPerStudent || 50} tiros</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -689,68 +711,65 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredBoxes.length === 0 ? (
               <div className="col-span-full bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center text-slate-500 italic text-xs">
                 Nenhuma caixa de armas cadastrada.
               </div>
             ) : (
               filteredBoxes.map((box) => (
-                <div key={box.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 hover:border-slate-700 transition">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center space-x-2.5">
-                      <Box className="w-5 h-5 text-amber-400" />
-                      <h3 className="text-base font-bold text-slate-100">{box.name}</h3>
+                <div key={box.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 hover:border-amber-500/50 transition shadow-sm flex flex-col justify-between">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="flex items-center space-x-2.5">
+                        <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                          <Box className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="text-base font-bold text-slate-100">{box.name}</h3>
+                          <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 inline-block mt-0.5">
+                            {box.weaponIds.length} armas acondicionadas
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-1">
+                        <button
+                          onClick={() => handleOpenReplaceModal(box)}
+                          className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 p-1.5 rounded-lg text-xs transition"
+                          title="Substituir Arma Defeituosa na Caixa"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenBoxModal(box)}
+                          className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg transition"
+                          title="Editar Caixa"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteTarget({ type: 'box', id: box.id, name: box.name })}
+                          className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg transition"
+                          title="Excluir Caixa"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center space-x-1.5">
-                      <button
-                        onClick={() => handleOpenReplaceModal(box)}
-                        className="bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 px-2.5 py-1 rounded-lg text-[11px] font-bold transition flex items-center space-x-1"
-                        title="Substituir Arma Defeituosa na Caixa"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Substituir Arma</span>
-                      </button>
-                      <button
-                        onClick={() => handleOpenBoxModal(box)}
-                        className="p-1.5 text-slate-400 hover:text-amber-400 rounded-lg transition"
-                      >
-                        <Edit2 className="w-4 h-4" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget({ type: 'box', id: box.id, name: box.name })}
-                        className="p-1.5 text-slate-400 hover:text-red-400 rounded-lg transition"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+
+                    {box.description && (
+                      <p className="text-xs text-slate-400 leading-relaxed line-clamp-2">{box.description}</p>
+                    )}
                   </div>
 
-                  {box.description && (
-                    <p className="text-xs text-slate-400">{box.description}</p>
-                  )}
-
-                  <div className="space-y-2">
-                    <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                      Armas na Caixa ({box.weaponIds.length}):
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      {box.weaponIds.map(wId => {
-                        const w = weapons.find(item => item.id === wId);
-                        return (
-                          <div key={wId} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px]">
-                            {w ? (
-                              <>
-                                <div className="font-bold text-slate-100">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</div>
-                                <div className="text-amber-400 font-mono text-[10px]">Nº {w.serialNumber}</div>
-                              </>
-                            ) : (
-                              <span className="text-slate-500 italic">{wId}</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div className="pt-2 border-t border-slate-800/80">
+                    <button
+                      onClick={() => setViewingBoxWeaponsModal(box)}
+                      className="w-full bg-slate-950 hover:bg-slate-800 text-amber-400 font-bold text-xs py-2.5 px-4 rounded-xl border border-slate-800 hover:border-amber-500/50 transition flex items-center justify-center space-x-2 shadow-inner"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>Ver Armas da Caixa ({box.weaponIds.length})</span>
+                    </button>
                   </div>
                 </div>
               ))
@@ -798,6 +817,37 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'lesson-plans' && (
         <div className="space-y-4">
+          {/* Sub-tabs: Curso de Formação / Ensino Continuado */}
+          <div className="flex flex-col sm:flex-row items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl p-3 gap-3">
+            <div className="flex items-center space-x-2 w-full sm:w-auto">
+              <button
+                onClick={() => setPlanCategoryTab('curso de formação')}
+                className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 ${
+                  planCategoryTab === 'curso de formação'
+                    ? 'bg-amber-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4" />
+                <span>Plano de Aula do Curso de Formação</span>
+              </button>
+              <button
+                onClick={() => setPlanCategoryTab('curso ensino continuado')}
+                className={`flex-1 sm:flex-none px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 ${
+                  planCategoryTab === 'curso ensino continuado'
+                    ? 'bg-amber-500 text-slate-950 shadow-md'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                <Award className="w-4 h-4" />
+                <span>Plano de Aula de Ensino Continuado</span>
+              </button>
+            </div>
+            <span className="text-xs font-mono text-amber-400 font-bold px-3 py-1 bg-amber-500/10 rounded-lg border border-amber-500/30 shrink-0">
+              {filteredPlans.length} plano(s) encontrado(s)
+            </span>
+          </div>
+
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md">
             <div className="relative w-full sm:w-80">
               <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
@@ -815,7 +865,9 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center justify-center space-x-1.5"
             >
               <Plus className="w-4 h-4" />
-              <span>Novo Plano de Aula</span>
+              <span>
+                Novo {planCategoryTab === 'curso de formação' ? 'Plano de Aula (Formação)' : 'Plano de Aula (Ensino Continuado)'}
+              </span>
             </button>
           </div>
 
@@ -1459,6 +1511,85 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Ver Armas da Caixa */}
+      {viewingBoxWeaponsModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <Box className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base font-bold text-slate-100">
+                  Armas Acondicionadas na Caixa: <span className="text-amber-400">{viewingBoxWeaponsModal.name}</span>
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewingBoxWeaponsModal(null)}
+                className="text-slate-500 hover:text-slate-300 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {viewingBoxWeaponsModal.description && (
+              <p className="text-xs text-slate-400 italic bg-slate-950 p-3 rounded-xl border border-slate-800">
+                {viewingBoxWeaponsModal.description}
+              </p>
+            )}
+
+            <div className="space-y-2">
+              <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center justify-between">
+                <span>Relação de Armamentos ({viewingBoxWeaponsModal.weaponIds.length}):</span>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-96 overflow-y-auto pr-1">
+                {viewingBoxWeaponsModal.weaponIds.map((wId) => {
+                  const w = weapons.find((item) => item.id === wId);
+                  return (
+                    <div
+                      key={wId}
+                      className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1 text-xs"
+                    >
+                      {w ? (
+                        <>
+                          <div className="font-bold text-slate-100 flex items-center justify-between">
+                            <span>{w.type} • {w.model}</span>
+                            <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono">
+                              {w.caliber}
+                            </span>
+                          </div>
+                          <div className="text-amber-400 font-mono font-bold text-[11px]">
+                            Nº de Série: {w.serialNumber}
+                          </div>
+                          {w.manufacturer && (
+                            <div className="text-[10px] text-slate-400">
+                              Fabricante: {w.manufacturer}
+                            </div>
+                          )}
+                          <div className="text-[10px] text-slate-500">
+                            Status: <span className="text-emerald-400 font-semibold">{w.status}</span>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-slate-500 italic">ID da arma: {wId}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setViewingBoxWeaponsModal(null)}
+                className="px-5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
       )}

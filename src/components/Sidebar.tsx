@@ -10,7 +10,8 @@ import {
   ArrowRightLeft,
   FileText,
   BookOpen,
-  GraduationCap
+  GraduationCap,
+  Award
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -81,8 +82,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'cursos',
-      label: 'Cursos & Aulas',
+      label: 'Curso de Formação',
       icon: GraduationCap,
+      visible: canManageCourses
+    },
+    {
+      id: 'ensino-continuado',
+      label: 'Ensino Continuado',
+      icon: Award,
       visible: canManageCourses
     },
     {

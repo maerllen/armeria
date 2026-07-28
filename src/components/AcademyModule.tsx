@@ -79,6 +79,7 @@ interface AcademyModuleProps {
   departments: Department[];
   units: Unit[];
   onRefresh: () => void;
+  courseTypeFilterProp?: 'Formação' | 'Ensino Continuado';
 }
 
 export const AcademyModule: React.FC<AcademyModuleProps> = ({
@@ -89,7 +90,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   vaultSpaces,
   departments,
   units,
-  onRefresh
+  onRefresh,
+  courseTypeFilterProp
 }) => {
   const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'cursos'>('movements');
 
@@ -122,6 +124,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const courseClasses = storage.getCourseClasses();
   const courseMovements = storage.getCourseMovements();
   const lessonPlans = storage.getLessonPlans();
+
+  const filteredMovements = courseMovements.filter(mov => {
+    if (courseTypeFilterProp) {
+      if (mov.type && mov.type !== courseTypeFilterProp) return false;
+      const linkedCourse = academyCourses.find(ac => ac.name === mov.courseName || ac.id === mov.courseId);
+      if (linkedCourse && linkedCourse.type !== courseTypeFilterProp) return false;
+    }
+    return true;
+  });
+
+  const filteredClasses = courseClasses.filter(cls => {
+    if (courseTypeFilterProp) {
+      if (cls.type && cls.type !== courseTypeFilterProp) return false;
+      const linkedCourse = academyCourses.find(ac => ac.id === cls.courseId);
+      if (linkedCourse && linkedCourse.type !== courseTypeFilterProp) return false;
+    }
+    return true;
+  });
 
   // --- QUALIFICATION / HABILITAÇÃO COURSES MANAGEMENT STATE ---
   const [showManageCoursesModal, setShowManageCoursesModal] = useState(false);
@@ -279,6 +299,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   ];
 
   const filteredUnifiedCourses = allUnifiedCourses.filter(c => {
+    if (courseTypeFilterProp && c.type !== courseTypeFilterProp) return false;
+
     if (courseSearchName.trim()) {
       const term = courseSearchName.toLowerCase();
       const matchName = c.name.toLowerCase().includes(term);
@@ -396,7 +418,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setCourseEndDate(param.endDate || (param.dates && param.dates.length > 1 ? param.dates[param.dates.length - 1] : (param.dates && param.dates.length === 1 ? param.dates[0] : '')));
       setCourseModuleRoman(param.module ? param.module.replace('Módulo ', '') : 'I');
     } else {
-      const selectedType = param || 'Formação';
+      const selectedType = courseTypeFilterProp || (typeof param === 'string' ? param : 'Formação');
       setEditingCourse(null);
       setCourseType(selectedType);
       setCourseDates([]);
@@ -1240,9 +1262,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             <GraduationCap className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-100">Academia de Polícia Civil • Gestão de Cursos e Aulas</h1>
+            <h1 className="text-xl font-bold text-slate-100">
+              {courseTypeFilterProp === 'Ensino Continuado'
+                ? 'Módulo de Ensino Continuado'
+                : (courseTypeFilterProp === 'Formação' ? 'Curso de Formação' : 'Academia de Polícia Civil • Gestão de Cursos e Aulas')}
+            </h1>
             <p className="text-xs text-slate-400">
-              Controle de turmas, caixas de armamento para instruções, saídas e mapas de aula com balanço de munições
+              {courseTypeFilterProp === 'Ensino Continuado'
+                ? 'Administre todos os Cursos de Ensino Continuado, especializações e aperfeiçoamento da Polícia Civil.'
+                : (courseTypeFilterProp === 'Formação'
+                  ? 'Módulo exclusivo para consulta de cursos, turmas e dados de formação policial.'
+                  : 'Controle de turmas, caixas de armamento para instruções, saídas e mapas de aula com balanço de munições')}
             </p>
           </div>
         </div>
@@ -1258,7 +1288,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             }`}
           >
             <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span>Mapas de Aula ({courseMovements.length})</span>
+            <span>Mapas de Aula ({filteredMovements.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('turmas')}
@@ -1269,7 +1299,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             }`}
           >
             <Users className="w-3.5 h-3.5" />
-            <span>Turmas ({courseClasses.length})</span>
+            <span>Turmas ({filteredClasses.length})</span>
           </button>
           <button
             onClick={() => setActiveTab('cursos')}
@@ -1280,7 +1310,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             }`}
           >
             <BookOpen className="w-3.5 h-3.5" />
-            <span>Cursos ({academyCourses.length})</span>
+            <span>Cursos ({sortedUnifiedCourses.length})</span>
           </button>
         </div>
       </div>
@@ -1359,14 +1389,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
-                  {courseMovements.length === 0 ? (
+                  {filteredMovements.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-slate-500 italic">
                         Nenhuma movimentação de aula registrada.
                       </td>
                     </tr>
                   ) : (
-                    courseMovements.map((mov) => {
+                    filteredMovements.map((mov) => {
                       const isEmAula = mov.status === 'Em Sala de Aula';
                       const ammoRet = mov.ammoReturned || 0;
                       const ammoUsed = mov.ammoQuantity - ammoRet;
@@ -1503,12 +1533,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {courseClasses.length === 0 ? (
+            {filteredClasses.length === 0 ? (
               <div className="col-span-full bg-slate-900 border border-slate-800 p-8 rounded-2xl text-center text-slate-500 italic text-xs">
                 Nenhuma turma cadastrada.
               </div>
             ) : (
-              courseClasses.map((cls) => (
+              filteredClasses.map((cls) => (
                 <div key={cls.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 relative hover:border-slate-700 transition">
                   <div className="flex items-center justify-between border-b border-slate-800 pb-2">
                     <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 font-extrabold text-xs px-3 py-1 rounded-lg uppercase font-mono">

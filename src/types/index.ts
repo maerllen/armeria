@@ -11,6 +11,7 @@ export type ModuleType =
   | 'relatorio'
   | 'manual'
   | 'cursos'
+  | 'ensino-continuado'
   | 'gerencia-cursos';
 
 export type UserCargo = 

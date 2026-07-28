@@ -282,6 +282,21 @@ export default function App() {
               departments={departments}
               units={units}
               onRefresh={refreshData}
+              courseTypeFilterProp="Formação"
+            />
+          )}
+
+          {activeModule === 'ensino-continuado' && (
+            <AcademyModule
+              currentUser={currentUser}
+              users={allUsers}
+              weapons={weapons}
+              ammoStocks={ammoStocks}
+              vaultSpaces={vaultSpaces}
+              departments={departments}
+              units={units}
+              onRefresh={refreshData}
+              courseTypeFilterProp="Ensino Continuado"
             />
           )}
 
