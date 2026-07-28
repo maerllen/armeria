@@ -872,6 +872,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Retorno / Fechar Mapa modal
   const [showRetornoModal, setShowRetornoModal] = useState(false);
   const [retornoMovement, setRetornoMovement] = useState<CourseMovement | null>(null);
+  const [retornoSelectedBoxIds, setRetornoSelectedBoxIds] = useState<string[]>([]);
   const [retornoAmmoUsed, setRetornoAmmoUsed] = useState<number>(0);
   const [retornoAmmoReturned, setRetornoAmmoReturned] = useState<number>(0);
   const [retornoMaterials, setRetornoMaterials] = useState('');
@@ -1010,9 +1011,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleOpenRetornoModal = (mov: CourseMovement) => {
     setRetornoMovement(mov);
     const supplied = mov.ammoQuantity || mov.ammoSupplied || 0;
-    setRetornoAmmoUsed(supplied); // Default all used
-    setRetornoAmmoReturned(0);
-    setRetornoMaterials('Caixas de armamento e acessórios devolvidos em perfeito estado');
+    setRetornoAmmoReturned(supplied); // Default: all returned initially
+    setRetornoAmmoUsed(0); // Used = 0 initially
+
+    // Find linked boxes
+    const movBoxIds = (mov.boxId || mov.weaponBoxId || '').split(',').map(s => s.trim()).filter(Boolean);
+    const matchedBoxes = weaponBoxes.filter(b => 
+      movBoxIds.includes(b.id) || (mov.boxName && mov.boxName.toLowerCase().includes(b.name.toLowerCase()))
+    );
+
+    const initialIds = matchedBoxes.map(b => b.id);
+    setRetornoSelectedBoxIds(initialIds);
+
+    const boxNamesStr = matchedBoxes.map(b => b.name).join(' + ');
+    setRetornoMaterials(
+      boxNamesStr 
+        ? `Caixas devolvidas ao cofre: ${boxNamesStr}` 
+        : 'Caixas de armamento e acessórios devolvidos em perfeito estado'
+    );
     setRetornoNotes(mov.notes || '');
     setRetornoUserName(mov.teacherName || currentUser.name);
     setShowRetornoModal(true);
@@ -1023,13 +1039,21 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     if (!retornoMovement) return;
 
     try {
+      const selectedBoxes = weaponBoxes.filter(b => retornoSelectedBoxIds.includes(b.id));
+      const returnedBoxNames = selectedBoxes.map(b => b.name);
+      let finalMaterials = retornoMaterials.trim();
+
+      if (returnedBoxNames.length > 0 && !finalMaterials.includes(returnedBoxNames[0])) {
+        finalMaterials = `Caixas Devolvidas: ${returnedBoxNames.join(', ')}. ${finalMaterials}`;
+      }
+
       const res = await storage.darRetornoCurso(
         retornoMovement.id,
         Number(retornoAmmoReturned) || 0,
         retornoUserName.trim(),
         {
           ammoUsed: Number(retornoAmmoUsed) || 0,
-          returnedMaterials: retornoMaterials.trim(),
+          returnedMaterials: finalMaterials,
           notes: retornoNotes.trim()
         }
       );
@@ -1047,6 +1071,72 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     const totalAmmo = mov.ammoQuantity || mov.ammoSupplied || 0;
     const ammoReturned = mov.ammoReturned || 0;
     const ammoUsed = (mov.ammoUsed !== undefined) ? mov.ammoUsed : Math.max(0, totalAmmo - ammoReturned);
+
+    // Build box and weapons detailed list for printed receipt
+    const movBoxIds = (mov.boxId || mov.weaponBoxId || '').split(',').map(s => s.trim()).filter(Boolean);
+    const matchedBoxes = weaponBoxes.filter(b => 
+      movBoxIds.includes(b.id) || (mov.boxName && mov.boxName.toLowerCase().includes(b.name.toLowerCase()))
+    );
+
+    let boxesHtml = '';
+    if (matchedBoxes.length > 0) {
+      boxesHtml = matchedBoxes.map((box) => {
+        const boxWeapons = weapons.filter(w => box.weaponIds && box.weaponIds.includes(w.id));
+        
+        let rows = '';
+        if (boxWeapons.length > 0) {
+          rows = boxWeapons.map((w, wIdx) => `
+            <tr style="border-bottom: 1px solid #e2e8f0;">
+              <td style="padding: 5px; text-align: center; font-weight: bold;">${wIdx + 1}</td>
+              <td style="padding: 5px; font-weight: bold; color: #1e293b;">${w.type || 'Arma'}</td>
+              <td style="padding: 5px;">${w.manufacturer || 'N/I'}</td>
+              <td style="padding: 5px;">${w.caliber || 'N/I'}</td>
+              <td style="padding: 5px;">${w.model || 'N/I'}</td>
+              <td style="padding: 5px; font-family: monospace; font-weight: bold; color: #0f172a;">${w.serialNumber || 'N/I'}</td>
+            </tr>
+          `).join('');
+        } else {
+          rows = `
+            <tr>
+              <td colspan="6" style="padding: 8px; text-align: center; color: #64748b; font-style: italic;">
+                Nenhuma arma individual cadastrada nesta caixa.
+              </td>
+            </tr>
+          `;
+        }
+
+        return `
+          <div style="margin-bottom: 12px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; background: #f8fafc;">
+            <div style="font-weight: 800; font-size: 11px; margin-bottom: 6px; color: #0f172a; text-transform: uppercase; letter-spacing: 0.5px;">
+              📦 Caixa de Armas: ${box.name} (${boxWeapons.length} arma${boxWeapons.length !== 1 ? 's' : ''})
+            </div>
+            <table style="width: 100%; border-collapse: collapse; font-size: 10px; text-align: left; background: #ffffff;">
+              <thead>
+                <tr style="background: #e2e8f0; font-weight: bold; color: #1e293b; border-bottom: 1px solid #cbd5e1;">
+                  <th style="padding: 5px; text-align: center; width: 30px;">#</th>
+                  <th style="padding: 5px;">Tipo</th>
+                  <th style="padding: 5px;">Marca / Fabricante</th>
+                  <th style="padding: 5px;">Calibre</th>
+                  <th style="padding: 5px;">Modelo</th>
+                  <th style="padding: 5px;">Nº de Série</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rows}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }).join('');
+    } else if (mov.boxName) {
+      boxesHtml = `
+        <div style="padding: 8px; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; font-weight: bold; font-size: 11px;">
+          Caixa de Armas / Conjunto: ${mov.boxName}
+        </div>
+      `;
+    } else {
+      boxesHtml = `<div style="font-style: italic; color: #64748b;">Sem Caixa de Armas vinculada.</div>`;
+    }
 
     const html = `
       <!DOCTYPE html>
@@ -1110,9 +1200,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           </div>
 
           <div class="box full-width">
-            <div class="box-title">3. Armamento e Materiais Fornecidos</div>
-            <div class="field"><span class="label">Caixa de Armas / Conjunto:</span> <span class="val">${mov.boxName || 'Sem Caixa Vinculada'}</span></div>
-            ${mov.returnedMaterials ? `<div class="field"><span class="label">Materiais Registrados no Fechamento:</span> <span class="val">${mov.returnedMaterials}</span></div>` : ''}
+            <div class="box-title">3. Armamento e Caixas de Armas Fornecidas</div>
+            ${boxesHtml}
+            ${mov.returnedMaterials ? `<div class="field" style="margin-top: 8px;"><span class="label">Materiais Registrados na Devolução:</span> <span class="val" style="font-size: 11px;">${mov.returnedMaterials}</span></div>` : ''}
           </div>
 
           ${totalAmmo > 0 ? `
@@ -3406,34 +3496,120 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             </div>
 
             <form onSubmit={handleExecuteRetorno} className="space-y-4 text-xs">
-              {/* Quantidade de Munições Utilizadas x Devolvidas */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+              {/* Caixas de Armas Fornecidas (Seleção de Caixas a Devolver) */}
+              {(() => {
+                const movBoxIds = (retornoMovement.boxId || retornoMovement.weaponBoxId || '').split(',').map(s => s.trim()).filter(Boolean);
+                const matchedBoxes = weaponBoxes.filter(b => 
+                  movBoxIds.includes(b.id) || (retornoMovement.boxName && retornoMovement.boxName.toLowerCase().includes(b.name.toLowerCase()))
+                );
+
+                return (
+                  <div className="space-y-2 bg-slate-950/60 p-3.5 rounded-xl border border-slate-800">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-slate-200 font-bold text-xs">
+                        Caixas de Armas Fornecidas (Selecione as caixas devolvidas)
+                      </label>
+                      <span className="text-[10px] text-amber-400 font-mono font-semibold">
+                        {retornoSelectedBoxIds.length} / {matchedBoxes.length || 1} Selecionada(s)
+                      </span>
+                    </div>
+
+                    {matchedBoxes.length > 0 ? (
+                      <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                        {matchedBoxes.map((box) => {
+                          const isSelected = retornoSelectedBoxIds.includes(box.id);
+                          const boxWeapons = weapons.filter(w => box.weaponIds && box.weaponIds.includes(w.id));
+
+                          return (
+                            <div
+                              key={box.id}
+                              onClick={() => {
+                                setRetornoSelectedBoxIds(prev =>
+                                  prev.includes(box.id) ? prev.filter(id => id !== box.id) : [...prev, box.id]
+                                );
+                              }}
+                              className={`p-3 rounded-xl border transition cursor-pointer ${
+                                isSelected
+                                  ? 'bg-emerald-950/30 border-emerald-500/50 text-slate-100'
+                                  : 'bg-slate-900/50 border-slate-800 text-slate-400 hover:border-slate-700'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center space-x-2.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => {}} // Controlled by parent container onClick
+                                    className="w-4 h-4 rounded text-emerald-500 bg-slate-950 border-slate-700 focus:ring-emerald-500"
+                                  />
+                                  <div>
+                                    <div className="font-bold text-slate-100 text-xs flex items-center space-x-2">
+                                      <span>📦 {box.name}</span>
+                                      <span className="text-[10px] bg-slate-800 text-amber-400 px-1.5 py-0.5 rounded font-mono">
+                                        {boxWeapons.length} arma(s)
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                  isSelected 
+                                    ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' 
+                                    : 'bg-slate-800 text-slate-500'
+                                }`}>
+                                  {isSelected ? 'Devolvida ao Cofre' : 'Não Selecionada'}
+                                </span>
+                              </div>
+
+                              {/* Conteúdo Detalhado da Caixa (Tipo, Marca, Calibre, Modelo, S/N) */}
+                              {boxWeapons.length > 0 && (
+                                <div className="mt-2.5 pt-2 border-t border-slate-800/80 text-[10px] font-mono space-y-1">
+                                  <div className="text-slate-400 font-semibold flex justify-between items-center">
+                                    <span>Conteúdo da Caixa:</span>
+                                    <span className="text-[9px] text-slate-500 font-normal">Tipo • Marca • Calibre • Modelo • Nº de Série</span>
+                                  </div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                    {boxWeapons.map((w, wIdx) => (
+                                      <div key={w.id || wIdx} className="bg-slate-950/80 p-1.5 rounded border border-slate-800/60 flex justify-between items-center text-slate-300">
+                                        <span><strong>{w.type || 'Arma'}</strong> {w.manufacturer} {w.model} ({w.caliber})</span>
+                                        <span className="text-amber-300 font-bold font-mono text-[9px] ml-1">S/N: {w.serialNumber}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="text-slate-300 bg-slate-950 p-2.5 rounded-lg border border-slate-800 flex justify-between items-center">
+                        <span>📦 {retornoMovement.weaponBoxName || retornoMovement.boxName || 'Caixa de Armas Padrão'}</span>
+                        <span className="text-emerald-400 font-bold text-[10px] bg-emerald-500/10 px-2 py-0.5 rounded">
+                          Resgatada
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Quantidade de Munições Entregues x Devolvidas x Utilizadas */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-950/60 p-3 rounded-xl border border-slate-800">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Munições Utilizadas em Aula <span className="text-red-400">*</span>
+                  <label className="block text-slate-400 font-semibold mb-1">
+                    Munições Entregues
                   </label>
-                  <input
-                    type="number"
-                    value={retornoAmmoUsed}
-                    onChange={(e) => {
-                      const val = Math.max(0, Number(e.target.value));
-                      const total = retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0;
-                      setRetornoAmmoUsed(val);
-                      setRetornoAmmoReturned(Math.max(0, total - val));
-                    }}
-                    min={0}
-                    max={retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0}
-                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-amber-400 font-mono text-base font-bold"
-                    required
-                  />
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Deflagradas / consumidas na aula
+                  <div className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-mono text-base font-bold">
+                    {retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0} un
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Calibre: {retornoMovement.ammoCaliber || 'Padrão'}
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">
-                    Munições Devolvidas ao Cofre
+                  <label className="block text-emerald-400 font-semibold mb-1">
+                    Munições Devolvidas
                   </label>
                   <input
                     type="number"
@@ -3446,11 +3622,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     }}
                     min={0}
                     max={retornoMovement.ammoQuantity || retornoMovement.ammoSupplied || 0}
-                    className="w-full bg-slate-950 border border-emerald-500/50 rounded-xl px-3.5 py-2 text-emerald-400 font-mono text-base font-bold"
+                    className="w-full bg-slate-950 border border-emerald-500/50 rounded-xl px-3 py-2 text-emerald-400 font-mono text-base font-bold focus:border-emerald-400"
                     required
                   />
                   <p className="text-[10px] text-slate-400 mt-1">
-                    Não utilizadas (retornam ao estoque)
+                    Retornam ao estoque do cofre
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-amber-400 font-semibold mb-1">
+                    Munições Utilizadas
+                  </label>
+                  <div className="w-full bg-slate-900 border border-amber-500/30 rounded-xl px-3 py-2 text-amber-400 font-mono text-base font-bold">
+                    {retornoAmmoUsed} un
+                  </div>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Deflagradas na aula (Subtração)
                   </p>
                 </div>
               </div>
