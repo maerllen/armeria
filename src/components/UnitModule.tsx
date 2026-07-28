@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { User, Department, Unit } from '../types';
 import { storage } from '../services/storage';
-import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check } from 'lucide-react';
+import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UnitModuleProps {
@@ -17,6 +17,8 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   units,
   onRefresh
 }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
@@ -151,6 +153,23 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     }
   };
 
+  // Toggle accordion expansion
+  const toggleDeptExpand = (deptId: string) => {
+    setExpandedDeptIds(prev =>
+      prev.includes(deptId) ? prev.filter(id => id !== deptId) : [...prev, deptId]
+    );
+  };
+
+  // Search filter for departments and units
+  const term = searchTerm.toLowerCase().trim();
+  const filteredDepts = visibleDepts.filter(dept => {
+    if (!term) return true;
+    const deptUnits = visibleUnits.filter(u => u.departmentId === dept.id);
+    const matchesDept = dept.name.toLowerCase().includes(term) || dept.code.toLowerCase().includes(term);
+    const matchesUnit = deptUnits.some(u => u.name.toLowerCase().includes(term));
+    return matchesDept || matchesUnit;
+  });
+
   return (
     <div className="space-y-6">
       
@@ -164,7 +183,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
             <div>
               <h1 className="text-xl font-bold text-slate-100">Gestão de Unidades e Departamentos</h1>
               <p className="text-xs text-slate-400">
-                Estrutura organizacional da Polícia Civil (Cada unidade pertence a um único departamento)
+                Selecione um departamento para visualizar as unidades vinculadas.
               </p>
             </div>
           </div>
@@ -194,6 +213,26 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         )}
       </div>
 
+      {/* Search Input Bar */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center space-x-3">
+        <Search className="w-5 h-5 text-slate-400 shrink-0 ml-1" />
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Pesquisar por nome ou código do departamento ou nome da unidade..."
+          className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+        />
+        {searchTerm && (
+          <button
+            onClick={() => setSearchTerm('')}
+            className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 bg-slate-800 rounded-lg"
+          >
+            Limpar
+          </button>
+        )}
+      </div>
+
       {successMsg && (
         <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
           <Check className="w-4 h-4 text-emerald-400" />
@@ -208,108 +247,131 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         </div>
       )}
 
-      {/* Departments & Units List Cards */}
-      <div className="space-y-6">
-        {visibleDepts.map((dept) => {
-          const deptUnits = visibleUnits.filter(u => u.departmentId === dept.id);
+      {/* Departments & Units List Accordion */}
+      <div className="space-y-4">
+        {filteredDepts.length === 0 ? (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs italic">
+            Nenhum departamento ou unidade encontrado para os critérios informados.
+          </div>
+        ) : (
+          filteredDepts.map((dept) => {
+            const deptUnits = visibleUnits.filter(u => u.departmentId === dept.id && (!term || u.name.toLowerCase().includes(term) || dept.name.toLowerCase().includes(term) || dept.code.toLowerCase().includes(term)));
+            const isExpanded = term !== '' || expandedDeptIds.includes(dept.id);
 
-          return (
-            <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-              
-              {/* Department Header */}
-              <div className="bg-slate-800/80 px-6 py-4 border-b border-slate-700 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
-                      {dept.code}
-                    </span>
-                    <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
+            return (
+              <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
+                
+                {/* Department Header Clickable Row */}
+                <div 
+                  onClick={() => toggleDeptExpand(dept.id)}
+                  className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
+                >
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+                      <Building className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                          {dept.code}
+                        </span>
+                        <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        {deptUnits.length} unidade(s) cadastrada(s)
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-[11px] text-slate-400 mt-0.5">
-                    {deptUnits.length} unidade(s) cadastrada(s) neste departamento
-                  </p>
+
+                  <div className="flex items-center space-x-3">
+                    {isGeral && (
+                      <div className="flex items-center space-x-1 mr-2" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleOpenDeptModal(dept)}
+                          className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-700/80 rounded-lg transition"
+                          title="Editar Departamento"
+                        >
+                          <Edit2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteDept(dept)}
+                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700/80 rounded-lg transition"
+                          title="Excluir Departamento"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+
+                    <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
+                      {isExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5" />}
+                    </div>
+                  </div>
                 </div>
 
-                {isGeral && (
-                  <div className="flex items-center space-x-2">
-                    <button
-                      onClick={() => handleOpenDeptModal(dept)}
-                      className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-700 rounded-lg transition"
-                      title="Editar Departamento"
-                    >
-                      <Edit2 className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteDept(dept)}
-                      className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-700 rounded-lg transition"
-                      title="Excluir Departamento"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
+                {/* Units List (Shown when Expanded) */}
+                {isExpanded && (
+                  <div className="p-6 bg-slate-950/40 border-t border-slate-800/60">
+                    {deptUnits.length === 0 ? (
+                      <p className="text-xs text-slate-500 italic py-2">
+                        Nenhuma unidade vinculada a este departamento.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {deptUnits.map((unit) => {
+                          const unitUserCount = storage.getAllUsers().filter(u => u.unitId === unit.id).length;
+                          const unitWeaponCount = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.unitId === unit.id).length;
 
-              {/* Units Table / Grid */}
-              <div className="p-6">
-                {deptUnits.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic py-2">
-                    Nenhuma unidade vinculada a este departamento.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {deptUnits.map((unit) => {
-                      const unitUserCount = storage.getAllUsers().filter(u => u.unitId === unit.id).length;
-                      const unitWeaponCount = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.unitId === unit.id).length;
-
-                      return (
-                        <div
-                          key={unit.id}
-                          className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-slate-700 transition"
-                        >
-                          <div>
-                            <div className="flex items-start justify-between">
-                              <h3 className="font-bold text-slate-200 text-sm">{unit.name}</h3>
-                              {!isPolicial && (
-                                <div className="flex items-center space-x-1">
-                                  <button
-                                    onClick={() => handleOpenUnitModal(unit)}
-                                    className="p-1 text-slate-400 hover:text-amber-400 rounded"
-                                    title="Editar Unidade"
-                                  >
-                                    <Edit2 className="w-3.5 h-3.5" />
-                                  </button>
-                                  {isGeral && (
-                                    <button
-                                      onClick={() => handleDeleteUnit(unit)}
-                                      className="p-1 text-slate-400 hover:text-red-400 rounded"
-                                      title="Excluir Unidade"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
+                          return (
+                            <div
+                              key={unit.id}
+                              className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-slate-700 transition"
+                            >
+                              <div>
+                                <div className="flex items-start justify-between">
+                                  <h3 className="font-bold text-slate-200 text-sm">{unit.name}</h3>
+                                  {!isPolicial && (
+                                    <div className="flex items-center space-x-1">
+                                      <button
+                                        onClick={(e) => { e.stopPropagation(); handleOpenUnitModal(unit); }}
+                                        className="p-1 text-slate-400 hover:text-amber-400 rounded"
+                                        title="Editar Unidade"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      {isGeral && (
+                                        <button
+                                          onClick={(e) => { e.stopPropagation(); handleDeleteUnit(unit); }}
+                                          className="p-1 text-slate-400 hover:text-red-400 rounded"
+                                          title="Excluir Unidade"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      )}
+                                    </div>
                                   )}
                                 </div>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Pertence a: <span className="text-slate-300 font-semibold">{dept.name}</span>
-                            </p>
-                          </div>
+                                <p className="text-[11px] text-slate-400 mt-1">
+                                  Pertence a: <span className="text-slate-300 font-semibold">{dept.name}</span>
+                                </p>
+                              </div>
 
-                          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                            <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
-                            <span>Armas no acervo: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
-                          </div>
-                        </div>
-                      );
-                    })}
+                              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
+                                <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
+                                <span>Armas no acervo: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
 
-            </div>
-          );
-        })}
+              </div>
+            );
+          })
+        )}
       </div>
 
       {/* Modal Department */}

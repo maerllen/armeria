@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 
 interface UserModuleProps {
@@ -27,7 +27,13 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [showCourseManagementModal, setShowCourseManagementModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  // User form states
+  const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
+
+  const toggleDeptExpand = (deptId: string) => {
+    setExpandedDeptIds(prev =>
+      prev.includes(deptId) ? prev.filter(id => id !== deptId) : [...prev, deptId]
+    );
+  };
   const [maspRaw, setMaspRaw] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
@@ -323,16 +329,26 @@ export const UserModule: React.FC<UserModuleProps> = ({
   };
 
   // Search filter
+  const term = searchTerm.toLowerCase().trim();
   const filteredUsers = users.filter(u => {
-    const term = searchTerm.toLowerCase();
+    if (!term) return true;
     const maspFmt = formatMasp(u.masp).toLowerCase();
+    const dept = departments.find(d => d.id === u.departmentId);
+    const unit = units.find(un => un.id === u.unitId);
     return (
       u.name.toLowerCase().includes(term) ||
       u.masp.includes(term) ||
       maspFmt.includes(term) ||
-      u.cargo.toLowerCase().includes(term)
+      u.cargo.toLowerCase().includes(term) ||
+      (dept && (dept.name.toLowerCase().includes(term) || dept.code.toLowerCase().includes(term))) ||
+      (unit && unit.name.toLowerCase().includes(term))
     );
   });
+
+  // Filtered Departments to display
+  const visibleDepts = isGeral
+    ? departments
+    : departments.filter(d => d.id === currentUser.departmentId);
 
   return (
     <div className="space-y-6">
@@ -344,9 +360,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-100">Gestão de Policiais e Efetivo</h1>
+            <h1 className="text-xl font-bold text-slate-100">Gestão de Policiais por Departamento</h1>
             <p className="text-xs text-slate-400">
-              Cadastro de policiais, concessão de permissões operacionais e cursos concluídos
+              Clique em um departamento para expandir e visualizar os policiais cadastrados.
             </p>
           </div>
         </div>
@@ -387,7 +403,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
             type="text"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar policial por nome, MASP ou cargo..."
+            placeholder="Buscar policial por nome, MASP, cargo ou unidade..."
             className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
           />
         </div>
@@ -396,163 +412,210 @@ export const UserModule: React.FC<UserModuleProps> = ({
         </span>
       </div>
 
-      {/* Users Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
-              <tr>
-                <th className="py-3 px-4">Policial / MASP</th>
-                <th className="py-3 px-4">Cargo</th>
-                <th className="py-3 px-4">Perfil</th>
-                <th className="py-3 px-4">Departamento / Unidade</th>
-                <th className="py-3 px-4 text-center">Acesso</th>
-                <th className="py-3 px-4">Permissões Especial</th>
-                <th className="py-3 px-4">Cursos Habilitados</th>
-                {!isPolicial && <th className="py-3 px-4 text-right">Ações</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="py-8 text-center text-slate-500 italic">
-                    Nenhum policial encontrado.
-                  </td>
-                </tr>
-              ) : (
-                filteredUsers.map((usr) => {
-                  const d = departments.find(dep => dep.id === usr.departmentId);
-                  const u = units.find(un => un.id === usr.unitId);
+      {/* Departments Accordion with Grouped Users */}
+      <div className="space-y-4">
+        {visibleDepts.map((dept) => {
+          const deptUsers = filteredUsers.filter(u => u.departmentId === dept.id);
+          const isExpanded = term !== '' || expandedDeptIds.includes(dept.id);
 
-                  return (
-                    <tr key={usr.id} className="hover:bg-slate-800/50 transition">
-                      
-                      {/* Name & MASP */}
-                      <td className="py-3 px-4">
-                        <div className="font-bold text-slate-100 text-sm">{usr.name}</div>
-                        <div className="text-[11px] font-mono text-amber-400">
-                          MASP: {formatMasp(usr.masp)}
-                        </div>
-                      </td>
+          // If searching and this department has no matching users, hide it
+          if (term !== '' && deptUsers.length === 0) return null;
 
-                      {/* Cargo */}
-                      <td className="py-3 px-4">
-                        <span className="bg-slate-800 text-slate-200 px-2 py-1 rounded font-medium">
-                          {usr.cargo}
-                        </span>
-                      </td>
+          return (
+            <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
+              
+              {/* Department Header Row */}
+              <div
+                onClick={() => toggleDeptExpand(dept.id)}
+                className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
+              >
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+                    <Building className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                        {dept.code}
+                      </span>
+                      <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      {deptUsers.length} policial(is) cadastrado(s) neste departamento
+                    </p>
+                  </div>
+                </div>
 
-                      {/* Role */}
-                      <td className="py-3 px-4">
-                        <span
-                          className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
-                            usr.role === 'Geral'
-                              ? 'bg-purple-950 text-purple-300 border-purple-800'
-                              : usr.role === 'Administrador'
-                              ? 'bg-blue-950 text-blue-300 border-blue-800'
-                              : usr.role === 'Armeiro'
-                              ? 'bg-amber-950 text-amber-300 border-amber-800'
-                              : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                          }`}
-                        >
-                          {usr.role}
-                        </span>
-                      </td>
+                <div className="flex items-center space-x-3">
+                  <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
+                    {deptUsers.length} Policiais
+                  </span>
+                  <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
+                    {isExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5" />}
+                  </div>
+                </div>
+              </div>
 
-                      {/* Dept & Unit */}
-                      <td className="py-3 px-4 text-slate-300">
-                        <div className="font-semibold text-slate-200">{u ? u.name : 'N/A'}</div>
-                        <div className="text-[10px] text-slate-400">{d ? d.code : ''}</div>
-                      </td>
+              {/* Users Table for this Department (Shown when Expanded) */}
+              {isExpanded && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs text-slate-300">
+                    <thead className="bg-slate-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                      <tr>
+                        <th className="py-3 px-4">Policial / MASP</th>
+                        <th className="py-3 px-4">Cargo</th>
+                        <th className="py-3 px-4">Perfil</th>
+                        <th className="py-3 px-4">Unidade</th>
+                        <th className="py-3 px-4 text-center">Acesso</th>
+                        <th className="py-3 px-4">Permissões Especial</th>
+                        <th className="py-3 px-4">Cursos Habilitados</th>
+                        {!isPolicial && <th className="py-3 px-4 text-right">Ações</th>}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60">
+                      {deptUsers.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="py-6 text-center text-slate-500 italic">
+                            Nenhum policial cadastrado neste departamento.
+                          </td>
+                        </tr>
+                      ) : (
+                        deptUsers.map((usr) => {
+                          const u = units.find(un => un.id === usr.unitId);
 
-                      {/* System Access */}
-                      <td className="py-3 px-4 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                            usr.hasSystemAccess
-                              ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                              : 'bg-red-950 text-red-400 border border-red-800'
-                          }`}
-                        >
-                          {usr.hasSystemAccess ? 'SIM' : 'NÃO'}
-                        </span>
-                      </td>
+                          return (
+                            <tr key={usr.id} className="hover:bg-slate-800/40 transition">
+                              
+                              {/* Name & MASP */}
+                              <td className="py-3 px-4">
+                                <div className="font-bold text-slate-100 text-sm">{usr.name}</div>
+                                <div className="text-[11px] font-mono text-amber-400">
+                                  MASP: {formatMasp(usr.masp)}
+                                </div>
+                              </td>
 
-                      {/* Special Move Permissions */}
-                      <td className="py-3 px-4 space-y-1">
-                        <div className="text-[10px]">
-                          Munição: {' '}
-                          <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                            {usr.canMoveAmmunition ? 'Sim' : 'Não'}
-                          </span>
-                        </div>
-                        <div className="text-[10px]">
-                          Armas: {' '}
-                          <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                            {usr.canMoveWeapons ? 'Sim' : 'Não'}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Courses */}
-                      <td className="py-3 px-4">
-                        <div className="flex flex-wrap gap-1 max-w-xs">
-                          {usr.courses.length === 0 ? (
-                            <span className="text-slate-500 italic text-[11px]">Nenhum</span>
-                          ) : (
-                            usr.courses.map((uc, i) => {
-                              const cObj = courses.find(c => c.id === uc.courseId);
-                              const expired = isCourseExpired(uc.completionDate);
-
-                              return (
-                                <span
-                                  key={i}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-mono border font-semibold flex items-center space-x-1 ${
-                                    expired
-                                      ? 'bg-red-600 text-white border-red-500'
-                                      : 'bg-slate-950 text-amber-400 border-slate-800'
-                                  }`}
-                                  title={expired ? 'Curso Vencido (> 2 anos)' : 'Curso Válido'}
-                                >
-                                  <span>{cObj ? cObj.name : uc.courseId}</span>
-                                  {expired && <AlertTriangle className="w-3 h-3 text-white inline" />}
+                              {/* Cargo */}
+                              <td className="py-3 px-4">
+                                <span className="bg-slate-800 text-slate-200 px-2 py-1 rounded font-medium">
+                                  {usr.cargo}
                                 </span>
-                              );
-                            })
-                          )}
-                        </div>
-                      </td>
+                              </td>
 
-                      {/* Actions */}
-                      {!isPolicial && (
-                        <td className="py-3 px-4 text-right">
-                          <div className="flex items-center justify-end space-x-2">
-                            <button
-                              onClick={() => handleOpenUserModal(usr)}
-                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Editar Policial"
-                            >
-                              <Edit2 className="w-4 h-4" />
-                            </button>
-                            {isGeral && (
-                              <button
-                                onClick={() => handleDeleteUser(usr)}
-                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                                title="Excluir Policial"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            )}
-                          </div>
-                        </td>
+                              {/* Role */}
+                              <td className="py-3 px-4">
+                                <span
+                                  className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
+                                    usr.role === 'Geral'
+                                      ? 'bg-purple-950 text-purple-300 border-purple-800'
+                                      : usr.role === 'Administrador'
+                                      ? 'bg-blue-950 text-blue-300 border-blue-800'
+                                      : usr.role === 'Armeiro'
+                                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                      : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                  }`}
+                                >
+                                  {usr.role}
+                                </span>
+                              </td>
+
+                              {/* Unit */}
+                              <td className="py-3 px-4 text-slate-300">
+                                <div className="font-semibold text-slate-200">{u ? u.name : 'N/A'}</div>
+                              </td>
+
+                              {/* System Access */}
+                              <td className="py-3 px-4 text-center">
+                                <span
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                    usr.hasSystemAccess
+                                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                      : 'bg-red-950 text-red-400 border border-red-800'
+                                  }`}
+                                >
+                                  {usr.hasSystemAccess ? 'SIM' : 'NÃO'}
+                                </span>
+                              </td>
+
+                              {/* Special Move Permissions */}
+                              <td className="py-3 px-4 space-y-1">
+                                <div className="text-[10px]">
+                                  Munição: {' '}
+                                  <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                    {usr.canMoveAmmunition ? 'Sim' : 'Não'}
+                                  </span>
+                                </div>
+                                <div className="text-[10px]">
+                                  Armas: {' '}
+                                  <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                    {usr.canMoveWeapons ? 'Sim' : 'Não'}
+                                  </span>
+                                </div>
+                              </td>
+
+                              {/* Courses */}
+                              <td className="py-3 px-4">
+                                <div className="flex flex-wrap gap-1 max-w-xs">
+                                  {usr.courses.length === 0 ? (
+                                    <span className="text-slate-500 italic text-[11px]">Nenhum</span>
+                                  ) : (
+                                    usr.courses.map((uc, i) => {
+                                      const cObj = courses.find(c => c.id === uc.courseId);
+                                      const expired = isCourseExpired(uc.completionDate);
+
+                                      return (
+                                        <span
+                                          key={i}
+                                          className={`px-2 py-0.5 rounded text-[10px] font-mono border font-semibold flex items-center space-x-1 ${
+                                            expired
+                                              ? 'bg-red-600 text-white border-red-500'
+                                              : 'bg-slate-950 text-amber-400 border-slate-800'
+                                          }`}
+                                          title={expired ? 'Curso Vencido (> 2 anos)' : 'Curso Válido'}
+                                        >
+                                          <span>{cObj ? cObj.name : uc.courseId}</span>
+                                          {expired && <AlertTriangle className="w-3 h-3 text-white inline" />}
+                                        </span>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              </td>
+
+                              {/* Actions */}
+                              {!isPolicial && (
+                                <td className="py-3 px-4 text-right">
+                                  <div className="flex items-center justify-end space-x-2">
+                                    <button
+                                      onClick={() => handleOpenUserModal(usr)}
+                                      className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                                      title="Editar Policial"
+                                    >
+                                      <Edit2 className="w-4 h-4" />
+                                    </button>
+                                    {isGeral && (
+                                      <button
+                                        onClick={() => handleDeleteUser(usr)}
+                                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                        title="Excluir Policial"
+                                      >
+                                        <Trash2 className="w-4 h-4" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })
                       )}
-                    </tr>
-                  );
-                })
+                    </tbody>
+                  </table>
+                </div>
               )}
-            </tbody>
-          </table>
-        </div>
+
+            </div>
+          );
+        })}
       </div>
 
       {/* User Edit / Add Modal */}
