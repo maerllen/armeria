@@ -631,6 +631,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [classTeacherName, setClassTeacherName] = useState('');
   const [classSubject, setClassSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [classStudentCount, setClassStudentCount] = useState<number>(20);
+  const [classLessonPlanId, setClassLessonPlanId] = useState('');
 
   const getCareerAbbr = (car: string): 'DL' | 'IP' | 'EP' | 'PC' | 'ML' => {
     const c = (car || '').toUpperCase();
@@ -656,6 +657,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassTeacherName(cls.teacherName || '');
       setClassSubject(cls.subject);
       setClassStudentCount(cls.studentCount);
+      setClassLessonPlanId(cls.lessonPlanId || '');
     } else {
       const initialSubject: 'MEAF' | 'TAP' | 'DP' = 'MEAF';
       const initialMatching = teachers.filter(t => t.teacherSubject === initialSubject);
@@ -672,6 +674,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassTeacherId(defaultTeacher?.id || '');
       setClassTeacherName(defaultTeacher?.name || '');
       setClassStudentCount(20);
+      setClassLessonPlanId('');
     }
     setShowClassModal(true);
   };
@@ -684,6 +687,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
     const selectedCourse = academyCourses.find(c => c.id === classCourseId);
     const selectedTeacher = teachers.find(t => t.id === classTeacherId);
+    const selectedPlan = lessonPlans.find(p => p.id === classLessonPlanId);
 
     const abbr = getCareerAbbr(classCareer);
     const formattedNum = (classTurmaNum.trim() || '01').padStart(2, '0').slice(-2);
@@ -718,6 +722,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         teacherName: finalTeacherName,
         subject: classSubject,
         studentCount: Number(classStudentCount) || 1,
+        lessonPlanId: classLessonPlanId || undefined,
+        lessonPlanName: selectedPlan ? selectedPlan.name : undefined,
         departmentId: currentUser.departmentId
       });
       if (!res.success) throw new Error(res.error);
@@ -1580,6 +1586,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 font-sans">Disciplina:</span>
                       <span className="text-amber-400 font-bold">{cls.subject}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400 font-sans">Plano de Aula:</span>
+                      <span className={`font-bold truncate max-w-[170px] ${cls.lessonPlanName ? 'text-amber-400' : 'text-slate-500 italic'}`} title={cls.lessonPlanName}>
+                        {cls.lessonPlanName || 'Nenhum vinculado'}
+                      </span>
                     </div>
                     <div className="flex items-center justify-between">
                       <span className="text-slate-400 font-sans">Alunos na Turma:</span>
@@ -2749,6 +2761,46 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
                   required
                 />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                  <span>Plano de Aula Vinculado</span>
+                  <span className="text-[10px] text-amber-400 font-normal">
+                    Selecione o plano
+                  </span>
+                </label>
+                <select
+                  value={classLessonPlanId}
+                  onChange={(e) => setClassLessonPlanId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-medium"
+                >
+                  <option value="">-- Selecione o Plano de Aula Vinculado (Opcional) --</option>
+                  {lessonPlans.map((plan) => (
+                    <option key={plan.id} value={plan.id}>
+                      {plan.name} ({plan.career} • {plan.lessonCount} Aulas)
+                    </option>
+                  ))}
+                </select>
+                {classLessonPlanId && (() => {
+                  const p = lessonPlans.find(item => item.id === classLessonPlanId);
+                  if (!p) return null;
+                  return (
+                    <div className="bg-slate-950/80 p-2.5 rounded-xl border border-amber-500/30 text-[11px] space-y-1 mt-1.5">
+                      <div className="text-amber-400 font-bold flex items-center justify-between">
+                        <span className="truncate max-w-[240px]">Plano: {p.name}</span>
+                        <span className="bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 text-[10px] font-mono shrink-0">
+                          {p.lessonCount} Aulas
+                        </span>
+                      </div>
+                      <div className="text-slate-400 flex items-center space-x-2 text-[10px]">
+                        <span>Carreira: <strong className="text-slate-200">{p.career}</strong></span>
+                        <span>•</span>
+                        <span>Tipo: <strong className="text-slate-200">{p.type}</strong></span>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">

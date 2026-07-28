@@ -339,6 +339,8 @@ export interface CourseClass {
   teacherUserId?: string;
   teacherName?: string;
   teacherUserIds?: string[];
+  lessonPlanId?: string;
+  lessonPlanName?: string;
   departmentId?: string;
   unitId?: string;
   createdAt: string;

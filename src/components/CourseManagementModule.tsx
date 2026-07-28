@@ -1337,7 +1337,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               <div className="flex items-center space-x-2">
                 <ClipboardList className="w-5 h-5 text-amber-400" />
                 <h3 className="text-base font-bold text-slate-100">
-                  {editingPlan ? 'Editar Plano de Aula' : 'Novo Plano de Aula'}
+                  {editingPlan ? 'Editar Plano de Aula Curso de Formação' : 'Novo Plano de Aula Curso de Formação'}
                 </h3>
               </div>
               <button onClick={() => setShowPlanModal(false)} className="text-slate-500 hover:text-slate-300">

@@ -310,7 +310,41 @@ CREATE TABLE IF NOT EXISTS `course_classes` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2.18 Planos de Aula
+-- 2.18 Planos de Aula (Geral e Cursos de Formação)
+CREATE TABLE IF NOT EXISTS `plano_de_aula_curso_de_formacao` (
+    `id` VARCHAR(64) NOT NULL,
+    `nome_do_plano` VARCHAR(255) NOT NULL,
+    `carreira` VARCHAR(64) NOT NULL,
+    `materia` VARCHAR(100) NOT NULL DEFAULT 'MEAF',
+    `ano_de_vigencia_do_plano` INT NOT NULL,
+    `numero_de_aulas` INT NOT NULL DEFAULT 1,
+    `turma_code` VARCHAR(64) DEFAULT NULL,
+    `type` VARCHAR(64) NOT NULL DEFAULT 'curso de formação',
+    `department_id` VARCHAR(64) DEFAULT NULL,
+    `unit_id` VARCHAR(64) DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2.18.1 Aulas Vinculadas ao Plano de Aula (Curso de Formação)
+CREATE TABLE IF NOT EXISTS `aulas_plano_de_aula_curso_de_formacao` (
+    `id` VARCHAR(64) NOT NULL,
+    `plano_de_aula_id` VARCHAR(64) NOT NULL,
+    `numero_da_aula` INT NOT NULL,
+    `quantidade_de_tiros_por_aluno` INT NOT NULL DEFAULT 0,
+    `calibre_usado` VARCHAR(64) NOT NULL DEFAULT '.40 S&W',
+    `insumo_do_instrutor` INT NOT NULL DEFAULT 0,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_plano_aula_num` (`plano_de_aula_id`, `numero_da_aula`),
+    KEY `idx_aulas_plano_id` (`plano_de_aula_id`),
+    CONSTRAINT `fk_aulas_plano_de_aula`
+        FOREIGN KEY (`plano_de_aula_id`)
+        REFERENCES `plano_de_aula_curso_de_formacao` (`id`)
+        ON DELETE CASCADE
+        ON UPDATE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `lesson_plans` (
     `id` VARCHAR(64) NOT NULL,
     `name` VARCHAR(255) NOT NULL,

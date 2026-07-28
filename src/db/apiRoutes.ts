@@ -1634,25 +1634,70 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
   }
 });
 
-// Lesson Plans (Planos de Aula)
+// Lesson Plans (Planos de Aula Curso de Formação)
 apiRouter.get('/lesson-plans', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT * FROM lesson_plans ORDER BY created_at DESC');
-    const mapped = (rows || []).map((r: any) => ({
-      id: r.id,
-      name: r.name,
-      subject: r.subject || 'MEAF',
-      turmaCode: r.turma_code || undefined,
-      career: r.career,
-      year: r.year,
-      type: r.type,
-      lessonCount: r.lesson_count,
-      lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
-      departmentId: r.department_id || undefined,
-      unitId: r.unit_id || undefined,
-      createdAt: r.created_at
-    }));
+    let rows: any = [];
+    let isNewTable = true;
+    try {
+      [rows] = await pool.query('SELECT * FROM plano_de_aula_curso_de_formacao ORDER BY created_at DESC');
+    } catch (e) {
+      isNewTable = false;
+      [rows] = await pool.query('SELECT * FROM lesson_plans ORDER BY created_at DESC');
+    }
+
+    let mapped: any[] = [];
+    if (isNewTable && rows.length > 0) {
+      let allAulas: any[] = [];
+      try {
+        const [aulasRes]: any = await pool.query('SELECT * FROM aulas_plano_de_aula_curso_de_formacao ORDER BY numero_da_aula ASC');
+        allAulas = aulasRes || [];
+      } catch (errAulas) {
+        allAulas = [];
+      }
+
+      mapped = rows.map((r: any) => {
+        const planAulas = allAulas.filter((a: any) => a.plano_de_aula_id === r.id);
+        const lessonsData = planAulas.map((a: any) => ({
+          lessonNumber: a.numero_da_aula,
+          shotsPerStudent: a.quantidade_de_tiros_por_aluno,
+          caliberName: a.calibre_usado,
+          instructorShots: a.insumo_do_instrutor
+        }));
+
+        return {
+          id: r.id,
+          name: r.nome_do_plano || r.name,
+          subject: r.materia || r.subject || 'MEAF',
+          turmaCode: r.turma_code || undefined,
+          career: r.carreira || r.career,
+          year: r.ano_de_vigencia_do_plano || r.year,
+          type: r.type || 'curso de formação',
+          lessonCount: r.numero_de_aulas || r.lesson_count || 1,
+          lessonsData: lessonsData.length > 0 ? lessonsData : (typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || [])),
+          departmentId: r.department_id || undefined,
+          unitId: r.unit_id || undefined,
+          createdAt: r.created_at
+        };
+      });
+    } else {
+      mapped = (rows || []).map((r: any) => ({
+        id: r.id,
+        name: r.nome_do_plano || r.name,
+        subject: r.materia || r.subject || 'MEAF',
+        turmaCode: r.turma_code || undefined,
+        career: r.carreira || r.career,
+        year: r.ano_de_vigencia_do_plano || r.year,
+        type: r.type || 'curso de formação',
+        lessonCount: r.numero_de_aulas || r.lesson_count || 1,
+        lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
+        departmentId: r.department_id || undefined,
+        unitId: r.unit_id || undefined,
+        createdAt: r.created_at
+      }));
+    }
+
     return res.json(mapped);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1664,26 +1709,87 @@ apiRouter.post('/lesson-plans', async (req: Request, res: Response) => {
     const { name, subject, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
     const pool = getPool();
     const id = req.body.id || `plano-${Date.now()}`;
-    await pool.query(
-      `INSERT INTO lesson_plans (id, name, subject, turma_code, career, year, type, lesson_count, lessons_data, department_id, unit_id, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        id,
-        name,
-        subject || 'MEAF',
-        turmaCode || null,
-        career || 'Delegado',
-        Number(year) || new Date().getFullYear(),
-        type || 'curso de formação',
-        Number(lessonCount) || 1,
-        JSON.stringify(lessonsData || []),
-        departmentId || null,
-        unitId || null
-      ]
-    );
+    const planName = name || 'Plano de Aula';
+    const planSubject = subject || 'MEAF';
+    const planCareer = career || 'Delegado';
+    const planYear = Number(year) || new Date().getFullYear();
+    const planType = type || 'curso de formação';
+    const lessonsList: any[] = Array.isArray(lessonsData) ? lessonsData : [];
+    const planLessonCount = Number(lessonCount) || (lessonsList.length > 0 ? lessonsList.length : 1);
 
-    await insertAuditLog('Cursos', 'Criar', `Cadastrado plano de aula: ${name} (${subject || 'MEAF'} - ${career} - ${type})`, actor, req.ip);
-    return res.json({ id, name, subject: subject || 'MEAF', turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
+    let savedInNewTable = false;
+    try {
+      await pool.query(
+        `INSERT INTO plano_de_aula_curso_de_formacao 
+         (id, nome_do_plano, carreira, materia, ano_de_vigencia_do_plano, numero_de_aulas, turma_code, type, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          planName,
+          planCareer,
+          planSubject,
+          planYear,
+          planLessonCount,
+          turmaCode || null,
+          planType,
+          departmentId || null,
+          unitId || null
+        ]
+      );
+      savedInNewTable = true;
+
+      if (lessonsList.length > 0) {
+        for (const item of lessonsList) {
+          const aulaId = `aula-${id}-${item.lessonNumber || 1}`;
+          await pool.query(
+            `INSERT INTO aulas_plano_de_aula_curso_de_formacao
+             (id, plano_de_aula_id, numero_da_aula, quantidade_de_tiros_por_aluno, calibre_usado, insumo_do_instrutor, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())
+             ON DUPLICATE KEY UPDATE
+               quantidade_de_tiros_por_aluno = VALUES(quantidade_de_tiros_por_aluno),
+               calibre_usado = VALUES(calibre_usado),
+               insumo_do_instrutor = VALUES(insumo_do_instrutor)`,
+            [
+              aulaId,
+              id,
+              Number(item.lessonNumber) || 1,
+              Number(item.shotsPerStudent) || 0,
+              item.caliberName || '.40 S&W',
+              Number(item.instructorShots) || 0
+            ]
+          );
+        }
+      }
+    } catch (tblErr: any) {
+      console.warn('Fallback ou inserção paralela em lesson_plans:', tblErr.message);
+    }
+
+    try {
+      await pool.query(
+        `INSERT INTO lesson_plans (id, name, subject, turma_code, career, year, type, lesson_count, lessons_data, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          planName,
+          planSubject,
+          turmaCode || null,
+          planCareer,
+          planYear,
+          planType,
+          planLessonCount,
+          JSON.stringify(lessonsList),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    } catch (legacyErr) {
+      if (!savedInNewTable) {
+        throw legacyErr;
+      }
+    }
+
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado plano de aula: ${planName} (${planSubject} - ${planCareer} - ${planType})`, actor, req.ip);
+    return res.json({ id, name: planName, subject: planSubject, turmaCode, career: planCareer, year: planYear, type: planType, lessonCount: planLessonCount, lessonsData: lessonsList, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     console.error('Erro em POST /lesson-plans:', err);
     return res.status(500).json({ error: err.message });
@@ -1695,36 +1801,100 @@ apiRouter.put('/lesson-plans/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, subject, turmaCode, career, year, type, lessonCount, lessonsData, departmentId, unitId, actor } = req.body;
     const pool = getPool();
+    const planName = name || 'Plano de Aula';
+    const planSubject = subject || 'MEAF';
+    const planCareer = career || 'Delegado';
+    const planYear = Number(year) || new Date().getFullYear();
+    const planType = type || 'curso de formação';
+    const lessonsList: any[] = Array.isArray(lessonsData) ? lessonsData : [];
+    const planLessonCount = Number(lessonCount) || (lessonsList.length > 0 ? lessonsList.length : 1);
 
-    await pool.query(
-      `UPDATE lesson_plans SET
-        name = ?,
-        subject = ?,
-        turma_code = ?,
-        career = ?,
-        year = ?,
-        type = ?,
-        lesson_count = ?,
-        lessons_data = ?,
-        department_id = ?,
-        unit_id = ?
-       WHERE id = ?`,
-      [
-        name,
-        subject || 'MEAF',
-        turmaCode || null,
-        career || 'Delegado',
-        Number(year) || new Date().getFullYear(),
-        type || 'curso de formação',
-        Number(lessonCount) || 1,
-        JSON.stringify(lessonsData || []),
-        departmentId || null,
-        unitId || null,
-        id
-      ]
-    );
+    let updatedInNewTable = false;
 
-    await insertAuditLog('Cursos', 'Editar', `Atualizado plano de aula: ${name}`, actor, req.ip);
+    try {
+      await pool.query(
+        `UPDATE plano_de_aula_curso_de_formacao SET
+           nome_do_plano = ?,
+           materia = ?,
+           turma_code = ?,
+           carreira = ?,
+           ano_de_vigencia_do_plano = ?,
+           type = ?,
+           numero_de_aulas = ?,
+           department_id = ?,
+           unit_id = ?
+         WHERE id = ?`,
+        [
+          planName,
+          planSubject,
+          turmaCode || null,
+          planCareer,
+          planYear,
+          planType,
+          planLessonCount,
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+      updatedInNewTable = true;
+
+      await pool.query('DELETE FROM aulas_plano_de_aula_curso_de_formacao WHERE plano_de_aula_id = ?', [id]);
+      if (lessonsList.length > 0) {
+        for (const item of lessonsList) {
+          const aulaId = `aula-${id}-${item.lessonNumber || 1}`;
+          await pool.query(
+            `INSERT INTO aulas_plano_de_aula_curso_de_formacao
+             (id, plano_de_aula_id, numero_da_aula, quantidade_de_tiros_por_aluno, calibre_usado, insumo_do_instrutor, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              aulaId,
+              id,
+              Number(item.lessonNumber) || 1,
+              Number(item.shotsPerStudent) || 0,
+              item.caliberName || '.40 S&W',
+              Number(item.instructorShots) || 0
+            ]
+          );
+        }
+      }
+    } catch (e: any) {
+      console.warn('Fallback ao atualizar tabela legada lesson_plans:', e.message);
+    }
+
+    try {
+      await pool.query(
+        `UPDATE lesson_plans SET
+           name = ?,
+           subject = ?,
+           turma_code = ?,
+           career = ?,
+           year = ?,
+           type = ?,
+           lesson_count = ?,
+           lessons_data = ?,
+           department_id = ?,
+           unit_id = ?
+         WHERE id = ?`,
+        [
+          planName,
+          planSubject,
+          turmaCode || null,
+          planCareer,
+          planYear,
+          planType,
+          planLessonCount,
+          JSON.stringify(lessonsList),
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    } catch (legacyErr) {
+      if (!updatedInNewTable) throw legacyErr;
+    }
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizado plano de aula: ${planName}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     console.error('Erro em PUT /lesson-plans:', err);
@@ -1735,10 +1905,18 @@ apiRouter.put('/lesson-plans/:id', async (req: Request, res: Response) => {
 apiRouter.delete('/lesson-plans/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const actor = req.body.actor;
+    const actor = req.body?.actor;
     const pool = getPool();
 
-    await pool.query('DELETE FROM lesson_plans WHERE id = ?', [id]);
+    try {
+      await pool.query('DELETE FROM aulas_plano_de_aula_curso_de_formacao WHERE plano_de_aula_id = ?', [id]);
+      await pool.query('DELETE FROM plano_de_aula_curso_de_formacao WHERE id = ?', [id]);
+    } catch (e) {}
+
+    try {
+      await pool.query('DELETE FROM lesson_plans WHERE id = ?', [id]);
+    } catch (e) {}
+
     await insertAuditLog('Cursos', 'Excluir', `Excluído plano de aula ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
