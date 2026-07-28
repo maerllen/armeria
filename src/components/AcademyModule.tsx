@@ -1436,9 +1436,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </tr>
                   ) : (
                     filteredMovements.map((mov) => {
-                      const isEmAula = mov.status === 'Em Sala de Aula';
-                      const ammoRet = mov.ammoReturned || 0;
-                      const ammoUsed = mov.ammoQuantity - ammoRet;
+                      const isEmAula = (mov.status === 'Em Sala de Aula' || mov.status === 'Em Aula') && !mov.returnedAt;
+                      const ammoSuppliedVal = Number(mov.ammoQuantity || mov.ammoSupplied) || 0;
+                      const ammoRet = Number(mov.ammoReturned) || 0;
+                      const ammoUsed = isEmAula ? 0 : Math.max(0, ammoSuppliedVal - ammoRet);
 
                       return (
                         <tr key={mov.id} className="hover:bg-slate-800/50 transition">
@@ -1469,17 +1470,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-4 font-mono text-xs">
-                            {mov.ammoQuantity > 0 || mov.ammoSupplied > 0 ? (
+                            {ammoSuppliedVal > 0 ? (
                               <div className="space-y-0.5">
                                 <div className="text-slate-100 font-bold text-[11px]">{mov.ammoCaliber || 'Calibre N/I'}</div>
                                 <div className="text-[10px] text-amber-300">
-                                  Entregue: <strong className="text-amber-400 font-mono">{mov.ammoQuantity || mov.ammoSupplied || 0} un</strong>
+                                  Entregue: <strong className="text-amber-400 font-mono">{ammoSuppliedVal} un</strong>
                                 </div>
                                 <div className="text-[10px] text-emerald-400">
                                   Devolvido: <strong className="font-mono">{ammoRet} un</strong>
                                 </div>
-                                <div className="text-[10px] text-red-400">
-                                  Não devolvido: <strong className="font-mono">{ammoUsed < 0 ? 0 : ammoUsed} un</strong>
+                                <div className="text-[10px] text-sky-400">
+                                  Utilizadas: <strong className="font-mono">{ammoUsed} un</strong>
                                 </div>
                               </div>
                             ) : (
@@ -1487,7 +1488,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <div className="flex items-center justify-center space-x-1.5 flex-wrap">
+                            <div className="flex items-center justify-center space-x-2">
                               <span
                                 className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
                                   isEmAula
@@ -1500,10 +1501,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                               {isEmAula && (
                                 <button
                                   onClick={() => handleOpenRetornoModal(mov)}
-                                  className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer hover:scale-105 transition"
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-bold shadow transition flex items-center space-x-1 cursor-pointer"
                                   title="Clique para realizar a devolução das caixas e munições"
                                 >
-                                  (devolver)
+                                  <span>Devolução</span>
                                 </button>
                               )}
                             </div>
