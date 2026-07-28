@@ -435,19 +435,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Button Cadastrar Calibre - Opens Caliber Management Modal */}
-          <button
-            onClick={() => {
-              setErrorMsg('');
-              setCaliberName('');
-              setEditingCaliber(null);
-              setShowCaliberModal(true);
-            }}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4 text-amber-400" />
-            <span>Cadastrar Calibre</span>
-          </button>
+          {/* Button Cadastrar Calibre - Opens Caliber Management Modal (Visible ONLY for Geral & Armeiro) */}
+          {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
+            <button
+              onClick={() => {
+                setErrorMsg('');
+                setCaliberName('');
+                setEditingCaliber(null);
+                setShowCaliberModal(true);
+              }}
+              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4 text-amber-400" />
+              <span>Cadastrar Calibre</span>
+            </button>
+          )}
 
           {/* Separate ENTRADA Button */}
           {canManageStock && (
@@ -939,8 +941,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               </button>
             </div>
 
-            {/* Form de Cadastro / Edição: VISÍVEL APENAS PARA PERFIL GERAL */}
-            {isGeral ? (
+            {/* Form de Cadastro / Edição: VISÍVEL APENAS PARA PERFIL GERAL E ARMEIRO */}
+            {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') ? (
               <form onSubmit={handleSaveCaliber} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
                   {editingCaliber ? 'Editar Calibre' : 'Cadastrar Novo Calibre'}
@@ -976,7 +978,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               </form>
             ) : (
               <p className="text-[11px] text-slate-500 italic bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
-                Apenas usuários do perfil <strong>Geral</strong> possuem permissão para cadastrar, editar ou excluir calibres.
+                Apenas usuários dos perfis <strong>Geral</strong> e <strong>Armeiro</strong> possuem permissão para cadastrar, editar ou excluir calibres.
               </p>
             )}
 
@@ -993,7 +995,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                     <span className="font-mono font-bold text-slate-100 text-sm">{c.name}</span>
                     <div className="flex items-center space-x-2">
                       <span className="text-[10px] text-slate-500 uppercase font-mono">Calibre</span>
-                      {isGeral && (
+                      {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
                         <>
                           <button
                             onClick={() => {

@@ -382,8 +382,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Teachers list
   const teachers = users.filter(u => u.isTeacher || u.role === 'Geral' || u.role === 'Administrador' || u.role === 'Armeiro');
 
-  // Available weapons for boxes or movements
-  const availableWeapons = weapons.filter(w => w.status === 'Disponível' || w.status === 'No Cofre');
+  // Available weapons for boxes or movements (excluding weapons already assigned to any weapon box)
+  const allBoxedWeaponIds = weaponBoxes.flatMap(b => b.weaponIds || []);
+  const availableWeapons = weapons.filter(w => (w.status === 'Disponível' || w.status === 'No Cofre') && !allBoxedWeaponIds.includes(w.id));
 
   // --- 1. COURSE FORM STATE ---
   const [showCourseModal, setShowCourseModal] = useState(false);
@@ -861,11 +862,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [movClassId, setMovClassId] = useState('');
   const [movPlanId, setMovPlanId] = useState('');
   const [movLessonNumber, setMovLessonNumber] = useState<number>(1);
-  const [movBoxId, setMovBoxId] = useState('');
-  const [movCaliberId, setMovCaliberId] = useState('');
-  const [movVaultSpaceId, setMovVaultSpaceId] = useState('');
-  const [movAmmoStockId, setMovAmmoStockId] = useState('');
-  const [movAmmoQuantity, setMovAmmoQuantity] = useState<number>(0);
+  const [movSelectedBoxIds, setMovSelectedBoxIds] = useState<string[]>([]);
+  const [movAmmoItems, setMovAmmoItems] = useState<{ id: string; caliberId: string; vaultSpaceId: string; quantity: number }[]>([]);
   const [movRecipientType, setMovRecipientType] = useState<'inside' | 'outside'>('inside');
   const [movTeacherUserId, setMovTeacherUserId] = useState('');
   const [movTeacherNameOutside, setMovTeacherNameOutside] = useState('');
@@ -884,7 +882,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setErrorMsg('');
     const firstClass = courseClasses[0];
     setMovClassId(firstClass?.id || '');
-    setMovBoxId('');
+    setMovSelectedBoxIds([]);
 
     // Filter plans with type 'curso de formação'
     const formacaoPlans = lessonPlans.filter(p => (p.type || '').toLowerCase().includes('formação'));
@@ -895,21 +893,35 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     const lessonItem = initialPlan?.lessonsData[0];
     const targetCalName = lessonItem?.caliberName || ammoStocks[0]?.caliber || '';
     const selCalObj = calibers.find(c => c.id === targetCalName || c.name.toLowerCase() === targetCalName.toLowerCase()) || calibers[0];
-    setMovCaliberId(selCalObj?.id || calibers[0]?.id || '');
+
+    // Filter MEAF vaults
+    const meafVaults = vaultSpaces.filter(v => {
+      if (v.unitId === 'unit-acad-meaf') return true;
+      const linkedUnit = units.find(u => u.id === v.unitId);
+      if (linkedUnit && (linkedUnit.name.toUpperCase().includes('MEAF') || linkedUnit.code?.toUpperCase().includes('MEAF'))) return true;
+      if (v.name?.toUpperCase().includes('MEAF') || v.code?.toUpperCase().includes('MEAF')) return true;
+      return false;
+    });
+    const displayVaults = meafVaults.length > 0 ? meafVaults : vaultSpaces;
 
     const matchingStock = ammoStocks.find(a =>
       selCalObj && (a.caliberId === selCalObj.id || (a.caliber && a.caliber.toLowerCase() === selCalObj.name.toLowerCase()))
     ) || ammoStocks[0];
-
-    setMovVaultSpaceId(matchingStock?.vaultSpaceId || vaultSpaces[0]?.id || '');
-    setMovAmmoStockId(matchingStock?.id || '');
 
     const studentCount = firstClass?.studentCount || 20;
     const shotsPerStudent = lessonItem?.shotsPerStudent || 0;
     const instructorShots = lessonItem?.instructorShots || 0;
     const baseQty = (shotsPerStudent * studentCount) + instructorShots;
     const suppliedQty = Math.round(baseQty * 1.10);
-    setMovAmmoQuantity(suppliedQty);
+
+    setMovAmmoItems([
+      {
+        id: '1',
+        caliberId: selCalObj?.id || calibers[0]?.id || '',
+        vaultSpaceId: matchingStock?.vaultSpaceId || displayVaults[0]?.id || '',
+        quantity: suppliedQty
+      }
+    ]);
 
     setMovRecipientType('inside');
     setMovTeacherUserId(firstClass?.teacherUserId || teachers[0]?.id || '');
@@ -942,15 +954,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       teacherName = movTeacherNameOutside.trim() + ' (Fora do Sistema)';
     }
 
-    const selectedBox = weaponBoxes.find(b => b.id === movBoxId);
-    
-    const selectedCaliber = calibers.find(c => c.id === movCaliberId || c.name === movCaliberId);
-    const caliberName = selectedCaliber ? selectedCaliber.name : movCaliberId;
+    const selectedBoxes = weaponBoxes.filter(b => movSelectedBoxIds.includes(b.id));
+    const boxNamesJoined = selectedBoxes.length > 0 ? selectedBoxes.map(b => b.name).join(' + ') : undefined;
+    const boxIdsJoined = selectedBoxes.length > 0 ? selectedBoxes.map(b => b.id).join(',') : undefined;
 
-    const matchingStock = ammoStocks.find(a =>
-      (a.vaultSpaceId === movVaultSpaceId) &&
-      (a.caliberId === movCaliberId || (caliberName && a.caliber && a.caliber.toLowerCase() === caliberName.toLowerCase()))
-    ) || ammoStocks.find(a => a.id === movAmmoStockId);
+    // Ammo summary & calculation
+    const ammoCaliberSummary = movAmmoItems
+      .filter(item => item.quantity > 0 || movAmmoItems.length === 1)
+      .map(item => {
+        const calObj = calibers.find(c => c.id === item.caliberId || c.name === item.caliberId);
+        const cName = calObj ? calObj.name : item.caliberId;
+        return `${item.quantity}un (${cName})`;
+      })
+      .join(', ');
+
+    const totalAmmoQuantity = movAmmoItems.reduce((acc, curr) => acc + Number(curr.quantity || 0), 0);
+    const primaryItem = movAmmoItems[0];
+    const primaryCalObj = calibers.find(c => c.id === primaryItem?.caliberId || c.name === primaryItem?.caliberId);
 
     try {
       const res = await storage.darSaidaCurso({
@@ -966,14 +986,13 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         lessonNumber: movLessonNumber,
         teacherName,
         teacherUserId: movRecipientType === 'inside' ? movTeacherUserId : undefined,
-        boxId: selectedBox ? selectedBox.id : undefined,
-        boxName: selectedBox ? selectedBox.name : undefined,
-        caliberId: selectedCaliber ? selectedCaliber.id : movCaliberId,
-        ammoCaliber: caliberName,
-        vaultSpaceId: movVaultSpaceId,
-        ammoStockId: matchingStock ? matchingStock.id : undefined,
-        ammoQuantity: Number(movAmmoQuantity) || 0,
-        ammoSupplied: Number(movAmmoQuantity) || 0,
+        boxId: boxIdsJoined,
+        boxName: boxNamesJoined,
+        caliberId: primaryCalObj ? primaryCalObj.id : primaryItem?.caliberId,
+        ammoCaliber: ammoCaliberSummary || primaryCalObj?.name,
+        vaultSpaceId: primaryItem?.vaultSpaceId,
+        ammoQuantity: totalAmmoQuantity,
+        ammoSupplied: totalAmmoQuantity,
         notes: movNotes.trim(),
         issuedByUserId: currentUser.id,
         issuedByUserName: currentUser.name
@@ -1385,21 +1404,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             </div>
             <div className="flex items-center space-x-2">
               <button
-                onClick={() => {
-                  const activeMovs = courseMovements.filter(m => m.status === 'Em Sala de Aula' || m.status === 'Em Aula');
-                  if (activeMovs.length === 0) {
-                    alert('Nenhuma aula em andamento encontrada para retorno.');
-                    return;
-                  }
-                  handleOpenRetornoModal(activeMovs[0]);
-                }}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-                title="Registrar retorno de materiais e devolução de munições não utilizadas"
-              >
-                <RotateCcw className="w-4 h-4" />
-                <span>Retorno de Aula (Aula CFTP)</span>
-              </button>
-              <button
                 onClick={handleOpenSaidaModal}
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
               >
@@ -1479,15 +1483,26 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-4 text-center">
-                            <span
-                              className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
-                                isEmAula
-                                  ? 'bg-amber-950/80 text-amber-400 border-amber-800 animate-pulse'
-                                  : 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
-                              }`}
-                            >
-                              {mov.status}
-                            </span>
+                            <div className="flex items-center justify-center space-x-1.5 flex-wrap">
+                              <span
+                                className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase border ${
+                                  isEmAula
+                                    ? 'bg-amber-950/80 text-amber-400 border-amber-800 animate-pulse'
+                                    : 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
+                                }`}
+                              >
+                                {mov.status}
+                              </span>
+                              {isEmAula && (
+                                <button
+                                  onClick={() => handleOpenRetornoModal(mov)}
+                                  className="text-[10px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer hover:scale-105 transition"
+                                  title="Clique para registrar retorno de aula"
+                                >
+                                  (retorno de aula)
+                                </button>
+                              )}
+                            </div>
                           </td>
                           <td className="py-3 px-4 text-right">
                             <div className="flex items-center justify-end space-x-1.5">
@@ -2241,28 +2256,39 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   Selecione as Armas na Caixa ({selectedBoxWeaponIds.length} selecionadas)
                 </label>
                 <div className="max-h-48 overflow-y-auto space-y-1 bg-slate-950 border border-slate-800 p-2 rounded-xl">
-                  {weapons.map((w) => {
-                    const isChecked = selectedBoxWeaponIds.includes(w.id);
-                    return (
-                      <label key={w.id} className="flex items-center space-x-2 p-1.5 hover:bg-slate-900 rounded cursor-pointer font-mono text-[11px]">
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedBoxWeaponIds([...selectedBoxWeaponIds, w.id]);
-                            } else {
-                              setSelectedBoxWeaponIds(selectedBoxWeaponIds.filter(id => id !== w.id));
-                            }
-                          }}
-                          className="rounded text-amber-500 focus:ring-0"
-                        />
-                        <span className="text-slate-200 font-bold">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</span>
-                        <span className="text-amber-400">Nº {w.serialNumber}</span>
-                        <span className="text-slate-500 text-[10px]">({w.caliber})</span>
-                      </label>
-                    );
-                  })}
+                  {(() => {
+                    const otherBoxesWeaponIds = weaponBoxes
+                      .filter(b => !editingBox || b.id !== editingBox.id)
+                      .flatMap(b => b.weaponIds || []);
+                    const unboxedWeapons = weapons.filter(w => !otherBoxesWeaponIds.includes(w.id));
+
+                    if (unboxedWeapons.length === 0) {
+                      return <div className="text-slate-500 italic text-center p-2 text-xs">Nenhuma arma disponível ou sem vínculo com outra caixa.</div>;
+                    }
+
+                    return unboxedWeapons.map((w) => {
+                      const isChecked = selectedBoxWeaponIds.includes(w.id);
+                      return (
+                        <label key={w.id} className="flex items-center space-x-2 p-1.5 hover:bg-slate-900 rounded cursor-pointer font-mono text-[11px]">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedBoxWeaponIds([...selectedBoxWeaponIds, w.id]);
+                              } else {
+                                setSelectedBoxWeaponIds(selectedBoxWeaponIds.filter(id => id !== w.id));
+                              }
+                            }}
+                            className="rounded text-amber-500 focus:ring-0"
+                          />
+                          <span className="text-slate-200 font-bold">{w.type} {w.manufacturer ? `• ${w.manufacturer}` : ''} {w.model}</span>
+                          <span className="text-amber-400">Nº {w.serialNumber}</span>
+                          <span className="text-slate-500 text-[10px]">({w.caliber})</span>
+                        </label>
+                      );
+                    });
+                  })()}
                 </div>
               </div>
 
@@ -2857,7 +2883,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       const lessonItem = selP?.lessonsData?.find(l => l.lessonNumber === movLessonNumber) || selP?.lessonsData?.[0];
                       if (lessonItem) {
                         const baseSum = (lessonItem.shotsPerStudent * selectedC.studentCount) + lessonItem.instructorShots;
-                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                        const newQty = Math.round(baseSum * 1.10);
+                        setMovAmmoItems(prev => prev.length > 0 ? [{ ...prev[0], quantity: newQty }, ...prev.slice(1)] : prev);
                       }
                     }
                   }}
@@ -2918,7 +2945,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         const selectedC = courseClasses.find(c => c.id === movClassId);
                         const stCount = selectedC ? selectedC.studentCount : 20;
                         const baseSum = (firstLesson.shotsPerStudent * stCount) + firstLesson.instructorShots;
-                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                        const newQty = Math.round(baseSum * 1.10);
+                        setMovAmmoItems(prev => prev.length > 0 ? [{ ...prev[0], quantity: newQty }, ...prev.slice(1)] : prev);
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
@@ -2947,7 +2975,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         const selectedC = courseClasses.find(c => c.id === movClassId);
                         const stCount = selectedC ? selectedC.studentCount : 20;
                         const baseSum = (lessonItem.shotsPerStudent * stCount) + lessonItem.instructorShots;
-                        setMovAmmoQuantity(Math.round(baseSum * 1.10));
+                        const newQty = Math.round(baseSum * 1.10);
+                        setMovAmmoItems(prev => prev.length > 0 ? [{ ...prev[0], quantity: newQty }, ...prev.slice(1)] : prev);
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
@@ -2966,113 +2995,180 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </div>
               </div>
 
+              {/* Seleção de Caixas de Armas (Múltiplas Caixas) */}
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Caixa de Armas para Aula (Opcional)</label>
-                <select
-                  value={movBoxId}
-                  onChange={(e) => setMovBoxId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-mono"
-                >
-                  <option value="">-- Nenhuma caixa (somente munição) --</option>
-                  {weaponBoxes.map(b => (
-                    <option key={b.id} value={b.id}>
-                      {b.name} ({b.weaponIds.length} armas)
-                    </option>
-                  ))}
-                </select>
+                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between text-xs">
+                  <span>Caixas de Armas para Aula (Múltiplas Seleções)</span>
+                  <span className="text-[10px] text-amber-400 font-mono">{movSelectedBoxIds.length} selecionada(s)</span>
+                </label>
+                <div className="max-h-36 overflow-y-auto space-y-1 bg-slate-950 border border-slate-800 p-2 rounded-xl">
+                  {weaponBoxes.length === 0 ? (
+                    <div className="text-slate-500 italic text-xs text-center p-2">Nenhuma caixa cadastrada.</div>
+                  ) : (
+                    weaponBoxes.map(b => {
+                      const isChecked = movSelectedBoxIds.includes(b.id);
+                      return (
+                        <label key={b.id} className="flex items-center space-x-2 p-1.5 hover:bg-slate-900 rounded cursor-pointer font-mono text-xs">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setMovSelectedBoxIds(prev => [...prev, b.id]);
+                              } else {
+                                setMovSelectedBoxIds(prev => prev.filter(id => id !== b.id));
+                              }
+                            }}
+                            className="rounded text-amber-500 focus:ring-0"
+                          />
+                          <span className="text-slate-200 font-bold">{b.name}</span>
+                          <span className="text-amber-400 font-normal">({b.weaponIds?.length || 0} armas)</span>
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
               </div>
 
-              {/* Seleção do Estoque: Calibre e Local do Cofre */}
+              {/* Seleção do Estoque: Múltiplos Calibres e Cofres MEAF */}
               <div className="bg-slate-950/60 p-3.5 rounded-xl border border-slate-800 space-y-3">
                 <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between border-b border-slate-800/80 pb-2">
-                  <span>Estoque de Munição para Subtração</span>
-                  <span className="text-[10px] text-slate-400 font-normal">Selecione o Calibre e o Cofre</span>
-                </div>
+                  <span>Estoque e Calibres de Munição ({movAmmoItems.length} calibre(s))</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const meafVaults = vaultSpaces.filter(v => {
+                        if (v.unitId === 'unit-acad-meaf') return true;
+                        const linkedUnit = units.find(u => u.id === v.unitId);
+                        if (linkedUnit && (linkedUnit.name.toUpperCase().includes('MEAF') || linkedUnit.code?.toUpperCase().includes('MEAF'))) return true;
+                        if (v.name?.toUpperCase().includes('MEAF') || v.code?.toUpperCase().includes('MEAF')) return true;
+                        return false;
+                      });
+                      const displayVaults = meafVaults.length > 0 ? meafVaults : vaultSpaces;
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1 text-xs">
-                      Calibre da Munição
-                    </label>
-                    <select
-                      value={movCaliberId}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setMovCaliberId(val);
-                        const selC = calibers.find(c => c.id === val || c.name === val);
-                        const cName = selC ? selC.name : val;
-                        const match = ammoStocks.find(a =>
-                          a.caliberId === val || (cName && a.caliber && a.caliber.toLowerCase() === cName.toLowerCase())
-                        );
-                        if (match && match.vaultSpaceId) {
-                          setMovVaultSpaceId(match.vaultSpaceId);
+                      setMovAmmoItems(prev => [
+                        ...prev,
+                        {
+                          id: Date.now().toString(),
+                          caliberId: calibers[0]?.id || '',
+                          vaultSpaceId: displayVaults[0]?.id || '',
+                          quantity: 0
                         }
-                      }}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                    >
-                      <option value="">-- Selecione o Calibre --</option>
-                      {calibers.map(c => (
-                        <option key={c.id} value={c.id}>
-                          {c.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1 text-xs">
-                      Local do Cofre (Espaço no Cofre)
-                    </label>
-                    <select
-                      value={movVaultSpaceId}
-                      onChange={(e) => setMovVaultSpaceId(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                    >
-                      <option value="">-- Selecione o Cofre --</option>
-                      {vaultSpaces.map(v => (
-                        <option key={v.id} value={v.id}>
-                          {v.name} ({v.spaceNumber || v.location || 'Cofre'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                      ]);
+                    }}
+                    className="text-[10px] text-amber-400 hover:text-amber-300 font-bold bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 px-2 py-1 rounded transition flex items-center space-x-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Adicionar Outro Calibre</span>
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/60">
-                  <div className="flex items-center justify-between bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800">
-                    <span className="text-[11px] text-slate-400">Saldo no Cofre:</span>
-                    {(() => {
-                      const selCal = calibers.find(c => c.id === movCaliberId || c.name === movCaliberId);
-                      const calName = selCal ? selCal.name : movCaliberId;
+                {(() => {
+                  const meafVaults = vaultSpaces.filter(v => {
+                    if (v.unitId === 'unit-acad-meaf') return true;
+                    const linkedUnit = units.find(u => u.id === v.unitId);
+                    if (linkedUnit && (linkedUnit.name.toUpperCase().includes('MEAF') || linkedUnit.code?.toUpperCase().includes('MEAF'))) return true;
+                    if (v.name?.toUpperCase().includes('MEAF') || v.code?.toUpperCase().includes('MEAF')) return true;
+                    return false;
+                  });
+                  const displayVaults = meafVaults.length > 0 ? meafVaults : vaultSpaces;
 
-                      const match = ammoStocks.find(a =>
-                        (a.vaultSpaceId === movVaultSpaceId) &&
-                        (a.caliberId === movCaliberId || (calName && a.caliber && a.caliber.toLowerCase() === calName.toLowerCase()))
-                      );
+                  return movAmmoItems.map((item, idx) => {
+                    const selCal = calibers.find(c => c.id === item.caliberId || c.name === item.caliberId);
+                    const calName = selCal ? selCal.name : item.caliberId;
 
-                      const avail = match ? match.quantity : 0;
-                      return (
-                        <strong className={`text-xs font-mono font-bold ${avail >= movAmmoQuantity ? 'text-emerald-400' : 'text-red-400'}`}>
-                          {avail} un
-                        </strong>
-                      );
-                    })()}
-                  </div>
+                    const matchStock = ammoStocks.find(a =>
+                      (a.vaultSpaceId === item.vaultSpaceId) &&
+                      (a.caliberId === item.caliberId || (calName && a.caliber && a.caliber.toLowerCase() === calName.toLowerCase()))
+                    );
+                    const stockAvail = matchStock ? matchStock.quantity : 0;
 
-                  <div>
-                    <label className="block text-slate-300 font-semibold mb-1 text-xs flex items-center justify-between">
-                      <span>Qtd. Fornecida</span>
-                      <span className="text-[10px] text-emerald-400 font-mono">+10% Margem</span>
-                    </label>
-                    <input
-                      type="number"
-                      value={movAmmoQuantity}
-                      onChange={(e) => setMovAmmoQuantity(Number(e.target.value))}
-                      min={0}
-                      className="w-full bg-slate-900 border border-amber-500/50 rounded-xl px-3 py-1.5 text-slate-100 font-mono font-bold text-amber-400 text-xs focus:outline-none"
-                    />
-                  </div>
-                </div>
+                    return (
+                      <div key={item.id || idx} className="p-3 bg-slate-900/90 rounded-xl border border-slate-800 space-y-2.5 relative">
+                        {movAmmoItems.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setMovAmmoItems(prev => prev.filter(i => i.id !== item.id))}
+                            className="absolute top-2 right-2 text-red-400 hover:text-red-300 p-1 rounded hover:bg-slate-800 transition"
+                            title="Remover este calibre"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                              Calibre da Munição
+                            </label>
+                            <select
+                              value={item.caliberId}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                const updatedCal = calibers.find(c => c.id === val || c.name === val);
+                                const cName = updatedCal ? updatedCal.name : val;
+                                const matchingS = ammoStocks.find(a =>
+                                  a.caliberId === val || (cName && a.caliber && a.caliber.toLowerCase() === cName.toLowerCase())
+                                );
+                                setMovAmmoItems(prev => prev.map(i => i.id === item.id ? {
+                                  ...i,
+                                  caliberId: val,
+                                  vaultSpaceId: matchingS?.vaultSpaceId || i.vaultSpaceId
+                                } : i));
+                              }}
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                            >
+                              <option value="">-- Selecione o Calibre --</option>
+                              {calibers.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-slate-300 font-semibold mb-1 text-[11px]">
+                              Nome do Cofre (Unidade MEAF)
+                            </label>
+                            <select
+                              value={item.vaultSpaceId}
+                              onChange={(e) => {
+                                const vId = e.target.value;
+                                setMovAmmoItems(prev => prev.map(i => i.id === item.id ? { ...i, vaultSpaceId: vId } : i));
+                              }}
+                              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                            >
+                              <option value="">-- Selecione o Cofre MEAF --</option>
+                              {displayVaults.map(v => (
+                                <option key={v.id} value={v.id}>
+                                  {v.name || v.code || v.location || 'Cofre MEAF'}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 font-mono text-xs">
+                          <span className="text-slate-400">
+                            Saldo no Cofre: <strong className={stockAvail >= item.quantity ? 'text-emerald-400' : 'text-red-400'}>{stockAvail} un</strong>
+                          </span>
+                          <div className="flex items-center space-x-2">
+                            <span className="text-slate-300 font-semibold font-sans text-[11px]">Qtd. Fornecida:</span>
+                            <input
+                              type="number"
+                              value={item.quantity}
+                              onChange={(e) => {
+                                const q = Number(e.target.value);
+                                setMovAmmoItems(prev => prev.map(i => i.id === item.id ? { ...i, quantity: q } : i));
+                              }}
+                              min={0}
+                              className="w-24 bg-slate-950 border border-amber-500/50 rounded-lg px-2 py-1 text-slate-100 font-bold text-amber-400 text-xs text-right focus:outline-none"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  });
+                })()}
               </div>
 
               {/* Responsible Officer / Recipient */}

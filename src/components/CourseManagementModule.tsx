@@ -1169,10 +1169,17 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                   Selecionar Armas para a Caixa ({boxSelectedWeaponIds.length} selecionadas) <span className="text-red-400">*</span>
                 </label>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 max-h-60 overflow-y-auto space-y-1.5">
-                  {weapons.length === 0 ? (
-                    <div className="text-slate-500 italic text-center p-3">Nenhuma arma disponível no acervo.</div>
-                  ) : (
-                    weapons.map(w => {
+                  {(() => {
+                    const otherBoxesWeaponIds = weaponBoxes
+                      .filter(b => !editingBox || b.id !== editingBox.id)
+                      .flatMap(b => b.weaponIds || []);
+                    const availableWeapons = weapons.filter(w => !otherBoxesWeaponIds.includes(w.id));
+
+                    if (availableWeapons.length === 0) {
+                      return <div className="text-slate-500 italic text-center p-3">Nenhuma arma disponível ou sem vínculo com outra caixa.</div>;
+                    }
+
+                    return availableWeapons.map(w => {
                       const isChecked = boxSelectedWeaponIds.includes(w.id);
                       return (
                         <label key={w.id} className={`flex items-center justify-between p-2 rounded-lg border cursor-pointer transition ${
@@ -1201,8 +1208,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                           <span className="text-[10px] text-slate-400 font-mono">{w.caliber}</span>
                         </label>
                       );
-                    })
-                  )}
+                    });
+                  })()}
                 </div>
               </div>
 
