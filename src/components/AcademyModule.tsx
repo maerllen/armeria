@@ -1606,20 +1606,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleOpenCourseModal('Formação')}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Novo Curso Formação</span>
-              </button>
-              <button
-                onClick={() => handleOpenCourseModal('Ensino Continuado')}
-                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Novo Curso Ensino Continuado</span>
-              </button>
+              {(!courseTypeFilterProp || courseTypeFilterProp === 'Formação') && (
+                <button
+                  onClick={() => handleOpenCourseModal('Formação')}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Novo Curso Formação</span>
+                </button>
+              )}
+              {(!courseTypeFilterProp || courseTypeFilterProp === 'Ensino Continuado') && (
+                <button
+                  onClick={() => handleOpenCourseModal('Ensino Continuado')}
+                  className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Novo Curso Ensino Continuado</span>
+                </button>
+              )}
             </div>
           </div>
 

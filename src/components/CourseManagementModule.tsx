@@ -1415,7 +1415,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                   <input
                     type="number"
                     min="1"
-                    max="20"
+                    max="100"
                     value={planLessonCount}
                     onChange={(e) => handlePlanLessonCountChange(parseInt(e.target.value) || 1)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-bold font-mono text-amber-400"
