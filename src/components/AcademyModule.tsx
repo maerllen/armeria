@@ -14,7 +14,9 @@ import {
   CourseMovement,
   LessonPlan,
   LessonPlanItem,
-  AcademyCareer
+  AcademyCareer,
+  AlunoTurma,
+  AlunoAula
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
@@ -638,8 +640,44 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Expand / Collapse details & Alunos Modal
   const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
   const [selectedStudentsClass, setSelectedStudentsClass] = useState<CourseClass | null>(null);
-  const [editStudentCount, setEditStudentCount] = useState<number>(20);
-  const [savingStudents, setSavingStudents] = useState(false);
+
+  // ALUNO TURMA & ALUNO AULAS STATE
+  const [classStudents, setClassStudents] = useState<AlunoTurma[]>([]);
+  const [loadingStudents, setLoadingStudents] = useState(false);
+  const [addStudentMode, setAddStudentMode] = useState<'single' | 'batch'>('batch');
+  const [newStudentName, setNewStudentName] = useState('');
+  const [newStudentMasp, setNewStudentMasp] = useState('');
+  const [newStudentBatchText, setNewStudentBatchText] = useState('');
+  const [savingStudent, setSavingStudent] = useState(false);
+
+  // Edit / Instrutores Extras State
+  const [editingStudent, setEditingStudent] = useState<AlunoTurma | null>(null);
+  const [editStudentNome, setEditStudentNome] = useState('');
+  const [editStudentMasp, setEditStudentMasp] = useState('');
+  const [editStudentSituacao, setEditStudentSituacao] = useState('Ativo');
+  const [editStudentInstrutor1, setEditStudentInstrutor1] = useState('');
+  const [editStudentInstrutor2, setEditStudentInstrutor2] = useState('');
+  const [editStudentInstrutor3, setEditStudentInstrutor3] = useState('');
+  const [editStudentInstrutor4, setEditStudentInstrutor4] = useState('');
+
+  // Transfer Student State
+  const [transferTargetStudent, setTransferTargetStudent] = useState<AlunoTurma | null>(null);
+  const [transferNewClassId, setTransferNewClassId] = useState('');
+  const [transferringStudent, setTransferringStudent] = useState(false);
+
+  // Student Lessons Modal State
+  const [selectedStudentForLessons, setSelectedStudentForLessons] = useState<AlunoTurma | null>(null);
+  const [studentLessons, setStudentLessons] = useState<AlunoAula[]>([]);
+  const [loadingStudentLessons, setLoadingStudentLessons] = useState(false);
+  const [editingLesson, setEditingLesson] = useState<AlunoAula | null>(null);
+  const [lessonFormName, setLessonFormName] = useState('');
+  const [lessonFormNumber, setLessonFormNumber] = useState<number>(1);
+  const [lessonFormDate, setLessonFormDate] = useState('');
+  const [lessonFormTime, setLessonFormTime] = useState('');
+  const [lessonFormContent, setLessonFormContent] = useState('');
+  const [lessonFormObs, setLessonFormObs] = useState('');
+  const [lessonFormGrade, setLessonFormGrade] = useState('');
+  const [savingLesson, setSavingLesson] = useState(false);
 
   const toggleClassDetails = (classId: string) => {
     setExpandedClasses(prev => ({
@@ -648,27 +686,224 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }));
   };
 
-  const handleOpenStudentsModal = (cls: CourseClass) => {
+  const handleOpenStudentsModal = async (cls: CourseClass) => {
     setSelectedStudentsClass(cls);
-    setEditStudentCount(cls.studentCount || 20);
+    setLoadingStudents(true);
+    setNewStudentName('');
+    setNewStudentMasp('');
+    setNewStudentBatchText('');
+    setEditingStudent(null);
+    setTransferTargetStudent(null);
+    setSelectedStudentForLessons(null);
+    try {
+      const students = await storage.getAlunosTurma(cls.id);
+      setClassStudents(students);
+    } catch (err: any) {
+      setErrorMsg('Erro ao carregar alunos da turma.');
+    } finally {
+      setLoadingStudents(false);
+    }
   };
 
-  const handleSaveStudentCount = async () => {
-    if (!selectedStudentsClass) return;
-    setSavingStudents(true);
+  const loadClassStudents = async (classId: string) => {
+    setLoadingStudents(true);
     try {
-      const res = await storage.saveCourseClass({
-        ...selectedStudentsClass,
-        studentCount: Number(editStudentCount) || 1
-      });
+      const students = await storage.getAlunosTurma(classId);
+      setClassStudents(students);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingStudents(false);
+    }
+  };
+
+  const handleAddStudents = async () => {
+    if (!selectedStudentsClass) return;
+    setSavingStudent(true);
+    try {
+      let res;
+      if (addStudentMode === 'batch') {
+        if (!newStudentBatchText.trim()) {
+          throw new Error('Insira ao menos um nome de aluno no campo em bloco (um por linha).');
+        }
+        res = await storage.addAlunosTurma({
+          turmaId: selectedStudentsClass.id,
+          names: newStudentBatchText
+        });
+      } else {
+        if (!newStudentName.trim()) {
+          throw new Error('Informe o nome do aluno.');
+        }
+        res = await storage.addAlunosTurma({
+          turmaId: selectedStudentsClass.id,
+          name: newStudentName.trim(),
+          masp: newStudentMasp.trim() || undefined
+        });
+      }
+
       if (!res.success) throw new Error(res.error);
-      setSuccessMsg(`Quantidade de alunos da turma ${selectedStudentsClass.code || selectedStudentsClass.name} atualizada com sucesso!`);
-      setSelectedStudentsClass(null);
+      setSuccessMsg(`Aluno(s) cadastrado(s) com sucesso na turma ${selectedStudentsClass.code || selectedStudentsClass.name}!`);
+      setNewStudentName('');
+      setNewStudentMasp('');
+      setNewStudentBatchText('');
+      await loadClassStudents(selectedStudentsClass.id);
       onRefresh();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao atualizar quantidade de alunos.');
+      setErrorMsg(err.message || 'Erro ao cadastrar aluno(s).');
     } finally {
-      setSavingStudents(false);
+      setSavingStudent(false);
+    }
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
+    if (!selectedStudentsClass) return;
+    try {
+      const res = await storage.deleteAlunoTurma(studentId);
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg('Aluno removido com sucesso.');
+      await loadClassStudents(selectedStudentsClass.id);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao remover aluno.');
+    }
+  };
+
+  const handleOpenEditStudent = (student: AlunoTurma) => {
+    setEditingStudent(student);
+    setEditStudentNome(student.nomeAluno);
+    setEditStudentMasp(student.maspAluno || '');
+    setEditStudentSituacao(student.situacaoAluno || 'Ativo');
+    setEditStudentInstrutor1(student.instrutor1Aluno || '');
+    setEditStudentInstrutor2(student.instrutor2Aluno || '');
+    setEditStudentInstrutor3(student.instrutor3Aluno || '');
+    setEditStudentInstrutor4(student.instrutor4Aluno || '');
+  };
+
+  const handleSaveEditStudent = async () => {
+    if (!editingStudent || !selectedStudentsClass) return;
+    setSavingStudent(true);
+    try {
+      const res = await storage.updateAlunoTurma(editingStudent.id, {
+        nomeAluno: editStudentNome,
+        maspAluno: editStudentMasp,
+        situacaoAluno: editStudentSituacao,
+        instrutor1Aluno: editStudentInstrutor1,
+        instrutor2Aluno: editStudentInstrutor2,
+        instrutor3Aluno: editStudentInstrutor3,
+        instrutor4Aluno: editStudentInstrutor4
+      });
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg(`Cadastro do aluno ${editStudentNome} atualizado!`);
+      setEditingStudent(null);
+      await loadClassStudents(selectedStudentsClass.id);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar alterações do aluno.');
+    } finally {
+      setSavingStudent(false);
+    }
+  };
+
+  const handleOpenTransferModal = (student: AlunoTurma) => {
+    setTransferTargetStudent(student);
+    setTransferNewClassId('');
+  };
+
+  const handleExecuteTransfer = async () => {
+    if (!transferTargetStudent || !transferNewClassId || !selectedStudentsClass) return;
+    setTransferringStudent(true);
+    try {
+      const res = await storage.transferAlunoTurma(transferTargetStudent.id, transferNewClassId);
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg(`Aluno ${transferTargetStudent.nomeAluno} transferido de turma com sucesso! Todas as aulas e notas foram mantidas.`);
+      setTransferTargetStudent(null);
+      await loadClassStudents(selectedStudentsClass.id);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao transferir aluno de turma.');
+    } finally {
+      setTransferringStudent(false);
+    }
+  };
+
+  // Lessons Handlers
+  const handleOpenLessonsModal = async (student: AlunoTurma) => {
+    setSelectedStudentForLessons(student);
+    setLoadingStudentLessons(true);
+    setEditingLesson(null);
+    resetLessonForm();
+    try {
+      const aulas = await storage.getAlunoAulas(student.id);
+      setStudentLessons(aulas);
+    } catch (err) {
+      setErrorMsg('Erro ao carregar aulas do aluno.');
+    } finally {
+      setLoadingStudentLessons(false);
+    }
+  };
+
+  const resetLessonForm = () => {
+    setEditingLesson(null);
+    setLessonFormName('');
+    setLessonFormNumber(1);
+    setLessonFormDate('');
+    setLessonFormTime('');
+    setLessonFormContent('');
+    setLessonFormObs('');
+    setLessonFormGrade('');
+  };
+
+  const handleEditLesson = (lesson: AlunoAula) => {
+    setEditingLesson(lesson);
+    setLessonFormName(lesson.aulaNomeAluno);
+    setLessonFormNumber(lesson.aulaNumeroAluno || 1);
+    setLessonFormDate(lesson.aulaDataAluno || '');
+    setLessonFormTime(lesson.aulaHoraAluno || '');
+    setLessonFormContent(lesson.aulaConteudoAluno || '');
+    setLessonFormObs(lesson.observacaoAluno || '');
+    setLessonFormGrade(lesson.notaAluno || '');
+  };
+
+  const handleSaveLesson = async () => {
+    if (!selectedStudentForLessons) return;
+    if (!lessonFormName.trim()) {
+      setErrorMsg('Informe o nome da aula.');
+      return;
+    }
+    setSavingLesson(true);
+    try {
+      const res = await storage.saveAlunoAula(selectedStudentForLessons.id, {
+        id: editingLesson?.id,
+        aulaNomeAluno: lessonFormName.trim(),
+        aulaNumeroAluno: Number(lessonFormNumber) || 1,
+        aulaDataAluno: lessonFormDate || undefined,
+        aulaHoraAluno: lessonFormTime || undefined,
+        aulaConteudoAluno: lessonFormContent.slice(0, 500),
+        observacaoAluno: lessonFormObs || undefined,
+        notaAluno: lessonFormGrade || undefined
+      });
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg('Aula/nota do aluno salva com sucesso!');
+      resetLessonForm();
+      const updated = await storage.getAlunoAulas(selectedStudentForLessons.id);
+      setStudentLessons(updated);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar aula do aluno.');
+    } finally {
+      setSavingLesson(false);
+    }
+  };
+
+  const handleDeleteLesson = async (aulaId: string) => {
+    if (!selectedStudentForLessons) return;
+    try {
+      const res = await storage.deleteAlunoAula(aulaId);
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg('Aula removida com sucesso.');
+      const updated = await storage.getAlunoAulas(selectedStudentForLessons.id);
+      setStudentLessons(updated);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao remover aula.');
     }
   };
 
@@ -2955,16 +3190,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </select>
               </div>
 
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Quantidade de Alunos</label>
-                <input
-                  type="number"
-                  value={classStudentCount}
-                  onChange={(e) => setClassStudentCount(Number(e.target.value))}
-                  min={1}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
-                  required
-                />
+              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1">
+                <label className="block text-slate-300 font-semibold text-xs">Quantidade de Alunos</label>
+                <p className="text-[11px] text-amber-400/90 font-medium leading-relaxed">
+                  Calculada automaticamente conforme os alunos cadastrados na turma (botão <strong>Alunos</strong>).
+                </p>
               </div>
 
               <div>
@@ -3030,84 +3260,614 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       {/* 4.5 Modal Alunos da Turma */}
       {selectedStudentsClass && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 my-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-4xl shadow-2xl space-y-5 my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2.5 text-amber-400">
                 <Users className="w-5 h-5" />
                 <h3 className="text-base font-bold text-slate-100">
-                  Alunos da Turma - <span className="text-amber-400">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
+                  Gestão de Alunos da Turma - <span className="text-amber-400">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
                 </h3>
               </div>
               <button
                 type="button"
-                onClick={() => setSelectedStudentsClass(null)}
+                onClick={() => {
+                  setSelectedStudentsClass(null);
+                  setEditingStudent(null);
+                  setTransferTargetStudent(null);
+                  setSelectedStudentForLessons(null);
+                }}
                 className="text-slate-400 hover:text-slate-200 text-sm font-bold p-1 rounded-lg hover:bg-slate-800 transition"
               >
                 ✕
               </button>
             </div>
 
-            <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs text-slate-300 font-mono">
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 font-sans">Código da Turma:</span>
-                <span className="font-bold text-amber-400">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
+            {/* Header info card */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 text-xs">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Código da Turma</span>
+                <span className="font-bold text-amber-400 font-mono text-sm">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 font-sans">Curso Vinculado:</span>
-                <span className="font-semibold text-slate-200">
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Código do Curso</span>
+                <span className="font-semibold text-slate-200 font-mono">
                   {(() => {
                     const linkedC = academyCourses.find(c => c.id === selectedStudentsClass.courseId || c.name === selectedStudentsClass.courseName);
-                    return linkedC?.code ? `Código ${linkedC.code} - ${linkedC.name}` : selectedStudentsClass.courseName;
+                    return linkedC?.code ? linkedC.code : (selectedStudentsClass.courseId || selectedStudentsClass.courseName);
                   })()}
                 </span>
               </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 font-sans">Carreira / Disciplina:</span>
-                <span className="text-slate-200">{selectedStudentsClass.career} ({selectedStudentsClass.subject})</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-slate-400 font-sans">Professor Responsável:</span>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Professor Responsável</span>
                 <span className="text-emerald-400 font-semibold">{getTeacherDisplayName(selectedStudentsClass)}</span>
+              </div>
+              <div>
+                <span className="text-slate-400 block text-[10px] uppercase font-semibold">Total de Alunos</span>
+                <span className="font-bold text-emerald-400 text-sm">{classStudents.length} cadastrados</span>
               </div>
             </div>
 
-            <div className="space-y-3 pt-2">
-              <label className="block text-xs font-semibold text-slate-200">
-                Quantidade Total de Alunos Matriculados
-              </label>
-              <div className="flex items-center space-x-3">
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  value={editStudentCount}
-                  onChange={(e) => setEditStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
-                  className="w-32 bg-slate-950 border border-slate-700 text-slate-100 p-2.5 rounded-xl font-bold text-center text-sm focus:border-amber-500 focus:outline-none"
-                />
-                <span className="text-xs text-slate-300 font-medium">
-                  alunos na turma
-                </span>
+            {/* Cadastro de Alunos Section */}
+            <div className="bg-slate-950/50 p-4 rounded-xl border border-slate-800/80 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800/60 pb-2">
+                <h4 className="text-xs font-bold text-slate-200 flex items-center space-x-1.5">
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  <span>Cadastrar Novos Alunos</span>
+                </h4>
+                <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setAddStudentMode('batch')}
+                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${addStudentMode === 'batch' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Em Bloco (Lote)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAddStudentMode('single')}
+                    className={`px-2.5 py-1 text-[11px] font-semibold rounded-md transition ${addStudentMode === 'single' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                  >
+                    Individual
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-400 italic bg-slate-950/40 p-2.5 rounded-lg border border-slate-800">
-                * Este quantitativo é utilizado para o cálculo de munições por aluno no tirometro e nas guias de saída para aula.
-              </p>
+
+              {addStudentMode === 'batch' ? (
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-semibold text-slate-300">
+                    Insira os nomes dos alunos (um por linha):
+                  </label>
+                  <textarea
+                    rows={4}
+                    value={newStudentBatchText}
+                    onChange={(e) => setNewStudentBatchText(e.target.value)}
+                    placeholder={'Carlos Silva\nMariana Santos\nPedro Henrique'}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:border-amber-500 focus:outline-none font-mono"
+                  />
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] text-slate-400 italic">
+                      * Cada quebra de linha criará um novo aluno vinculado a esta turma.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleAddStudents}
+                      disabled={savingStudent || !newStudentBatchText.trim()}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition shadow flex items-center space-x-1 disabled:opacity-50"
+                    >
+                      {savingStudent ? 'Cadastrando...' : 'Cadastrar Bloco de Alunos'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      Nome do Aluno *
+                    </label>
+                    <input
+                      type="text"
+                      value={newStudentName}
+                      onChange={(e) => setNewStudentName(e.target.value)}
+                      placeholder="Nome completo do aluno"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                      MASP (Opcional)
+                    </label>
+                    <input
+                      type="text"
+                      value={newStudentMasp}
+                      onChange={(e) => setNewStudentMasp(e.target.value)}
+                      placeholder="Ex: 1234567"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <div className="md:col-span-3 flex justify-end pt-1">
+                    <button
+                      type="button"
+                      onClick={handleAddStudents}
+                      disabled={savingStudent || !newStudentName.trim()}
+                      className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl transition shadow disabled:opacity-50"
+                    >
+                      {savingStudent ? 'Cadastrando...' : 'Cadastrar Aluno'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Lista de Alunos Registrados */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-200 flex items-center justify-between">
+                <span>Alunos Cadastrados na Turma ({classStudents.length})</span>
+                {loadingStudents && <span className="text-[10px] text-amber-400 animate-pulse">Carregando alunos...</span>}
+              </h4>
+
+              {classStudents.length === 0 ? (
+                <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs">
+                  Nenhum aluno cadastrado nesta turma ainda. Utilize o formulário acima para adicionar alunos.
+                </div>
+              ) : (
+                <div className="max-h-72 overflow-y-auto border border-slate-800 rounded-xl divide-y divide-slate-800/60 bg-slate-950/40">
+                  {classStudents.map((stu, idx) => (
+                    <div key={stu.id} className="p-3 flex flex-col md:flex-row md:items-center justify-between gap-2 hover:bg-slate-800/30 transition text-xs">
+                      <div className="flex items-center space-x-3">
+                        <span className="w-6 h-6 rounded-full bg-slate-800 text-amber-400 flex items-center justify-center font-bold text-[10px]">
+                          {idx + 1}
+                        </span>
+                        <div>
+                          <p className="font-bold text-slate-100 text-sm">{stu.nomeAluno}</p>
+                          <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
+                            {stu.maspAluno && <span>MASP: {formatMasp(stu.maspAluno)}</span>}
+                            <span>• Situação: <strong className="text-emerald-400">{stu.situacaoAluno || 'Ativo'}</strong></span>
+                            {stu.instrutor1Aluno && <span className="text-amber-400">• Instrutor Ext: {stu.instrutor1Aluno}</span>}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2 self-end md:self-auto">
+                        {/* Botão Aulas e Notas */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenLessonsModal(stu)}
+                          className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-200 px-2.5 py-1 rounded-lg font-semibold text-[11px] flex items-center space-x-1 transition"
+                          title="Visualizar ou registrar aulas e notas deste aluno"
+                        >
+                          <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
+                          <span>Aulas & Notas ({(stu.aulas || []).length})</span>
+                        </button>
+
+                        {/* Botão Transferir Aluno */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTransferModal(stu)}
+                          className="bg-amber-950/80 hover:bg-amber-900 border border-amber-700/60 text-amber-300 px-2.5 py-1 rounded-lg font-semibold text-[11px] flex items-center space-x-1 transition"
+                          title="Mudar aluno de turma"
+                        >
+                          <ArrowRightLeft className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Mudar de Turma</span>
+                        </button>
+
+                        {/* Editar Instrutores / Dados */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditStudent(stu)}
+                          className="text-slate-400 hover:text-amber-400 p-1 rounded-lg hover:bg-slate-800 transition"
+                          title="Editar / Cadastrar Instrutores Adicionais"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        {/* Excluir Aluno */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteStudent(stu.id)}
+                          className="text-slate-400 hover:text-rose-400 p-1 rounded-lg hover:bg-slate-800 transition"
+                          title="Excluir Aluno"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentsClass(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-5 py-2 rounded-xl transition"
+              >
+                Concluir
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Modal: Editar Dados do Aluno / Instrutores Adicionais */}
+      {editingStudent && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                <Edit2 className="w-4 h-4 text-amber-400" />
+                <span>Editar Aluno e Instrutores - {editingStudent.nomeAluno}</span>
+              </h4>
+              <button onClick={() => setEditingStudent(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Nome do Aluno</label>
+                <input
+                  type="text"
+                  value={editStudentNome}
+                  onChange={(e) => setEditStudentNome(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">MASP</label>
+                  <input
+                    type="text"
+                    value={editStudentMasp}
+                    onChange={(e) => setEditStudentMasp(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Situação</label>
+                  <select
+                    value={editStudentSituacao}
+                    onChange={(e) => setEditStudentSituacao(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+                  >
+                    <option value="Ativo">Ativo</option>
+                    <option value="Transferido">Transferido</option>
+                    <option value="Desligado">Desligado</option>
+                    <option value="Concluído">Concluído</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Instrutores Adicionais 1 a 4 */}
+              <div className="pt-2 border-t border-slate-800 space-y-2">
+                <p className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Instrutores Adicionais da Turma</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 1</label>
+                    <input
+                      type="text"
+                      value={editStudentInstrutor1}
+                      onChange={(e) => setEditStudentInstrutor1(e.target.value)}
+                      placeholder="Nome do 2º professor"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 2</label>
+                    <input
+                      type="text"
+                      value={editStudentInstrutor2}
+                      onChange={(e) => setEditStudentInstrutor2(e.target.value)}
+                      placeholder="Nome do 3º professor"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 3</label>
+                    <input
+                      type="text"
+                      value={editStudentInstrutor3}
+                      onChange={(e) => setEditStudentInstrutor3(e.target.value)}
+                      placeholder="Nome do 4º professor"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 4</label>
+                    <input
+                      type="text"
+                      value={editStudentInstrutor4}
+                      onChange={(e) => setEditStudentInstrutor4(e.target.value)}
+                      placeholder="Nome do 5º professor"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
               <button
                 type="button"
-                onClick={() => setSelectedStudentsClass(null)}
-                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 rounded-xl transition font-semibold"
+                onClick={() => setEditingStudent(null)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200"
               >
                 Cancelar
               </button>
               <button
                 type="button"
-                onClick={handleSaveStudentCount}
-                disabled={savingStudents}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shadow transition flex items-center space-x-1.5"
+                onClick={handleSaveEditStudent}
+                disabled={savingStudent}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl"
               >
-                {savingStudents ? 'Salvando...' : 'Salvar Alunos'}
+                {savingStudent ? 'Salvando...' : 'Salvar Alterações'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Modal: Transferir Aluno de Turma */}
+      {transferTargetStudent && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2 text-amber-400">
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>Transferir Aluno de Turma</span>
+              </h4>
+              <button onClick={() => setTransferTargetStudent(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <p className="text-slate-400">Aluno:</p>
+                <p className="text-sm font-bold text-slate-100">{transferTargetStudent.nomeAluno}</p>
+                <p className="text-[11px] text-amber-400 mt-1">Turma Atual: {transferTargetStudent.turmaAluno}</p>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">Selecione a Nova Turma de Destino *</label>
+                <select
+                  value={transferNewClassId}
+                  onChange={(e) => setTransferNewClassId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-100 font-medium"
+                >
+                  <option value="">-- Selecione a Nova Turma --</option>
+                  {courseClasses
+                    .filter(c => c.id !== selectedStudentsClass?.id)
+                    .map(c => (
+                      <option key={c.id} value={c.id}>
+                        Turma {c.code || `${c.careerAbbreviation}-${c.turmaNumber}`} - {c.career} ({c.subject})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div className="bg-amber-950/30 border border-amber-800/50 p-3 rounded-xl text-[11px] text-amber-200/90 leading-relaxed">
+                * Ao transferir, o aluno herdará o código da nova turma, o código do curso e o nome do professor responsável da nova turma. <strong>Todas as aulas e notas já registradas serão mantidas.</strong>
+              </div>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setTransferTargetStudent(null)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteTransfer}
+                disabled={transferringStudent || !transferNewClassId}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl disabled:opacity-50"
+              >
+                {transferringStudent ? 'Transferindo...' : 'Confirmar Transferência'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sub-Modal: Gerenciar Aulas e Notas do Aluno */}
+      {selectedStudentForLessons && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-3xl shadow-2xl space-y-5 my-8">
+            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2 text-indigo-400">
+                <BookOpen className="w-5 h-5" />
+                <h3 className="text-base font-bold text-slate-100">
+                  Histórico de Aulas e Notas - <span className="text-indigo-400">{selectedStudentForLessons.nomeAluno}</span>
+                </h3>
+              </div>
+              <button onClick={() => setSelectedStudentForLessons(null)} className="text-slate-400 hover:text-slate-200">✕</button>
+            </div>
+
+            {/* Form de Cadastro / Edição de Aula */}
+            <div className="bg-slate-950/70 p-4 rounded-xl border border-slate-800 space-y-3">
+              <h4 className="text-xs font-bold text-indigo-300 flex items-center justify-between">
+                <span>{editingLesson ? 'Editar Registro de Aula / Nota' : 'Cadastrar Nova Aula / Nota'}</span>
+                {editingLesson && (
+                  <button type="button" onClick={resetLessonForm} className="text-[10px] text-slate-400 hover:text-slate-200 underline">
+                    Cancelar Edição
+                  </button>
+                )}
+              </h4>
+
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                <div className="md:col-span-2">
+                  <label className="block text-slate-300 font-semibold mb-1">Nome da Aula *</label>
+                  <input
+                    type="text"
+                    value={lessonFormName}
+                    onChange={(e) => setLessonFormName(e.target.value)}
+                    placeholder="Ex: Manejo de Pistola 9mm / Tirometro"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Nº da Aula</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={lessonFormNumber}
+                    onChange={(e) => setLessonFormNumber(parseInt(e.target.value) || 1)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Nota do Aluno</label>
+                  <input
+                    type="text"
+                    value={lessonFormGrade}
+                    onChange={(e) => setLessonFormGrade(e.target.value)}
+                    placeholder="Ex: 9.5 ou Aprovado"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold text-amber-400 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Data da Aula</label>
+                  <input
+                    type="date"
+                    value={lessonFormDate}
+                    onChange={(e) => setLessonFormDate(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Hora da Aula</label>
+                  <input
+                    type="time"
+                    value={lessonFormTime}
+                    onChange={(e) => setLessonFormTime(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-slate-300 font-semibold mb-1">Observação</label>
+                  <input
+                    type="text"
+                    value={lessonFormObs}
+                    onChange={(e) => setLessonFormObs(e.target.value)}
+                    placeholder="Observações de desempenho ou presença"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="md:col-span-4">
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="block text-slate-300 font-semibold">Conteúdo da Aula (Até 500 caracteres)</label>
+                    <span className={`text-[10px] ${lessonFormContent.length > 500 ? 'text-rose-400 font-bold' : 'text-slate-400'}`}>
+                      {lessonFormContent.length}/500 caracteres
+                    </span>
+                  </div>
+                  <textarea
+                    rows={2}
+                    maxLength={500}
+                    value={lessonFormContent}
+                    onChange={(e) => setLessonFormContent(e.target.value.slice(0, 500))}
+                    placeholder="Descreva resumidamente o conteúdo ministrado na aula..."
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-slate-100 text-xs focus:border-indigo-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex justify-end pt-1">
+                <button
+                  type="button"
+                  onClick={handleSaveLesson}
+                  disabled={savingLesson || !lessonFormName.trim()}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs px-5 py-2 rounded-xl transition shadow disabled:opacity-50"
+                >
+                  {savingLesson ? 'Salvando...' : (editingLesson ? 'Atualizar Aula' : 'Salvar Aula / Nota')}
+                </button>
+              </div>
+            </div>
+
+            {/* Tabela de Aulas Ministradas */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-200">
+                Aulas Registradas ({studentLessons.length})
+              </h4>
+
+              {loadingStudentLessons ? (
+                <p className="text-xs text-amber-400 animate-pulse text-center py-4">Carregando histórico de aulas...</p>
+              ) : studentLessons.length === 0 ? (
+                <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                  Nenhuma aula registrada para este aluno ainda.
+                </div>
+              ) : (
+                <div className="max-h-60 overflow-y-auto border border-slate-800 rounded-xl divide-y divide-slate-800/60 bg-slate-950/40">
+                  {studentLessons.map((les) => (
+                    <div key={les.id} className="p-3 flex items-start justify-between gap-3 hover:bg-slate-800/30 transition text-xs">
+                      <div className="space-y-1 flex-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="bg-indigo-950 border border-indigo-700 text-indigo-300 font-mono font-bold text-[10px] px-2 py-0.5 rounded-md">
+                            Aula #{les.aulaNumeroAluno}
+                          </span>
+                          <span className="font-bold text-slate-100 text-sm">{les.aulaNomeAluno}</span>
+                          {les.notaAluno && (
+                            <span className="bg-amber-950 border border-amber-700/60 text-amber-300 font-bold px-2 py-0.5 rounded-md text-[11px]">
+                              Nota: {les.notaAluno}
+                            </span>
+                          )}
+                        </div>
+
+                        {(les.aulaDataAluno || les.aulaHoraAluno) && (
+                          <p className="text-[11px] text-slate-400">
+                            Data/Hora: {les.aulaDataAluno || ''} {les.aulaHoraAluno ? `às ${les.aulaHoraAluno}` : ''}
+                          </p>
+                        )}
+
+                        {les.aulaConteudoAluno && (
+                          <p className="text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-800/80 text-[11px] leading-relaxed">
+                            {les.aulaConteudoAluno}
+                          </p>
+                        )}
+
+                        {les.observacaoAluno && (
+                          <p className="text-[10px] text-slate-400 italic">
+                            Obs: {les.observacaoAluno}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="flex items-center space-x-1 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => handleEditLesson(les)}
+                          className="text-slate-400 hover:text-indigo-400 p-1.5 rounded-lg hover:bg-slate-800"
+                          title="Editar aula"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteLesson(les.id)}
+                          className="text-slate-400 hover:text-rose-400 p-1.5 rounded-lg hover:bg-slate-800"
+                          title="Excluir aula"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end border-t border-slate-800 pt-3">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentForLessons(null)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-5 py-2 rounded-xl transition"
+              >
+                Fechar
               </button>
             </div>
           </div>

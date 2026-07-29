@@ -311,6 +311,46 @@ CREATE TABLE IF NOT EXISTS `course_classes` (
     PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 2.17.1 Alunos da Turma (aluno_turma)
+CREATE TABLE IF NOT EXISTS `aluno_turma` (
+    `id` VARCHAR(64) NOT NULL,
+    `turma_id` VARCHAR(64) DEFAULT NULL,
+    `turma_aluno` VARCHAR(64) NOT NULL,
+    `modulo_aluno` VARCHAR(64) DEFAULT NULL,
+    `professor_aluno` VARCHAR(255) DEFAULT NULL,
+    `instrutor1_aluno` VARCHAR(255) DEFAULT NULL,
+    `instrutor2_aluno` VARCHAR(255) DEFAULT NULL,
+    `instrutor3_aluno` VARCHAR(255) DEFAULT NULL,
+    `instrutor4_aluno` VARCHAR(255) DEFAULT NULL,
+    `masp_aluno` VARCHAR(64) DEFAULT NULL,
+    `nome_aluno` VARCHAR(255) NOT NULL,
+    `situacao_aluno` VARCHAR(64) NOT NULL DEFAULT 'Ativo',
+    `departamento_aluno` VARCHAR(255) DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_aluno_turma_id` (`turma_id`),
+    KEY `idx_aluno_turma_code` (`turma_aluno`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 2.17.2 Aulas e Notas do Aluno (aluno_aulas)
+CREATE TABLE IF NOT EXISTS `aluno_aulas` (
+    `id` VARCHAR(64) NOT NULL,
+    `aluno_id` VARCHAR(64) NOT NULL,
+    `aula_nome_aluno` VARCHAR(255) NOT NULL,
+    `aula_numero_aluno` INT NOT NULL DEFAULT 1,
+    `aula_data_aluno` DATE DEFAULT NULL,
+    `aula_hora_aluno` VARCHAR(32) DEFAULT NULL,
+    `aula_conteudo_aluno` VARCHAR(500) DEFAULT NULL,
+    `observacao_aluno` TEXT DEFAULT NULL,
+    `nota_aluno` VARCHAR(32) DEFAULT NULL,
+    `created_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_aluno_aulas_aluno_id` (`aluno_id`),
+    CONSTRAINT `fk_aluno_aulas_aluno` FOREIGN KEY (`aluno_id`) REFERENCES `aluno_turma` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 2.18 Planos de Aula (Geral e Cursos de Formação)
 CREATE TABLE IF NOT EXISTS `plano_de_aula_curso_de_formacao` (
     `id` VARCHAR(64) NOT NULL,

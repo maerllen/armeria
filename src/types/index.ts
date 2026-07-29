@@ -325,6 +325,39 @@ export interface WeaponBoxReplacement {
   createdAt: string;
 }
 
+export interface AlunoTurma {
+  id: string;
+  turmaId?: string;
+  turmaAluno: string;
+  moduloAluno?: string;
+  professorAluno?: string;
+  instrutor1Aluno?: string;
+  instrutor2Aluno?: string;
+  instrutor3Aluno?: string;
+  instrutor4Aluno?: string;
+  maspAluno?: string;
+  nomeAluno: string;
+  situacaoAluno?: string;
+  departamentoAluno?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  aulas?: AlunoAula[];
+}
+
+export interface AlunoAula {
+  id: string;
+  alunoId: string;
+  aulaNomeAluno: string;
+  aulaNumeroAluno?: number;
+  aulaDataAluno?: string;
+  aulaHoraAluno?: string;
+  aulaConteudoAluno?: string;
+  observacaoAluno?: string;
+  notaAluno?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface CourseClass {
   id: string;
   courseId: string;

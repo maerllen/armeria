@@ -2118,6 +2118,14 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
       });
     } catch (e) {}
 
+    let studentCountsMap: Record<string, number> = {};
+    try {
+      const [scRows]: any = await pool.query('SELECT turma_id, COUNT(*) as cnt FROM aluno_turma WHERE turma_id IS NOT NULL GROUP BY turma_id');
+      (scRows || []).forEach((sc: any) => {
+        if (sc.turma_id) studentCountsMap[sc.turma_id] = Number(sc.cnt) || 0;
+      });
+    } catch (e) {}
+
     const mapped = (rows || []).map((r: any) => {
       const teacherUserIds = typeof r.teacher_user_ids === 'string' ? JSON.parse(r.teacher_user_ids) : (r.teacher_user_ids || []);
       const primaryTeacherId = r.teacher_user_id || (teacherUserIds.length > 0 ? teacherUserIds[0] : undefined);
@@ -2131,6 +2139,9 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
         teacherName = teacherMap[primaryTeacherId];
       }
 
+      // If student count exists in aluno_turma table, use that count; otherwise default to r.student_count
+      const computedStudentCount = (studentCountsMap[r.id] !== undefined) ? studentCountsMap[r.id] : r.student_count;
+
       return {
         id: r.id,
         courseId: r.course_id,
@@ -2140,7 +2151,7 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
         careerAbbreviation: r.career_abbreviation,
         turmaNumber: r.turma_number,
         code: r.code,
-        studentCount: r.student_count,
+        studentCount: computedStudentCount,
         teacherUserId: primaryTeacherId,
         teacherName: teacherName || undefined,
         teacherUserIds: teacherUserIds,
@@ -2698,6 +2709,393 @@ apiRouter.delete('/course-movements/:id', async (req: Request, res: Response) =>
       await insertAuditLog('Cursos', 'Excluir', `Excluído Mapa de Aula ID ${id}`, actor, req.ip);
     }
 
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ==========================================
+// 15. ALUNO TURMA & ALUNO AULAS ENDPOINTS
+// ==========================================
+
+// Helper function to recalculate class student_count
+async function syncClassStudentCount(pool: any, classId: string) {
+  if (!classId) return;
+  try {
+    const [rows]: any = await pool.query('SELECT COUNT(*) as total FROM aluno_turma WHERE turma_id = ?', [classId]);
+    const total = rows && rows[0] ? Number(rows[0].total) || 0 : 0;
+    await pool.query('UPDATE course_classes SET student_count = ? WHERE id = ?', [total, classId]);
+  } catch (e) {
+    console.error('Error syncing class student_count:', e);
+  }
+}
+
+// GET /aluno-turma
+apiRouter.get('/aluno-turma', async (req: Request, res: Response) => {
+  try {
+    const { turmaId, turmaCode } = req.query;
+    const pool = getPool();
+    let query = 'SELECT * FROM aluno_turma';
+    let params: any[] = [];
+
+    if (turmaId) {
+      query += ' WHERE turma_id = ?';
+      params.push(String(turmaId));
+    } else if (turmaCode) {
+      query += ' WHERE turma_aluno = ?';
+      params.push(String(turmaCode));
+    }
+    query += ' ORDER BY nome_aluno ASC';
+
+    const [rows]: any = await pool.query(query, params);
+
+    // Get aulas for each student
+    const studentIds = (rows || []).map((r: any) => r.id);
+    let aulasMap: Record<string, any[]> = {};
+    if (studentIds.length > 0) {
+      try {
+        const [aulasRows]: any = await pool.query(
+          `SELECT * FROM aluno_aulas WHERE aluno_id IN (${studentIds.map(() => '?').join(',')}) ORDER BY aula_numero_aluno ASC`,
+          studentIds
+        );
+        (aulasRows || []).forEach((a: any) => {
+          if (!aulasMap[a.aluno_id]) aulasMap[a.aluno_id] = [];
+          aulasMap[a.aluno_id].push({
+            id: a.id,
+            alunoId: a.aluno_id,
+            aulaNomeAluno: a.aula_nome_aluno,
+            aulaNumeroAluno: a.aula_numero_aluno,
+            aulaDataAluno: a.aula_data_aluno ? String(a.aula_data_aluno).split('T')[0] : undefined,
+            aulaHoraAluno: a.aula_hora_aluno,
+            aulaConteudoAluno: a.aula_conteudo_aluno,
+            observacaoAluno: a.observacao_aluno,
+            notaAluno: a.nota_aluno,
+            createdAt: a.created_at,
+            updatedAt: a.updated_at
+          });
+        });
+      } catch (e) {}
+    }
+
+    const result = (rows || []).map((r: any) => ({
+      id: r.id,
+      turmaId: r.turma_id,
+      turmaAluno: r.turma_aluno,
+      moduloAluno: r.modulo_aluno,
+      professorAluno: r.professor_aluno,
+      instrutor1Aluno: r.instrutor1_aluno,
+      instrutor2Aluno: r.instrutor2_aluno,
+      instrutor3Aluno: r.instrutor3_aluno,
+      instrutor4Aluno: r.instrutor4_aluno,
+      maspAluno: r.masp_aluno,
+      nomeAluno: r.nome_aluno,
+      situacaoAluno: r.situacao_aluno,
+      departamentoAluno: r.departamento_aluno,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      aulas: aulasMap[r.id] || []
+    }));
+
+    return res.json(result);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /aluno-turma (Cadastrar aluno ou bloco de alunos na turma)
+apiRouter.post('/aluno-turma', async (req: Request, res: Response) => {
+  try {
+    const { turmaId, names, name, masp, actor } = req.body;
+    if (!turmaId) {
+      return res.status(400).json({ error: 'ID da turma (turmaId) é obrigatório.' });
+    }
+
+    const pool = getPool();
+
+    // Fetch class info
+    const [clsRows]: any = await pool.query('SELECT * FROM course_classes WHERE id = ?', [turmaId]);
+    if (!clsRows || clsRows.length === 0) {
+      return res.status(404).json({ error: 'Turma não encontrada.' });
+    }
+    const cls = clsRows[0];
+
+    // Fetch linked course code if possible
+    let moduloCode = cls.course_id || '';
+    if (cls.course_id) {
+      try {
+        const [crsRows]: any = await pool.query('SELECT code, name FROM academy_courses WHERE id = ? OR code = ?', [cls.course_id, cls.course_id]);
+        if (crsRows && crsRows.length > 0) {
+          moduloCode = crsRows[0].code || crsRows[0].name || cls.course_id;
+        }
+      } catch (e) {}
+    }
+
+    // Process list of names
+    let studentNames: string[] = [];
+    if (Array.isArray(names)) {
+      studentNames = names.map(n => String(n).trim()).filter(Boolean);
+    } else if (typeof names === 'string') {
+      studentNames = names.split('\n').map(n => n.trim()).filter(Boolean);
+    } else if (name) {
+      studentNames = [String(name).trim()];
+    }
+
+    if (studentNames.length === 0) {
+      return res.status(400).json({ error: 'Informe ao menos o nome de um aluno.' });
+    }
+
+    const insertedIds: string[] = [];
+    for (const studentName of studentNames) {
+      const studentId = `stu-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      await pool.query(
+        `INSERT INTO aluno_turma (id, turma_id, turma_aluno, modulo_aluno, professor_aluno, masp_aluno, nome_aluno, situacao_aluno, departamento_aluno, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'Ativo', ?, NOW())`,
+        [
+          studentId,
+          cls.id,
+          cls.code || `${cls.career_abbreviation || 'DL'}-${cls.turma_number || '01'}`,
+          moduloCode,
+          cls.teacher_name || null,
+          masp || null,
+          studentName,
+          cls.department_id || 'ACADEMIA DE POLICIA'
+        ]
+      );
+      insertedIds.push(studentId);
+    }
+
+    // Sync student_count in course_classes
+    await syncClassStudentCount(pool, cls.id);
+
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado(s) ${studentNames.length} aluno(s) na turma ${cls.code}`, actor, req.ip);
+
+    return res.json({ success: true, count: studentNames.length, insertedIds });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /aluno-turma/:id
+apiRouter.put('/aluno-turma/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nomeAluno, maspAluno, situacaoAluno, instrutor1Aluno, instrutor2Aluno, instrutor3Aluno, instrutor4Aluno, actor } = req.body;
+    const pool = getPool();
+
+    await pool.query(
+      `UPDATE aluno_turma SET
+         nome_aluno = COALESCE(?, nome_aluno),
+         masp_aluno = COALESCE(?, masp_aluno),
+         situacao_aluno = COALESCE(?, situacao_aluno),
+         instrutor1_aluno = COALESCE(?, instrutor1_aluno),
+         instrutor2_aluno = COALESCE(?, instrutor2_aluno),
+         instrutor3_aluno = COALESCE(?, instrutor3_aluno),
+         instrutor4_aluno = COALESCE(?, instrutor4_aluno)
+       WHERE id = ?`,
+      [
+        nomeAluno || null,
+        maspAluno || null,
+        situacaoAluno || null,
+        instrutor1Aluno || null,
+        instrutor2Aluno || null,
+        instrutor3Aluno || null,
+        instrutor4Aluno || null,
+        id
+      ]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizado cadastro do aluno ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /aluno-turma/:id
+apiRouter.delete('/aluno-turma/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor;
+    const pool = getPool();
+
+    const [rows]: any = await pool.query('SELECT * FROM aluno_turma WHERE id = ?', [id]);
+    if (rows && rows.length > 0) {
+      const student = rows[0];
+      await pool.query('DELETE FROM aluno_aulas WHERE aluno_id = ?', [id]);
+      await pool.query('DELETE FROM aluno_turma WHERE id = ?', [id]);
+      if (student.turma_id) {
+        await syncClassStudentCount(pool, student.turma_id);
+      }
+      await insertAuditLog('Cursos', 'Excluir', `Excluído aluno ${student.nome_aluno} da turma ${student.turma_aluno}`, actor, req.ip);
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /aluno-turma/:id/transfer (Transferir aluno de turma)
+apiRouter.post('/aluno-turma/:id/transfer', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { newClassId, actor } = req.body;
+    if (!newClassId) {
+      return res.status(400).json({ error: 'Nova turma (newClassId) é obrigatória.' });
+    }
+
+    const pool = getPool();
+
+    const [stuRows]: any = await pool.query('SELECT * FROM aluno_turma WHERE id = ?', [id]);
+    if (!stuRows || stuRows.length === 0) {
+      return res.status(404).json({ error: 'Aluno não encontrado.' });
+    }
+    const student = stuRows[0];
+    const oldClassId = student.turma_id;
+
+    // Fetch new class info
+    const [clsRows]: any = await pool.query('SELECT * FROM course_classes WHERE id = ?', [newClassId]);
+    if (!clsRows || clsRows.length === 0) {
+      return res.status(404).json({ error: 'Nova turma não encontrada.' });
+    }
+    const newCls = clsRows[0];
+
+    // Fetch new course code
+    let moduloCode = newCls.course_id || '';
+    if (newCls.course_id) {
+      try {
+        const [crsRows]: any = await pool.query('SELECT code, name FROM academy_courses WHERE id = ? OR code = ?', [newCls.course_id, newCls.course_id]);
+        if (crsRows && crsRows.length > 0) {
+          moduloCode = crsRows[0].code || crsRows[0].name || newCls.course_id;
+        }
+      } catch (e) {}
+    }
+
+    // Update student's class association while retaining all existing lessons/grades
+    await pool.query(
+      `UPDATE aluno_turma SET
+         turma_id = ?,
+         turma_aluno = ?,
+         modulo_aluno = ?,
+         professor_aluno = ?,
+         departamento_aluno = ?
+       WHERE id = ?`,
+      [
+        newCls.id,
+        newCls.code || `${newCls.career_abbreviation || 'DL'}-${newCls.turma_number || '01'}`,
+        moduloCode,
+        newCls.teacher_name || null,
+        newCls.department_id || 'ACADEMIA DE POLICIA',
+        id
+      ]
+    );
+
+    // Sync student_count for both old and new class
+    if (oldClassId) await syncClassStudentCount(pool, oldClassId);
+    await syncClassStudentCount(pool, newCls.id);
+
+    await insertAuditLog('Cursos', 'Transferir', `Transferido aluno ${student.nome_aluno} da turma ${student.turma_aluno} para ${newCls.code}`, actor, req.ip);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /aluno-turma/:id/aulas (Listar aulas do aluno)
+apiRouter.get('/aluno-turma/:id/aulas', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM aluno_aulas WHERE aluno_id = ? ORDER BY aula_numero_aluno ASC', [id]);
+    const mapped = (rows || []).map((a: any) => ({
+      id: a.id,
+      alunoId: a.aluno_id,
+      aulaNomeAluno: a.aula_nome_aluno,
+      aulaNumeroAluno: a.aula_numero_aluno,
+      aulaDataAluno: a.aula_data_aluno ? String(a.aula_data_aluno).split('T')[0] : undefined,
+      aulaHoraAluno: a.aula_hora_aluno,
+      aulaConteudoAluno: a.aula_conteudo_aluno,
+      observacaoAluno: a.observacao_aluno,
+      notaAluno: a.nota_aluno,
+      createdAt: a.created_at,
+      updatedAt: a.updated_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /aluno-turma/:id/aulas (Cadastrar / Atualizar aula do aluno)
+apiRouter.post('/aluno-turma/:id/aulas', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params; // aluno_id
+    const { aulaId, aulaNomeAluno, aulaNumeroAluno, aulaDataAluno, aulaHoraAluno, aulaConteudoAluno, observacaoAluno, notaAluno, actor } = req.body;
+
+    if (!aulaNomeAluno) {
+      return res.status(400).json({ error: 'Nome da aula é obrigatório.' });
+    }
+
+    const pool = getPool();
+    const targetAulaId = aulaId || `aula-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const truncatedConteudo = aulaConteudoAluno ? String(aulaConteudoAluno).slice(0, 500) : null;
+
+    const [existing]: any = await pool.query('SELECT id FROM aluno_aulas WHERE id = ?', [targetAulaId]);
+    if (existing && existing.length > 0) {
+      await pool.query(
+        `UPDATE aluno_aulas SET
+           aula_nome_aluno = ?,
+           aula_numero_aluno = ?,
+           aula_data_aluno = ?,
+           aula_hora_aluno = ?,
+           aula_conteudo_aluno = ?,
+           observacao_aluno = ?,
+           nota_aluno = ?
+         WHERE id = ?`,
+        [
+          aulaNomeAluno,
+          Number(aulaNumeroAluno) || 1,
+          aulaDataAluno || null,
+          aulaHoraAluno || null,
+          truncatedConteudo,
+          observacaoAluno || null,
+          notaAluno || null,
+          targetAulaId
+        ]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO aluno_aulas (id, aluno_id, aula_nome_aluno, aula_numero_aluno, aula_data_aluno, aula_hora_aluno, aula_conteudo_aluno, observacao_aluno, nota_aluno, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          targetAulaId,
+          id,
+          aulaNomeAluno,
+          Number(aulaNumeroAluno) || 1,
+          aulaDataAluno || null,
+          aulaHoraAluno || null,
+          truncatedConteudo,
+          observacaoAluno || null,
+          notaAluno || null
+        ]
+      );
+    }
+
+    await insertAuditLog('Cursos', 'Salvar', `Registrada aula/nota para aluno ID ${id}`, actor, req.ip);
+    return res.json({ success: true, id: targetAulaId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /aluno-turma/aulas/:aulaId
+apiRouter.delete('/aluno-turma/aulas/:aulaId', async (req: Request, res: Response) => {
+  try {
+    const { aulaId } = req.params;
+    const pool = getPool();
+    await pool.query('DELETE FROM aluno_aulas WHERE id = ?', [aulaId]);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

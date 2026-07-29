@@ -16,7 +16,9 @@ import {
   CourseClass,
   CourseMovement,
   LessonPlan,
-  AvailableWeaponType
+  AvailableWeaponType,
+  AlunoTurma,
+  AlunoAula
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -1125,6 +1127,124 @@ class StorageService {
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- ALUNO TURMA & ALUNO AULAS METHODS ---
+  public async getAlunosTurma(turmaId?: string): Promise<AlunoTurma[]> {
+    try {
+      const url = turmaId ? `/api/aluno-turma?turmaId=${encodeURIComponent(turmaId)}` : '/api/aluno-turma';
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (err) {
+      console.error('Error fetching alunos turma:', err);
+      return [];
+    }
+  }
+
+  public async addAlunosTurma(data: { turmaId: string; names?: string | string[]; name?: string; masp?: string }): Promise<{ success: boolean; count?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/aluno-turma', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
+      await this.refreshFromServer();
+      return { success: true, count: resData.count };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateAlunoTurma(id: string, data: Partial<AlunoTurma>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aluno-turma/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAlunoTurma(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aluno-turma/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async transferAlunoTurma(id: string, newClassId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aluno-turma/${id}/transfer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newClassId, actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async getAlunoAulas(alunoId: string): Promise<AlunoAula[]> {
+    try {
+      const res = await fetch(`/api/aluno-turma/${alunoId}/aulas`);
+      if (!res.ok) return [];
+      return await res.json();
+    } catch (err) {
+      console.error('Error fetching aluno aulas:', err);
+      return [];
+    }
+  }
+
+  public async saveAlunoAula(alunoId: string, aulaData: Partial<AlunoAula>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aluno-turma/${alunoId}/aulas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...aulaData, actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAlunoAula(aulaId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aluno-turma/aulas/${aulaId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const resData = await res.json();
+      if (!res.ok) return { success: false, error: resData.error };
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
