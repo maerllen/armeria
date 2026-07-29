@@ -45,16 +45,16 @@ const TIME_SLOTS = [
 const normalizeTimeSlot = (rawHora: string): string => {
   if (!rawHora) return '08:00 as 09:40';
   const h = rawHora.trim().toLowerCase();
-  if (h.includes('1ª') || h.includes('1a') || h.includes('08:') || h.includes('8:')) {
+  if (h.includes('1º') || h.includes('1ª') || h.includes('08:') || h.includes('8:')) {
     return '08:00 as 09:40';
   }
-  if (h.includes('2ª') || h.includes('2a') || h.includes('10:')) {
+  if (h.includes('2º') || h.includes('2ª') || h.includes('10:')) {
     return '10:00 as 11:40';
   }
-  if (h.includes('3ª') || h.includes('3a') || h.includes('14:')) {
+  if (h.includes('3º') || h.includes('3ª') || h.includes('14:')) {
     return '14:00 as 15:40';
   }
-  if (h.includes('4ª') || h.includes('4a') || h.includes('16:')) {
+  if (h.includes('4º') || h.includes('4ª') || h.includes('16:')) {
     return '16:00 as 17:40';
   }
   return rawHora.trim();
