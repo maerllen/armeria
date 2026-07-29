@@ -3101,3 +3101,168 @@ apiRouter.delete('/aluno-turma/aulas/:aulaId', async (req: Request, res: Respons
     return res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------------------------------------------------
+// CALENDÁRIO DE AULAS ENDPOINTS
+// -------------------------------------------------------------
+
+// GET /calendario-aulas
+apiRouter.get('/calendario-aulas', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM calendario_aulas ORDER BY data_calendario ASC, horario_calendario ASC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      data_calendario: r.data_calendario ? String(r.data_calendario).split('T')[0] : '',
+      horario_calendario: r.horario_calendario || '',
+      turma_calendario: r.turma_calendario || '',
+      sigla_calendario: r.sigla_calendario || '',
+      disciplina_calendario: r.disciplina_calendario || '',
+      sala_calendario: r.sala_calendario || '',
+      curso_calendario: r.curso_calendario || '',
+      numero_aula_calendario: r.numero_aula_calendario || '',
+      equipe_calendario: r.equipe_calendario || '',
+      observacao_calendario: r.observacao_calendario || '',
+      createdAt: r.created_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /calendario-aulas/import (Batch import from Excel / UI)
+apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) => {
+  try {
+    const { records, actor } = req.body;
+    if (!Array.isArray(records) || records.length === 0) {
+      return res.status(400).json({ error: 'Nenhum registro para importar.' });
+    }
+
+    const pool = getPool();
+    let importedCount = 0;
+
+    for (const rec of records) {
+      const id = rec.id || `cal-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      const dataCal = rec.data_calendario || new Date().toISOString().split('T')[0];
+      const horaCal = rec.horario_calendario || '08:00 as 09:40';
+      const turmaCal = rec.turma_calendario || 'Geral';
+      const siglaCal = rec.sigla_calendario || 'DISC';
+      const discCal = rec.disciplina_calendario || null;
+      const salaCal = rec.sala_calendario || null;
+      const cursoCal = rec.curso_calendario || null;
+      const numAulaCal = rec.numero_aula_calendario !== undefined ? String(rec.numero_aula_calendario) : null;
+      const equipeCal = rec.equipe_calendario || null;
+      const obsCal = rec.observacao_calendario || null;
+
+      await pool.query(
+        `INSERT INTO calendario_aulas 
+          (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE
+          data_calendario = VALUES(data_calendario),
+          horario_calendario = VALUES(horario_calendario),
+          turma_calendario = VALUES(turma_calendario),
+          sigla_calendario = VALUES(sigla_calendario),
+          disciplina_calendario = VALUES(disciplina_calendario),
+          sala_calendario = VALUES(sala_calendario),
+          curso_calendario = VALUES(curso_calendario),
+          numero_aula_calendario = VALUES(numero_aula_calendario),
+          equipe_calendario = VALUES(equipe_calendario),
+          observacao_calendario = VALUES(observacao_calendario)`,
+        [id, dataCal, horaCal, turmaCal, siglaCal, discCal, salaCal, cursoCal, numAulaCal, equipeCal, obsCal]
+      );
+      importedCount++;
+    }
+
+    await insertAuditLog('Calendário', 'Importar Excel', `Importados ${importedCount} registros de calendário`, actor, req.ip);
+    return res.json({ success: true, count: importedCount });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /calendario-aulas (Create or Update Single Record)
+apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
+  try {
+    const {
+      id: reqId,
+      data_calendario,
+      horario_calendario,
+      turma_calendario,
+      sigla_calendario,
+      disciplina_calendario,
+      sala_calendario,
+      curso_calendario,
+      numero_aula_calendario,
+      equipe_calendario,
+      observacao_calendario,
+      actor
+    } = req.body;
+
+    if (!data_calendario || !turma_calendario || !sigla_calendario) {
+      return res.status(400).json({ error: 'Data, Turma e Sigla são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = reqId || `cal-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    await pool.query(
+      `INSERT INTO calendario_aulas 
+        (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+        data_calendario = VALUES(data_calendario),
+        horario_calendario = VALUES(horario_calendario),
+        turma_calendario = VALUES(turma_calendario),
+        sigla_calendario = VALUES(sigla_calendario),
+        disciplina_calendario = VALUES(disciplina_calendario),
+        sala_calendario = VALUES(sala_calendario),
+        curso_calendario = VALUES(curso_calendario),
+        numero_aula_calendario = VALUES(numero_aula_calendario),
+        equipe_calendario = VALUES(equipe_calendario),
+        observacao_calendario = VALUES(observacao_calendario)`,
+      [
+        id,
+        data_calendario,
+        horario_calendario || '08:00 as 09:40',
+        turma_calendario,
+        sigla_calendario,
+        disciplina_calendario || null,
+        sala_calendario || null,
+        curso_calendario || null,
+        numero_aula_calendario !== undefined ? String(numero_aula_calendario) : null,
+        equipe_calendario || null,
+        observacao_calendario || null
+      ]
+    );
+
+    await insertAuditLog('Calendário', 'Salvar', `Salva aula ${sigla_calendario} da turma ${turma_calendario} para o dia ${data_calendario}`, actor, req.ip);
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /calendario-aulas/clear-all
+apiRouter.delete('/calendario-aulas/clear-all', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await pool.query('TRUNCATE TABLE calendario_aulas');
+    return res.json({ success: true, message: 'Todos os registros do calendário foram apagados.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /calendario-aulas/:id
+apiRouter.delete('/calendario-aulas/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await pool.query('DELETE FROM calendario_aulas WHERE id = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});

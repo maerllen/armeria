@@ -469,6 +469,30 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'aluno_aulas' verificada/criada.");
 
+    // Calendario Aulas Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`calendario_aulas\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`data_calendario\` DATE NOT NULL,
+        \`horario_calendario\` VARCHAR(64) NOT NULL,
+        \`turma_calendario\` VARCHAR(64) NOT NULL,
+        \`sigla_calendario\` VARCHAR(64) NOT NULL,
+        \`disciplina_calendario\` VARCHAR(255) DEFAULT NULL,
+        \`sala_calendario\` VARCHAR(100) DEFAULT NULL,
+        \`curso_calendario\` VARCHAR(255) DEFAULT NULL,
+        \`numero_aula_calendario\` VARCHAR(64) DEFAULT NULL,
+        \`equipe_calendario\` VARCHAR(100) DEFAULT NULL,
+        \`observacao_calendario\` TEXT DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_cal_data\` (\`data_calendario\`),
+        KEY \`idx_cal_sigla\` (\`sigla_calendario\`),
+        KEY \`idx_cal_turma\` (\`turma_calendario\`),
+        KEY \`idx_cal_sala\` (\`sala_calendario\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'calendario_aulas' verificada/criada.");
+
     // Plano de Aula (Curso de Formação) Main Table
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`plano_de_aula_curso_de_formacao\` (

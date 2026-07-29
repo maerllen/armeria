@@ -13,7 +13,8 @@ export type ModuleType =
   | 'cursos'
   | 'ensino-continuado'
   | 'gerencia-cursos'
-  | 'iniciar-aula-mobile';
+  | 'iniciar-aula-mobile'
+  | 'calendario';
 
 export type UserCargo = 
   | 'Delegado' 
@@ -421,4 +422,19 @@ export interface CourseMovement {
   issuedAt?: string;
   createdAt: string;
   returnedAt?: string;
+}
+
+export interface CalendarRecord {
+  id: string;
+  data_calendario: string; // YYYY-MM-DD
+  horario_calendario: string; // e.g. "08:00 as 09:40", "10:00 as 11:40", "14:00 as 15:40", "16:00 as 16:40"
+  turma_calendario: string;
+  sigla_calendario: string;
+  disciplina_calendario?: string;
+  sala_calendario?: string;
+  curso_calendario?: string;
+  numero_aula_calendario?: number | string;
+  equipe_calendario?: string;
+  observacao_calendario?: string;
+  createdAt?: string;
 }

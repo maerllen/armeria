@@ -16,6 +16,7 @@ import { ReportModule } from './components/ReportModule';
 import { AcademyModule } from './components/AcademyModule';
 import { CourseManagementModule } from './components/CourseManagementModule';
 import { MobileClassModule } from './components/MobileClassModule';
+import { CalendarModule } from './components/CalendarModule';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -327,6 +328,12 @@ export default function App() {
               units={units}
               calibers={calibers}
               onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'calendario' && (
+            <CalendarModule
+              currentUser={currentUser}
             />
           )}
 

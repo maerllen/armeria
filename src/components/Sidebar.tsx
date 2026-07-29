@@ -12,7 +12,8 @@ import {
   BookOpen,
   GraduationCap,
   Award,
-  Smartphone
+  Smartphone,
+  Calendar
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -98,6 +99,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Gerência de Cursos',
       icon: BookOpen,
       visible: canManageCourses
+    },
+    {
+      id: 'calendario',
+      label: 'Calendário de Aulas',
+      icon: Calendar,
+      visible: true
     },
     {
       id: 'relatorio',

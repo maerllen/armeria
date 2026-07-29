@@ -18,7 +18,8 @@ import {
   LessonPlan,
   AvailableWeaponType,
   AlunoTurma,
-  AlunoAula
+  AlunoAula,
+  CalendarRecord
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -42,6 +43,7 @@ export interface AppState {
   courseClasses: CourseClass[];
   courseMovements: CourseMovement[];
   lessonPlans: LessonPlan[];
+  calendarRecords: CalendarRecord[];
 }
 
 class StorageService {
@@ -64,7 +66,8 @@ class StorageService {
     weaponBoxReplacements: [],
     courseClasses: [],
     courseMovements: [],
-    lessonPlans: []
+    lessonPlans: [],
+    calendarRecords: []
   };
 
   constructor() {
@@ -100,7 +103,8 @@ class StorageService {
         weaponBoxRepsRes,
         courseClassesRes,
         courseMovsRes,
-        lessonPlansRes
+        lessonPlansRes,
+        calendarRecordsRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -119,7 +123,8 @@ class StorageService {
         fetch('/api/weapon-box-replacements').then(r => r.ok ? r.json() : []),
         fetch('/api/course-classes').then(r => r.ok ? r.json() : []),
         fetch('/api/course-movements').then(r => r.ok ? r.json() : []),
-        fetch('/api/lesson-plans').then(r => r.ok ? r.json() : [])
+        fetch('/api/lesson-plans').then(r => r.ok ? r.json() : []),
+        fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -140,6 +145,7 @@ class StorageService {
       this.state.courseClasses = courseClassesRes || [];
       this.state.courseMovements = courseMovsRes || [];
       this.state.lessonPlans = lessonPlansRes || [];
+      this.state.calendarRecords = calendarRecordsRes || [];
 
       // Refresh current user reference if logged in
       if (this.state.currentUser) {
@@ -1257,6 +1263,79 @@ class StorageService {
       });
       const resData = await res.json();
       if (!res.ok) return { success: false, error: resData.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- CALENDÁRIO DE AULAS METHODS ---
+  public getCalendarRecords(): CalendarRecord[] {
+    return this.state.calendarRecords;
+  }
+
+  public async importCalendarRecords(records: CalendarRecord[]): Promise<{ success: boolean; count?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/calendario-aulas/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, count: data.count };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async saveCalendarRecord(rec: Partial<CalendarRecord>): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/calendario-aulas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rec, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCalendarRecord(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/calendario-aulas/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async clearAllCalendarRecords(): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch('/api/calendario-aulas/clear-all', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
