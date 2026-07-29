@@ -126,7 +126,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear() > 2020 ? now.getFullYear() : 2026);
   const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0-indexed
-  const [viewMode, setViewMode] = useState<'cards' | 'modelo'>('modelo');
 
   // Secondary Filters
   const [filterTurma, setFilterTurma] = useState<string>('TODAS');
@@ -659,30 +658,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         )}
       </div>
 
-
-      {/* ============= NOVO: TOGGLE DE VISUALIZAÇÃO ============= */}
-      <div className="print:hidden flex items-center justify-between bg-slate-900 border border-slate-800 rounded-2xl p-2.5">
-        <div className="flex items-center space-x-2">
-          <Layers className="w-4 h-4 text-amber-400" />
-          <span className="text-xs font-bold text-slate-300 uppercase">Modo de Visualização</span>
-        </div>
-        <div className="flex bg-slate-950 rounded-xl p-1 border border-slate-800">
-          <button
-            onClick={() => setViewMode('cards')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition ${viewMode==='cards' ? 'bg-amber-500 text-slate-950' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            CARDS (ATUAL)
-          </button>
-          <button
-            onClick={() => setViewMode('modelo')}
-            className={`px-3 py-1.5 rounded-lg text-[11px] font-black transition ${viewMode==='modelo' ? 'bg-indigo-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
-          >
-            MODELO OFICIAL ACADEPOL
-          </button>
-        </div>
-      </div>
-
-
       {/* STATE A: NO DISCIPLINE SELECTED */}
       {!selectedDiscipline ? (
         <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-4">
@@ -869,7 +844,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
           </div>
 
-          {/* MAIN GRID VIEW FOR MONTH (WEEKDAYS ONLY) - CARDS MODE */}
+          {/* MAIN GRID VIEW FOR MONTH (WEEKDAYS ONLY) */}
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4">
             {currentMonthWeekdays.length === 0 ? (
               <div className="text-center py-10 text-slate-500 text-xs">
@@ -1029,9 +1004,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             )}
           </div>
         </div>
-      )}
-
-        </>
       )}
 
       {/* SPECIAL PRINTABLE REPORT VIEW (MAPA HORÁRIO VISUAL COMPACTO) */}
