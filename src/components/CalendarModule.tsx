@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { CalendarRecord, User } from '../types';
+import { CalendarRecord, User, AcademyCourse, LessonPlan } from '../types';
 import { storage } from '../services/storage';
 import {
   Calendar,
@@ -23,7 +23,9 @@ import {
   ChevronRight,
   FileSpreadsheet,
   Info,
-  CalendarDays
+  CalendarDays,
+  Layers,
+  GraduationCap
 } from 'lucide-react';
 
 interface CalendarModuleProps {
@@ -46,10 +48,33 @@ const MONTH_NAMES = [
   'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
 ];
 
+const PRESET_MODULES = [
+  'Módulo I',
+  'Módulo II',
+  'Módulo III',
+  'Módulo IV',
+  'Módulo V',
+  'Módulo Único',
+  'Módulo Especial'
+];
+
+const DEFAULT_FORMACAO_COURSES = [
+  'Curso de Formação de Delegados de Polícia',
+  'Curso de Formação de Investigadores de Polícia',
+  'Curso de Formação de Escrivães de Polícia',
+  'Curso de Formação de Médicos Legistas',
+  'Curso de Formação de Peritos Criminais'
+];
+
 export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) => {
   const [records, setRecords] = useState<CalendarRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Available Formação Courses from Storage
+  const [formacaoCoursesList, setFormacaoCoursesList] = useState<
+    { name: string; module?: string; year?: number }[]
+  >([]);
 
   // Date filters (defaults to current date or June 2026 as per example)
   const now = new Date();
@@ -61,6 +86,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [filterSala, setFilterSala] = useState<string>('TODAS');
   const [filterNumeroAula, setFilterNumeroAula] = useState<string>('TODAS');
   const [filterEquipe, setFilterEquipe] = useState<string>('TODAS');
+  const [filterModulo, setFilterModulo] = useState<string>('TODOS');
+  const [filterAno, setFilterAno] = useState<string>('TODOS');
   const [filterTimeframe, setFilterTimeframe] = useState<'TODAS' | 'FUTURAS' | 'PASSADAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
@@ -71,6 +98,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [previewRecords, setPreviewRecords] = useState<CalendarRecord[]>([]);
   const [importing, setImporting] = useState<boolean>(false);
 
+  // Custom course selector helper state
+  const [isCustomCourse, setIsCustomCourse] = useState<boolean>(false);
+  const [isCustomModulo, setIsCustomModulo] = useState<boolean>(false);
+
   // Manual Add/Edit Form State
   const [formState, setFormState] = useState<Partial<CalendarRecord>>({
     data_calendario: new Date().toISOString().split('T')[0],
@@ -79,7 +110,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     sigla_calendario: 'MEAF',
     disciplina_calendario: 'Manuseio e Emprego de Armas de Fogo',
     sala_calendario: 'SL01',
-    curso_calendario: 'Curso de Formação de Delegados',
+    curso_calendario: 'Curso de Formação de Delegados de Polícia',
+    modulo_calendario: 'Módulo I',
+    ano_calendario: 2026,
     numero_aula_calendario: 1,
     equipe_calendario: 'Equipe Alpha',
     observacao_calendario: ''
@@ -96,6 +129,53 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       await storage.refreshFromServer();
       const loaded = storage.getCalendarRecords();
       setRecords(loaded);
+
+      // Load Cursos de Formação created in Curso de Formação module
+      const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
+      const lessonPlans = storage.getLessonPlans ? storage.getLessonPlans() : [];
+      const courseClasses = storage.getCourseClasses ? storage.getCourseClasses() : [];
+
+      const combined: { name: string; module?: string; year?: number }[] = [];
+
+      // Add default presets
+      DEFAULT_FORMACAO_COURSES.forEach((c) => {
+        combined.push({ name: c, module: 'Módulo I', year: 2026 });
+      });
+
+      // Add AcademyCourses
+      academyCourses.forEach((ac: AcademyCourse) => {
+        if (ac.name && !combined.some((c) => c.name.toLowerCase() === ac.name.toLowerCase())) {
+          combined.push({
+            name: ac.name,
+            module: ac.module || 'Módulo I',
+            year: ac.startDate ? new Date(ac.startDate).getFullYear() : 2026
+          });
+        }
+      });
+
+      // Add LessonPlans (Curso de Formação)
+      lessonPlans.forEach((lp: LessonPlan) => {
+        if (lp.name && !combined.some((c) => c.name.toLowerCase() === lp.name.toLowerCase())) {
+          combined.push({
+            name: lp.name,
+            module: 'Módulo I',
+            year: lp.year || 2026
+          });
+        }
+      });
+
+      // Add CourseClasses
+      courseClasses.forEach((cc) => {
+        if (cc.courseName && !combined.some((c) => c.name.toLowerCase() === cc.courseName.toLowerCase())) {
+          combined.push({
+            name: cc.courseName,
+            module: 'Módulo I',
+            year: 2026
+          });
+        }
+      });
+
+      setFormacaoCoursesList(combined);
     } catch (err: any) {
       showToast('error', 'Erro ao carregar os dados do calendário: ' + err.message);
     } finally {
@@ -172,6 +252,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           else if (rawHora.includes('3') || rawHora.includes('14:00')) finalHora = '14:00 as 15:40';
           else if (rawHora.includes('4') || rawHora.includes('16:00')) finalHora = '16:00 as 16:40';
 
+          const yearOfDate = formattedDate ? formattedDate.split('-')[0] : String(selectedYear);
+
           return {
             id: `cal-imp-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
             data_calendario: formattedDate,
@@ -180,7 +262,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             sigla_calendario: getVal('SIGLA_CALENDARIO', 'SIGLA CALENDARIO', 'SIGLA') || 'DISC',
             disciplina_calendario: getVal('DISCIPLINA_CALENDARIO', 'DISCIPLINA CALENDARIO', 'DISCIPLINA', 'MATERIA') || '',
             sala_calendario: getVal('SALA_CALENDARIO', 'SALA CALENDARIO', 'SALA', 'LOCAL') || 'SL01',
-            curso_calendario: getVal('CURSO_CALENDARIO', 'CURSO CALENDARIO', 'CURSO') || 'Formação',
+            curso_calendario: getVal('CURSO_CALENDARIO', 'CURSO CALENDARIO', 'CURSO') || 'Curso de Formação de Delegados de Polícia',
+            modulo_calendario: getVal('MODULO_CALENDARIO', 'MODULO CALENDARIO', 'MODULO', 'MODULO_CURSO') || 'Módulo I',
+            ano_calendario: getVal('ANO_CALENDARIO', 'ANO CALENDARIO', 'ANO', 'YEAR') || yearOfDate,
             numero_aula_calendario: getVal('NUMERO_AULA_CALENDARIO', 'NUMERO AULA', 'AULA', 'NUMERO_AULA') || (idx + 1),
             equipe_calendario: getVal('EQUIPE_CALENDARIO', 'EQUIPE CALENDARIO', 'EQUIPE', 'INSTRUTOR') || 'Equipe Alpha',
             observacao_calendario: getVal('OBSERVAÇÃO_CALENDARIO', 'OBSERVACAO_CALENDARIO', 'OBSERVACAO', 'OBS') || ''
@@ -268,11 +352,31 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     }
   };
 
+  // Select Course Handler for the Form Selectbox
+  const handleSelectCourseName = (courseName: string) => {
+    if (courseName === 'CUSTOM') {
+      setIsCustomCourse(true);
+      setFormState({ ...formState, curso_calendario: '' });
+      return;
+    }
+
+    setIsCustomCourse(false);
+    const matched = formacaoCoursesList.find((c) => c.name === courseName);
+    setFormState({
+      ...formState,
+      curso_calendario: courseName,
+      modulo_calendario: matched?.module || formState.modulo_calendario || 'Módulo I',
+      ano_calendario: matched?.year || formState.ano_calendario || selectedYear
+    });
+  };
+
   // --- DERIVED FILTER OPTIONS ---
   const uniqueSiglas = Array.from(new Set(records.map((r) => r.sigla_calendario).filter(Boolean)));
   const uniqueSalas = Array.from(new Set(records.map((r) => r.sala_calendario).filter(Boolean)));
   const uniqueAulas = Array.from(new Set(records.map((r) => String(r.numero_aula_calendario || '')).filter(Boolean)));
   const uniqueEquipes = Array.from(new Set(records.map((r) => r.equipe_calendario).filter(Boolean)));
+  const uniqueModulos = Array.from(new Set(records.map((r) => r.modulo_calendario).filter(Boolean)));
+  const uniqueAnos = Array.from(new Set(records.map((r) => String(r.ano_calendario || '')).filter(Boolean)));
 
   // Filter records
   const todayStr = new Date().toISOString().split('T')[0];
@@ -287,6 +391,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         (r.disciplina_calendario && r.disciplina_calendario.toLowerCase().includes(term)) ||
         (r.sala_calendario && r.sala_calendario.toLowerCase().includes(term)) ||
         (r.curso_calendario && r.curso_calendario.toLowerCase().includes(term)) ||
+        (r.modulo_calendario && r.modulo_calendario.toLowerCase().includes(term)) ||
+        (r.ano_calendario && String(r.ano_calendario).includes(term)) ||
         (r.equipe_calendario && r.equipe_calendario.toLowerCase().includes(term));
       if (!match) return false;
     }
@@ -302,6 +408,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
     // Equipe Filter
     if (filterEquipe !== 'TODAS' && r.equipe_calendario !== filterEquipe) return false;
+
+    // Modulo Filter
+    if (filterModulo !== 'TODOS' && r.modulo_calendario !== filterModulo) return false;
+
+    // Ano Filter
+    if (filterAno !== 'TODOS' && String(r.ano_calendario) !== filterAno) return false;
 
     // Timeframe Filter
     if (filterTimeframe === 'FUTURAS' && r.data_calendario < todayStr) return false;
@@ -373,7 +485,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-1.5 max-w-2xl">
-            Gestão inteligente de turmas, disciplinas, salas e horários. Importação direta de planilhas Excel (.xlsx/.csv) e integração com o banco de dados da ACADEPOL.
+            Gestão inteligente de turmas, módulos, disciplinas, salas e anos. Herdando cursos do módulo <strong className="text-amber-400">Curso de Formação</strong> com integração ao banco de dados MySQL da ACADEPOL.
           </p>
         </div>
 
@@ -389,6 +501,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
           <button
             onClick={() => {
+              const defaultCourse = formacaoCoursesList[0]?.name || 'Curso de Formação de Delegados de Polícia';
               setFormState({
                 data_calendario: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`,
                 horario_calendario: '10:00 as 11:40',
@@ -396,11 +509,15 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 sigla_calendario: 'MEAF',
                 disciplina_calendario: 'Manuseio e Emprego de Armas de Fogo',
                 sala_calendario: 'SL01',
-                curso_calendario: 'Curso de Formação de Delegados',
+                curso_calendario: defaultCourse,
+                modulo_calendario: 'Módulo I',
+                ano_calendario: selectedYear,
                 numero_aula_calendario: 1,
                 equipe_calendario: 'Equipe Alpha',
                 observacao_calendario: ''
               });
+              setIsCustomCourse(false);
+              setIsCustomModulo(false);
               setSelectedRecord(null);
               setShowRecordModal(true);
             }}
@@ -467,7 +584,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 onChange={(e) => setSelectedYear(Number(e.target.value))}
                 className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-200 focus:outline-none"
               >
-                {[2025, 2026, 2027, 2028].map((y) => (
+                {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
                   <option key={y} value={y}>
                     {y}
                   </option>
@@ -526,11 +643,50 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
 
         {/* Detailed Attribute Filters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 text-xs">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2.5 text-xs">
+          {/* MÓDULO Filter */}
+          <div>
+            <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1 flex items-center space-x-1">
+              <Layers className="w-3 h-3 text-amber-400" />
+              <span>MÓDULO</span>
+            </label>
+            <select
+              value={filterModulo}
+              onChange={(e) => setFilterModulo(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+            >
+              <option value="TODOS">Todos os Módulos</option>
+              {uniqueModulos.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ANO Filter */}
+          <div>
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              ANO
+            </label>
+            <select
+              value={filterAno}
+              onChange={(e) => setFilterAno(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+            >
+              <option value="TODOS">Todos os Anos</option>
+              {uniqueAnos.map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* SIGLA_CALENDARIO Filter */}
           <div>
-            <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1">
-              SIGLA_CALENDARIO
+            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              SIGLA
             </label>
             <select
               value={filterSigla}
@@ -565,29 +721,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </select>
           </div>
 
-          {/* NUMERO_AULA_CALENDARIO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              Nº DA AULA
-            </label>
-            <select
-              value={filterNumeroAula}
-              onChange={(e) => setFilterNumeroAula(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODAS">Todas as Aulas</option>
-              {uniqueAulas.map((n) => (
-                <option key={n} value={n}>
-                  Aula {n}
-                </option>
-              ))}
-            </select>
-          </div>
-
           {/* EQUIPE_CALENDARIO Filter */}
           <div>
             <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              EQUIPE / INSTRUTORES
+              EQUIPE / INSTRUTOR
             </label>
             <select
               value={filterEquipe}
@@ -614,7 +751,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Turma, curso, sala..."
+                placeholder="Curso, módulo, ano..."
                 className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-8 pr-2.5 py-1.5 text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
               />
             </div>
@@ -746,7 +883,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                   </button>
 
                                   {/* Sigla & Turma Badge */}
-                                  <div className="flex items-center space-x-1.5">
+                                  <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
                                     <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 font-black rounded text-[9px] tracking-tight">
                                       {rec.sigla_calendario}
                                     </span>
@@ -755,12 +892,26 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                     </span>
                                   </div>
 
+                                  {/* Modulo & Ano Badges */}
+                                  <div className="flex items-center space-x-1 text-[9px]">
+                                    {rec.modulo_calendario && (
+                                      <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono font-bold">
+                                        {rec.modulo_calendario}
+                                      </span>
+                                    )}
+                                    {rec.ano_calendario && (
+                                      <span className="px-1.5 py-0.5 bg-slate-800 text-amber-400 border border-slate-700 rounded font-mono font-bold">
+                                        {rec.ano_calendario}
+                                      </span>
+                                    )}
+                                  </div>
+
                                   {/* Sala & Aula Number */}
                                   <div className="text-[10px] space-y-0.5">
                                     <div className="flex items-center space-x-1 text-cyan-300 font-semibold">
                                       <MapPin className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
                                       <span className="truncate">
-                                        Sala: {rec.sala_calendario || 'Estande'}
+                                        Sala: {rec.sala_calendario || 'SL01'}
                                       </span>
                                     </div>
 
@@ -773,9 +924,15 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                     )}
                                   </div>
 
-                                  {/* Disciplina & Equipe */}
+                                  {/* Curso, Disciplina & Equipe */}
+                                  {rec.curso_calendario && (
+                                    <p className="text-[9px] font-bold text-slate-200 line-clamp-1 border-t border-slate-800/80 pt-1">
+                                      {rec.curso_calendario}
+                                    </p>
+                                  )}
+
                                   {rec.disciplina_calendario && (
-                                    <p className="text-[9px] text-slate-400 line-clamp-1 border-t border-slate-800/80 pt-1">
+                                    <p className="text-[9px] text-slate-400 line-clamp-1">
                                       {rec.disciplina_calendario}
                                     </p>
                                   )}
@@ -815,11 +972,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               <tr className="border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 bg-slate-950/60">
                 <th className="p-3">DATA</th>
                 <th className="p-3">HORÁRIO</th>
+                <th className="p-3">ANO</th>
+                <th className="p-3">MÓDULO</th>
                 <th className="p-3">TURMA</th>
                 <th className="p-3">SIGLA</th>
                 <th className="p-3">DISCIPLINA</th>
                 <th className="p-3">SALA</th>
-                <th className="p-3">CURSO</th>
+                <th className="p-3">CURSO DE FORMAÇÃO</th>
                 <th className="p-3">Nº AULA</th>
                 <th className="p-3">EQUIPE</th>
                 <th className="p-3 text-right">AÇÕES</th>
@@ -828,7 +987,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             <tbody className="divide-y divide-slate-800/60 text-slate-200 font-mono text-[11px]">
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="p-6 text-center text-slate-500 font-sans text-xs">
+                  <td colSpan={12} className="p-6 text-center text-slate-500 font-sans text-xs">
                     Nenhum registro de aula cadastrado para os filtros selecionados.
                   </td>
                 </tr>
@@ -837,11 +996,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   <tr key={r.id} className="hover:bg-slate-800/40 transition">
                     <td className="p-3 font-bold text-amber-400">{r.data_calendario}</td>
                     <td className="p-3 font-semibold text-slate-300">{r.horario_calendario}</td>
+                    <td className="p-3 font-bold text-amber-300">{r.ano_calendario || '-'}</td>
+                    <td className="p-3 font-bold text-indigo-300">{r.modulo_calendario || '-'}</td>
                     <td className="p-3 font-extrabold text-slate-100">{r.turma_calendario}</td>
                     <td className="p-3 font-black text-cyan-400">{r.sigla_calendario}</td>
                     <td className="p-3 font-sans text-slate-300">{r.disciplina_calendario || '-'}</td>
                     <td className="p-3 text-indigo-300 font-bold">{r.sala_calendario || 'SL01'}</td>
-                    <td className="p-3 font-sans text-slate-400">{r.curso_calendario || '-'}</td>
+                    <td className="p-3 font-sans font-bold text-slate-200">{r.curso_calendario || '-'}</td>
                     <td className="p-3 text-amber-300 font-bold">{r.numero_aula_calendario || '-'}</td>
                     <td className="p-3 font-sans text-slate-300">{r.equipe_calendario || '-'}</td>
                     <td className="p-3 text-right">
@@ -884,7 +1045,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              Selecione o arquivo Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">CURSO</strong>, <strong className="text-amber-400">AULA</strong>, <strong className="text-amber-400">EQUIPE</strong> e <strong className="text-amber-400">OBSERVAÇÃO</strong>.
+              Selecione o arquivo Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">ANO</strong>, <strong className="text-amber-400">MODULO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">CURSO</strong>, <strong className="text-amber-400">AULA</strong>, <strong className="text-amber-400">EQUIPE</strong> e <strong className="text-amber-400">OBSERVAÇÃO</strong>.
             </p>
 
             {/* Dropzone */}
@@ -920,10 +1081,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     <thead className="bg-slate-900 sticky top-0 text-amber-400 font-bold border-b border-slate-800">
                       <tr>
                         <th className="p-2">DATA</th>
-                        <th className="p-2">HORÁRIO</th>
+                        <th className="p-2">ANO</th>
+                        <th className="p-2">MÓDULO</th>
                         <th className="p-2">TURMA</th>
                         <th className="p-2">SIGLA</th>
-                        <th className="p-2">SALA</th>
                         <th className="p-2">CURSO</th>
                       </tr>
                     </thead>
@@ -931,10 +1092,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                       {previewRecords.slice(0, 10).map((r, i) => (
                         <tr key={i}>
                           <td className="p-2 text-emerald-400">{r.data_calendario}</td>
-                          <td className="p-2">{r.horario_calendario}</td>
+                          <td className="p-2 text-amber-300">{r.ano_calendario}</td>
+                          <td className="p-2 text-indigo-300">{r.modulo_calendario}</td>
                           <td className="p-2 font-bold">{r.turma_calendario}</td>
                           <td className="p-2 text-cyan-300">{r.sigla_calendario}</td>
-                          <td className="p-2">{r.sala_calendario}</td>
                           <td className="p-2 truncate max-w-[120px]">{r.curso_calendario}</td>
                         </tr>
                       ))}
@@ -980,7 +1141,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       {/* MODAL 2: MANUAL RECORD FORM */}
       {showRecordModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
                 <Plus className="w-5 h-5 text-amber-400" />
@@ -997,6 +1158,117 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
 
             <form onSubmit={handleSaveForm} className="space-y-4 text-xs">
+              {/* SELECTBOX DO CURSO DE FORMAÇÃO */}
+              <div className="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-3.5 space-y-2">
+                <label className="block text-[11px] font-extrabold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                  <GraduationCap className="w-4 h-4 text-amber-400" />
+                  <span>CURSO DE FORMAÇÃO (HERDADO) *</span>
+                </label>
+                <p className="text-[10px] text-slate-400">
+                  Selecione um curso criado no módulo Curso de Formação para herdar suas informações.
+                </p>
+
+                {!isCustomCourse ? (
+                  <select
+                    value={formState.curso_calendario || ''}
+                    onChange={(e) => handleSelectCourseName(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                  >
+                    {formacaoCoursesList.map((c, i) => (
+                      <option key={i} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                    <option value="CUSTOM">+ Outro Curso (Digitar Nome Customizado)</option>
+                  </select>
+                ) : (
+                  <div className="space-y-1">
+                    <input
+                      type="text"
+                      value={formState.curso_calendario || ''}
+                      onChange={(e) => setFormState({ ...formState, curso_calendario: e.target.value })}
+                      placeholder="Digite o nome do Curso de Formação..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomCourse(false)}
+                      className="text-[10px] text-amber-400 hover:underline font-bold"
+                    >
+                      ← Voltar à lista de cursos cadastrados
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* MÓDULO E ANO DO CALENDÁRIO */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* SELECTBOX DO MÓDULO DO CURSO */}
+                <div>
+                  <label className="block text-[10px] font-bold text-indigo-300 uppercase mb-1 flex items-center space-x-1">
+                    <Layers className="w-3 h-3 text-indigo-400" />
+                    <span>MÓDULO DO CURSO *</span>
+                  </label>
+                  {!isCustomModulo ? (
+                    <select
+                      value={formState.modulo_calendario || 'Módulo I'}
+                      onChange={(e) => {
+                        if (e.target.value === 'CUSTOM') {
+                          setIsCustomModulo(true);
+                          setFormState({ ...formState, modulo_calendario: '' });
+                        } else {
+                          setFormState({ ...formState, modulo_calendario: e.target.value });
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                    >
+                      {PRESET_MODULES.map((m) => (
+                        <option key={m} value={m}>
+                          {m}
+                        </option>
+                      ))}
+                      <option value="CUSTOM">+ Outro Módulo (Digitar...)</option>
+                    </select>
+                  ) : (
+                    <div className="space-y-1">
+                      <input
+                        type="text"
+                        value={formState.modulo_calendario || ''}
+                        onChange={(e) => setFormState({ ...formState, modulo_calendario: e.target.value })}
+                        placeholder="Ex: Módulo VI ou Específico"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsCustomModulo(false)}
+                        className="text-[10px] text-indigo-300 hover:underline font-bold"
+                      >
+                        ← Voltar à lista de módulos
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* SELECTBOX DO ANO DO CALENDÁRIO */}
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                    ANO DO CALENDÁRIO *
+                  </label>
+                  <select
+                    value={formState.ano_calendario || selectedYear}
+                    onChange={(e) => setFormState({ ...formState, ano_calendario: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                  >
+                    {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
+                      <option key={y} value={y}>
+                        {y}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* DATA, HORARIO, TURMA, SIGLA */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
@@ -1095,32 +1367,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    CURSO_CALENDARIO
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.curso_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, curso_calendario: e.target.value })}
-                    placeholder="Ex: Curso de Formação de Delegados"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    EQUIPE_CALENDARIO
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.equipe_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, equipe_calendario: e.target.value })}
-                    placeholder="Ex: Equipe Alpha"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                  EQUIPE_CALENDARIO
+                </label>
+                <input
+                  type="text"
+                  value={formState.equipe_calendario || ''}
+                  onChange={(e) => setFormState({ ...formState, equipe_calendario: e.target.value })}
+                  placeholder="Ex: Equipe Alpha"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
               </div>
 
               <div>

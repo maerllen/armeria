@@ -3120,6 +3120,8 @@ apiRouter.get('/calendario-aulas', async (req: Request, res: Response) => {
       disciplina_calendario: r.disciplina_calendario || '',
       sala_calendario: r.sala_calendario || '',
       curso_calendario: r.curso_calendario || '',
+      modulo_calendario: r.modulo_calendario || '',
+      ano_calendario: r.ano_calendario || '',
       numero_aula_calendario: r.numero_aula_calendario || '',
       equipe_calendario: r.equipe_calendario || '',
       observacao_calendario: r.observacao_calendario || '',
@@ -3151,14 +3153,16 @@ apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) =
       const discCal = rec.disciplina_calendario || null;
       const salaCal = rec.sala_calendario || null;
       const cursoCal = rec.curso_calendario || null;
+      const moduloCal = rec.modulo_calendario || null;
+      const anoCal = rec.ano_calendario !== undefined ? String(rec.ano_calendario) : null;
       const numAulaCal = rec.numero_aula_calendario !== undefined ? String(rec.numero_aula_calendario) : null;
       const equipeCal = rec.equipe_calendario || null;
       const obsCal = rec.observacao_calendario || null;
 
       await pool.query(
         `INSERT INTO calendario_aulas 
-          (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, modulo_calendario, ano_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE
           data_calendario = VALUES(data_calendario),
           horario_calendario = VALUES(horario_calendario),
@@ -3167,10 +3171,12 @@ apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) =
           disciplina_calendario = VALUES(disciplina_calendario),
           sala_calendario = VALUES(sala_calendario),
           curso_calendario = VALUES(curso_calendario),
+          modulo_calendario = VALUES(modulo_calendario),
+          ano_calendario = VALUES(ano_calendario),
           numero_aula_calendario = VALUES(numero_aula_calendario),
           equipe_calendario = VALUES(equipe_calendario),
           observacao_calendario = VALUES(observacao_calendario)`,
-        [id, dataCal, horaCal, turmaCal, siglaCal, discCal, salaCal, cursoCal, numAulaCal, equipeCal, obsCal]
+        [id, dataCal, horaCal, turmaCal, siglaCal, discCal, salaCal, cursoCal, moduloCal, anoCal, numAulaCal, equipeCal, obsCal]
       );
       importedCount++;
     }
@@ -3194,6 +3200,8 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
       disciplina_calendario,
       sala_calendario,
       curso_calendario,
+      modulo_calendario,
+      ano_calendario,
       numero_aula_calendario,
       equipe_calendario,
       observacao_calendario,
@@ -3209,8 +3217,8 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
 
     await pool.query(
       `INSERT INTO calendario_aulas 
-        (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        (id, data_calendario, horario_calendario, turma_calendario, sigla_calendario, disciplina_calendario, sala_calendario, curso_calendario, modulo_calendario, ano_calendario, numero_aula_calendario, equipe_calendario, observacao_calendario, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE
         data_calendario = VALUES(data_calendario),
         horario_calendario = VALUES(horario_calendario),
@@ -3219,6 +3227,8 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
         disciplina_calendario = VALUES(disciplina_calendario),
         sala_calendario = VALUES(sala_calendario),
         curso_calendario = VALUES(curso_calendario),
+        modulo_calendario = VALUES(modulo_calendario),
+        ano_calendario = VALUES(ano_calendario),
         numero_aula_calendario = VALUES(numero_aula_calendario),
         equipe_calendario = VALUES(equipe_calendario),
         observacao_calendario = VALUES(observacao_calendario)`,
@@ -3231,6 +3241,8 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
         disciplina_calendario || null,
         sala_calendario || null,
         curso_calendario || null,
+        modulo_calendario || null,
+        ano_calendario !== undefined && ano_calendario !== '' ? String(ano_calendario) : null,
         numero_aula_calendario !== undefined ? String(numero_aula_calendario) : null,
         equipe_calendario || null,
         observacao_calendario || null

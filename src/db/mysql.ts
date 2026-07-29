@@ -480,6 +480,8 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`disciplina_calendario\` VARCHAR(255) DEFAULT NULL,
         \`sala_calendario\` VARCHAR(100) DEFAULT NULL,
         \`curso_calendario\` VARCHAR(255) DEFAULT NULL,
+        \`modulo_calendario\` VARCHAR(100) DEFAULT NULL,
+        \`ano_calendario\` VARCHAR(64) DEFAULT NULL,
         \`numero_aula_calendario\` VARCHAR(64) DEFAULT NULL,
         \`equipe_calendario\` VARCHAR(100) DEFAULT NULL,
         \`observacao_calendario\` TEXT DEFAULT NULL,
@@ -492,6 +494,13 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'calendario_aulas' verificada/criada.");
+
+    try {
+      await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `modulo_calendario` VARCHAR(100) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `ano_calendario` VARCHAR(64) DEFAULT NULL;");
+    } catch (e) {}
 
     // Plano de Aula (Curso de Formação) Main Table
     await connection.query(`

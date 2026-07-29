@@ -433,6 +433,8 @@ export interface CalendarRecord {
   disciplina_calendario?: string;
   sala_calendario?: string;
   curso_calendario?: string;
+  modulo_calendario?: string;
+  ano_calendario?: number | string;
   numero_aula_calendario?: number | string;
   equipe_calendario?: string;
   observacao_calendario?: string;
