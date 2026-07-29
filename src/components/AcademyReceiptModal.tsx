@@ -70,8 +70,8 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
         <div class="grid">
           <div class="box">
             <div class="box-title">1. Identificação da Aula</div>
-            <div class="field"><span class="label">Turma:</span> <span class="val">${movement.turmaCode || movement.className}</span></div>
-            <div class="field"><span class="label">Curso / Carreira:</span> <span class="val">${movement.courseName} (${movement.career || 'N/A'})</span></div>
+            <div class="field"><span class="label">Turma e Curso:</span> <span class="val">Turma ${movement.turmaCode || movement.className} - ${movement.courseName || ''}</span></div>
+            <div class="field"><span class="label">Carreira:</span> <span class="val">${movement.career || 'N/A'}</span></div>
             <div class="field"><span class="label">Disciplina:</span> <span class="val">${movement.subject || 'MEAF'}</span></div>
             <div class="field"><span class="label">Plano de Aula:</span> <span class="val">${movement.lessonPlanName || 'Plano Padrão'} (Aula ${movement.lessonNumber || 1})</span></div>
           </div>
@@ -203,16 +203,16 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
                 1. Identificação da Aula
               </h3>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">CÓDIGO DA TURMA:</span>
-                <span className="font-extrabold text-amber-400 print:text-black text-base font-mono">{movement.turmaCode || movement.className}</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">TURMA E CURSO:</span>
+                <span className="font-extrabold text-amber-400 print:text-black text-base font-mono">Turma {movement.turmaCode || movement.className} - {movement.courseName}</span>
               </div>
               <div>
                 <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">PROFESSOR RESPONSÁVEL:</span>
                 <span className="font-bold text-slate-100 print:text-black text-sm">{movement.teacherName}</span>
               </div>
               <div>
-                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">CURSO / CARREIRA:</span>
-                <span className="font-semibold text-slate-200 print:text-black">{movement.courseName} ({movement.career}) • Disciplina: {movement.subject}</span>
+                <span className="text-slate-400 print:text-gray-600 block text-[10px] font-bold uppercase">CURSO E CARREIRA:</span>
+                <span className="font-semibold text-slate-200 print:text-black">{movement.courseName} (Carreira: {movement.career}) • Disciplina: {movement.subject}</span>
               </div>
               {movement.lessonPlanName && (
                 <div>

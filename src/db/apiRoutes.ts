@@ -2169,7 +2169,7 @@ function computeCareerAbbreviation(career?: string): string {
 
 apiRouter.post('/course-classes', async (req: Request, res: Response) => {
   try {
-    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, teacherName, departmentId, unitId, actor } = req.body;
     const planoDeAula = req.body.plano_de_aula || req.body.lessonPlanId || req.body.lesson_plan_id || null;
     const finalCareer = career || 'Delegado';
     const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
@@ -2181,6 +2181,22 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
 
     const pool = getPool();
 
+    const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
+    let finalTeacherName = teacherName || req.body.teacher_name || '';
+
+    if (!finalTeacherName && finalTeacherUserIds.length > 0) {
+      try {
+        let teacherMap: Record<string, string> = {};
+        const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+        (tchRows || []).forEach((t: any) => {
+          if (t.id) teacherMap[t.id] = t.name;
+          if (t.user_id) teacherMap[t.user_id] = t.name;
+        });
+        const names = finalTeacherUserIds.map((tid: string) => teacherMap[tid]).filter(Boolean);
+        if (names.length > 0) finalTeacherName = names.join(', ');
+      } catch (e) {}
+    }
+
     // Check duplicate turma in same course & career
     const [dups]: any = await pool.query(
       'SELECT id FROM course_classes WHERE course_id = ? AND career = ? AND turma_number = ?',
@@ -2190,13 +2206,12 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
       return res.status(400).json({ error: `Já existe uma turma cadastrada com o número "${turmaNumber}" para a carreira "${finalCareer}" neste mesmo curso.` });
     }
 
-    const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
     const id = req.body.id || `class-${Date.now()}`;
 
     try {
       await pool.query(
-        `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, plano_de_aula, department_id, unit_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        `INSERT INTO course_classes (id, course_id, course_name, subject, career, career_abbreviation, turma_number, code, student_count, teacher_user_ids, teacher_name, plano_de_aula, department_id, unit_id, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           id,
           courseId || '',
@@ -2208,6 +2223,7 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
           code,
           Number(studentCount) || 1,
           JSON.stringify(finalTeacherUserIds),
+          finalTeacherName || null,
           planoDeAula,
           departmentId || null,
           unitId || null
@@ -2235,8 +2251,8 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
       );
     }
 
-    await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject})`, actor, req.ip);
-    return res.json({ id, courseId, courseName, subject, career: finalCareer, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds: finalTeacherUserIds, plano_de_aula: planoDeAula, lessonPlanId: planoDeAula, departmentId, unitId, createdAt: new Date().toISOString() });
+    await insertAuditLog('Cursos', 'Criar', `Criada turma de aula: ${code} (${subject}) - Prof: ${finalTeacherName || 'N/I'}`, actor, req.ip);
+    return res.json({ id, courseId, courseName, subject, career: finalCareer, careerAbbreviation, turmaNumber, code, studentCount, teacherUserIds: finalTeacherUserIds, teacherName: finalTeacherName, plano_de_aula: planoDeAula, lessonPlanId: planoDeAula, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     console.error('Erro em POST /course-classes:', err);
     return res.status(500).json({ error: err.message });
@@ -2246,7 +2262,7 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
 apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, departmentId, unitId, actor } = req.body;
+    const { courseId, courseName, subject, career, studentCount, teacherUserIds, teacherUserId, teacherName, departmentId, unitId, actor } = req.body;
     const planoDeAula = req.body.plano_de_aula || req.body.lessonPlanId || req.body.lesson_plan_id || null;
     const finalCareer = career || 'Delegado';
     const careerAbbreviation = req.body.careerAbbreviation || req.body.career_abbreviation || computeCareerAbbreviation(finalCareer);
@@ -2268,6 +2284,20 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
     }
 
     const finalTeacherUserIds = Array.isArray(teacherUserIds) ? teacherUserIds : (teacherUserId ? [teacherUserId] : []);
+    let finalTeacherName = teacherName || req.body.teacher_name || '';
+
+    if (!finalTeacherName && finalTeacherUserIds.length > 0) {
+      try {
+        let teacherMap: Record<string, string> = {};
+        const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+        (tchRows || []).forEach((t: any) => {
+          if (t.id) teacherMap[t.id] = t.name;
+          if (t.user_id) teacherMap[t.user_id] = t.name;
+        });
+        const names = finalTeacherUserIds.map((tid: string) => teacherMap[tid]).filter(Boolean);
+        if (names.length > 0) finalTeacherName = names.join(', ');
+      } catch (e) {}
+    }
 
     try {
       await pool.query(
@@ -2281,6 +2311,7 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
           code = ?,
           student_count = ?,
           teacher_user_ids = ?,
+          teacher_name = ?,
           plano_de_aula = ?,
           department_id = ?,
           unit_id = ?
@@ -2295,6 +2326,7 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
           code,
           Number(studentCount) || 1,
           JSON.stringify(finalTeacherUserIds),
+          finalTeacherName || null,
           planoDeAula,
           departmentId || null,
           unitId || null,

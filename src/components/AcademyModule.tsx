@@ -1535,12 +1535,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         <tr key={mov.id} className="hover:bg-slate-800/50 transition">
                           <td className="py-3 px-4">
                             <div className="font-bold text-slate-100 text-xs">
-                              {mov.className || mov.turmaCode}
+                              Turma {mov.className || mov.turmaCode} {mov.courseName ? `- ${mov.courseName}` : ''}
                             </div>
-                            <div className="text-[11px] text-slate-400">{mov.courseName}</div>
+                            <div className="text-[11px] text-amber-400 font-medium">Curso: {mov.courseName || 'N/A'}</div>
                           </td>
                           <td className="py-3 px-4">
-                            <div className="font-semibold text-slate-200">{mov.career || 'N/A'}</div>
+                            <div className="font-semibold text-slate-200">Carreira: {mov.career || 'N/A'}</div>
                             <div className="text-[10px] text-slate-400 font-mono">Matéria: {mov.subject || 'N/A'}</div>
                           </td>
                           <td className="py-3 px-4">
@@ -1551,13 +1551,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <div className="text-[10px] text-slate-400">Emissor: {mov.issuedByUserName}</div>
                           </td>
                           <td className="py-3 px-4">
-                            {mov.boxName ? (
-                              <div className="text-slate-200 font-mono text-[11px] font-semibold">
-                                {mov.boxName}
-                              </div>
-                            ) : (
-                              <span className="text-slate-500 italic text-[11px]">Sem caixa</span>
-                            )}
+                            {(() => {
+                              const targetBoxId = mov.weaponBoxId || mov.boxId;
+                              const matchedBox = weaponBoxes.find(b => b.id === targetBoxId);
+                              const resolvedBoxName = mov.boxName || mov.weaponBoxName || matchedBox?.name;
+                              return resolvedBoxName ? (
+                                <div className="text-slate-200 font-mono text-[11px] font-semibold">
+                                  {resolvedBoxName}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500 italic text-[11px]">Sem caixa de armas</span>
+                              );
+                            })()}
                           </td>
                           <td className="py-3 px-4 font-mono text-xs">
                             {ammoSuppliedVal > 0 ? (
@@ -1638,7 +1643,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-bold text-slate-100">f</h2>
+              <h2 className="text-sm font-bold text-slate-100">Turmas da Academia de Polícia</h2>
               <p className="text-xs text-slate-400">
                 Cadastro de turmas vinculadas a cursos, carreiras policiais, professores e disciplinas
               </p>
@@ -1684,12 +1689,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
                   <div>
                     <h3 className="text-base font-bold text-slate-100 flex items-center justify-between">
-                      <span>Turma {cls.code || cls.name}</span>
+                      <span>Turma {cls.code || cls.name} - <span className="text-amber-400 font-semibold">{cls.courseName}</span></span>
                       <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
-                        {cls.career}
+                        Carreira: {cls.career}
                       </span>
                     </h3>
-                    <p className="text-xs font-mono text-amber-400 font-semibold">{cls.courseName}</p>
+                    <p className="text-xs font-mono text-slate-400">Curso Vinculado: <strong className="text-amber-300">{cls.courseName}</strong></p>
                   </div>
 
                   <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
@@ -2983,7 +2988,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 >
                   {courseClasses.map(c => (
                     <option key={c.id} value={c.id}>
-                      [{c.code || c.name}] • Prof: {c.teacherName} ({c.career} - {c.subject}) • {c.studentCount} alunos
+                      Turma: {c.code || c.name} - Curso: {c.courseName} • Prof: {getTeacherDisplayName(c)} (Carreira: {c.career} - {c.subject}) • {c.studentCount} alunos
                     </option>
                   ))}
                 </select>
@@ -2994,18 +2999,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   return (
                     <div className="bg-slate-950 p-3 rounded-xl border border-amber-500/30 text-xs space-y-1 font-mono mt-2.5">
                       <div className="flex items-center justify-between">
-                        <span className="text-slate-400 font-sans font-semibold">CÓDIGO DA TURMA:</span>
+                        <span className="text-slate-400 font-sans font-semibold">TURMA E CURSO:</span>
                         <span className="font-extrabold text-amber-400 text-sm bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
-                          {selectedC.code || selectedC.name}
+                          Turma {selectedC.code || selectedC.name} - {selectedC.courseName}
                         </span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400 font-sans font-semibold">PROFESSOR RESPONSÁVEL:</span>
-                        <span className="font-bold text-emerald-400">Prof. {selectedC.teacherName}</span>
+                        <span className="font-bold text-emerald-400">Prof. {getTeacherDisplayName(selectedC)}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400 font-sans font-semibold">CURSO / CARREIRA:</span>
-                        <span className="text-slate-200">{selectedC.courseName} ({selectedC.career})</span>
+                        <span className="text-slate-200">{selectedC.courseName} (Carreira: {selectedC.career})</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-slate-400 font-sans font-semibold">DISCIPLINA:</span>
