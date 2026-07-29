@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { CalendarRecord, User, AcademyCourse, LessonPlan } from '../types';
 import { storage } from '../services/storage';
@@ -12,34 +12,32 @@ import {
   Search,
   CheckCircle,
   AlertCircle,
-  Building2,
   MapPin,
-  Users,
-  BookOpen,
-  Tag,
   RefreshCw,
   X,
   ChevronLeft,
   ChevronRight,
   FileSpreadsheet,
-  Info,
   CalendarDays,
   Layers,
-  GraduationCap
+  Printer,
+  Edit3,
+  Eye,
+  BookOpen,
+  Award,
+  Users
 } from 'lucide-react';
 
 interface CalendarModuleProps {
   currentUser: User | null;
 }
 
-// Fixed Time Slots as required
+// Fixed Time Slots (No 20min interval breaks, only Lunch break)
 const TIME_SLOTS = [
   { id: 'slot1', label: '08:00 as 09:40', type: 'class', name: '1ª Aula' },
-  { id: 'break1', label: '09:40 as 10:00', type: 'break', name: 'Intervalo (20 min)' },
   { id: 'slot2', label: '10:00 as 11:40', type: 'class', name: '2ª Aula' },
   { id: 'lunch', label: '11:40 as 14:00', type: 'break', name: 'Intervalo de Almoço' },
   { id: 'slot3', label: '14:00 as 15:40', type: 'class', name: '3ª Aula' },
-  { id: 'break2', label: '15:40 as 16:00', type: 'break', name: 'Intervalo (20 min)' },
   { id: 'slot4', label: '16:00 as 16:40', type: 'class', name: '4ª Aula' }
 ] as const;
 
@@ -76,31 +74,32 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     { name: string; module?: string; year?: number }[]
   >([]);
 
-  // Date filters (defaults to current date or June 2026 as per example)
+  // Selected Subject/Discipline Filter - REQUIRED TO START CALENDAR
+  const [selectedDiscipline, setSelectedDiscipline] = useState<string>('');
+
+  // Date filters (defaults to current year/month or June 2026)
   const now = new Date();
   const [selectedYear, setSelectedYear] = useState<number>(now.getFullYear() > 2020 ? now.getFullYear() : 2026);
-  const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0-indexed (5 = Junho)
+  const [selectedMonth, setSelectedMonth] = useState<number>(now.getMonth()); // 0-indexed
 
-  // Advanced Filters
-  const [filterSigla, setFilterSigla] = useState<string>('TODAS');
+  // Secondary Filters
+  const [filterTurma, setFilterTurma] = useState<string>('TODAS');
   const [filterSala, setFilterSala] = useState<string>('TODAS');
-  const [filterNumeroAula, setFilterNumeroAula] = useState<string>('TODAS');
   const [filterEquipe, setFilterEquipe] = useState<string>('TODAS');
   const [filterModulo, setFilterModulo] = useState<string>('TODOS');
   const [filterAno, setFilterAno] = useState<string>('TODOS');
-  const [filterTimeframe, setFilterTimeframe] = useState<'TODAS' | 'FUTURAS' | 'PASSADAS'>('TODAS');
   const [searchTerm, setSearchTerm] = useState<string>('');
 
-  // Modals
+  // Modals & Detail Popups
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showRecordModal, setShowRecordModal] = useState<boolean>(false);
-  const [selectedRecord, setSelectedRecord] = useState<CalendarRecord | null>(null);
+  const [detailRecord, setDetailRecord] = useState<CalendarRecord | null>(null);
+  const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<CalendarRecord[]>([]);
   const [importing, setImporting] = useState<boolean>(false);
 
   // Custom course selector helper state
   const [isCustomCourse, setIsCustomCourse] = useState<boolean>(false);
-  const [isCustomModulo, setIsCustomModulo] = useState<boolean>(false);
 
   // Manual Add/Edit Form State
   const [formState, setFormState] = useState<Partial<CalendarRecord>>({
@@ -130,19 +129,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const loaded = storage.getCalendarRecords();
       setRecords(loaded);
 
-      // Load Cursos de Formação created in Curso de Formação module
+      // Load Cursos de Formação
       const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
       const lessonPlans = storage.getLessonPlans ? storage.getLessonPlans() : [];
       const courseClasses = storage.getCourseClasses ? storage.getCourseClasses() : [];
 
       const combined: { name: string; module?: string; year?: number }[] = [];
 
-      // Add default presets
       DEFAULT_FORMACAO_COURSES.forEach((c) => {
         combined.push({ name: c, module: 'Módulo I', year: 2026 });
       });
 
-      // Add AcademyCourses
       academyCourses.forEach((ac: AcademyCourse) => {
         if (ac.name && !combined.some((c) => c.name.toLowerCase() === ac.name.toLowerCase())) {
           combined.push({
@@ -153,7 +150,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         }
       });
 
-      // Add LessonPlans (Curso de Formação)
       lessonPlans.forEach((lp: LessonPlan) => {
         if (lp.name && !combined.some((c) => c.name.toLowerCase() === lp.name.toLowerCase())) {
           combined.push({
@@ -164,7 +160,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         }
       });
 
-      // Add CourseClasses
       courseClasses.forEach((cc) => {
         if (cc.courseName && !combined.some((c) => c.name.toLowerCase() === cc.courseName.toLowerCase())) {
           combined.push({
@@ -187,6 +182,31 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     loadData();
   }, []);
 
+  // --- LESSON NUMBERING LOGIC (Per Turma + Sigla) ---
+  // Calculates sequential lesson index for each class based on (turma_calendario + sigla_calendario)
+  const sortedAllRecords = useMemo(() => {
+    return [...records].sort((a, b) => {
+      if (a.data_calendario !== b.data_calendario) {
+        return a.data_calendario.localeCompare(b.data_calendario);
+      }
+      return a.horario_calendario.localeCompare(b.horario_calendario);
+    });
+  }, [records]);
+
+  const getCalculatedLessonNumber = (rec: CalendarRecord): number => {
+    const turma = (rec.turma_calendario || '').trim().toUpperCase();
+    const sigla = (rec.sigla_calendario || '').trim().toUpperCase();
+
+    const matchingSeries = sortedAllRecords.filter((r) => {
+      const rTurma = (r.turma_calendario || '').trim().toUpperCase();
+      const rSigla = (r.sigla_calendario || '').trim().toUpperCase();
+      return rTurma === turma && rSigla === sigla;
+    });
+
+    const index = matchingSeries.findIndex((r) => r.id === rec.id);
+    return index >= 0 ? index + 1 : 1;
+  };
+
   // --- EXCEL IMPORT PARSER ---
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -207,7 +227,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         }
 
         const parsed: CalendarRecord[] = data.map((row: any, idx: number) => {
-          // Normalize column headers
           const keys = Object.keys(row);
           const getVal = (...names: string[]) => {
             for (const n of names) {
@@ -221,11 +240,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             return '';
           };
 
-          // Parse Data
           let rawData = getVal('DATA_CALENDARIO', 'DATA CALENDARIO', 'DATA', 'DATE');
           let formattedDate = new Date().toISOString().split('T')[0];
           if (rawData) {
-            // Check if DD/MM/YYYY or YYYY-MM-DD
             if (rawData.includes('/')) {
               const parts = rawData.split('/');
               if (parts.length === 3) {
@@ -238,13 +255,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             } else if (rawData.includes('-')) {
               formattedDate = rawData.split('T')[0];
             } else if (!isNaN(Number(rawData))) {
-              // Excel date serial number
               const d = new Date((Number(rawData) - (25567 + 2)) * 86400 * 1000);
               formattedDate = d.toISOString().split('T')[0];
             }
           }
 
-          // Parse Horario and map to standard slots if applicable
           let rawHora = getVal('HORARIO_CALENDARIO', 'HORARIO CALENDARIO', 'HORARIO', 'HORA');
           let finalHora = rawHora || '08:00 as 09:40';
           if (rawHora.includes('1') && rawHora.includes('08')) finalHora = '08:00 as 09:40';
@@ -299,7 +314,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     }
   };
 
-  // --- SAVE SINGLE RECORD ---
+  // --- SAVE / EDIT SINGLE RECORD ---
   const handleSaveForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formState.data_calendario || !formState.turma_calendario || !formState.sigla_calendario) {
@@ -308,11 +323,16 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     }
 
     try {
-      const res = await storage.saveCalendarRecord(formState);
+      const payload = {
+        ...formState,
+        id: editingRecordId || formState.id
+      };
+      const res = await storage.saveCalendarRecord(payload);
       if (res.success) {
-        showToast('success', 'Agendamento salvo com sucesso no banco de dados!');
+        showToast('success', 'Agendamento salvo com sucesso!');
         setShowRecordModal(false);
-        setSelectedRecord(null);
+        setEditingRecordId(null);
+        setDetailRecord(null);
         await loadData();
       } else {
         showToast('error', res.error || 'Erro ao salvar agendamento.');
@@ -328,6 +348,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const res = await storage.deleteCalendarRecord(id);
       if (res.success) {
         showToast('success', 'Aula excluída com sucesso.');
+        setDetailRecord(null);
         await loadData();
       } else {
         showToast('error', res.error || 'Erro ao excluir aula.');
@@ -337,97 +358,65 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     }
   };
 
-  const handleClearAll = async () => {
-    if (!confirm('ATENÇÃO: Deseja apagar TODOS os registros do calendário no banco de dados? Esta ação não pode ser desfeita.')) return;
-    try {
-      const res = await storage.clearAllCalendarRecords();
-      if (res.success) {
-        showToast('success', 'Banco de dados do calendário zerado com sucesso.');
-        await loadData();
+  // --- DERIVED SUBJECT/DISCIPLINE LIST ---
+  const uniqueSubjectsMap = useMemo(() => {
+    const map = new Map<string, { sigla: string; nome: string; count: number }>();
+    records.forEach((r) => {
+      const sigla = (r.sigla_calendario || '').trim().toUpperCase();
+      if (!sigla) return;
+      const nome = r.disciplina_calendario || sigla;
+      if (!map.has(sigla)) {
+        map.set(sigla, { sigla, nome, count: 1 });
       } else {
-        showToast('error', res.error || 'Erro ao limpar calendário.');
+        map.get(sigla)!.count += 1;
       }
-    } catch (err: any) {
-      showToast('error', err.message);
-    }
-  };
-
-  // Select Course Handler for the Form Selectbox
-  const handleSelectCourseName = (courseName: string) => {
-    if (courseName === 'CUSTOM') {
-      setIsCustomCourse(true);
-      setFormState({ ...formState, curso_calendario: '' });
-      return;
-    }
-
-    setIsCustomCourse(false);
-    const matched = formacaoCoursesList.find((c) => c.name === courseName);
-    setFormState({
-      ...formState,
-      curso_calendario: courseName,
-      modulo_calendario: matched?.module || formState.modulo_calendario || 'Módulo I',
-      ano_calendario: matched?.year || formState.ano_calendario || selectedYear
     });
-  };
+    return Array.from(map.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
+  }, [records]);
 
-  // --- DERIVED FILTER OPTIONS ---
-  const uniqueSiglas = Array.from(new Set(records.map((r) => r.sigla_calendario).filter(Boolean)));
+  // Derive additional unique filters
+  const uniqueTurmas = Array.from(new Set(records.map((r) => r.turma_calendario).filter(Boolean)));
   const uniqueSalas = Array.from(new Set(records.map((r) => r.sala_calendario).filter(Boolean)));
-  const uniqueAulas = Array.from(new Set(records.map((r) => String(r.numero_aula_calendario || '')).filter(Boolean)));
   const uniqueEquipes = Array.from(new Set(records.map((r) => r.equipe_calendario).filter(Boolean)));
   const uniqueModulos = Array.from(new Set(records.map((r) => r.modulo_calendario).filter(Boolean)));
   const uniqueAnos = Array.from(new Set(records.map((r) => String(r.ano_calendario || '')).filter(Boolean)));
 
-  // Filter records
-  const todayStr = new Date().toISOString().split('T')[0];
+  // Filter records specifically for the selected discipline
+  const activeDisciplineRecords = useMemo(() => {
+    if (!selectedDiscipline) return [];
+    const selUpper = selectedDiscipline.trim().toUpperCase();
+    return sortedAllRecords.filter((r) => {
+      const siglaUpper = (r.sigla_calendario || '').trim().toUpperCase();
+      const discUpper = (r.disciplina_calendario || '').trim().toUpperCase();
+      if (siglaUpper !== selUpper && discUpper !== selUpper) return false;
 
-  const filteredRecords = records.filter((r) => {
-    // Search Term
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      const match =
-        r.sigla_calendario.toLowerCase().includes(term) ||
-        r.turma_calendario.toLowerCase().includes(term) ||
-        (r.disciplina_calendario && r.disciplina_calendario.toLowerCase().includes(term)) ||
-        (r.sala_calendario && r.sala_calendario.toLowerCase().includes(term)) ||
-        (r.curso_calendario && r.curso_calendario.toLowerCase().includes(term)) ||
-        (r.modulo_calendario && r.modulo_calendario.toLowerCase().includes(term)) ||
-        (r.ano_calendario && String(r.ano_calendario).includes(term)) ||
-        (r.equipe_calendario && r.equipe_calendario.toLowerCase().includes(term));
-      if (!match) return false;
-    }
+      if (filterTurma !== 'TODAS' && r.turma_calendario !== filterTurma) return false;
+      if (filterSala !== 'TODAS' && r.sala_calendario !== filterSala) return false;
+      if (filterEquipe !== 'TODAS' && r.equipe_calendario !== filterEquipe) return false;
+      if (filterModulo !== 'TODOS' && r.modulo_calendario !== filterModulo) return false;
+      if (filterAno !== 'TODOS' && String(r.ano_calendario) !== filterAno) return false;
 
-    // Sigla Filter
-    if (filterSigla !== 'TODAS' && r.sigla_calendario !== filterSigla) return false;
+      if (searchTerm) {
+        const term = searchTerm.toLowerCase();
+        const match =
+          r.turma_calendario.toLowerCase().includes(term) ||
+          (r.disciplina_calendario && r.disciplina_calendario.toLowerCase().includes(term)) ||
+          (r.sala_calendario && r.sala_calendario.toLowerCase().includes(term)) ||
+          (r.curso_calendario && r.curso_calendario.toLowerCase().includes(term)) ||
+          (r.equipe_calendario && r.equipe_calendario.toLowerCase().includes(term));
+        if (!match) return false;
+      }
 
-    // Sala Filter
-    if (filterSala !== 'TODAS' && r.sala_calendario !== filterSala) return false;
-
-    // Numero Aula Filter
-    if (filterNumeroAula !== 'TODAS' && String(r.numero_aula_calendario) !== filterNumeroAula) return false;
-
-    // Equipe Filter
-    if (filterEquipe !== 'TODAS' && r.equipe_calendario !== filterEquipe) return false;
-
-    // Modulo Filter
-    if (filterModulo !== 'TODOS' && r.modulo_calendario !== filterModulo) return false;
-
-    // Ano Filter
-    if (filterAno !== 'TODOS' && String(r.ano_calendario) !== filterAno) return false;
-
-    // Timeframe Filter
-    if (filterTimeframe === 'FUTURAS' && r.data_calendario < todayStr) return false;
-    if (filterTimeframe === 'PASSADAS' && r.data_calendario >= todayStr) return false;
-
-    return true;
-  });
+      return true;
+    });
+  }, [selectedDiscipline, sortedAllRecords, filterTurma, filterSala, filterEquipe, filterModulo, filterAno, searchTerm]);
 
   // Generate Weekdays for the Selected Month and Year
-  const getWeekdaysInMonth = (year: number, monthZeroBased: number) => {
+  const currentMonthWeekdays = useMemo(() => {
     const days: { dateStr: string; dayNum: number; dayName: string }[] = [];
-    const date = new Date(year, monthZeroBased, 1);
+    const date = new Date(selectedYear, selectedMonth, 1);
 
-    while (date.getMonth() === monthZeroBased) {
+    while (date.getMonth() === selectedMonth) {
       const dayOfWeek = date.getDay(); // 0 = Sunday, 6 = Saturday
       if (dayOfWeek !== 0 && dayOfWeek !== 6) {
         const y = date.getFullYear();
@@ -444,9 +433,46 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       date.setDate(date.getDate() + 1);
     }
     return days;
+  }, [selectedYear, selectedMonth]);
+
+  const selectedDisciplineName = useMemo(() => {
+    if (!selectedDiscipline) return '';
+    const found = uniqueSubjectsMap.find((s) => s.sigla === selectedDiscipline);
+    return found ? `${found.sigla} - ${found.nome}` : selectedDiscipline;
+  }, [selectedDiscipline, uniqueSubjectsMap]);
+
+  // Print PDF for the selected discipline
+  const handlePrintPDF = () => {
+    window.print();
   };
 
-  const currentMonthWeekdays = getWeekdaysInMonth(selectedYear, selectedMonth);
+  const openNewRecordModalForDiscipline = () => {
+    const defaultCourse = formacaoCoursesList[0]?.name || 'Curso de Formação de Delegados de Polícia';
+    setFormState({
+      data_calendario: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`,
+      horario_calendario: '08:00 as 09:40',
+      turma_calendario: 'DL1',
+      sigla_calendario: selectedDiscipline || 'MEAF',
+      disciplina_calendario: selectedDisciplineName.split(' - ')[1] || selectedDiscipline || '',
+      sala_calendario: 'SL01',
+      curso_calendario: defaultCourse,
+      modulo_calendario: 'Módulo I',
+      ano_calendario: selectedYear,
+      numero_aula_calendario: 1,
+      equipe_calendario: 'Equipe Alpha',
+      observacao_calendario: ''
+    });
+    setEditingRecordId(null);
+    setIsCustomCourse(false);
+    setShowRecordModal(true);
+  };
+
+  const openEditRecordModal = (rec: CalendarRecord) => {
+    setFormState({ ...rec });
+    setEditingRecordId(rec.id);
+    setIsCustomCourse(false);
+    setShowRecordModal(true);
+  };
 
   return (
     <div className="space-y-6">
@@ -468,8 +494,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* HEADER BAR */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl backdrop-blur-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+      {/* HEADER BAR (Hidden on Print) */}
+      <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl backdrop-blur-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2.5">
             <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-400">
@@ -480,47 +506,37 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 MÓDULO ACADÊMICO ACADEPOL
               </span>
               <h2 className="text-xl font-extrabold text-slate-100">
-                Calendário de Aulas & Cronograma
+                Calendário por Disciplina
               </h2>
             </div>
           </div>
           <p className="text-xs text-slate-400 mt-1.5 max-w-2xl">
-            Gestão inteligente de turmas, módulos, disciplinas, salas e anos. Herdando cursos do módulo <strong className="text-amber-400">Curso de Formação</strong> com integração ao banco de dados MySQL da ACADEPOL.
+            Selecione uma matéria para abrir e gerenciar a grade horária. A contagem de aulas é sequencial e individual por matéria e turma.
           </p>
         </div>
 
-        {/* Action Buttons */}
+        {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          {selectedDiscipline && (
+            <button
+              onClick={handlePrintPDF}
+              className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center space-x-2 transition"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir PDF da Disciplina</span>
+            </button>
+          )}
+
           <button
             onClick={() => setShowImportModal(true)}
             className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center space-x-2 transition"
           >
             <FileSpreadsheet className="w-4 h-4" />
-            <span>Importar Excel (.xlsx)</span>
+            <span>Importar Excel</span>
           </button>
 
           <button
-            onClick={() => {
-              const defaultCourse = formacaoCoursesList[0]?.name || 'Curso de Formação de Delegados de Polícia';
-              setFormState({
-                data_calendario: `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-01`,
-                horario_calendario: '10:00 as 11:40',
-                turma_calendario: 'DL1',
-                sigla_calendario: 'MEAF',
-                disciplina_calendario: 'Manuseio e Emprego de Armas de Fogo',
-                sala_calendario: 'SL01',
-                curso_calendario: defaultCourse,
-                modulo_calendario: 'Módulo I',
-                ano_calendario: selectedYear,
-                numero_aula_calendario: 1,
-                equipe_calendario: 'Equipe Alpha',
-                observacao_calendario: ''
-              });
-              setIsCustomCourse(false);
-              setIsCustomModulo(false);
-              setSelectedRecord(null);
-              setShowRecordModal(true);
-            }}
+            onClick={openNewRecordModalForDiscipline}
             className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/20 flex items-center space-x-2 transition"
           >
             <Plus className="w-4 h-4" />
@@ -534,39 +550,113 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
-
-          {records.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              title="Limpar todos os registros"
-              className="p-2.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 text-rose-300 rounded-xl transition"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
         </div>
       </div>
 
-      {/* FILTER CONTROLS BAR */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 space-y-4 shadow-lg">
-        {/* Month & Year Navigation Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+      {/* STEP 1: SUBJECT / DISCIPLINE SELECTION PANEL (Print: Hidden) */}
+      <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div className="flex items-center space-x-2">
-            <button
-              onClick={() => {
-                if (selectedMonth === 0) {
-                  setSelectedMonth(11);
-                  setSelectedYear((y) => y - 1);
-                } else {
-                  setSelectedMonth((m) => m - 1);
-                }
-              }}
-              className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 transition"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
+            <BookOpen className="w-5 h-5 text-amber-400" />
+            <h3 className="text-sm font-extrabold text-slate-100">
+              1. Seleção da Matéria / Disciplina
+            </h3>
+          </div>
 
-            <div className="flex items-center space-x-2">
+          {selectedDiscipline && (
+            <button
+              onClick={() => setSelectedDiscipline('')}
+              className="text-xs font-bold text-amber-400 hover:text-amber-300 underline flex items-center space-x-1"
+            >
+              <span>Trocar / Desmarcar Disciplina</span>
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* List of Disciplines / Badges */}
+        {uniqueSubjectsMap.length === 0 ? (
+          <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800/80 p-4">
+            Nenhuma disciplina cadastrada no banco. Clique em <strong className="text-amber-400">Novo Agendamento</strong> ou <strong className="text-amber-400">Importar Excel</strong> para adicionar aulas.
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {uniqueSubjectsMap.map((subj) => {
+              const isSelected = selectedDiscipline === subj.sigla;
+              return (
+                <button
+                  key={subj.sigla}
+                  onClick={() => setSelectedDiscipline(subj.sigla)}
+                  className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/20 font-black scale-105'
+                      : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/60'
+                  }`}
+                >
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${isSelected ? 'bg-slate-950 text-amber-400 font-extrabold' : 'bg-slate-800 text-amber-400'}`}>
+                    {subj.sigla}
+                  </span>
+                  <span className="truncate max-w-[180px]">{subj.nome}</span>
+                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${isSelected ? 'bg-slate-950/20 text-slate-950 font-black' : 'bg-slate-800 text-slate-400'}`}>
+                    {subj.count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* STATE A: NO DISCIPLINE SELECTED */}
+      {!selectedDiscipline ? (
+        <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-4">
+          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-full w-16 h-16 mx-auto flex items-center justify-center text-amber-400">
+            <BookOpen className="w-8 h-8" />
+          </div>
+          <div className="max-w-md mx-auto space-y-1">
+            <h3 className="text-base font-extrabold text-slate-200">
+              Selecione uma matéria para iniciar o calendário
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Clique em uma das siglas acima para visualizar os dias, horários e número das aulas por turma.
+            </p>
+          </div>
+        </div>
+      ) : (
+        /* STATE B: DISCIPLINE SELECTED - SHOW CALENDAR GRID */
+        <div className="space-y-6">
+          {/* Active Discipline Header Indicator */}
+          <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/30 rounded-3xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
+            <div className="flex items-center space-x-3">
+              <span className="px-3 py-1.5 bg-amber-500 text-slate-950 font-black text-sm font-mono rounded-xl shadow">
+                {selectedDiscipline}
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-100">
+                  {selectedDisciplineName}
+                </h3>
+                <span className="text-[11px] font-mono text-amber-400/90 font-semibold">
+                  Exibindo {activeDisciplineRecords.length} aula(s) cadastrada(s)
+                </span>
+              </div>
+            </div>
+
+            {/* Navigation & Month / Year Selector */}
+            <div className="print:hidden flex items-center space-x-2">
+              <button
+                onClick={() => {
+                  if (selectedMonth === 0) {
+                    setSelectedMonth(11);
+                    setSelectedYear((y) => y - 1);
+                  } else {
+                    setSelectedMonth((m) => m - 1);
+                  }
+                }}
+                className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 transition"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+
               <select
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(Number(e.target.value))}
@@ -590,439 +680,637 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   </option>
                 ))}
               </select>
+
+              <button
+                onClick={() => {
+                  if (selectedMonth === 11) {
+                    setSelectedMonth(0);
+                    setSelectedYear((y) => y + 1);
+                  } else {
+                    setSelectedMonth((m) => m + 1);
+                  }
+                }}
+                className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 transition"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* SECONDARY FILTERS BAR (Print: Hidden) */}
+          <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-2.5 text-xs">
+            {/* TURMA Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                TURMA
+              </label>
+              <select
+                value={filterTurma}
+                onChange={(e) => setFilterTurma(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="TODAS">Todas as Turmas</option>
+                {uniqueTurmas.map((t) => (
+                  <option key={t} value={t}>
+                    Turma {t}
+                  </option>
+                ))}
+              </select>
             </div>
 
-            <button
-              onClick={() => {
-                if (selectedMonth === 11) {
-                  setSelectedMonth(0);
-                  setSelectedYear((y) => y + 1);
-                } else {
-                  setSelectedMonth((m) => m + 1);
-                }
-              }}
-              className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-xl text-slate-300 transition"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
+            {/* SALA Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                SALA
+              </label>
+              <select
+                value={filterSala}
+                onChange={(e) => setFilterSala(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="TODAS">Todas as Salas</option>
+                {uniqueSalas.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Timeframe Filter (Passadas / Futuras) */}
-          <div className="flex items-center bg-slate-950 p-1 border border-slate-800 rounded-2xl text-[11px] font-bold">
-            <button
-              onClick={() => setFilterTimeframe('TODAS')}
-              className={`px-3 py-1 rounded-xl transition ${
-                filterTimeframe === 'TODAS'
-                  ? 'bg-amber-500 text-slate-950 shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Todas ({records.length})
-            </button>
-            <button
-              onClick={() => setFilterTimeframe('FUTURAS')}
-              className={`px-3 py-1 rounded-xl transition ${
-                filterTimeframe === 'FUTURAS'
-                  ? 'bg-emerald-500 text-slate-950 shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Futuras
-            </button>
-            <button
-              onClick={() => setFilterTimeframe('PASSADAS')}
-              className={`px-3 py-1 rounded-xl transition ${
-                filterTimeframe === 'PASSADAS'
-                  ? 'bg-indigo-600 text-white shadow'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Passadas
-            </button>
-          </div>
-        </div>
+            {/* EQUIPE Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                EQUIPE / INSTRUTOR
+              </label>
+              <select
+                value={filterEquipe}
+                onChange={(e) => setFilterEquipe(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="TODAS">Todas as Equipes</option>
+                {uniqueEquipes.map((eq) => (
+                  <option key={eq} value={eq}>
+                    {eq}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-        {/* Detailed Attribute Filters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2.5 text-xs">
-          {/* MÓDULO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1 flex items-center space-x-1">
-              <Layers className="w-3 h-3 text-amber-400" />
-              <span>MÓDULO</span>
-            </label>
-            <select
-              value={filterModulo}
-              onChange={(e) => setFilterModulo(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODOS">Todos os Módulos</option>
-              {uniqueModulos.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </div>
+            {/* MÓDULO Filter */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                MÓDULO
+              </label>
+              <select
+                value={filterModulo}
+                onChange={(e) => setFilterModulo(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+              >
+                <option value="TODOS">Todos os Módulos</option>
+                {uniqueModulos.map((m) => (
+                  <option key={m} value={m}>
+                    {m}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* ANO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              ANO
-            </label>
-            <select
-              value={filterAno}
-              onChange={(e) => setFilterAno(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODOS">Todos os Anos</option>
-              {uniqueAnos.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* SIGLA_CALENDARIO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              SIGLA
-            </label>
-            <select
-              value={filterSigla}
-              onChange={(e) => setFilterSigla(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODAS">Todas as Siglas</option>
-              {uniqueSiglas.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* SALA_CALENDARIO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              SALA
-            </label>
-            <select
-              value={filterSala}
-              onChange={(e) => setFilterSala(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODAS">Todas as Salas</option>
-              {uniqueSalas.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* EQUIPE_CALENDARIO Filter */}
-          <div>
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              EQUIPE / INSTRUTOR
-            </label>
-            <select
-              value={filterEquipe}
-              onChange={(e) => setFilterEquipe(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700/80 rounded-xl px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
-            >
-              <option value="TODAS">Todas as Equipes</option>
-              {uniqueEquipes.map((eq) => (
-                <option key={eq} value={eq}>
-                  {eq}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Search Term Input */}
-          <div className="relative">
-            <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
-              BUSCAR TEXTO
-            </label>
+            {/* SEARCH TEXT */}
             <div className="relative">
-              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Curso, módulo, ano..."
-                className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-8 pr-2.5 py-1.5 text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
-              />
+              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                BUSCA RÁPIDA
+              </label>
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Turma, sala..."
+                  className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-8 pr-2.5 py-1.5 text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* VISUAL MONTHLY CALENDAR GRID */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-          <div>
-            <h3 className="text-sm font-extrabold text-slate-100 flex items-center space-x-2">
-              <Calendar className="w-4 h-4 text-amber-400" />
-              <span>
-                Grade Horária do Mês: {MONTH_NAMES[selectedMonth]} de {selectedYear}
-              </span>
-            </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Somente dias úteis (Segunda a Sexta). Aulas organizadas pelas faixas horárias regulamentares.
-            </p>
-          </div>
+          {/* MAIN GRID VIEW FOR MONTH (WEEKDAYS ONLY) */}
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-2xl space-y-4">
+            {currentMonthWeekdays.length === 0 ? (
+              <div className="text-center py-10 text-slate-500 text-xs">
+                Nenhum dia útil encontrado para este mês.
+              </div>
+            ) : (
+              <div className="space-y-4 overflow-x-auto">
+                {currentMonthWeekdays.map((day) => {
+                  const dayRecords = activeDisciplineRecords.filter(
+                    (r) => r.data_calendario === day.dateStr
+                  );
 
-          <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-xl">
-            {filteredRecords.length} Aulas Encontradas
-          </span>
-        </div>
+                  return (
+                    <div
+                      key={day.dateStr}
+                      className="bg-slate-950/80 border border-slate-800 rounded-2xl p-3.5 space-y-2.5 transition"
+                    >
+                      {/* Day Header */}
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
+                        <div className="flex items-center space-x-2.5">
+                          <span className="px-2.5 py-0.5 bg-slate-900 text-amber-400 font-mono font-black rounded-lg border border-slate-700 text-xs">
+                            DIA {day.dayNum < 10 ? `0${day.dayNum}` : day.dayNum}
+                          </span>
+                          <span className="text-xs font-bold text-slate-200 uppercase">
+                            {day.dayName}-feira
+                          </span>
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            ({day.dateStr})
+                          </span>
+                        </div>
 
-        {currentMonthWeekdays.length === 0 ? (
-          <div className="text-center py-10 text-slate-500 text-xs">
-            Nenhum dia útil encontrado para este mês.
-          </div>
-        ) : (
-          <div className="space-y-6 overflow-x-auto">
-            {currentMonthWeekdays.map((day) => {
-              // Get records for this specific date
-              const dayRecords = filteredRecords.filter((r) => r.data_calendario === day.dateStr);
-
-              return (
-                <div
-                  key={day.dateStr}
-                  className={`bg-slate-950/80 border rounded-2xl p-4 space-y-3 transition ${
-                    day.dateStr === todayStr
-                      ? 'border-amber-500/80 shadow-lg shadow-amber-500/5 ring-1 ring-amber-500/30'
-                      : 'border-slate-800'
-                  }`}
-                >
-                  {/* Day Header */}
-                  <div className="flex items-center justify-between pb-2 border-b border-slate-800/80">
-                    <div className="flex items-center space-x-2.5">
-                      <span
-                        className={`px-3 py-1 rounded-xl text-xs font-black font-mono border ${
-                          day.dateStr === todayStr
-                            ? 'bg-amber-500 text-slate-950 border-amber-400'
-                            : 'bg-slate-900 text-slate-200 border-slate-700'
-                        }`}
-                      >
-                        DIA {day.dayNum < 10 ? `0${day.dayNum}` : day.dayNum}
-                      </span>
-                      <div>
-                        <span className="text-xs font-bold text-slate-200 uppercase">
-                          {day.dayName}-feira
-                        </span>
-                        <span className="text-[10px] text-slate-500 font-mono ml-2">
-                          ({day.dateStr})
+                        <span className="text-[10px] font-mono font-semibold text-slate-400">
+                          {dayRecords.length > 0 ? `${dayRecords.length} aula(s)` : 'Sem aulas'}
                         </span>
                       </div>
-                    </div>
 
-                    <span className="text-[10px] font-mono text-slate-400">
-                      {dayRecords.length > 0 ? `${dayRecords.length} aula(s)` : 'Sem aulas registradas'}
-                    </span>
-                  </div>
+                      {/* Time Slots Grid (No interval slots, only class slots + Lunch break) */}
+                      <div className="grid grid-cols-1 md:grid-cols-5 gap-2">
+                        {TIME_SLOTS.map((slot) => {
+                          if (slot.type === 'break') {
+                            return (
+                              <div
+                                key={slot.id}
+                                className="bg-slate-900/40 border border-dashed border-slate-800/80 rounded-xl p-2 flex flex-col justify-center items-center text-center text-slate-500 text-[10px] min-h-[75px]"
+                              >
+                                <Clock className="w-3.5 h-3.5 mb-1 text-slate-600" />
+                                <span className="font-bold">{slot.name}</span>
+                                <span className="font-mono text-[9px] mt-0.5 text-slate-600">
+                                  {slot.label}
+                                </span>
+                              </div>
+                            );
+                          }
 
-                  {/* Time Slots Grid for this Day */}
-                  <div className="grid grid-cols-1 md:grid-cols-7 gap-2">
-                    {TIME_SLOTS.map((slot) => {
-                      if (slot.type === 'break') {
-                        return (
-                          <div
-                            key={slot.id}
-                            className="bg-slate-900/40 border border-dashed border-slate-800/80 rounded-xl p-2.5 flex flex-col justify-center items-center text-center text-slate-500 text-[10px] min-h-[85px]"
-                          >
-                            <Clock className="w-3.5 h-3.5 mb-1 text-slate-600" />
-                            <span className="font-bold">{slot.name}</span>
-                            <span className="font-mono text-[9px] mt-0.5 text-slate-600">
-                              {slot.label}
-                            </span>
-                          </div>
-                        );
-                      }
+                          // Filter records matching this slot
+                          const slotRecords = dayRecords.filter(
+                            (r) =>
+                              r.horario_calendario === slot.label ||
+                              r.horario_calendario.includes(slot.name.split(' ')[0])
+                          );
 
-                      // Find matching records in this time slot
-                      const slotRecords = dayRecords.filter(
-                        (r) =>
-                          r.horario_calendario === slot.label ||
-                          r.horario_calendario.includes(slot.name.split(' ')[0])
-                      );
+                          return (
+                            <div
+                              key={slot.id}
+                              className="bg-slate-900/90 border border-slate-800/90 rounded-xl p-2 flex flex-col justify-between min-h-[85px] space-y-1.5"
+                            >
+                              {/* Slot Label Header */}
+                              <div className="flex items-center justify-between text-[9px] font-mono text-amber-400/90 border-b border-slate-800/60 pb-1">
+                                <span className="font-bold">{slot.name}</span>
+                                <span>{slot.label}</span>
+                              </div>
 
-                      return (
-                        <div
-                          key={slot.id}
-                          className="bg-slate-900/90 border border-slate-800 rounded-xl p-2.5 flex flex-col justify-between min-h-[95px] space-y-2 hover:border-slate-700 transition"
-                        >
-                          {/* Slot Header */}
-                          <div className="flex items-center justify-between text-[9px] font-mono text-amber-400/90 border-b border-slate-800/60 pb-1">
-                            <span className="font-bold">{slot.name}</span>
-                            <span>{slot.label}</span>
-                          </div>
-
-                          {/* Slot Content */}
-                          {slotRecords.length === 0 ? (
-                            <div className="flex-1 flex items-center justify-center text-[10px] text-slate-600 italic">
-                              Livre
-                            </div>
-                          ) : (
-                            <div className="space-y-2">
-                              {slotRecords.map((rec) => (
-                                <div
-                                  key={rec.id}
-                                  className="bg-slate-950 border border-amber-500/30 rounded-xl p-2 space-y-1.5 shadow-md relative group hover:border-amber-400 transition"
-                                >
-                                  {/* Delete Button on Hover */}
-                                  <button
-                                    onClick={() => handleDeleteRecord(rec.id)}
-                                    className="absolute top-1 right-1 p-1 text-slate-500 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition"
-                                    title="Excluir agendamento"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-
-                                  {/* Sigla & Turma Badge */}
-                                  <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
-                                    <span className="px-1.5 py-0.5 bg-amber-500 text-slate-950 font-black rounded text-[9px] tracking-tight">
-                                      {rec.sigla_calendario}
-                                    </span>
-                                    <span className="text-[10px] font-extrabold text-slate-100">
-                                      Turma {rec.turma_calendario}
-                                    </span>
-                                  </div>
-
-                                  {/* Modulo & Ano Badges */}
-                                  <div className="flex items-center space-x-1 text-[9px]">
-                                    {rec.modulo_calendario && (
-                                      <span className="px-1.5 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono font-bold">
-                                        {rec.modulo_calendario}
-                                      </span>
-                                    )}
-                                    {rec.ano_calendario && (
-                                      <span className="px-1.5 py-0.5 bg-slate-800 text-amber-400 border border-slate-700 rounded font-mono font-bold">
-                                        {rec.ano_calendario}
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  {/* Sala & Aula Number */}
-                                  <div className="text-[10px] space-y-0.5">
-                                    <div className="flex items-center space-x-1 text-cyan-300 font-semibold">
-                                      <MapPin className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
-                                      <span className="truncate">
-                                        Sala: {rec.sala_calendario || 'SL01'}
-                                      </span>
-                                    </div>
-
-                                    {rec.numero_aula_calendario && (
-                                      <div className="text-[9px] font-mono font-bold text-amber-400/90">
-                                        {typeof rec.numero_aula_calendario === 'number'
-                                          ? `Aula ${rec.numero_aula_calendario}`
-                                          : rec.numero_aula_calendario}
-                                      </div>
-                                    )}
-                                  </div>
-
-                                  {/* Curso, Disciplina & Equipe */}
-                                  {rec.curso_calendario && (
-                                    <p className="text-[9px] font-bold text-slate-200 line-clamp-1 border-t border-slate-800/80 pt-1">
-                                      {rec.curso_calendario}
-                                    </p>
-                                  )}
-
-                                  {rec.disciplina_calendario && (
-                                    <p className="text-[9px] text-slate-400 line-clamp-1">
-                                      {rec.disciplina_calendario}
-                                    </p>
-                                  )}
-
-                                  {rec.equipe_calendario && (
-                                    <p className="text-[8px] text-indigo-300 font-mono">
-                                      Eq: {rec.equipe_calendario}
-                                    </p>
-                                  )}
+                              {/* Slot Content: Compact Cards with Details Popup Trigger */}
+                              {slotRecords.length === 0 ? (
+                                <div className="flex-1 flex items-center justify-center text-[10px] text-slate-600 italic">
+                                  Livre
                                 </div>
-                              ))}
+                              ) : (
+                                <div className="space-y-1.5">
+                                  {slotRecords.map((rec) => {
+                                    const calculatedAula = getCalculatedLessonNumber(rec);
+                                    return (
+                                      <button
+                                        key={rec.id}
+                                        onClick={() => setDetailRecord(rec)}
+                                        className="w-full text-left bg-slate-950 hover:bg-slate-800/80 border border-amber-500/30 hover:border-amber-400 rounded-lg p-2 space-y-1 transition shadow-sm group"
+                                      >
+                                        <div className="flex items-center justify-between gap-1">
+                                          <div className="flex items-center space-x-1">
+                                            <span className="px-1.5 py-0.2 bg-amber-500 text-slate-950 font-black rounded text-[9px] font-mono">
+                                              {rec.sigla_calendario}
+                                            </span>
+                                            <span className="text-[10px] font-extrabold text-slate-100">
+                                              Turma {rec.turma_calendario}
+                                            </span>
+                                          </div>
+                                          <span className="px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[9px] font-extrabold rounded">
+                                            Aula {calculatedAula}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex items-center justify-between text-[9px] text-slate-400">
+                                          <span className="truncate text-cyan-300 font-semibold flex items-center space-x-1">
+                                            <MapPin className="w-2.5 h-2.5 text-cyan-400 shrink-0" />
+                                            <span>{rec.sala_calendario || 'SL01'}</span>
+                                          </span>
+                                          <span className="text-amber-400 font-medium group-hover:underline flex items-center space-x-0.5">
+                                            <Eye className="w-2.5 h-2.5" />
+                                            <span>Ver</span>
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* SUMMARY TABLE VIEW */}
-      <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-100 flex items-center space-x-2">
-            <BookOpen className="w-4 h-4 text-cyan-400" />
-            <span>Tabela Completa de Registros de Aulas ({filteredRecords.length})</span>
-          </h3>
+      {/* SPECIAL PRINTABLE REPORT VIEW (Appears only on window.print()) */}
+      <div className="hidden print:block text-black bg-white p-6 font-sans">
+        <div className="border-b-2 border-slate-900 pb-4 mb-4 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-black uppercase">ACADEPOL - Academia de Polícia Civil</h1>
+            <h2 className="text-base font-bold text-slate-800">
+              Cronograma Oficial da Disciplina: {selectedDisciplineName}
+            </h2>
+            <p className="text-xs text-slate-600">
+              Período: {MONTH_NAMES[selectedMonth]} de {selectedYear}
+            </p>
+          </div>
+          <div className="text-right text-xs font-mono">
+            <div>Data de Impressão: {new Date().toLocaleDateString('pt-BR')}</div>
+            <div>Total de Aulas: {activeDisciplineRecords.length}</div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs border-collapse">
-            <thead>
-              <tr className="border-b border-slate-800 text-[10px] uppercase font-bold text-slate-400 bg-slate-950/60">
-                <th className="p-3">DATA</th>
-                <th className="p-3">HORÁRIO</th>
-                <th className="p-3">ANO</th>
-                <th className="p-3">MÓDULO</th>
-                <th className="p-3">TURMA</th>
-                <th className="p-3">SIGLA</th>
-                <th className="p-3">DISCIPLINA</th>
-                <th className="p-3">SALA</th>
-                <th className="p-3">CURSO DE FORMAÇÃO</th>
-                <th className="p-3">Nº AULA</th>
-                <th className="p-3">EQUIPE</th>
-                <th className="p-3 text-right">AÇÕES</th>
+        <table className="w-full text-left text-xs border-collapse border border-slate-400">
+          <thead>
+            <tr className="bg-slate-200 text-slate-900 font-bold uppercase border-b border-slate-400">
+              <th className="p-2 border border-slate-400">Data</th>
+              <th className="p-2 border border-slate-400">Horário</th>
+              <th className="p-2 border border-slate-400">Turma</th>
+              <th className="p-2 border border-slate-400">Nº Aula (Seq)</th>
+              <th className="p-2 border border-slate-400">Sala</th>
+              <th className="p-2 border border-slate-400">Equipe / Instrutor</th>
+              <th className="p-2 border border-slate-400">Observações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activeDisciplineRecords.map((r) => (
+              <tr key={r.id} className="border-b border-slate-300">
+                <td className="p-2 border border-slate-300 font-bold">{r.data_calendario}</td>
+                <td className="p-2 border border-slate-300">{r.horario_calendario}</td>
+                <td className="p-2 border border-slate-300 font-bold">Turma {r.turma_calendario}</td>
+                <td className="p-2 border border-slate-300 font-bold">
+                  Aula {getCalculatedLessonNumber(r)}
+                </td>
+                <td className="p-2 border border-slate-300">{r.sala_calendario || 'SL01'}</td>
+                <td className="p-2 border border-slate-300">{r.equipe_calendario || '-'}</td>
+                <td className="p-2 border border-slate-300">{r.observacao_calendario || '-'}</td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 text-slate-200 font-mono text-[11px]">
-              {filteredRecords.length === 0 ? (
-                <tr>
-                  <td colSpan={12} className="p-6 text-center text-slate-500 font-sans text-xs">
-                    Nenhum registro de aula cadastrado para os filtros selecionados.
-                  </td>
-                </tr>
-              ) : (
-                filteredRecords.map((r) => (
-                  <tr key={r.id} className="hover:bg-slate-800/40 transition">
-                    <td className="p-3 font-bold text-amber-400">{r.data_calendario}</td>
-                    <td className="p-3 font-semibold text-slate-300">{r.horario_calendario}</td>
-                    <td className="p-3 font-bold text-amber-300">{r.ano_calendario || '-'}</td>
-                    <td className="p-3 font-bold text-indigo-300">{r.modulo_calendario || '-'}</td>
-                    <td className="p-3 font-extrabold text-slate-100">{r.turma_calendario}</td>
-                    <td className="p-3 font-black text-cyan-400">{r.sigla_calendario}</td>
-                    <td className="p-3 font-sans text-slate-300">{r.disciplina_calendario || '-'}</td>
-                    <td className="p-3 text-indigo-300 font-bold">{r.sala_calendario || 'SL01'}</td>
-                    <td className="p-3 font-sans font-bold text-slate-200">{r.curso_calendario || '-'}</td>
-                    <td className="p-3 text-amber-300 font-bold">{r.numero_aula_calendario || '-'}</td>
-                    <td className="p-3 font-sans text-slate-300">{r.equipe_calendario || '-'}</td>
-                    <td className="p-3 text-right">
-                      <button
-                        onClick={() => handleDeleteRecord(r.id)}
-                        className="p-1.5 text-slate-500 hover:text-rose-400 transition"
-                        title="Excluir"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+            ))}
+          </tbody>
+        </table>
+
+        <div className="mt-12 flex justify-around text-xs font-bold text-slate-800 pt-8 border-t border-slate-300">
+          <div className="text-center">
+            __________________________________________<br />
+            Coordenadoria Pedagógica - ACADEPOL
+          </div>
+          <div className="text-center">
+            __________________________________________<br />
+            Chefia de Ensino e Instrução
+          </div>
         </div>
       </div>
 
-      {/* MODAL 1: EXCEL IMPORT */}
+      {/* MODAL 1: DETALHES DA AULA (CLICKED FROM GRID) */}
+      {detailRecord && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <span className="px-2.5 py-1 bg-amber-500 text-slate-950 font-black text-xs font-mono rounded-lg">
+                  {detailRecord.sigla_calendario}
+                </span>
+                <h3 className="text-base font-extrabold text-slate-100">
+                  Detalhes da Aula
+                </h3>
+              </div>
+              <button
+                onClick={() => setDetailRecord(null)}
+                className="text-slate-400 hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2">
+                <div className="text-sm font-extrabold text-slate-100">
+                  {detailRecord.disciplina_calendario || detailRecord.sigla_calendario}
+                </div>
+                <div className="text-amber-400 font-mono font-bold flex items-center space-x-2">
+                  <Award className="w-4 h-4 text-amber-400" />
+                  <span>
+                    Turma {detailRecord.turma_calendario} • Aula nº {getCalculatedLessonNumber(detailRecord)} (sequencial da matéria)
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 font-mono text-[11px]">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Data & Horário</span>
+                  <span className="text-slate-200 font-bold">{detailRecord.data_calendario}</span>
+                  <span className="text-slate-400 block text-[10px]">{detailRecord.horario_calendario}</span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Sala / Local</span>
+                  <span className="text-cyan-300 font-bold">{detailRecord.sala_calendario || 'SL01'}</span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Curso de Formação</span>
+                  <span className="text-slate-200">{detailRecord.curso_calendario || '-'}</span>
+                </div>
+
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Módulo & Ano</span>
+                  <span className="text-indigo-300 font-bold">{detailRecord.modulo_calendario || 'Módulo I'} ({detailRecord.ano_calendario || 2026})</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold mb-1">Equipe de Instrução</span>
+                <span className="text-slate-200 font-bold">{detailRecord.equipe_calendario || 'Não especificada'}</span>
+              </div>
+
+              {detailRecord.observacao_calendario && (
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold mb-1">Observações</span>
+                  <p className="text-slate-300 font-sans text-[11px] leading-relaxed">{detailRecord.observacao_calendario}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+              <button
+                onClick={() => handleDeleteRecord(detailRecord.id)}
+                className="px-3.5 py-2 bg-rose-950/60 hover:bg-rose-900/80 border border-rose-800 text-rose-300 rounded-xl text-xs font-bold flex items-center space-x-1.5 transition"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Excluir</span>
+              </button>
+
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => openEditRecordModal(detailRecord)}
+                  className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-extrabold flex items-center space-x-1.5 transition"
+                >
+                  <Edit3 className="w-3.5 h-3.5" />
+                  <span>Editar</span>
+                </button>
+                <button
+                  onClick={() => setDetailRecord(null)}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: NEW / EDIT RECORD FORM */}
+      {showRecordModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
+                <Plus className="w-5 h-5 text-amber-400" />
+                <span>{editingRecordId ? 'Editar Agendamento' : 'Novo Agendamento de Aula'}</span>
+              </h3>
+              <button
+                onClick={() => {
+                  setShowRecordModal(false);
+                  setEditingRecordId(null);
+                }}
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveForm} className="space-y-4 text-xs">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {/* Data */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    DATA DA AULA *
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={formState.data_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, data_calendario: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Horário Slot */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    FAIXA HORÁRIA *
+                  </label>
+                  <select
+                    value={formState.horario_calendario || '08:00 as 09:40'}
+                    onChange={(e) => setFormState({ ...formState, horario_calendario: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="08:00 as 09:40">1ª Aula (08:00 as 09:40)</option>
+                    <option value="10:00 as 11:40">2ª Aula (10:00 as 11:40)</option>
+                    <option value="14:00 as 15:40">3ª Aula (14:00 as 15:40)</option>
+                    <option value="16:00 as 16:40">4ª Aula (16:00 as 16:40)</option>
+                  </select>
+                </div>
+
+                {/* Turma */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    TURMA (ex: DL1, EP1) *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formState.turma_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, turma_calendario: e.target.value.toUpperCase() })}
+                    placeholder="Ex: DL1"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none uppercase font-mono font-bold"
+                  />
+                </div>
+
+                {/* Sigla */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    SIGLA DA DISCIPLINA *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={formState.sigla_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, sigla_calendario: e.target.value.toUpperCase() })}
+                    placeholder="Ex: MEAF"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-amber-400 focus:border-amber-500 focus:outline-none uppercase font-mono font-extrabold"
+                  />
+                </div>
+
+                {/* Nome Completo da Disciplina */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    NOME DA DISCIPLINA
+                  </label>
+                  <input
+                    type="text"
+                    value={formState.disciplina_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, disciplina_calendario: e.target.value })}
+                    placeholder="Ex: Manuseio e Emprego de Armas de Fogo"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Sala */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    SALA / LOCAL
+                  </label>
+                  <input
+                    type="text"
+                    value={formState.sala_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, sala_calendario: e.target.value })}
+                    placeholder="Ex: SL01"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Módulo */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    MÓDULO DO CURSO
+                  </label>
+                  <select
+                    value={formState.modulo_calendario || 'Módulo I'}
+                    onChange={(e) => setFormState({ ...formState, modulo_calendario: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    {PRESET_MODULES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Curso de Formação */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    CURSO DE FORMAÇÃO
+                  </label>
+                  <select
+                    value={isCustomCourse ? 'CUSTOM' : formState.curso_calendario || ''}
+                    onChange={(e) => {
+                      if (e.target.value === 'CUSTOM') {
+                        setIsCustomCourse(true);
+                        setFormState({ ...formState, curso_calendario: '' });
+                      } else {
+                        setIsCustomCourse(false);
+                        setFormState({ ...formState, curso_calendario: e.target.value });
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    {formacaoCoursesList.map((c, i) => (
+                      <option key={i} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                    <option value="CUSTOM">+ Outro Curso (Digitar)</option>
+                  </select>
+
+                  {isCustomCourse && (
+                    <input
+                      type="text"
+                      value={formState.curso_calendario || ''}
+                      onChange={(e) => setFormState({ ...formState, curso_calendario: e.target.value })}
+                      placeholder="Digite o nome do curso de formação..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 mt-2 focus:border-amber-500 focus:outline-none"
+                    />
+                  )}
+                </div>
+
+                {/* Equipe */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    EQUIPE / INSTRUTOR
+                  </label>
+                  <input
+                    type="text"
+                    value={formState.equipe_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, equipe_calendario: e.target.value })}
+                    placeholder="Ex: Equipe Alpha"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Ano */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    ANO LETIVO
+                  </label>
+                  <input
+                    type="number"
+                    value={formState.ano_calendario || 2026}
+                    onChange={(e) => setFormState({ ...formState, ano_calendario: Number(e.target.value) })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none font-mono"
+                  />
+                </div>
+
+                {/* Observações */}
+                <div className="sm:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    OBSERVAÇÕES ADICIONAIS
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={formState.observacao_calendario || ''}
+                    onChange={(e) => setFormState({ ...formState, observacao_calendario: e.target.value })}
+                    placeholder="Observações sobre a aula..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowRecordModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl shadow-lg shadow-amber-500/20 transition"
+                >
+                  Salvar Agendamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: EXCEL IMPORT */}
       {showImportModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl">
@@ -1045,15 +1333,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              Selecione o arquivo Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">ANO</strong>, <strong className="text-amber-400">MODULO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">CURSO</strong>, <strong className="text-amber-400">AULA</strong>, <strong className="text-amber-400">EQUIPE</strong> e <strong className="text-amber-400">OBSERVAÇÃO</strong>.
+              Selecione a planilha Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">MODULO</strong>, <strong className="text-amber-400">ANO</strong>.
             </p>
 
-            {/* Dropzone */}
             <div className="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 rounded-2xl p-6 text-center space-y-3 bg-slate-950/50 transition">
               <Upload className="w-8 h-8 text-indigo-400 mx-auto" />
               <div className="text-xs text-slate-300">
                 <label className="cursor-pointer font-extrabold text-amber-400 hover:underline">
-                  Clique aqui para selecionar o arquivo
+                  Clique aqui para selecionar o arquivo Excel
                   <input
                     type="file"
                     accept=".xlsx, .xls, .csv"
@@ -1061,355 +1348,57 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     className="hidden"
                   />
                 </label>
-                <span className="block text-[11px] text-slate-500 mt-1">
-                  Formatos aceitos: .XLSX, .XLS, .CSV
-                </span>
               </div>
             </div>
 
-            {/* Preview Section */}
             {previewRecords.length > 0 && (
               <div className="space-y-3 border-t border-slate-800 pt-4">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-emerald-400">
-                    ✓ {previewRecords.length} linha(s) resgatadas da planilha
+                    ✓ {previewRecords.length} linha(s) lidas
                   </span>
                 </div>
 
-                <div className="max-h-56 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
+                <div className="max-h-52 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
                   <table className="w-full text-left text-[11px] font-mono">
                     <thead className="bg-slate-900 sticky top-0 text-amber-400 font-bold border-b border-slate-800">
                       <tr>
                         <th className="p-2">DATA</th>
-                        <th className="p-2">ANO</th>
-                        <th className="p-2">MÓDULO</th>
                         <th className="p-2">TURMA</th>
                         <th className="p-2">SIGLA</th>
-                        <th className="p-2">CURSO</th>
+                        <th className="p-2">MÓDULO</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/50 text-slate-300">
-                      {previewRecords.slice(0, 10).map((r, i) => (
+                      {previewRecords.slice(0, 8).map((r, i) => (
                         <tr key={i}>
                           <td className="p-2 text-emerald-400">{r.data_calendario}</td>
-                          <td className="p-2 text-amber-300">{r.ano_calendario}</td>
-                          <td className="p-2 text-indigo-300">{r.modulo_calendario}</td>
                           <td className="p-2 font-bold">{r.turma_calendario}</td>
-                          <td className="p-2 text-cyan-300">{r.sigla_calendario}</td>
-                          <td className="p-2 truncate max-w-[120px]">{r.curso_calendario}</td>
+                          <td className="p-2 text-amber-400 font-bold">{r.sigla_calendario}</td>
+                          <td className="p-2 text-indigo-300">{r.modulo_calendario}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
 
-                {previewRecords.length > 10 && (
-                  <p className="text-[10px] text-slate-500 text-center">
-                    E mais {previewRecords.length - 10} linha(s)...
-                  </p>
-                )}
+                <div className="flex items-center justify-end space-x-2 pt-2">
+                  <button
+                    onClick={() => setPreviewRecords([])}
+                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold"
+                  >
+                    Descartar
+                  </button>
+                  <button
+                    onClick={saveImportedData}
+                    disabled={importing}
+                    className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-emerald-500/20"
+                  >
+                    {importing ? 'Gravando...' : 'Gravar no Banco'}
+                  </button>
+                </div>
               </div>
             )}
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end space-x-3 border-t border-slate-800 pt-4">
-              <button
-                type="button"
-                onClick={() => {
-                  setShowImportModal(false);
-                  setPreviewRecords([]);
-                }}
-                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700 transition"
-              >
-                Cancelar
-              </button>
-
-              <button
-                type="button"
-                disabled={previewRecords.length === 0 || importing}
-                onClick={saveImportedData}
-                className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 disabled:opacity-50 flex items-center space-x-2 transition"
-              >
-                {importing && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-                <span>Confirmar e Gravar no Banco</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* MODAL 2: MANUAL RECORD FORM */}
-      {showRecordModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center space-x-2.5">
-                <Plus className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-extrabold text-slate-100">
-                  Cadastrar Agendamento no Calendário
-                </h3>
-              </div>
-              <button
-                onClick={() => setShowRecordModal(false)}
-                className="text-slate-400 hover:text-slate-200"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveForm} className="space-y-4 text-xs">
-              {/* SELECTBOX DO CURSO DE FORMAÇÃO */}
-              <div className="bg-slate-950/80 border border-amber-500/30 rounded-2xl p-3.5 space-y-2">
-                <label className="block text-[11px] font-extrabold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
-                  <GraduationCap className="w-4 h-4 text-amber-400" />
-                  <span>CURSO DE FORMAÇÃO (HERDADO) *</span>
-                </label>
-                <p className="text-[10px] text-slate-400">
-                  Selecione um curso criado no módulo Curso de Formação para herdar suas informações.
-                </p>
-
-                {!isCustomCourse ? (
-                  <select
-                    value={formState.curso_calendario || ''}
-                    onChange={(e) => handleSelectCourseName(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                  >
-                    {formacaoCoursesList.map((c, i) => (
-                      <option key={i} value={c.name}>
-                        {c.name}
-                      </option>
-                    ))}
-                    <option value="CUSTOM">+ Outro Curso (Digitar Nome Customizado)</option>
-                  </select>
-                ) : (
-                  <div className="space-y-1">
-                    <input
-                      type="text"
-                      value={formState.curso_calendario || ''}
-                      onChange={(e) => setFormState({ ...formState, curso_calendario: e.target.value })}
-                      placeholder="Digite o nome do Curso de Formação..."
-                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setIsCustomCourse(false)}
-                      className="text-[10px] text-amber-400 hover:underline font-bold"
-                    >
-                      ← Voltar à lista de cursos cadastrados
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* MÓDULO E ANO DO CALENDÁRIO */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {/* SELECTBOX DO MÓDULO DO CURSO */}
-                <div>
-                  <label className="block text-[10px] font-bold text-indigo-300 uppercase mb-1 flex items-center space-x-1">
-                    <Layers className="w-3 h-3 text-indigo-400" />
-                    <span>MÓDULO DO CURSO *</span>
-                  </label>
-                  {!isCustomModulo ? (
-                    <select
-                      value={formState.modulo_calendario || 'Módulo I'}
-                      onChange={(e) => {
-                        if (e.target.value === 'CUSTOM') {
-                          setIsCustomModulo(true);
-                          setFormState({ ...formState, modulo_calendario: '' });
-                        } else {
-                          setFormState({ ...formState, modulo_calendario: e.target.value });
-                        }
-                      }}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                    >
-                      {PRESET_MODULES.map((m) => (
-                        <option key={m} value={m}>
-                          {m}
-                        </option>
-                      ))}
-                      <option value="CUSTOM">+ Outro Módulo (Digitar...)</option>
-                    </select>
-                  ) : (
-                    <div className="space-y-1">
-                      <input
-                        type="text"
-                        value={formState.modulo_calendario || ''}
-                        onChange={(e) => setFormState({ ...formState, modulo_calendario: e.target.value })}
-                        placeholder="Ex: Módulo VI ou Específico"
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setIsCustomModulo(false)}
-                        className="text-[10px] text-indigo-300 hover:underline font-bold"
-                      >
-                        ← Voltar à lista de módulos
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                {/* SELECTBOX DO ANO DO CALENDÁRIO */}
-                <div>
-                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    ANO DO CALENDÁRIO *
-                  </label>
-                  <select
-                    value={formState.ano_calendario || selectedYear}
-                    onChange={(e) => setFormState({ ...formState, ano_calendario: Number(e.target.value) })}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                  >
-                    {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map((y) => (
-                      <option key={y} value={y}>
-                        {y}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* DATA, HORARIO, TURMA, SIGLA */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    DATA_CALENDARIO *
-                  </label>
-                  <input
-                    type="date"
-                    value={formState.data_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, data_calendario: e.target.value })}
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    HORARIO_CALENDARIO *
-                  </label>
-                  <select
-                    value={formState.horario_calendario || '10:00 as 11:40'}
-                    onChange={(e) => setFormState({ ...formState, horario_calendario: e.target.value })}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="08:00 as 09:40">08:00 as 09:40 (1ª Aula)</option>
-                    <option value="10:00 as 11:40">10:00 as 11:40 (2ª Aula)</option>
-                    <option value="14:00 as 15:40">14:00 as 15:40 (3ª Aula)</option>
-                    <option value="16:00 as 16:40">16:00 as 16:40 (4ª Aula)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    TURMA_CALENDARIO *
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.turma_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, turma_calendario: e.target.value })}
-                    placeholder="Ex: DL1"
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    SIGLA_CALENDARIO *
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.sigla_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, sigla_calendario: e.target.value })}
-                    placeholder="Ex: MEAF"
-                    required
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    SALA_CALENDARIO
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.sala_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, sala_calendario: e.target.value })}
-                    placeholder="Ex: SL01 ou Estande"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    NUMERO_AULA_CALENDARIO
-                  </label>
-                  <input
-                    type="text"
-                    value={formState.numero_aula_calendario || ''}
-                    onChange={(e) => setFormState({ ...formState, numero_aula_calendario: e.target.value })}
-                    placeholder="Ex: 1 ou Aula 01"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                  DISCIPLINA_CALENDARIO
-                </label>
-                <input
-                  type="text"
-                  value={formState.disciplina_calendario || ''}
-                  onChange={(e) => setFormState({ ...formState, disciplina_calendario: e.target.value })}
-                  placeholder="Ex: Manuseio e Emprego de Armas de Fogo"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                  EQUIPE_CALENDARIO
-                </label>
-                <input
-                  type="text"
-                  value={formState.equipe_calendario || ''}
-                  onChange={(e) => setFormState({ ...formState, equipe_calendario: e.target.value })}
-                  placeholder="Ex: Equipe Alpha"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                  OBSERVAÇÃO_CALENDARIO
-                </label>
-                <textarea
-                  value={formState.observacao_calendario || ''}
-                  onChange={(e) => setFormState({ ...formState, observacao_calendario: e.target.value })}
-                  rows={2}
-                  placeholder="Observações adicionais sobre o agendamento..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 border-t border-slate-800 pt-4">
-                <button
-                  type="button"
-                  onClick={() => setShowRecordModal(false)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold hover:bg-slate-700 transition"
-                >
-                  Cancelar
-                </button>
-
-                <button
-                  type="submit"
-                  className="px-5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/20 transition"
-                >
-                  Salvar Agendamento
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}
