@@ -63,16 +63,16 @@ const normalizeTimeSlot = (rawHora: string): string => {
 
   // Se contém a palavra HORARIO + número, faz o DE/PARA principal
   if (h.includes('HORARIO') || h.includes('AULA') || numero) {
-    if (numero === '1' || h.includes('1 HORARIO') || h.includes('PRIMEIRO')) {
+    if (numero === '1' || h.includes('1º HORARIO') || h.includes('PRIMEIRO')) {
       return '08:00 as 09:40';
     }
-    if (numero === '2' || h.includes('2 HORARIO') || h.includes('SEGUNDO')) {
+    if (numero === '2' || h.includes('2º HORARIO') || h.includes('SEGUNDO')) {
       return '10:00 as 11:40';
     }
-    if (numero === '3' || h.includes('3 HORARIO') || h.includes('TERCEIRO')) {
+    if (numero === '3' || h.includes('3º HORARIO') || h.includes('TERCEIRO')) {
       return '14:00 as 15:40';
     }
-    if (numero === '4' || h.includes('4 HORARIO') || h.includes('QUARTO')) {
+    if (numero === '4' || h.includes('4º HORARIO') || h.includes('QUARTO')) {
       return '16:00 as 17:40';
     }
   }
