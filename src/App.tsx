@@ -65,12 +65,15 @@ export default function App() {
     }
   };
 
+  const isMobileMode = React.useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const search = window.location.search;
+    const path = window.location.pathname;
+    return search.includes('mode=mobile-class') || search.includes('mobile=true') || path === '/iniciar-aula';
+  }, []);
+
   useEffect(() => {
     refreshData();
-    const urlParams = new URLSearchParams(window.location.search);
-    if (urlParams.get('mode') === 'mobile-class' || urlParams.get('mobile') === 'true') {
-      setActiveModule('iniciar-aula-mobile');
-    }
   }, []);
 
   const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
@@ -108,6 +111,17 @@ export default function App() {
     setCurrentUser(res.user);
     refreshData();
   };
+
+  if (isMobileMode) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+        <MobileClassModule
+          currentUser={currentUser || ({ id: 'temp-mobile', masp: '', name: 'Instrutor', role: 'Armeiro', cargo: 'Inspetor de Polícia' } as unknown as User)}
+          onRefresh={refreshData}
+        />
+      </div>
+    );
+  }
 
   if (!currentUser) {
     return (

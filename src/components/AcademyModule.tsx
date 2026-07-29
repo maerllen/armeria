@@ -40,7 +40,8 @@ import {
   Layers,
   Calendar,
   RotateCcw,
-  Eye
+  Eye,
+  Smartphone
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -1922,6 +1923,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => {
+                  const mobileUrl = `${window.location.origin}/?mode=mobile-class`;
+                  navigator.clipboard.writeText(mobileUrl);
+                  alert(`Link de acesso exclusivo para Celular copiado com sucesso!\n\n${mobileUrl}\n\nEnvie aos instrutores no estande.`);
+                }}
+                className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Copiar link de acesso direto do celular para instrutores no estande"
+              >
+                <Smartphone className="w-4 h-4 text-indigo-400" />
+                <span>📱 Link Celular Estande</span>
+              </button>
+
               <button
                 onClick={() => handleOpenClassModal(undefined, 'Formação')}
                 className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"

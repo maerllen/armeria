@@ -100,12 +100,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: canManageCourses
     },
     {
-      id: 'iniciar-aula-mobile',
-      label: '📱 Iniciar Aula (Celular)',
-      icon: Smartphone,
-      visible: true
-    },
-    {
       id: 'relatorio',
       label: 'Relatórios',
       icon: FileText,
