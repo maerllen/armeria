@@ -15,6 +15,7 @@ import { MovementModule } from './components/MovementModule';
 import { ReportModule } from './components/ReportModule';
 import { AcademyModule } from './components/AcademyModule';
 import { CourseManagementModule } from './components/CourseManagementModule';
+import { MobileClassModule } from './components/MobileClassModule';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -66,6 +67,10 @@ export default function App() {
 
   useEffect(() => {
     refreshData();
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('mode') === 'mobile-class' || urlParams.get('mobile') === 'true') {
+      setActiveModule('iniciar-aula-mobile');
+    }
   }, []);
 
   const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
@@ -307,6 +312,13 @@ export default function App() {
               departments={departments}
               units={units}
               calibers={calibers}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'iniciar-aula-mobile' && (
+            <MobileClassModule
+              currentUser={currentUser}
               onRefresh={refreshData}
             />
           )}

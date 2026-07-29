@@ -74,8 +74,8 @@ export const ManualModule: React.FC = () => {
   };
 
   const handlePrint = () => {
-    if (reportRef.current) {
-      const contentHtml = reportRef.current.innerHTML;
+    if (manualRef.current) {
+      const contentHtml = manualRef.current.innerHTML;
       const html = `
         <!DOCTYPE html>
         <html lang="pt-BR">

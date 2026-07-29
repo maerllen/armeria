@@ -148,7 +148,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             <td style="padding: 8px;">${w.type} ${w.model}</td>
             <td style="padding: 8px; font-family: monospace; font-weight: bold; color: #b45309;">${w.serialNumber}</td>
             <td style="padding: 8px;">${w.caliber}</td>
-            <td style="padding: 8px;">${w.condition || 'Bom'} (${w.situation || 'Ativa'})</td>
+            <td style="padding: 8px;">${(w as any).condition || 'Bom'} (${(w as any).situation || 'Ativa'})</td>
           </tr>
         `).join('');
       }
@@ -162,7 +162,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             <tr style="border-bottom: 1px solid #e5e7eb;">
               <td style="padding: 8px; font-weight: bold;">${idx + 1}</td>
               <td style="padding: 8px; font-weight: bold;">Calibre ${cal?.name || s.caliberId}</td>
-              <td style="padding: 8px; font-family: monospace;">${s.lotNumber || 'Padrão'}</td>
+              <td style="padding: 8px; font-family: monospace;">${(s as any).lotNumber || 'Padrão'}</td>
               <td style="padding: 8px; font-weight: bold; color: #0369a1;">${s.quantity} un</td>
             </tr>
           `;
@@ -570,7 +570,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                               <td className="py-2.5 px-3 font-semibold text-slate-100">{w.type} {w.model}</td>
                               <td className="py-2.5 px-3 font-mono font-bold text-amber-400">{w.serialNumber}</td>
                               <td className="py-2.5 px-3 text-slate-300">{w.caliber}</td>
-                              <td className="py-2.5 px-3 text-slate-400">{w.condition || 'Bom'}</td>
+                              <td className="py-2.5 px-3 text-slate-400">{(w as any).condition || 'Bom'}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -598,7 +598,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                             return (
                               <tr key={s.id} className="hover:bg-slate-900/50">
                                 <td className="py-2.5 px-3 font-bold text-slate-100">Calibre {cal?.name || s.caliberId}</td>
-                                <td className="py-2.5 px-3 font-mono text-slate-400">{s.lotNumber || 'Padrão'}</td>
+                                <td className="py-2.5 px-3 font-mono text-slate-400">{(s as any).lotNumber || 'Padrão'}</td>
                                 <td className="py-2.5 px-3 text-right font-bold font-mono text-cyan-400">{s.quantity} un</td>
                               </tr>
                             );

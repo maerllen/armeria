@@ -11,7 +11,8 @@ import {
   FileText,
   BookOpen,
   GraduationCap,
-  Award
+  Award,
+  Smartphone
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -97,6 +98,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Gerência de Cursos',
       icon: BookOpen,
       visible: canManageCourses
+    },
+    {
+      id: 'iniciar-aula-mobile',
+      label: '📱 Iniciar Aula (Celular)',
+      icon: Smartphone,
+      visible: true
     },
     {
       id: 'relatorio',

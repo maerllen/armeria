@@ -12,7 +12,8 @@ export type ModuleType =
   | 'manual'
   | 'cursos'
   | 'ensino-continuado'
-  | 'gerencia-cursos';
+  | 'gerencia-cursos'
+  | 'iniciar-aula-mobile';
 
 export type UserCargo = 
   | 'Delegado' 

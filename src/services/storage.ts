@@ -584,6 +584,18 @@ class StorageService {
     return caliber;
   }
 
+  public async updateCaliber(id: string, name: string): Promise<Caliber> {
+    const res = await fetch(`/api/calibers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, actor: this.state.currentUser })
+    });
+    const caliber = await res.json();
+    if (!res.ok) throw new Error(caliber.error || 'Erro ao atualizar calibre.');
+    await this.refreshFromServer();
+    return caliber;
+  }
+
   public async deleteCaliber(id: string): Promise<boolean> {
     const res = await fetch(`/api/calibers/${id}`, {
       method: 'DELETE',

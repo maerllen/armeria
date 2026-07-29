@@ -264,7 +264,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
           <div class="box-title">3. Auditoria e Armeiros Responsáveis</div>
           <div class="grid" style="margin-bottom: 0;">
             <div class="field"><span class="label">Armeiro Aprovador:</span> <span class="val">${mov.approvedByUserName || 'Pendente'}</span></div>
-            <div class="field"><span class="label">Confirmado Por (Devolução):</span> <span class="val">${mov.returnConfirmedByUserName || 'Não Devolvido'}</span></div>
+            <div class="field"><span class="label">Confirmado Por (Devolução):</span> <span class="val">${mov.receiptConfirmedByUserName || 'Não Devolvido'}</span></div>
           </div>
           ${mov.divergenceJustification ? `<div class="field" style="margin-top: 6px;"><span class="label">Justificativa de Divergência:</span> <span class="val" style="font-weight: normal; color: #b91c1c;">${mov.divergenceJustification}</span></div>` : ''}
         </div>
@@ -275,7 +275,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
             <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Policial Cautelante (MASP: ${mov.requesterMasp})</span>
           </div>
           <div class="sig-line">
-            ${mov.returnConfirmedByUserName || mov.approvedByUserName || 'Armeiro Responsável'}<br>
+            ${mov.receiptConfirmedByUserName || mov.approvedByUserName || 'Armeiro Responsável'}<br>
             <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro da Unidade</span>
           </div>
         </div>

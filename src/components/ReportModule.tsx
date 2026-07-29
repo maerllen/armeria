@@ -211,7 +211,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
           <div class="meta">
             Gerado em: ${new Date().toLocaleString('pt-BR')}<br>
-            Filtros Ativos: ${reportType.toUpperCase()}
+            Filtros Ativos: ${activeTab.toUpperCase()}
           </div>
         </div>
 
@@ -228,7 +228,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </tr>
           </thead>
           <tbody>
-            ${filteredMovements.slice(0, 100).map(m => `
+            ${filteredWeaponMovements.slice(0, 100).map(m => `
               <tr>
                 <td>#${m.id}</td>
                 <td>${formatTimestamp(m.createdAt)}</td>
