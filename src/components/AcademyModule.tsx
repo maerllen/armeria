@@ -37,7 +37,8 @@ import {
   ClipboardList,
   Layers,
   Calendar,
-  RotateCcw
+  RotateCcw,
+  Eye
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
@@ -633,6 +634,43 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [classSubject, setClassSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [classStudentCount, setClassStudentCount] = useState<number>(20);
   const [classLessonPlanId, setClassLessonPlanId] = useState('');
+
+  // Expand / Collapse details & Alunos Modal
+  const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
+  const [selectedStudentsClass, setSelectedStudentsClass] = useState<CourseClass | null>(null);
+  const [editStudentCount, setEditStudentCount] = useState<number>(20);
+  const [savingStudents, setSavingStudents] = useState(false);
+
+  const toggleClassDetails = (classId: string) => {
+    setExpandedClasses(prev => ({
+      ...prev,
+      [classId]: !prev[classId]
+    }));
+  };
+
+  const handleOpenStudentsModal = (cls: CourseClass) => {
+    setSelectedStudentsClass(cls);
+    setEditStudentCount(cls.studentCount || 20);
+  };
+
+  const handleSaveStudentCount = async () => {
+    if (!selectedStudentsClass) return;
+    setSavingStudents(true);
+    try {
+      const res = await storage.saveCourseClass({
+        ...selectedStudentsClass,
+        studentCount: Number(editStudentCount) || 1
+      });
+      if (!res.success) throw new Error(res.error);
+      setSuccessMsg(`Quantidade de alunos da turma ${selectedStudentsClass.code || selectedStudentsClass.name} atualizada com sucesso!`);
+      setSelectedStudentsClass(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao atualizar quantidade de alunos.');
+    } finally {
+      setSavingStudents(false);
+    }
+  };
 
   const getCareerAbbr = (car: string): 'DL' | 'IP' | 'EP' | 'PC' | 'ML' => {
     const c = (car || '').toUpperCase();
@@ -1665,62 +1703,108 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 Nenhuma turma cadastrada.
               </div>
             ) : (
-              filteredClasses.map((cls) => (
-                <div key={cls.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 relative hover:border-slate-700 transition">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                    <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 font-extrabold text-xs px-3 py-1 rounded-lg uppercase font-mono">
-                      CÓDIGO: {cls.code || `${cls.careerAbbreviation || getCareerAbbr(cls.career)}-${cls.turmaNumber || '01'}`}
-                    </span>
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleOpenClassModal(cls)}
-                        className="p-1 text-slate-400 hover:text-amber-400 rounded transition"
-                      >
-                        <Edit2 className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget({ type: 'class', id: cls.id, name: cls.name })}
-                        className="p-1 text-slate-400 hover:text-red-400 rounded transition"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
+              filteredClasses.map((cls) => {
+                const isExpanded = !!expandedClasses[cls.id];
+                const linkedCourse = academyCourses.find(c => c.id === cls.courseId || c.name === cls.courseName);
+                const classCodeStr = cls.code || `${cls.careerAbbreviation || getCareerAbbr(cls.career)}-${cls.turmaNumber || '01'}`;
 
-                  <div>
-                    <h3 className="text-base font-bold text-slate-100 flex items-center justify-between">
-                      <span>Turma {cls.code || cls.name} - <span className="text-amber-400 font-semibold">{cls.courseName}</span></span>
-                      <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
-                        Carreira: {cls.career}
+                return (
+                  <div key={cls.id} className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 relative hover:border-slate-700 transition shadow-sm">
+                    {/* Header: Class Code & Actions (Alunos, Editar, Excluir) */}
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2.5 flex-wrap gap-2">
+                      <span className="bg-amber-500/20 border border-amber-500/40 text-amber-400 font-extrabold text-xs px-3 py-1 rounded-lg uppercase font-mono">
+                        CÓDIGO: {classCodeStr}
                       </span>
-                    </h3>
-                    <p className="text-xs font-mono text-slate-400">Curso Vinculado: <strong className="text-amber-300">{cls.courseName}</strong></p>
-                  </div>
 
-                  <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-sans">Professor:</span>
-                      <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
-                        Prof. {getTeacherDisplayName(cls)}
-                      </span>
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          onClick={() => handleOpenStudentsModal(cls)}
+                          title="Gerenciar Alunos da Turma"
+                          className="flex items-center space-x-1.5 px-2.5 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 rounded-lg transition font-semibold"
+                        >
+                          <Users className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Alunos ({cls.studentCount || 0})</span>
+                        </button>
+
+                        <button
+                          onClick={() => handleOpenClassModal(cls)}
+                          title="Editar Turma"
+                          className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+
+                        <button
+                          onClick={() => setDeleteTarget({ type: 'class', id: cls.id, name: cls.name })}
+                          title="Excluir Turma"
+                          className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition border border-transparent hover:border-slate-700"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-sans">Disciplina:</span>
-                      <span className="text-amber-400 font-bold">{cls.subject}</span>
+
+                    {/* Toggle Button for Details */}
+                    <div className="pt-0.5">
+                      <button
+                        onClick={() => toggleClassDetails(cls.id)}
+                        className="w-full text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center justify-center space-x-1.5 bg-amber-500/10 hover:bg-amber-500/20 px-3 py-1.5 rounded-xl border border-amber-500/30 transition"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>{isExpanded ? 'Ocultar Detalhes' : 'Ver Detalhes'}</span>
+                      </button>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-sans">Plano de Aula:</span>
-                      <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
-                        {getLessonPlanDisplayName(cls)}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-400 font-sans">Alunos na Turma:</span>
-                      <span className="text-slate-100 font-bold">{cls.studentCount} alunos</span>
-                    </div>
+
+                    {/* Expanded Details Section */}
+                    {isExpanded && (
+                      <div className="space-y-3 pt-2.5 border-t border-slate-800/80 animate-fadeIn">
+                        <div>
+                          <h3 className="text-sm font-bold text-slate-100 flex items-center justify-between">
+                            <span>Turma {classCodeStr}</span>
+                            <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
+                              Carreira: {cls.career}
+                            </span>
+                          </h3>
+                          <div className="text-xs font-mono text-slate-300 mt-1 bg-slate-950/40 p-2 rounded-lg border border-slate-800">
+                            <span className="text-slate-400 block text-[10px] uppercase font-bold font-sans">Curso Vinculado:</span>
+                            <span className="text-amber-400 font-bold text-xs">
+                              Código: {linkedCourse?.code || 'S/ CÓDIGO'}
+                            </span>
+                            {linkedCourse?.name && (
+                              <span className="text-slate-300 text-[11px] block mt-0.5">
+                                ({linkedCourse.name})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-sans">Professor:</span>
+                            <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
+                              Prof. {getTeacherDisplayName(cls)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-sans">Disciplina:</span>
+                            <span className="text-amber-400 font-bold">{cls.subject}</span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-sans">Plano de Aula:</span>
+                            <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
+                              {getLessonPlanDisplayName(cls)}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-slate-400 font-sans">Alunos na Turma:</span>
+                            <span className="text-slate-100 font-bold">{cls.studentCount} alunos</span>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>
@@ -2939,6 +3023,93 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 4.5 Modal Alunos da Turma */}
+      {selectedStudentsClass && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5 text-amber-400">
+                <Users className="w-5 h-5" />
+                <h3 className="text-base font-bold text-slate-100">
+                  Alunos da Turma - <span className="text-amber-400">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudentsClass(null)}
+                className="text-slate-400 hover:text-slate-200 text-sm font-bold p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-950/80 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs text-slate-300 font-mono">
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Código da Turma:</span>
+                <span className="font-bold text-amber-400">{selectedStudentsClass.code || selectedStudentsClass.name}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Curso Vinculado:</span>
+                <span className="font-semibold text-slate-200">
+                  {(() => {
+                    const linkedC = academyCourses.find(c => c.id === selectedStudentsClass.courseId || c.name === selectedStudentsClass.courseName);
+                    return linkedC?.code ? `Código ${linkedC.code} - ${linkedC.name}` : selectedStudentsClass.courseName;
+                  })()}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Carreira / Disciplina:</span>
+                <span className="text-slate-200">{selectedStudentsClass.career} ({selectedStudentsClass.subject})</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-slate-400 font-sans">Professor Responsável:</span>
+                <span className="text-emerald-400 font-semibold">{getTeacherDisplayName(selectedStudentsClass)}</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-2">
+              <label className="block text-xs font-semibold text-slate-200">
+                Quantidade Total de Alunos Matriculados
+              </label>
+              <div className="flex items-center space-x-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  value={editStudentCount}
+                  onChange={(e) => setEditStudentCount(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-32 bg-slate-950 border border-slate-700 text-slate-100 p-2.5 rounded-xl font-bold text-center text-sm focus:border-amber-500 focus:outline-none"
+                />
+                <span className="text-xs text-slate-300 font-medium">
+                  alunos na turma
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-400 italic bg-slate-950/40 p-2.5 rounded-lg border border-slate-800">
+                * Este quantitativo é utilizado para o cálculo de munições por aluno no tirometro e nas guias de saída para aula.
+              </p>
+            </div>
+
+            <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentsClass(null)}
+                className="px-4 py-2 text-xs text-slate-400 hover:text-slate-200 rounded-xl transition font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveStudentCount}
+                disabled={savingStudents}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                {savingStudents ? 'Salvando...' : 'Salvar Alunos'}
+              </button>
+            </div>
           </div>
         </div>
       )}
