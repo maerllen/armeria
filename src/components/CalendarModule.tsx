@@ -41,31 +41,47 @@ const TIME_SLOTS = [
   { id: 'slot4', label: '16:00 as 17:40', type: 'class', name: '4ª Aula' }
 ] as const;
 
-// Helper to normalize any time slot text before saving - TRATAMENTO EXATO
-// O Excel sempre virá em MAIÚSCULO com º: "1º HORÁRIO"
+// Helper to normalize any time slot text before saving or filtering
+// DE: "1º HORÁRIO" PARA: "08:00 as 09:40" etc
 const normalizeTimeSlot = (rawHora: string): string => {
   if (!rawHora) return '08:00 as 09:40';
 
-  const horaLimpa = rawHora.trim().toUpperCase();
+  // Remove acentos e deixa tudo maiúsculo pra facilitar a comparação
+  // "1º HORÁRIO" -> "1 HORARIO"
+  const h = rawHora
+    .trim()
+    .toUpperCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // tira acento
+    .replace(/[^A-Z0-9]/g, ' ') // troca º ª por espaço
+    .replace(/\s+/g, ' ')
+    .trim();
 
-  // DE/PARA EXATO conforme solicitado
-  const mapaHorarios: Record<string, string> = {
-    '1º HORÁRIO': '08:00 as 09:40',
-    '2º HORÁRIO': '10:00 as 11:40',
-    '3º HORÁRIO': '14:00 as 15:40',
-    '4º HORÁRIO': '16:00 as 17:40',
-  };
+  // Extrai só o número do horário: "1 HORARIO" -> 1
+  const matchNumero = h.match(/\b([1-4])\b/);
+  const numero = matchNumero ? matchNumero[1] : '';
 
-  // Se for exatamente um dos 4 valores, retorna o horário convertido
-  if (mapaHorarios[horaLimpa]) {
-    return mapaHorarios[horaLimpa];
+  // Se contém a palavra HORARIO + número, faz o DE/PARA principal
+  if (h.includes('HORARIO') || h.includes('AULA') || numero) {
+    if (numero === '1' || h.includes('1 HORARIO') || h.includes('PRIMEIRO')) {
+      return '08:00 as 09:40';
+    }
+    if (numero === '2' || h.includes('2 HORARIO') || h.includes('SEGUNDO')) {
+      return '10:00 as 11:40';
+    }
+    if (numero === '3' || h.includes('3 HORARIO') || h.includes('TERCEIRO')) {
+      return '14:00 as 15:40';
+    }
+    if (numero === '4' || h.includes('4 HORARIO') || h.includes('QUARTO')) {
+      return '16:00 as 17:40';
+    }
   }
 
-  // Fallback caso venha já no formato final (evita quebrar o que já funciona)
-  if (horaLimpa === '08:00 AS 09:40') return '08:00 as 09:40';
-  if (horaLimpa === '10:00 AS 11:40') return '10:00 as 11:40';
-  if (horaLimpa === '14:00 AS 15:40') return '14:00 as 15:40';
-  if (horaLimpa === '16:00 AS 17:40') return '16:00 as 17:40';
+  // Fallback: se já vier no formato de hora, mantém a normalização antiga
+  if (h.includes('08') || (h.includes('8') && h.includes('00'))) return '08:00 as 09:40';
+  if (h.includes('10')) return '10:00 as 11:40';
+  if (h.includes('14')) return '14:00 as 15:40';
+  if (h.includes('16')) return '16:00 as 17:40';
 
   return rawHora.trim();
 };
@@ -257,11 +273,22 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
         const parsed: CalendarRecord[] = data.map((row: any, idx: number) => {
           const keys = Object.keys(row);
+
+          // Normaliza para comparar sem acento: "HORÁRIO" == "HORARIO"
+          const normalizeKey = (str: string) =>
+            String(str || '')
+              .trim()
+              .toUpperCase()
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '');
+
           const getVal = (...names: string[]) => {
             for (const n of names) {
-              const matchedKey = keys.find(
-                (k) => k.trim().toUpperCase() === n.toUpperCase() || k.trim().toUpperCase().includes(n.toUpperCase())
-              );
+              const normalizedSearch = normalizeKey(n);
+              const matchedKey = keys.find((k) => {
+                const normalizedK = normalizeKey(k);
+                return normalizedK === normalizedSearch || normalizedK.includes(normalizedSearch);
+              });
               if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== '') {
                 return String(row[matchedKey]).trim();
               }
@@ -1535,3 +1562,4 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     </div>
   );
 };
+
