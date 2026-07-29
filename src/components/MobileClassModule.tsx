@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, CourseClass } from '../types';
+import { User, CourseClass, AcademyCourse } from '../types';
 import { storage } from '../services/storage';
 import {
   Smartphone,
@@ -20,7 +20,11 @@ import {
   Award,
   GraduationCap,
   Sparkles,
-  ClipboardList
+  ClipboardList,
+  Calendar,
+  Clock,
+  MapPin,
+  ChevronRight
 } from 'lucide-react';
 
 interface StudentData {
@@ -68,8 +72,14 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
   // --- DATA STATES ---
   const [courseClasses, setCourseClasses] = useState<CourseClass[]>([]);
+  const [academyCourses, setAcademyCourses] = useState<AcademyCourse[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>('');
   const [selectedClass, setSelectedClass] = useState<CourseClass | null>(null);
+
+  // Calendar search & filters
+  const [courseSearch, setCourseSearch] = useState('');
+  const [courseCareerFilter, setCourseCareerFilter] = useState<string>('TODAS');
+  const [courseTypeFilter, setCourseTypeFilter] = useState<'TODOS' | 'Formação' | 'Ensino Continuado'>('TODOS');
 
   // Students for selected class
   const [classStudents, setClassStudents] = useState<StudentData[]>([]);
@@ -79,8 +89,8 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
   // Attendance & Shot Map state: { [studentId]: { present: boolean, shots: number, lane: number, status: 'present'|'absent'|'excused'|'late' } }
   const [attendanceMap, setAttendanceMap] = useState<Record<string, { present: boolean; shots: number; status: 'present' | 'absent' | 'excused'; note?: string }>>({});
 
-  // Active Tab: 'mapa' | 'alunos' | 'lancar-geral'
-  const [activeTab, setActiveTab] = useState<'mapa' | 'alunos' | 'lancar-geral'>('mapa');
+  // Active Tab: 'calendario' | 'alunos' | 'lancar-geral'
+  const [activeTab, setActiveTab] = useState<'calendario' | 'alunos' | 'lancar-geral'>('calendario');
 
   // --- MODAL / SUB-FORM STATES ---
   // Add Student
@@ -129,12 +139,14 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
     setTimeout(() => setFeedbackMsg(null), 3500);
   };
 
-  // Load Turmas from server
+  // Load Turmas and Courses from server
   const loadTurmas = async () => {
     try {
       await storage.refreshFromServer();
       const classes = storage.getCourseClasses();
       setCourseClasses(classes);
+      const courses = storage.getAcademyCourses();
+      setAcademyCourses(courses);
       if (classes.length > 0 && !selectedClassId) {
         setSelectedClassId(classes[0].id);
         setSelectedClass(classes[0]);
@@ -143,6 +155,22 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
       console.error('Error loading turmas:', err);
     }
   };
+
+  const filteredAcademyCourses = academyCourses.filter((c) => {
+    const matchesSearch =
+      !courseSearch ||
+      c.name.toLowerCase().includes(courseSearch.toLowerCase()) ||
+      c.code.toLowerCase().includes(courseSearch.toLowerCase()) ||
+      (c.subject && c.subject.toLowerCase().includes(courseSearch.toLowerCase()));
+
+    const matchesType =
+      courseTypeFilter === 'TODOS' || c.type === courseTypeFilter;
+
+    const matchesCareer =
+      courseCareerFilter === 'TODAS' || c.career === courseCareerFilter;
+
+    return matchesSearch && matchesType && matchesCareer;
+  });
 
   // Load Students for current Turma
   const loadStudents = async (turmaObj?: CourseClass) => {
@@ -611,7 +639,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
             </div>
             <div>
               <span className="text-[9px] uppercase font-bold text-amber-400 tracking-wider font-mono block">
-                MODO CELULAR • ESTANDE & MAPA
+                MODO CELULAR • CALENDÁRIO & CURSOS
               </span>
               <h1 className="text-sm font-extrabold text-slate-100 leading-tight">
                 {authenticatedUser?.name || currentUser.name}
@@ -677,181 +705,243 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
       {/* MAIN CONTENT AREA BY TAB */}
       <main className="p-3.5 space-y-4">
         
-        {/* TAB 1: MAPA DA AULA & PISTA (VISUAL GRID / PISTAS) */}
-        {activeTab === 'mapa' && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center space-x-2">
-                <Target className="w-4 h-4 text-amber-400" />
-                <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                  Mapa do Tiromêtro / Pista de Tiro
-                </h3>
+        {/* TAB 1: CALENDÁRIO DE CURSOS E CRONOGRAMA */}
+        {activeTab === 'calendario' && (
+          <div className="space-y-3.5">
+            {/* Header / Search */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-3 shadow-lg">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Calendar className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                    Calendário de Cursos & Cronograma
+                  </h3>
+                </div>
+                <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                  ACADEPOL 2026
+                </span>
               </div>
-              <button
-                type="button"
-                onClick={() => {
-                  // Mark all present
-                  const next: any = {};
-                  classStudents.forEach(st => {
-                    next[st.id] = { present: true, shots: attendanceMap[st.id]?.shots || 0, status: 'present' };
-                  });
-                  setAttendanceMap(next);
-                  showFeedback('Todos os alunos marcados como presentes.');
-                }}
-                className="text-[10px] font-bold text-emerald-400 bg-emerald-950/60 border border-emerald-800/60 px-2 py-1 rounded-lg"
-              >
-                ✓ Todos Presentes
-              </button>
+
+              {/* Search Input */}
+              <div className="relative">
+                <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={courseSearch}
+                  onChange={(e) => setCourseSearch(e.target.value)}
+                  placeholder="Buscar curso, código, carreira ou professor..."
+                  className="w-full bg-slate-950 border border-slate-700/80 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Filters: Type & Career */}
+              <div className="space-y-2">
+                <div className="flex items-center space-x-1 overflow-x-auto pb-1 text-[10px]">
+                  <span className="text-slate-400 font-bold shrink-0 mr-1">Tipo:</span>
+                  {(['TODOS', 'Formação', 'Ensino Continuado'] as const).map((t) => (
+                    <button
+                      key={t}
+                      onClick={() => setCourseTypeFilter(t)}
+                      className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition ${
+                        courseTypeFilter === t
+                          ? 'bg-amber-500 text-slate-950 shadow'
+                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center space-x-1 overflow-x-auto pb-1 text-[10px]">
+                  <span className="text-slate-400 font-bold shrink-0 mr-1">Carreira:</span>
+                  {['TODAS', 'Delegado', 'Investigador', 'Escrivão', 'Perito', 'Médico Legista'].map((c) => (
+                    <button
+                      key={c}
+                      onClick={() => setCourseCareerFilter(c)}
+                      className={`px-2.5 py-1 rounded-lg font-bold shrink-0 transition ${
+                        courseCareerFilter === c
+                          ? 'bg-indigo-600 text-white shadow'
+                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      {c}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
 
-            {loadingStudents ? (
-              <div className="text-center py-8 text-amber-400 text-xs animate-pulse">
-                Carregando mapa da turma...
-              </div>
-            ) : classStudents.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-500 text-xs">
-                Nenhum aluno cadastrado nesta turma ainda. Vá para a aba "Alunos" para cadastrar.
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {classStudents.map((st, idx) => {
-                  const att = attendanceMap[st.id] || { present: true, shots: 0, status: 'present' };
-                  const isPresent = att.status === 'present';
-                  const isAbsent = att.status === 'absent';
-                  const isExcused = att.status === 'excused';
+            {/* LIST OF COURSES / TURMAS IN CALENDAR */}
+            <div className="space-y-3">
+              {filteredAcademyCourses.length === 0 && courseClasses.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-center text-slate-500 text-xs space-y-2">
+                  <Calendar className="w-8 h-8 text-slate-600 mx-auto" />
+                  <p className="font-semibold text-slate-400">Nenhum curso encontrado no calendário.</p>
+                  <p className="text-[11px] text-slate-500">Cadastre cursos na gestão da ACADEPOL para visualizar o cronograma completo aqui.</p>
+                </div>
+              ) : (
+                filteredAcademyCourses.map((c) => {
+                  const linkedClasses = courseClasses.filter(
+                    (cc) => cc.courseId === c.id || cc.courseName === c.name || (c.code && cc.code?.includes(c.code))
+                  );
 
                   return (
                     <div
-                      key={st.id}
-                      className={`p-3 rounded-2xl border transition ${
-                        isPresent
-                          ? 'bg-slate-900/90 border-slate-800'
-                          : isAbsent
-                          ? 'bg-rose-950/20 border-rose-900/50'
-                          : 'bg-amber-950/20 border-amber-900/50'
-                      }`}
+                      key={c.id}
+                      className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-3 shadow-md hover:border-slate-700 transition"
                     >
-                      {/* Top Row: Pista # & Name */}
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="flex items-center space-x-2.5">
-                          <span className="w-6 h-6 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono font-bold text-[10px] flex items-center justify-center shrink-0">
-                            P{idx + 1}
+                      {/* Badges & Type */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-1.5">
+                          <span
+                            className={`px-2 py-0.5 rounded-md text-[9px] font-extrabold uppercase ${
+                              c.type === 'Formação'
+                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                : 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30'
+                            }`}
+                          >
+                            {c.type}
                           </span>
-                          <div>
-                            <p className="font-extrabold text-slate-100 text-xs">{st.nomeAluno}</p>
-                            {st.maspAluno && (
-                              <p className="text-[10px] text-slate-400 font-mono">MASP: {st.maspAluno}</p>
-                            )}
-                          </div>
+                          {c.career && (
+                            <span className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              {c.career}
+                            </span>
+                          )}
                         </div>
+                        <span className="font-mono text-[10px] font-bold text-amber-400">{c.code}</span>
+                      </div>
 
-                        {/* Status Badges */}
-                        <div className="flex items-center space-x-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttendanceMap(prev => ({
-                                ...prev,
-                                [st.id]: { ...att, present: true, status: 'present' }
-                              }));
-                            }}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
-                              isPresent
-                                ? 'bg-emerald-500 text-slate-950 border-emerald-400'
-                                : 'bg-slate-950 text-slate-500 border-slate-800'
-                            }`}
-                          >
-                            Presente
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttendanceMap(prev => ({
-                                ...prev,
-                                [st.id]: { ...att, present: false, status: 'absent' }
-                              }));
-                            }}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
-                              isAbsent
-                                ? 'bg-rose-600 text-white border-rose-500'
-                                : 'bg-slate-950 text-slate-500 border-slate-800'
-                            }`}
-                          >
-                            Falta
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAttendanceMap(prev => ({
-                                ...prev,
-                                [st.id]: { ...att, present: false, status: 'excused' }
-                              }));
-                            }}
-                            className={`px-2 py-1 rounded-lg text-[10px] font-bold border transition ${
-                              isExcused
-                                ? 'bg-amber-500 text-slate-950 border-amber-400'
-                                : 'bg-slate-950 text-slate-500 border-slate-800'
-                            }`}
-                          >
-                            Just.
-                          </button>
+                      {/* Title & Subject */}
+                      <div>
+                        <h4 className="font-extrabold text-slate-100 text-xs leading-snug">{c.name}</h4>
+                        {c.subject && <p className="text-[11px] text-slate-400 mt-0.5">Disciplina: {c.subject}</p>}
+                      </div>
+
+                      {/* Course Dates / Period Info */}
+                      <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80 space-y-1.5 text-[10px]">
+                        <div className="flex items-center space-x-1.5 text-slate-300">
+                          <Clock className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span className="font-semibold">Período / Datas:</span>
+                          <span className="font-mono font-bold text-slate-100">
+                            {c.type === 'Formação'
+                              ? (c.startDate && c.endDate ? `${c.startDate} até ${c.endDate}` : 'Período Regulamentar')
+                              : (c.dates && c.dates.length > 0 ? c.dates.join(', ') : `${c.durationDays || 5} dias`)}
+                          </span>
+                        </div>
+                        <div className="flex items-center space-x-1.5 text-slate-400">
+                          <MapPin className="w-3 h-3 text-indigo-400 shrink-0" />
+                          <span>Unidade: {c.departmentName || c.teachingDepartmentName || 'ACADEPOL / Estande'}</span>
                         </div>
                       </div>
 
-                      {/* Tiromêtro / Shot Counter Controls */}
-                      {isPresent && (
-                        <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
-                          <span className="text-slate-400 text-[10px] uppercase font-semibold">
-                            Disparos (Tiromêtro):
-                          </span>
-                          <div className="flex items-center space-x-1.5">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAttendanceMap(prev => ({
-                                  ...prev,
-                                  [st.id]: { ...att, shots: Math.max(0, (att.shots || 0) - 10) }
-                                }));
-                              }}
-                              className="w-7 h-7 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg font-bold text-slate-400 text-xs flex items-center justify-center"
-                            >
-                              -10
-                            </button>
-                            <span className="w-12 text-center font-black text-cyan-400 text-sm">
-                              {att.shots || 0}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAttendanceMap(prev => ({
-                                  ...prev,
-                                  [st.id]: { ...att, shots: (att.shots || 0) + 5 }
-                                }));
-                              }}
-                              className="w-7 h-7 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg font-bold text-amber-400 text-xs flex items-center justify-center"
-                            >
-                              +5
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAttendanceMap(prev => ({
-                                  ...prev,
-                                  [st.id]: { ...att, shots: (att.shots || 0) + 10 }
-                                }));
-                              }}
-                              className="w-7 h-7 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg font-bold text-emerald-400 text-xs flex items-center justify-center"
-                            >
-                              +10
-                            </button>
+                      {/* Linked Turmas */}
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Turmas em Instrução ({linkedClasses.length}):
+                        </p>
+                        {linkedClasses.length === 0 ? (
+                          <p className="text-[10px] text-slate-500 italic">Nenhuma turma cadastrada neste curso ainda.</p>
+                        ) : (
+                          <div className="space-y-1.5">
+                            {linkedClasses.map((turma) => (
+                              <div
+                                key={turma.id}
+                                className={`flex items-center justify-between p-2 rounded-xl border transition ${
+                                  selectedClassId === turma.id
+                                    ? 'bg-amber-500/10 border-amber-500/40'
+                                    : 'bg-slate-950/60 border-slate-800'
+                                }`}
+                              >
+                                <div>
+                                  <p className="font-bold text-slate-200 text-xs">
+                                    Turma {turma.code || `${turma.careerAbbreviation}-${turma.turmaNumber}`}
+                                  </p>
+                                  <p className="text-[9px] text-slate-400">
+                                    Prof. {turma.teacherName || 'ACADEPOL'} • {turma.studentCount || 0} Alunos
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => {
+                                    setSelectedClassId(turma.id);
+                                    setSelectedClass(turma);
+                                    setActiveTab('alunos');
+                                    showFeedback(`Turma ${turma.code || turma.id} selecionada.`);
+                                  }}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center space-x-1 transition ${
+                                    selectedClassId === turma.id
+                                      ? 'bg-amber-500 text-slate-950 font-extrabold'
+                                      : 'bg-slate-800 hover:bg-amber-500/20 text-amber-400 border border-slate-700'
+                                  }`}
+                                >
+                                  <span>{selectedClassId === turma.id ? '✓ Ativa' : 'Selecionar'}</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </button>
+                              </div>
+                            ))}
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
                   );
-                })}
+                })
+              )}
+
+              {/* ALL TURMAS CALENDAR SCHEDULE */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider flex items-center space-x-1.5">
+                    <GraduationCap className="w-4 h-4 text-indigo-400" />
+                    <span>Todas as Turmas Ativas ({courseClasses.length})</span>
+                  </h4>
+                </div>
+
+                {courseClasses.length === 0 ? (
+                  <p className="text-[11px] text-slate-500 text-center py-2">Nenhuma turma cadastrada no momento.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {courseClasses.map((tc) => (
+                      <div
+                        key={tc.id}
+                        onClick={() => {
+                          setSelectedClassId(tc.id);
+                          setSelectedClass(tc);
+                          setActiveTab('alunos');
+                          showFeedback(`Turma ${tc.code || tc.id} ativada.`);
+                        }}
+                        className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center justify-between ${
+                          selectedClassId === tc.id
+                            ? 'bg-amber-500/10 border-amber-500/50 text-amber-300'
+                            : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-200'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-extrabold text-xs">
+                              {tc.code || `Turma ${tc.turmaNumber}`}
+                            </span>
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                              {tc.career}
+                            </span>
+                          </div>
+                          <p className="text-[10px] text-slate-400 mt-0.5">
+                            {tc.courseName} • Prof. {tc.teacherName || 'ACADEPOL'}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] font-bold font-mono text-cyan-400 block">
+                            {tc.studentCount || 0} Alunos
+                          </span>
+                          <span className="text-[9px] text-amber-400 font-semibold">
+                            {selectedClassId === tc.id ? '● Selecionada' : 'Toque p/ Abrir'}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </div>
         )}
 
@@ -1317,15 +1407,15 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
       <nav className="fixed bottom-0 left-0 right-0 max-w-md mx-auto bg-slate-900/95 backdrop-blur-xl border-t border-slate-800/80 px-4 py-2 flex items-center justify-around z-40 shadow-2xl">
         <button
           type="button"
-          onClick={() => setActiveTab('mapa')}
+          onClick={() => setActiveTab('calendario')}
           className={`flex flex-col items-center space-y-1 py-1 px-3 rounded-2xl transition ${
-            activeTab === 'mapa'
+            activeTab === 'calendario'
               ? 'text-amber-400 font-extrabold bg-amber-500/10 border border-amber-500/20'
               : 'text-slate-400 hover:text-slate-200'
           }`}
         >
-          <Target className="w-5 h-5" />
-          <span className="text-[10px]">Mapa & Pista</span>
+          <Calendar className="w-5 h-5" />
+          <span className="text-[10px]">Calendário de Cursos</span>
         </button>
 
         <button
