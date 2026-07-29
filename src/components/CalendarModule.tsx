@@ -38,8 +38,27 @@ const TIME_SLOTS = [
   { id: 'slot2', label: '10:00 as 11:40', type: 'class', name: '2ª Aula' },
   { id: 'lunch', label: '11:40 as 14:00', type: 'break', name: 'Intervalo de Almoço' },
   { id: 'slot3', label: '14:00 as 15:40', type: 'class', name: '3ª Aula' },
-  { id: 'slot4', label: '16:00 as 16:40', type: 'class', name: '4ª Aula' }
+  { id: 'slot4', label: '16:00 as 17:40', type: 'class', name: '4ª Aula' }
 ] as const;
+
+// Helper to normalize any time slot text before saving or filtering
+const normalizeTimeSlot = (rawHora: string): string => {
+  if (!rawHora) return '08:00 as 09:40';
+  const h = rawHora.trim().toLowerCase();
+  if (h.includes('1ª') || h.includes('1a') || h.includes('08:') || h.includes('8:')) {
+    return '08:00 as 09:40';
+  }
+  if (h.includes('2ª') || h.includes('2a') || h.includes('10:')) {
+    return '10:00 as 11:40';
+  }
+  if (h.includes('3ª') || h.includes('3a') || h.includes('14:')) {
+    return '14:00 as 15:40';
+  }
+  if (h.includes('4ª') || h.includes('4a') || h.includes('16:')) {
+    return '16:00 as 17:40';
+  }
+  return rawHora.trim();
+};
 
 const MONTH_NAMES = [
   'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
@@ -261,11 +280,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           }
 
           let rawHora = getVal('HORARIO_CALENDARIO', 'HORARIO CALENDARIO', 'HORARIO', 'HORA');
-          let finalHora = rawHora || '08:00 as 09:40';
-          if (rawHora.includes('1') && rawHora.includes('08')) finalHora = '08:00 as 09:40';
-          else if (rawHora.includes('2') || rawHora.includes('10:00')) finalHora = '10:00 as 11:40';
-          else if (rawHora.includes('3') || rawHora.includes('14:00')) finalHora = '14:00 as 15:40';
-          else if (rawHora.includes('4') || rawHora.includes('16:00')) finalHora = '16:00 as 16:40';
+          let finalHora = normalizeTimeSlot(rawHora);
 
           const yearOfDate = formattedDate ? formattedDate.split('-')[0] : String(selectedYear);
 
@@ -325,6 +340,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     try {
       const payload = {
         ...formState,
+        horario_calendario: normalizeTimeSlot(formState.horario_calendario || ''),
         id: editingRecordId || formState.id
       };
       const res = await storage.saveCalendarRecord(payload);
@@ -574,7 +590,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           )}
         </div>
 
-        {/* List of Disciplines / Badges */}
+        {/* List of Disciplines / Badges (Only Siglas, hover shows full name) */}
         {uniqueSubjectsMap.length === 0 ? (
           <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800/80 p-4">
             Nenhuma disciplina cadastrada no banco. Clique em <strong className="text-amber-400">Novo Agendamento</strong> ou <strong className="text-amber-400">Importar Excel</strong> para adicionar aulas.
@@ -587,16 +603,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 <button
                   key={subj.sigla}
                   onClick={() => setSelectedDiscipline(subj.sigla)}
-                  className={`px-3.5 py-2 rounded-2xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${
+                  title={`${subj.sigla} - ${subj.nome} (${subj.count} aula${subj.count > 1 ? 's' : ''})`}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-black transition flex items-center space-x-1.5 border shadow-sm ${
                     isSelected
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/20 font-black scale-105'
-                      : 'bg-slate-950 text-slate-200 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/60'
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/20 scale-105'
+                      : 'bg-slate-950 text-amber-400 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/60'
                   }`}
                 >
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${isSelected ? 'bg-slate-950 text-amber-400 font-extrabold' : 'bg-slate-800 text-amber-400'}`}>
-                    {subj.sigla}
-                  </span>
-                  <span className="truncate max-w-[180px]">{subj.nome}</span>
+                  <span>{subj.sigla}</span>
                   <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${isSelected ? 'bg-slate-950/20 text-slate-950 font-black' : 'bg-slate-800 text-slate-400'}`}>
                     {subj.count}
                   </span>
@@ -848,12 +862,44 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                             );
                           }
 
-                          // Filter records matching this slot
-                          const slotRecords = dayRecords.filter(
-                            (r) =>
-                              r.horario_calendario === slot.label ||
-                              r.horario_calendario.includes(slot.name.split(' ')[0])
-                          );
+                           // Precise Slot Matching
+                          const isRecordInSlot = (r: CalendarRecord) => {
+                            const rHora = normalizeTimeSlot(r.horario_calendario || '');
+                            return rHora === slot.label;
+                          };
+
+                          const slotRecords = dayRecords.filter(isRecordInSlot);
+
+                          // Group turmas together if and only if they share exact same day, time slot, discipline, sala
+                          const groupedSlotRecords: {
+                            key: string;
+                            turmasStr: string;
+                            primaryRecord: CalendarRecord;
+                            aulasStr: string;
+                            records: CalendarRecord[];
+                          }[] = [];
+
+                          slotRecords.forEach((rec) => {
+                            const key = `${rec.data_calendario}_${rec.sigla_calendario}_${rec.sala_calendario || ''}_${rec.equipe_calendario || ''}`;
+                            const found = groupedSlotRecords.find((g) => g.key === key);
+                            const calculatedAula = getCalculatedLessonNumber(rec);
+
+                            if (found) {
+                              if (!found.records.some((r) => r.turma_calendario === rec.turma_calendario)) {
+                                found.records.push(rec);
+                                found.turmasStr = Array.from(new Set(found.records.map((r) => r.turma_calendario))).join(', ');
+                                found.aulasStr = Array.from(new Set(found.records.map((r) => `Aula ${getCalculatedLessonNumber(r)}`))).join(' / ');
+                              }
+                            } else {
+                              groupedSlotRecords.push({
+                                key,
+                                turmasStr: rec.turma_calendario,
+                                primaryRecord: rec,
+                                aulasStr: `Aula ${calculatedAula}`,
+                                records: [rec]
+                              });
+                            }
+                          });
 
                           return (
                             <div
@@ -866,18 +912,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 <span>{slot.label}</span>
                               </div>
 
-                              {/* Slot Content: Compact Cards with Details Popup Trigger */}
-                              {slotRecords.length === 0 ? (
+                              {/* Slot Content: Compact Cards */}
+                              {groupedSlotRecords.length === 0 ? (
                                 <div className="flex-1 flex items-center justify-center text-[10px] text-slate-600 italic">
                                   Livre
                                 </div>
                               ) : (
                                 <div className="space-y-1.5">
-                                  {slotRecords.map((rec) => {
-                                    const calculatedAula = getCalculatedLessonNumber(rec);
+                                  {groupedSlotRecords.map((group) => {
+                                    const rec = group.primaryRecord;
                                     return (
                                       <button
-                                        key={rec.id}
+                                        key={group.key}
                                         onClick={() => setDetailRecord(rec)}
                                         className="w-full text-left bg-slate-950 hover:bg-slate-800/80 border border-amber-500/30 hover:border-amber-400 rounded-lg p-2 space-y-1 transition shadow-sm group"
                                       >
@@ -887,11 +933,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                               {rec.sigla_calendario}
                                             </span>
                                             <span className="text-[10px] font-extrabold text-slate-100">
-                                              Turma {rec.turma_calendario}
+                                              Turma {group.turmasStr}
                                             </span>
                                           </div>
                                           <span className="px-1.5 py-0.2 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 font-mono text-[9px] font-extrabold rounded">
-                                            Aula {calculatedAula}
+                                            {group.aulasStr}
                                           </span>
                                         </div>
 
@@ -923,54 +969,128 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* SPECIAL PRINTABLE REPORT VIEW (Appears only on window.print()) */}
-      <div className="hidden print:block text-black bg-white p-6 font-sans">
-        <div className="border-b-2 border-slate-900 pb-4 mb-4 flex items-center justify-between">
+      {/* SPECIAL PRINTABLE REPORT VIEW (MAPA HORÁRIO VISUAL COMPACTO) */}
+      <div className="hidden print:block text-black bg-white p-4 font-sans text-xs">
+        <div className="border-b-2 border-black pb-3 mb-3 flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-black uppercase">ACADEPOL - Academia de Polícia Civil</h1>
-            <h2 className="text-base font-bold text-slate-800">
-              Cronograma Oficial da Disciplina: {selectedDisciplineName}
+            <h1 className="text-base font-black uppercase tracking-tight">ACADEPOL - ACADEMIA DE POLÍCIA CIVIL</h1>
+            <h2 className="text-sm font-extrabold text-slate-900">
+              MAPA HORÁRIO DA DISCIPLINA: {selectedDisciplineName}
             </h2>
-            <p className="text-xs text-slate-600">
-              Período: {MONTH_NAMES[selectedMonth]} de {selectedYear}
+            <p className="text-[11px] text-slate-700 font-medium">
+              Mês / Ano: {MONTH_NAMES[selectedMonth]} / {selectedYear}
             </p>
           </div>
-          <div className="text-right text-xs font-mono">
+          <div className="text-right text-[10px] font-mono">
             <div>Data de Impressão: {new Date().toLocaleDateString('pt-BR')}</div>
             <div>Total de Aulas: {activeDisciplineRecords.length}</div>
           </div>
         </div>
 
-        <table className="w-full text-left text-xs border-collapse border border-slate-400">
+        {/* Compact Visual Calendar Map Table */}
+        <table className="w-full text-left text-[10px] border-collapse border border-slate-900">
           <thead>
-            <tr className="bg-slate-200 text-slate-900 font-bold uppercase border-b border-slate-400">
-              <th className="p-2 border border-slate-400">Data</th>
-              <th className="p-2 border border-slate-400">Horário</th>
-              <th className="p-2 border border-slate-400">Turma</th>
-              <th className="p-2 border border-slate-400">Nº Aula (Seq)</th>
-              <th className="p-2 border border-slate-400">Sala</th>
-              <th className="p-2 border border-slate-400">Equipe / Instrutor</th>
-              <th className="p-2 border border-slate-400">Observações</th>
+            <tr className="bg-slate-200 text-slate-900 font-bold uppercase border-b border-slate-900 text-center">
+              <th className="p-1.5 border border-slate-900 w-24">Data / Dia</th>
+              <th className="p-1.5 border border-slate-900">1ª Aula (08:00 - 09:40)</th>
+              <th className="p-1.5 border border-slate-900">2ª Aula (10:00 - 11:40)</th>
+              <th className="p-1.5 border border-slate-900 bg-slate-100 w-20">Almoço</th>
+              <th className="p-1.5 border border-slate-900">3ª Aula (14:00 - 15:40)</th>
+              <th className="p-1.5 border border-slate-900">4ª Aula (16:00 - 17:40)</th>
             </tr>
           </thead>
           <tbody>
-            {activeDisciplineRecords.map((r) => (
-              <tr key={r.id} className="border-b border-slate-300">
-                <td className="p-2 border border-slate-300 font-bold">{r.data_calendario}</td>
-                <td className="p-2 border border-slate-300">{r.horario_calendario}</td>
-                <td className="p-2 border border-slate-300 font-bold">Turma {r.turma_calendario}</td>
-                <td className="p-2 border border-slate-300 font-bold">
-                  Aula {getCalculatedLessonNumber(r)}
-                </td>
-                <td className="p-2 border border-slate-300">{r.sala_calendario || 'SL01'}</td>
-                <td className="p-2 border border-slate-300">{r.equipe_calendario || '-'}</td>
-                <td className="p-2 border border-slate-300">{r.observacao_calendario || '-'}</td>
-              </tr>
-            ))}
+            {currentMonthWeekdays.map((day) => {
+              const dayRecords = activeDisciplineRecords.filter(
+                (r) => r.data_calendario === day.dateStr
+              );
+
+              return (
+                <tr key={day.dateStr} className="border-b border-slate-800">
+                  {/* Day Column */}
+                  <td className="p-1.5 border border-slate-900 bg-slate-50 font-bold text-center">
+                    <div className="text-xs">{day.dayNum < 10 ? `0${day.dayNum}` : day.dayNum}/{String(selectedMonth + 1).padStart(2, '0')}</div>
+                    <div className="text-[9px] uppercase font-mono text-slate-700">{day.dayName}</div>
+                  </td>
+
+                  {/* Slots 1, 2, Lunch, 3, 4 */}
+                  {TIME_SLOTS.map((slot) => {
+                    if (slot.type === 'break') {
+                      return (
+                        <td key={slot.id} className="p-1 border border-slate-900 bg-slate-100 text-center text-[9px] text-slate-500 font-mono">
+                          Intervalo
+                        </td>
+                      );
+                    }
+
+                    const isRecordInSlot = (r: CalendarRecord) => {
+                      const rHora = normalizeTimeSlot(r.horario_calendario || '');
+                      return rHora === slot.label;
+                    };
+
+                    const slotRecords = dayRecords.filter(isRecordInSlot);
+
+                    // Group slot records
+                    const groups: {
+                      key: string;
+                      turmasStr: string;
+                      primaryRecord: CalendarRecord;
+                      aulasStr: string;
+                      records: CalendarRecord[];
+                    }[] = [];
+
+                    slotRecords.forEach((rec) => {
+                      const key = `${rec.data_calendario}_${rec.sigla_calendario}_${rec.sala_calendario || ''}_${rec.equipe_calendario || ''}`;
+                      const found = groups.find((g) => g.key === key);
+                      const calculatedAula = getCalculatedLessonNumber(rec);
+
+                      if (found) {
+                        if (!found.records.some((r) => r.turma_calendario === rec.turma_calendario)) {
+                          found.records.push(rec);
+                          found.turmasStr = Array.from(new Set(found.records.map((r) => r.turma_calendario))).join(', ');
+                          found.aulasStr = Array.from(new Set(found.records.map((r) => `Aula ${getCalculatedLessonNumber(r)}`))).join(' / ');
+                        }
+                      } else {
+                        groups.push({
+                          key,
+                          turmasStr: rec.turma_calendario,
+                          primaryRecord: rec,
+                          aulasStr: `Aula ${calculatedAula}`,
+                          records: [rec]
+                        });
+                      }
+                    });
+
+                    return (
+                      <td key={slot.id} className="p-1 border border-slate-900 align-top">
+                        {groups.length === 0 ? (
+                          <div className="text-center text-slate-300 text-[9px]">-</div>
+                        ) : (
+                          <div className="space-y-1">
+                            {groups.map((g, idx) => (
+                              <div key={idx} className="bg-slate-50 border border-slate-400 p-1 rounded text-[9px] leading-tight">
+                                <div className="font-bold text-black flex items-center justify-between">
+                                  <span>Turma {g.turmasStr}</span>
+                                  <span className="font-mono text-[8px] bg-slate-200 px-1 rounded">{g.aulasStr}</span>
+                                </div>
+                                <div className="text-slate-700 text-[8.5px] mt-0.5">
+                                  Sala: {g.primaryRecord.sala_calendario || 'SL01'}
+                                  {g.primaryRecord.equipe_calendario ? ` | Eq: ${g.primaryRecord.equipe_calendario}` : ''}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                    );
+                  })}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 
-        <div className="mt-12 flex justify-around text-xs font-bold text-slate-800 pt-8 border-t border-slate-300">
+        <div className="mt-8 flex justify-around text-[10px] font-bold text-slate-900 pt-6 border-t border-slate-400">
           <div className="text-center">
             __________________________________________<br />
             Coordenadoria Pedagógica - ACADEPOL
@@ -1131,7 +1251,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     <option value="08:00 as 09:40">1ª Aula (08:00 as 09:40)</option>
                     <option value="10:00 as 11:40">2ª Aula (10:00 as 11:40)</option>
                     <option value="14:00 as 15:40">3ª Aula (14:00 as 15:40)</option>
-                    <option value="16:00 as 16:40">4ª Aula (16:00 as 16:40)</option>
+                    <option value="16:00 as 17:40">4ª Aula (16:00 as 17:40)</option>
                   </select>
                 </div>
 
