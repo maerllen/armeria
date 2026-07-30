@@ -1243,10 +1243,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               @media print {
                 @page {
                   size: A4 landscape;
-                  margin: 3mm;
+                  margin: 4mm;
                 }
-                html, body, #root, main {
-                  width: 100% !important;
+                html, body, #root, main, div {
+                  overflow: visible !important;
+                }
+                body {
                   margin: 0 !important;
                   padding: 0 !important;
                   background: #ffffff !important;
@@ -1259,6 +1261,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   display: none !important;
                 }
                 .folha-pagina {
+                  page-break-before: always !important;
+                  break-before: page !important;
                   page-break-after: always !important;
                   break-after: page !important;
                   page-break-inside: avoid !important;
@@ -1272,14 +1276,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   max-width: 100% !important;
                   background: #ffffff !important;
                 }
-                .folha-pagina:last-child {
+                .folha-pagina:first-of-type {
+                  page-break-before: auto !important;
+                  break-before: auto !important;
+                }
+                .folha-pagina:last-of-type {
                   page-break-after: auto !important;
                   break-after: auto !important;
                 }
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 2mm !important;
+                  margin-bottom: 3mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1288,6 +1296,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   border: none !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
+                }
+                td.cell-slot {
+                  height: 46px !important;
+                  min-height: 46px !important;
+                  max-height: 46px !important;
+                }
+                td.cell-slot > div {
+                  min-height: 46px !important;
                 }
               }
               .folha-pagina {
@@ -1312,7 +1328,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 18px !important; }
+              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
               .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
               .celula-aula .turma { background: #ffffff !important; font-size: 10px !important; font-weight: bold !important; color: #000000 !important; }
@@ -1366,7 +1382,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '08:00 as 09:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1381,7 +1397,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '10:00 as 11:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1395,7 +1411,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                             </td>
                             <td className="bg-hora">12:00-14:00</td>
                             {week.days.map((day) => (
-                              <td key={day.dateStr} colSpan={4} className="bg-almoco" style={{ height: '18px' }}>
+                              <td key={day.dateStr} colSpan={4} className="bg-almoco" style={{ height: '16px' }}>
                                 ALMOÇO
                               </td>
                             ))}
@@ -1412,7 +1428,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '14:00 as 15:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1427,7 +1443,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '16:00 as 17:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
