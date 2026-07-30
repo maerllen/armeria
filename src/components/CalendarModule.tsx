@@ -747,6 +747,25 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
+  const availableTeachersForEquipe = useMemo(() => {
+    const currentSubj = (equipeForm.materia || selectedDiscipline || '').trim().toUpperCase();
+
+    const matched = systemUsers.filter((u) => {
+      if (!u.isTeacher) return false;
+      const uSubj = (u.teacherSubject || u.teacher_subject || '').trim().toUpperCase();
+      if (!currentSubj) return true;
+      if (uSubj === currentSubj) return true;
+      if (uSubj && (currentSubj.includes(uSubj) || uSubj.includes(currentSubj))) return true;
+      return false;
+    });
+
+    if (matched.length > 0) return matched;
+
+    // Fallback: Return all users marked as teachers if no exact match for discipline
+    const teachersOnly = systemUsers.filter((u) => u.isTeacher);
+    return teachersOnly.length > 0 ? teachersOnly : systemUsers;
+  }, [systemUsers, equipeForm.materia, selectedDiscipline]);
+
   // Helper to extract team professor siglas and details
   const getTeamProfessorsSiglas = (rec: CalendarRecord) => {
     const eqName = (rec.equipe_calendario || '').trim().toLowerCase();
@@ -928,7 +947,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 flex items-center space-x-2 transition"
           >
             <Users className="w-4 h-4" />
-            <span>Gerenciar Equipes</span>
+            <span>Equipe Curso de Formação</span>
           </button>
 
           {selectedDiscipline && (
@@ -1969,7 +1988,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-slate-100">
-                    {editingEquipeId ? 'Editar Equipe do Calendário' : 'Gerenciar Equipes do Calendário'}
+                    {editingEquipeId ? 'Editar Equipe Curso de Formação' : 'Equipe Curso de Formação'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
                     Cadastre a equipe e atribua as siglas do professor titular e múltiplos instrutores por matéria e curso.
@@ -2073,7 +2092,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 {/* Professor Titular (Usuário) */}
                 <div>
                   <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    PROFESSOR TITULAR (ÚNICO) *
+                    PROFESSOR TITULAR (DA MATÉRIA) *
                   </label>
                   <select
                     value={equipeForm.professor_titular_equipe}
@@ -2082,9 +2101,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     required
                   >
                     <option value="">Selecione o Professor Titular...</option>
-                    {systemUsers.map((u) => (
+                    {availableTeachersForEquipe.map((u) => (
                       <option key={u.id} value={u.name}>
-                        {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.cargo || 'Policial'})
+                        {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
                       </option>
                     ))}
                   </select>
@@ -2136,9 +2155,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
                         >
                           <option value="">Selecione o Instrutor...</option>
-                          {systemUsers.map((u) => (
+                          {availableTeachersForEquipe.map((u) => (
                             <option key={u.id} value={u.name}>
-                              {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.cargo || 'Policial'})
+                              {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
                             </option>
                           ))}
                         </select>
