@@ -500,16 +500,19 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const getCalculatedLessonNumber = (rec: CalendarRecord): number => {
     const turma = (rec.turma_calendario || '').trim().toUpperCase();
-    const sigla = (rec.sigla_calendario || '').trim().toUpperCase();
+    const sigla = (rec.sigla_calendario || rec.disciplina_calendario || '').trim().toUpperCase();
 
     const matchingSeries = sortedAllRecords.filter((r) => {
       const rTurma = (r.turma_calendario || '').trim().toUpperCase();
-      const rSigla = (r.sigla_calendario || '').trim().toUpperCase();
-      return rTurma === turma && rSigla === sigla;
+      const rSigla = (r.sigla_calendario || r.disciplina_calendario || '').trim().toUpperCase();
+      if (turma && rTurma) {
+        return rTurma === turma && rSigla === sigla;
+      }
+      return rSigla === sigla;
     });
 
     const index = matchingSeries.findIndex((r) => r.id === rec.id);
-    return index >= 0 ? index + 1 : 1;
+    return index >= 0 ? index + 1 : (rec.numero_aula_calendario ? Number(String(rec.numero_aula_calendario).replace(/\D/g, '')) || 1 : 1);
   };
 
   // --- EXCEL IMPORT PARSER ---
@@ -817,9 +820,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       <div className="flex flex-col space-y-1 p-0.5 justify-center items-center w-full min-h-[36px]">
         {slotRecords.map((rec) => {
           const turma = (rec.turma_calendario || 'DL1').trim();
-          const numAulaOnly = rec.numero_aula_calendario
-            ? String(rec.numero_aula_calendario).replace(/\D/g, '') || String(rec.numero_aula_calendario)
-            : String(getCalculatedLessonNumber(rec));
+          const numAulaOnly = String(getCalculatedLessonNumber(rec));
 
           const teamInfo = getTeamProfessorsSiglas(rec);
 
