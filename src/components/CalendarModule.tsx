@@ -1070,7 +1070,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         /* STATE B: DISCIPLINE SELECTED - SHOW CALENDAR GRID */
         <div className="space-y-6">
           {/* Active Discipline Header Indicator */}
-          <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/30 rounded-3xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
+          <div className="print:hidden bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/30 rounded-3xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
             <div className="flex items-center space-x-3">
               <span className="px-3 py-1.5 bg-amber-500 text-slate-950 font-black text-sm font-mono rounded-xl shadow">
                 {selectedDiscipline}
@@ -1242,8 +1242,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             <style>{`
               @media print {
                 @page {
-                  size: landscape;
-                  margin: 4mm;
+                  size: A4 landscape;
+                  margin: 3mm;
                 }
                 html, body, #root, main {
                   width: 100% !important;
@@ -1255,16 +1255,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   print-color-adjust: exact !important;
                   box-shadow: none !important;
                 }
-                .print\\:hidden, header, aside, footer {
+                .print\\:hidden, header, aside, footer, nav {
                   display: none !important;
                 }
                 .folha-pagina {
                   page-break-after: always !important;
                   break-after: page !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                   box-shadow: none !important;
                   border: none !important;
                   border-radius: 0 !important;
-                  margin: 0 0 4px 0 !important;
+                  margin: 0 !important;
                   padding: 0 !important;
                   width: 100% !important;
                   max-width: 100% !important;
@@ -1274,11 +1276,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   page-break-after: auto !important;
                   break-after: auto !important;
                 }
+                .semana-bloco {
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                  margin-bottom: 2mm !important;
+                }
                 .folha-pagina table {
                   width: 100% !important;
                   table-layout: fixed !important;
                   border-collapse: collapse !important;
                   border: none !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                 }
               }
               .folha-pagina {
@@ -1318,22 +1327,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               weekPairs.map((pair, pageIdx) => (
                 <div key={`page-${pageIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-2.5 print:p-0 my-6 print:my-0 text-black">
                   {pair.map((week, wIdx) => (
-                    <div key={week.weekNum} className={wIdx > 0 ? 'mt-3' : ''}>
-                      {/* Header Banner for Week */}
-                      {wIdx === 0 ? (
-                        <div className="px-3 py-1 text-center font-bold text-xs text-black mb-1">
-                          <div className="text-center font-black text-xs uppercase text-black tracking-wide">
-                            {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'} — {MONTH_NAMES[selectedMonth]} DE {selectedYear}
-                          </div>
-                          <div className="text-center font-bold text-[10px] text-slate-800 mt-0.5">
-                            SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="px-3 py-1 text-center font-bold text-[10.5px] uppercase text-black mb-1 mt-3">
-                          SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
-                        </div>
-                      )}
+                    <div key={week.weekNum} className={`semana-bloco ${wIdx > 0 ? 'mt-3 print:mt-2' : ''}`}>
+                      {/* Week Header */}
+                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans">
+                        SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+                      </div>
 
                       <table className="w-full border-collapse text-[10px] text-black" style={{ tableLayout: 'fixed' }}>
                         <thead>
