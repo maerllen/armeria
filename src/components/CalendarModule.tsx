@@ -573,20 +573,32 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     slotRecords.forEach((rec) => {
       const key = `${rec.data_calendario}_${rec.sigla_calendario}_${rec.sala_calendario || ''}_${rec.equipe_calendario || ''}`;
       const found = groups.find((g) => g.key === key);
-      const calculatedAula = getCalculatedLessonNumber(rec);
+
+      const calcAulaNum = rec.numero_aula_calendario
+        ? String(rec.numero_aula_calendario).includes('Aula')
+          ? rec.numero_aula_calendario
+          : `${rec.numero_aula_calendario}ª Aula`
+        : `${getCalculatedLessonNumber(rec)}ª Aula`;
 
       if (found) {
         if (!found.records.some((r) => r.turma_calendario === rec.turma_calendario)) {
           found.records.push(rec);
           found.turmasStr = Array.from(new Set(found.records.map((r) => r.turma_calendario))).join(', ');
-          found.aulasStr = Array.from(new Set(found.records.map((r) => `Aula ${getCalculatedLessonNumber(r)}`))).join(' / ');
+          found.aulasStr = Array.from(new Set(found.records.map((r) => {
+            const num = r.numero_aula_calendario
+              ? String(r.numero_aula_calendario).includes('Aula')
+                ? r.numero_aula_calendario
+                : `${r.numero_aula_calendario}ª Aula`
+              : `${getCalculatedLessonNumber(r)}ª Aula`;
+            return num;
+          }))).join(' / ');
         }
       } else {
         groups.push({
           key,
           turmasStr: rec.turma_calendario,
           primaryRecord: rec,
-          aulasStr: `Aula ${calculatedAula}`,
+          aulasStr: String(calcAulaNum),
           records: [rec]
         });
       }
@@ -596,29 +608,28 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       <div className="space-y-1 p-0.5">
         {groups.map((group) => {
           const rec = group.primaryRecord;
+          const turma = group.turmasStr || rec.turma_calendario || '';
+          const aula = group.aulasStr || '';
+          const equipe = rec.equipe_calendario || '';
+
+          // Formato solicitado: (TURMA CALENDARIO - NUMERO_AULA_CALENDARIO - PROFESSORES_EQUIPE_CALENDARIO)
+          const cellInfo = [turma, aula, equipe].filter(Boolean).join(' - ');
+
           return (
             <div
               key={group.key}
               onClick={() => setDetailRecord(rec)}
-              className="celula-aula cursor-pointer hover:bg-amber-100 transition p-1 border border-slate-300 rounded bg-white shadow-xs text-black text-left"
+              className="celula-aula cursor-pointer hover:bg-amber-100 transition p-1.5 border border-slate-300 rounded bg-white shadow-xs text-black text-center"
               title="Clique para ver ou editar detalhes"
             >
-              <div className="turma font-extrabold text-[11px] text-black flex items-center justify-between gap-1">
-                <span>Turma {group.turmasStr}</span>
-                <span className="font-mono text-[9px] bg-slate-100 px-1 rounded border border-slate-300 font-bold text-slate-800">
-                  {group.aulasStr}
-                </span>
+              <div className="turma font-black text-[10.5px] text-black leading-tight">
+                {cellInfo}
               </div>
-              <div className="instr text-[9.5px] text-slate-700 font-semibold mt-0.5 flex flex-wrap items-center justify-between gap-1">
-                <span>
-                  {rec.equipe_calendario ? `Prof: ${rec.equipe_calendario}` : ''}
-                  {rec.equipe_calendario && rec.sala_calendario ? ' | ' : ''}
-                  {rec.sala_calendario ? `Sala: ${rec.sala_calendario}` : ''}
-                </span>
-                <span className="text-amber-800 font-bold text-[9px] underline">
-                  [Ver]
-                </span>
-              </div>
+              {rec.sala_calendario && (
+                <div className="instr text-[9px] text-slate-700 font-semibold mt-0.5">
+                  Sala: {rec.sala_calendario}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1015,13 +1026,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               monthWeeks.map((week) => (
                 <div key={week.weekNum} className="folha bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 overflow-x-auto my-4 text-black">
                   {/* Header Banner for Week */}
-                  <div className="bg-slate-100 px-4 py-2 border-b-2 border-black flex items-center justify-between font-bold text-xs text-black">
-                    <span className="text-black uppercase font-black">
-                      {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'} — SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
-                    </span>
-                    <span className="text-slate-800 font-mono text-[11px] font-bold">
-                      {MONTH_NAMES[selectedMonth]} DE {selectedYear}
-                    </span>
+                  <div className="bg-slate-100 px-4 py-2.5 border-b-2 border-black text-center font-bold text-xs text-black">
+                    <div className="text-center font-black text-sm uppercase text-black tracking-wide">
+                      {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'}
+                    </div>
+                    <div className="text-center font-bold text-[11px] text-slate-800 mt-0.5">
+                      SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate}) — {MONTH_NAMES[selectedMonth]} DE {selectedYear}
+                    </div>
                   </div>
 
                   <table className="w-full border-collapse text-[11px] text-black">
@@ -1136,16 +1147,16 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       {/* SPECIAL PRINTABLE REPORT VIEW */}
       <div className="hidden print:block text-black bg-white p-4 font-sans text-xs">
         <div className="border-b-2 border-black pb-3 mb-3 flex items-center justify-between">
-          <div>
+          <div className="flex-1 text-center">
             <h1 className="text-base font-black uppercase tracking-tight">ACADEPOL - ACADEMIA DE POLÍCIA CIVIL</h1>
-            <h2 className="text-sm font-extrabold text-slate-900">
-              MAPA HORÁRIO DA DISCIPLINA: {selectedDisciplineName}
+            <h2 className="text-sm font-black text-slate-900 uppercase my-0.5">
+              DISCIPLINA: {selectedDisciplineName}
             </h2>
-            <p className="text-[11px] text-slate-700 font-medium">
+            <p className="text-[11px] text-slate-700 font-bold">
               Mês / Ano: {MONTH_NAMES[selectedMonth]} / {selectedYear}
             </p>
           </div>
-          <div className="text-right text-[10px] font-mono">
+          <div className="text-right text-[10px] font-mono shrink-0">
             <div>Data de Impressão: {new Date().toLocaleDateString('pt-BR')}</div>
             <div>Total de Aulas: {activeDisciplineRecords.length}</div>
           </div>
@@ -1153,8 +1164,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
         {monthWeeks.map((week) => (
           <div key={week.weekNum} className="folha bg-white w-full overflow-x-auto my-4 text-black page-break-after-always">
-            <div className="bg-slate-100 px-3 py-1 border-b border-black font-bold text-[11px] text-black">
-              SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+            <div className="bg-slate-100 px-3 py-1.5 border-b border-black font-bold text-[11px] text-black text-center">
+              <div className="font-black text-xs uppercase">
+                DISCIPLINA: {selectedDisciplineName}
+              </div>
+              <div className="font-bold text-[10px] text-slate-800">
+                SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+              </div>
             </div>
             <table className="w-full border-collapse text-[10px] text-black">
               <thead>
