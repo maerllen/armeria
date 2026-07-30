@@ -3278,3 +3278,151 @@ apiRouter.delete('/calendario-aulas/:id', async (req: Request, res: Response) =>
     return res.status(500).json({ error: err.message });
   }
 });
+
+// -------------------------------------------------------------
+// EQUIPES CALENDÁRIO ENDPOINTS
+// -------------------------------------------------------------
+
+// GET /equipes-calendario
+apiRouter.get('/equipes-calendario', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM equipe_calendario ORDER BY created_at DESC');
+    const mapped = [];
+
+    for (const r of rows || []) {
+      const [profs]: any = await pool.query('SELECT * FROM professores_equipe WHERE equipe_id = ?', [r.id]);
+      mapped.push({
+        id: r.id,
+        nome_da_equipe: r.nome_da_equipe || '',
+        materia: r.materia || '',
+        tipo_curso: r.tipo_curso || 'Curso de Formação',
+        nome_do_curso: r.nome_do_curso || '',
+        modulo: r.modulo || '',
+        data: r.data ? String(r.data).split('T')[0] : '',
+        professor_titular_equipe: r.professor_titular_nome || '',
+        sigla_professor: r.sigla_professor || '',
+        instrutor_equipe: r.instrutor_nome || '',
+        sigla_instrutor: r.sigla_instrutor || '',
+        professores_equipe: (profs || []).map((p: any) => ({
+          id: p.id,
+          equipeId: p.equipe_id,
+          professorTitularId: p.professor_titular_id,
+          professorTitularNome: p.professor_titular_nome,
+          siglaProfessor: p.sigla_professor,
+          instrutorId: p.instrutor_id,
+          instrutorNome: p.instrutor_nome,
+          siglaInstrutor: p.sigla_instrutor,
+        })),
+        createdAt: r.created_at
+      });
+    }
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /equipes-calendario (Create or Update Team)
+apiRouter.post('/equipes-calendario', async (req: Request, res: Response) => {
+  try {
+    const {
+      id: reqId,
+      nome_da_equipe,
+      materia,
+      tipo_curso,
+      nome_do_curso,
+      modulo,
+      data,
+      professor_titular_equipe,
+      professor_titular_id,
+      sigla_professor,
+      instrutor_equipe,
+      instrutor_id,
+      sigla_instrutor,
+      actor
+    } = req.body;
+
+    if (!nome_da_equipe || !materia || !nome_do_curso) {
+      return res.status(400).json({ error: 'Nome da Equipe, Matéria e Curso são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = reqId || `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const tipoCursoVal = tipo_curso || 'Curso de Formação';
+    const dataVal = data || new Date().toISOString().split('T')[0];
+
+    await pool.query(
+      `INSERT INTO equipe_calendario
+        (id, nome_da_equipe, materia, tipo_curso, nome_do_curso, modulo, data, professor_titular_id, professor_titular_nome, sigla_professor, instrutor_id, instrutor_nome, sigla_instrutor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+        nome_da_equipe = VALUES(nome_da_equipe),
+        materia = VALUES(materia),
+        tipo_curso = VALUES(tipo_curso),
+        nome_do_curso = VALUES(nome_do_curso),
+        modulo = VALUES(modulo),
+        data = VALUES(data),
+        professor_titular_id = VALUES(professor_titular_id),
+        professor_titular_nome = VALUES(professor_titular_nome),
+        sigla_professor = VALUES(sigla_professor),
+        instrutor_id = VALUES(instrutor_id),
+        instrutor_nome = VALUES(instrutor_nome),
+        sigla_instrutor = VALUES(sigla_instrutor)`,
+      [
+        id,
+        nome_da_equipe,
+        materia,
+        tipoCursoVal,
+        nome_do_curso,
+        modulo || 'Módulo I',
+        dataVal,
+        professor_titular_id || null,
+        professor_titular_equipe || null,
+        sigla_professor || null,
+        instrutor_id || null,
+        instrutor_equipe || null,
+        sigla_instrutor || null
+      ]
+    );
+
+    // Sync professores_equipe table
+    await pool.query('DELETE FROM professores_equipe WHERE equipe_id = ?', [id]);
+    const profEqId = `prof-eq-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO professores_equipe
+        (id, equipe_id, professor_titular_id, professor_titular_nome, sigla_professor, instrutor_id, instrutor_nome, sigla_instrutor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        profEqId,
+        id,
+        professor_titular_id || null,
+        professor_titular_equipe || null,
+        sigla_professor || null,
+        instrutor_id || null,
+        instrutor_equipe || null,
+        sigla_instrutor || null
+      ]
+    );
+
+    await insertAuditLog('Calendário', 'Salvar Equipe', `Cadastrada/Atualizada Equipe ${nome_da_equipe} (${materia}) para curso ${nome_do_curso}`, actor, req.ip);
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /equipes-calendario/:id
+apiRouter.delete('/equipes-calendario/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await pool.query('DELETE FROM professores_equipe WHERE equipe_id = ?', [id]);
+    await pool.query('DELETE FROM equipe_calendario WHERE id = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+

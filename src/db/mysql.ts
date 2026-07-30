@@ -495,6 +495,46 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     `);
     logs.push("Tabela 'calendario_aulas' verificada/criada.");
 
+    // Equipe Calendario Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`equipe_calendario\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`nome_da_equipe\` VARCHAR(100) NOT NULL,
+        \`materia\` VARCHAR(100) NOT NULL,
+        \`tipo_curso\` VARCHAR(100) NOT NULL DEFAULT 'Curso de Formação',
+        \`nome_do_curso\` VARCHAR(255) NOT NULL,
+        \`modulo\` VARCHAR(100) NOT NULL,
+        \`data\` DATE DEFAULT NULL,
+        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
+        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
+        \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
+        \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'equipe_calendario' verificada/criada.");
+
+    // Professores Equipe Table
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`professores_equipe\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`equipe_id\` VARCHAR(64) NOT NULL,
+        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
+        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
+        \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
+        \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
+        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_prof_eq_id\` (\`equipe_id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    logs.push("Tabela 'professores_equipe' verificada/criada.");
+
     try {
       await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `modulo_calendario` VARCHAR(100) DEFAULT NULL;");
     } catch (e) {}

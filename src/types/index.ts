@@ -440,3 +440,30 @@ export interface CalendarRecord {
   observacao_calendario?: string;
   createdAt?: string;
 }
+
+export interface ProfessorEquipe {
+  id?: string;
+  equipeId?: string;
+  professorTitularId?: string;
+  professorTitularNome: string;
+  siglaProfessor: string;
+  instrutorId?: string;
+  instrutorNome: string;
+  siglaInstrutor: string;
+}
+
+export interface EquipeCalendario {
+  id: string;
+  nome_da_equipe: string;
+  materia: string;
+  tipo_curso: string;
+  nome_do_curso: string;
+  modulo: string;
+  data: string;
+  professor_titular_equipe?: string;
+  sigla_professor?: string;
+  instrutor_equipe?: string;
+  sigla_instrutor?: string;
+  professores_equipe?: ProfessorEquipe[];
+  createdAt?: string;
+}

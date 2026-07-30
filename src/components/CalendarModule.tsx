@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { CalendarRecord, User, AcademyCourse, LessonPlan } from '../types';
+import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe } from '../types';
 import { storage } from '../services/storage';
 import {
   Calendar,
@@ -179,6 +179,14 @@ const DEFAULT_FORMACAO_COURSES = [
   'Curso de Formação de Peritos Criminais'
 ];
 
+const TEAM_NAMES_LIST = [
+  'Alpha', 'Bravo', 'Charlie', 'Delta', 'Eco', 'Foxtrot', 'Golf',
+  'Hotel', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November',
+  'Oscar', 'Papa', 'Quebec', 'Romeu', 'Sierra', 'Tango', 'Uniform',
+  'Victor', 'Whiskey', 'X-Ray', 'Yankee', 'Zulu'
+];
+
+
 export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) => {
   const [records, setRecords] = useState<CalendarRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -208,10 +216,50 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   // Modals & Detail Popups
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showRecordModal, setShowRecordModal] = useState<boolean>(false);
+  const [showEquipeModal, setShowEquipeModal] = useState<boolean>(false);
   const [detailRecord, setDetailRecord] = useState<CalendarRecord | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<CalendarRecord[]>([]);
   const [importing, setImporting] = useState<boolean>(false);
+
+  // Equipes state
+  const [equipesList, setEquipesList] = useState<EquipeCalendario[]>([]);
+  const [systemUsers, setSystemUsers] = useState<User[]>([]);
+  const [editingEquipeId, setEditingEquipeId] = useState<string | null>(null);
+
+  const [equipeForm, setEquipeForm] = useState({
+    nome_da_equipe: 'Alpha',
+    materia: 'MEAF',
+    tipo_curso: 'Curso de Formação',
+    nome_do_curso: '',
+    modulo: 'Módulo I',
+    data: new Date().toISOString().split('T')[0],
+    professor_titular_id: '',
+    professor_titular_equipe: '',
+    sigla_professor: '',
+    instrutor_id: '',
+    instrutor_equipe: '',
+    sigla_instrutor: ''
+  });
+
+  const resetEquipeForm = () => {
+    const defaultCourse = formacaoCoursesList[0]?.name || DEFAULT_FORMACAO_COURSES[0];
+    setEquipeForm({
+      nome_da_equipe: 'Alpha',
+      materia: 'MEAF',
+      tipo_curso: 'Curso de Formação',
+      nome_do_curso: defaultCourse,
+      modulo: 'Módulo I',
+      data: new Date().toISOString().split('T')[0],
+      professor_titular_id: '',
+      professor_titular_equipe: '',
+      sigla_professor: '',
+      instrutor_id: '',
+      instrutor_equipe: '',
+      sigla_instrutor: ''
+    });
+    setEditingEquipeId(null);
+  };
 
   // Custom course selector helper state
   const [isCustomCourse, setIsCustomCourse] = useState<boolean>(false);
@@ -243,6 +291,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       await storage.refreshFromServer();
       const loaded = storage.getCalendarRecords();
       setRecords(loaded);
+
+      // Load Equipes & Users
+      const loadedEquipes = storage.getEquipesCalendario ? storage.getEquipesCalendario() : [];
+      setEquipesList(loadedEquipes);
+      const loadedUsers = storage.getUsers ? storage.getUsers() : [];
+      setSystemUsers(loadedUsers);
 
       // Load Cursos de Formação
       const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
@@ -286,12 +340,78 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       });
 
       setFormacaoCoursesList(combined);
+
+      // Set default course for equipe form if empty
+      if (!equipeForm.nome_do_curso && combined.length > 0) {
+        setEquipeForm((prev) => ({ ...prev, nome_do_curso: combined[0].name }));
+      }
     } catch (err: any) {
       showToast('error', 'Erro ao carregar os dados do calendário: ' + err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  const handleSaveEquipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!equipeForm.nome_da_equipe || !equipeForm.materia || !equipeForm.nome_do_curso) {
+      showToast('error', 'Preencha o Nome da Equipe, Matéria e Curso.');
+      return;
+    }
+
+    const payload: Partial<EquipeCalendario> = {
+      id: editingEquipeId || undefined,
+      nome_da_equipe: equipeForm.nome_da_equipe,
+      materia: equipeForm.materia,
+      tipo_curso: equipeForm.tipo_curso || 'Curso de Formação',
+      nome_do_curso: equipeForm.nome_do_curso,
+      modulo: equipeForm.modulo || 'Módulo I',
+      data: equipeForm.data || new Date().toISOString().split('T')[0],
+      professor_titular_equipe: equipeForm.professor_titular_equipe,
+      sigla_professor: equipeForm.sigla_professor,
+      instrutor_equipe: equipeForm.instrutor_equipe,
+      sigla_instrutor: equipeForm.sigla_instrutor
+    };
+
+    const res = await storage.saveEquipeCalendario(payload);
+    if (res.success) {
+      showToast('success', editingEquipeId ? 'Equipe atualizada com sucesso!' : 'Equipe cadastrada com sucesso!');
+      resetEquipeForm();
+      await loadData();
+    } else {
+      showToast('error', 'Erro ao salvar equipe: ' + (res.error || ''));
+    }
+  };
+
+  const handleDeleteEquipe = async (id: string) => {
+    if (!window.confirm('Deseja realmente excluir esta equipe?')) return;
+    const res = await storage.deleteEquipeCalendario(id);
+    if (res.success) {
+      showToast('success', 'Equipe excluída com sucesso!');
+      await loadData();
+    } else {
+      showToast('error', 'Erro ao excluir equipe: ' + (res.error || ''));
+    }
+  };
+
+  const handleEditEquipe = (eq: EquipeCalendario) => {
+    setEditingEquipeId(eq.id);
+    setEquipeForm({
+      nome_da_equipe: eq.nome_da_equipe || 'Alpha',
+      materia: eq.materia || 'MEAF',
+      tipo_curso: eq.tipo_curso || 'Curso de Formação',
+      nome_do_curso: eq.nome_do_curso || (formacaoCoursesList[0]?.name || ''),
+      modulo: eq.modulo || 'Módulo I',
+      data: eq.data || new Date().toISOString().split('T')[0],
+      professor_titular_id: '',
+      professor_titular_equipe: eq.professor_titular_equipe || '',
+      sigla_professor: eq.sigla_professor || '',
+      instrutor_id: '',
+      instrutor_equipe: eq.instrutor_equipe || '',
+      sigla_instrutor: eq.sigla_instrutor || ''
+    });
+  };
+
 
   useEffect(() => {
     loadData();
@@ -702,7 +822,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 MÓDULO ACADÊMICO ACADEPOL
               </span>
               <h2 className="text-xl font-extrabold text-slate-100">
-                Calendário por Disciplina
+                Calendário Curso de Formação
               </h2>
             </div>
           </div>
@@ -713,6 +833,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => {
+              resetEquipeForm();
+              setShowEquipeModal(true);
+            }}
+            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 flex items-center space-x-2 transition"
+          >
+            <Users className="w-4 h-4" />
+            <span>Criar Equipe</span>
+          </button>
+
           {selectedDiscipline && (
             <button
               onClick={handlePrintPDF}
@@ -1692,6 +1823,315 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           </div>
         </div>
       )}
+
+      {/* MODAL 4: CRIAR EQUIPE CALENDÁRIO */}
+      {showEquipeModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-6 shadow-2xl my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-100">
+                    {editingEquipeId ? 'Editar Equipe do Calendário' : 'Criar Equipe do Calendário'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Cadastre a equipe e atribua as siglas dos professores titulares e instrutores por matéria e curso.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEquipeModal(false);
+                  resetEquipeForm();
+                }}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* FORM */}
+            <form onSubmit={handleSaveEquipe} className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
+                {/* Nome da Equipe */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    NOME DA EQUIPE *
+                  </label>
+                  <select
+                    value={equipeForm.nome_da_equipe}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, nome_da_equipe: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    {TEAM_NAMES_LIST.map((teamName) => (
+                      <option key={teamName} value={teamName}>
+                        Equipe {teamName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Matéria */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    MATÉRIA / DISCIPLINA *
+                  </label>
+                  <select
+                    value={equipeForm.materia}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, materia: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    {uniqueSubjectsMap.length > 0 ? (
+                      uniqueSubjectsMap.map((s) => (
+                        <option key={s.sigla} value={s.sigla}>
+                          {s.sigla} - {s.nome}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="MEAF">MEAF - Manuseio e Emprego de Armas de Fogo</option>
+                        <option value="TAP">TAP - Táticas de Ação Policial</option>
+                        <option value="DP">DP - Direito Processual Penal</option>
+                        <option value="TIG">TIG - Técnicas de Investigação</option>
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                {/* Tipo de Curso */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    TIPO DE CURSO *
+                  </label>
+                  <select
+                    value={equipeForm.tipo_curso}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, tipo_curso: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-400 font-bold focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    <option value="Curso de Formação">Curso de Formação (Pré-selecionado)</option>
+                    <option value="Curso de Ensino Continuado">Curso de Ensino Continuado</option>
+                  </select>
+                </div>
+
+                {/* Nome do Curso de Formação */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    CURSO DE FORMAÇÃO *
+                  </label>
+                  <select
+                    value={equipeForm.nome_do_curso}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, nome_do_curso: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                    required
+                  >
+                    {formacaoCoursesList.map((c, i) => (
+                      <option key={i} value={c.name}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Módulo */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    MÓDULO DO CURSO
+                  </label>
+                  <select
+                    value={equipeForm.modulo}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, modulo: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    {PRESET_MODULES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Data */}
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    DATA DA EQUIPE
+                  </label>
+                  <input
+                    type="date"
+                    value={equipeForm.data}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, data: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Professor Titular (do sistema) */}
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                    PROFESSOR TITULAR (USUÁRIO)
+                  </label>
+                  <select
+                    value={equipeForm.professor_titular_equipe}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, professor_titular_equipe: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="">Selecione o Professor Titular...</option>
+                    {systemUsers.map((u) => (
+                      <option key={u.id} value={u.name}>
+                        {u.name} ({u.cargo || 'Policial'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sigla do Professor */}
+                <div>
+                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                    SIGLA DO PROFESSOR (ESCRITA MANUAL)
+                  </label>
+                  <input
+                    type="text"
+                    value={equipeForm.sigla_professor}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value })}
+                    placeholder="Ex: PF-MEAF-01"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono uppercase focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                {/* Instrutor (do sistema) */}
+                <div>
+                  <label className="block text-[10px] font-bold text-indigo-400 uppercase mb-1">
+                    INSTRUTOR DA EQUIPE (USUÁRIO)
+                  </label>
+                  <select
+                    value={equipeForm.instrutor_equipe}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, instrutor_equipe: e.target.value })}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="">Selecione o Instrutor...</option>
+                    {systemUsers.map((u) => (
+                      <option key={u.id} value={u.name}>
+                        {u.name} ({u.cargo || 'Policial'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sigla do Instrutor */}
+                <div>
+                  <label className="block text-[10px] font-bold text-indigo-400 uppercase mb-1">
+                    SIGLA DO INSTRUTOR (ESCRITA MANUAL)
+                  </label>
+                  <input
+                    type="text"
+                    value={equipeForm.sigla_instrutor}
+                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_instrutor: e.target.value })}
+                    placeholder="Ex: INST-MEAF-01"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono uppercase focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                {editingEquipeId && (
+                  <button
+                    type="button"
+                    onClick={resetEquipeForm}
+                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
+                  >
+                    Cancelar Edição
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition flex items-center space-x-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>{editingEquipeId ? 'Atualizar Equipe' : 'Salvar Equipe'}</span>
+                </button>
+              </div>
+            </form>
+
+            {/* TABELA DE EQUIPES CADASTRADAS */}
+            <div className="space-y-3 pt-4 border-t border-slate-800">
+              <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-widest flex items-center space-x-2">
+                <Users className="w-4 h-4" />
+                <span>Equipes Cadastradas no Sistema ({equipesList.length})</span>
+              </h4>
+
+              {equipesList.length === 0 ? (
+                <p className="text-xs text-slate-500 text-center py-4 bg-slate-950/40 rounded-xl border border-slate-800">
+                  Nenhuma equipe cadastrada ainda. Preencha o formulário acima para criar uma equipe.
+                </p>
+              ) : (
+                <div className="max-h-60 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 sticky top-0">
+                      <tr>
+                        <th className="p-2.5">EQUIPE</th>
+                        <th className="p-2.5">MATÉRIA</th>
+                        <th className="p-2.5">CURSO / MÓDULO</th>
+                        <th className="p-2.5">PROFESSOR (SIGLA)</th>
+                        <th className="p-2.5">INSTRUTOR (SIGLA)</th>
+                        <th className="p-2.5 text-center">AÇÕES</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                      {equipesList.map((eq) => (
+                        <tr key={eq.id} className="hover:bg-slate-900/40">
+                          <td className="p-2.5 font-bold">
+                            <span className="px-2 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg text-[11px]">
+                              Equipe {eq.nome_da_equipe}
+                            </span>
+                          </td>
+                          <td className="p-2.5 font-mono text-amber-300 font-bold">{eq.materia}</td>
+                          <td className="p-2.5 text-[11px]">
+                            <div className="font-semibold text-slate-200">{eq.nome_do_curso}</div>
+                            <div className="text-[10px] text-slate-400">{eq.modulo} ({eq.data})</div>
+                          </td>
+                          <td className="p-2.5 text-[11px]">
+                            <div className="font-semibold">{eq.professor_titular_equipe || '-'}</div>
+                            {eq.sigla_professor && (
+                              <span className="text-[10px] font-mono text-amber-400 font-bold">[{eq.sigla_professor}]</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-[11px]">
+                            <div className="font-semibold">{eq.instrutor_equipe || '-'}</div>
+                            {eq.sigla_instrutor && (
+                              <span className="text-[10px] font-mono text-indigo-400 font-bold">[{eq.sigla_instrutor}]</span>
+                            )}
+                          </td>
+                          <td className="p-2.5 text-center space-x-1">
+                            <button
+                              onClick={() => handleEditEquipe(eq)}
+                              className="p-1 text-slate-400 hover:text-amber-400 transition"
+                              title="Editar Equipe"
+                            >
+                              <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteEquipe(eq.id)}
+                              className="p-1 text-slate-400 hover:text-rose-400 transition"
+                              title="Excluir Equipe"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

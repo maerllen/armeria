@@ -19,7 +19,9 @@ import {
   AvailableWeaponType,
   AlunoTurma,
   AlunoAula,
-  CalendarRecord
+  CalendarRecord,
+  EquipeCalendario,
+  ProfessorEquipe
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -44,6 +46,7 @@ export interface AppState {
   courseMovements: CourseMovement[];
   lessonPlans: LessonPlan[];
   calendarRecords: CalendarRecord[];
+  equipesCalendario: EquipeCalendario[];
 }
 
 class StorageService {
@@ -67,7 +70,8 @@ class StorageService {
     courseClasses: [],
     courseMovements: [],
     lessonPlans: [],
-    calendarRecords: []
+    calendarRecords: [],
+    equipesCalendario: []
   };
 
   constructor() {
@@ -104,7 +108,8 @@ class StorageService {
         courseClassesRes,
         courseMovsRes,
         lessonPlansRes,
-        calendarRecordsRes
+        calendarRecordsRes,
+        equipesCalendarioRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -124,7 +129,8 @@ class StorageService {
         fetch('/api/course-classes').then(r => r.ok ? r.json() : []),
         fetch('/api/course-movements').then(r => r.ok ? r.json() : []),
         fetch('/api/lesson-plans').then(r => r.ok ? r.json() : []),
-        fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : [])
+        fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : []),
+        fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -146,6 +152,8 @@ class StorageService {
       this.state.courseMovements = courseMovsRes || [];
       this.state.lessonPlans = lessonPlansRes || [];
       this.state.calendarRecords = calendarRecordsRes || [];
+      this.state.equipesCalendario = equipesCalendarioRes || [];
+
 
       // Refresh current user reference if logged in
       if (this.state.currentUser) {
@@ -1341,6 +1349,46 @@ class StorageService {
       return { success: false, error: err.message };
     }
   }
+
+  // --- EQUIPES CALENDÁRIO METHODS ---
+  public getEquipesCalendario(): EquipeCalendario[] {
+    return this.state.equipesCalendario || [];
+  }
+
+  public async saveEquipeCalendario(equipe: Partial<EquipeCalendario>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/equipes-calendario', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...equipe, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteEquipeCalendario(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/equipes-calendario/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
+
 
 export const storage = new StorageService();

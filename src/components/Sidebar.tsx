@@ -102,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'calendario',
-      label: 'Calendário de Aulas',
+      label: 'Calendário Curso de Formação',
       icon: Calendar,
       visible: true
     },
