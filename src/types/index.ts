@@ -49,6 +49,8 @@ export interface User {
   courses: UserCourse[];
   isTeacher?: boolean;
   teacherSubject?: TeacherSubject;
+  professorSigla?: string;
+  professor_sigla?: string;
   createdAt: string;
 }
 
@@ -441,15 +443,27 @@ export interface CalendarRecord {
   createdAt?: string;
 }
 
+export interface InstrutorItem {
+  id?: string;
+  rotulo?: string; // e.g. "Instrutor 02", "Instrutor 03", "Instrutor 04"
+  instrutorNome: string;
+  siglaInstrutor: string;
+}
+
 export interface ProfessorEquipe {
   id?: string;
   equipeId?: string;
+  nome_professor?: string;
+  sigla_professor?: string;
+  titular?: 'Sim' | 'Não' | string;
+  instrutor?: '1' | '2' | '3' | '4' | string;
   professorTitularId?: string;
-  professorTitularNome: string;
-  siglaProfessor: string;
+  professorTitularNome?: string;
+  siglaProfessor?: string;
   instrutorId?: string;
-  instrutorNome: string;
-  siglaInstrutor: string;
+  instrutorNome?: string;
+  siglaInstrutor?: string;
+  tipoFuncao?: 'TITULAR' | 'INSTRUTOR';
 }
 
 export interface EquipeCalendario {
@@ -458,12 +472,16 @@ export interface EquipeCalendario {
   materia: string;
   tipo_curso: string;
   nome_do_curso: string;
+  codigo_curso?: string;
+  dates_curso?: string;
   modulo: string;
-  data: string;
+  ano?: string | number;
+  data?: string;
   professor_titular_equipe?: string;
   sigla_professor?: string;
   instrutor_equipe?: string;
   sigla_instrutor?: string;
+  instrutores?: InstrutorItem[];
   professores_equipe?: ProfessorEquipe[];
   createdAt?: string;
 }

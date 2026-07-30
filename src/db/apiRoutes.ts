@@ -352,6 +352,8 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         mustChangePassword: Boolean(u.must_change_password),
         isTeacher: Boolean(u.is_teacher),
         teacherSubject: u.teacher_subject || undefined,
+        professorSigla: u.professor_sigla || '',
+        professor_sigla: u.professor_sigla || '',
         courses,
         createdAt: u.created_at
       };
@@ -365,8 +367,9 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { masp, name, phone, cargo, role, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, courses, actor } = req.body;
+    const { masp, name, phone, cargo, role, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
+    const siglaProf = professorSigla || professor_sigla || null;
 
     const pool = getPool();
     const [existing]: any = await pool.query('SELECT id FROM users WHERE masp = ?', [cleanMasp]);
@@ -377,8 +380,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const id = `usr-${Date.now()}`;
     const hashedDefaultPass = hashPassword(cleanMasp);
     await pool.query(
-      `INSERT INTO users (id, masp, password, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, is_teacher, teacher_subject, must_change_password, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+      `INSERT INTO users (id, masp, password, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, is_teacher, teacher_subject, professor_sigla, must_change_password, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
       [
         id,
         cleanMasp,
@@ -393,7 +396,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
         canMoveWeapons ? 1 : 0,
         hasSystemAccess ? 1 : 0,
         isTeacher ? 1 : 0,
-        teacherSubject || null
+        teacherSubject || null,
+        siglaProf
       ]
     );
 
@@ -480,7 +484,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
         can_move_weapons = COALESCE(?, can_move_weapons),
         has_system_access = COALESCE(?, has_system_access),
         is_teacher = COALESCE(?, is_teacher),
-        teacher_subject = COALESCE(?, teacher_subject)
+        teacher_subject = COALESCE(?, teacher_subject),
+        professor_sigla = COALESCE(?, professor_sigla)
        WHERE id = ?`,
       [
         cleanMasp,
@@ -495,6 +500,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
         updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
         updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
         updates.teacherSubject !== undefined ? updates.teacherSubject : null,
+        updates.professorSigla ?? updates.professor_sigla ?? null,
         id
       ]
     );
@@ -3292,27 +3298,66 @@ apiRouter.get('/equipes-calendario', async (req: Request, res: Response) => {
 
     for (const r of rows || []) {
       const [profs]: any = await pool.query('SELECT * FROM professores_equipe WHERE equipe_id = ?', [r.id]);
+      
+      const instrutoresList: any[] = [];
+      let profTitularNome = r.professor_titular_nome || '';
+      let profTitularSigla = r.sigla_professor || '';
+
+      for (const p of profs || []) {
+        if (p.tipo_funcao === 'TITULAR' || p.professor_titular_nome) {
+          profTitularNome = p.professor_titular_nome || profTitularNome;
+          profTitularSigla = p.sigla_professor || profTitularSigla;
+        }
+        if (p.tipo_funcao === 'INSTRUTOR' || p.instrutor_nome || p.sigla_instrutor) {
+          if (p.instrutor_nome || p.sigla_instrutor) {
+            instrutoresList.push({
+              id: p.id,
+              instrutorNome: p.instrutor_nome || '',
+              siglaInstrutor: p.sigla_instrutor || ''
+            });
+          }
+        }
+      }
+
+      // If no separate profs rows but single columns set
+      if (instrutoresList.length === 0 && (r.instrutor_nome || r.sigla_instrutor)) {
+        instrutoresList.push({
+          id: `inst-1`,
+          instrutorNome: r.instrutor_nome || '',
+          siglaInstrutor: r.sigla_instrutor || ''
+        });
+      }
+
       mapped.push({
         id: r.id,
         nome_da_equipe: r.nome_da_equipe || '',
         materia: r.materia || '',
-        tipo_curso: r.tipo_curso || 'Curso de Formação',
+        tipo_curso: 'Curso de Formação',
         nome_do_curso: r.nome_do_curso || '',
+        codigo_curso: r.codigo_curso || '',
+        dates_curso: r.dates_curso || '',
         modulo: r.modulo || '',
+        ano: r.ano || (r.created_at ? new Date(r.created_at).getFullYear() : new Date().getFullYear()),
         data: r.data ? String(r.data).split('T')[0] : '',
-        professor_titular_equipe: r.professor_titular_nome || '',
-        sigla_professor: r.sigla_professor || '',
-        instrutor_equipe: r.instrutor_nome || '',
-        sigla_instrutor: r.sigla_instrutor || '',
+        professor_titular_equipe: profTitularNome,
+        sigla_professor: profTitularSigla,
+        instrutor_equipe: r.instrutor_nome || (instrutoresList[0]?.instrutorNome || ''),
+        sigla_instrutor: r.sigla_instrutor || (instrutoresList[0]?.siglaInstrutor || ''),
+        instrutores: instrutoresList,
         professores_equipe: (profs || []).map((p: any) => ({
           id: p.id,
           equipeId: p.equipe_id,
+          nome_professor: p.nome_professor || p.professor_titular_nome || p.instrutor_nome || '',
+          sigla_professor: p.sigla_professor || p.sigla_instrutor || '',
+          titular: p.titular || (p.tipo_funcao === 'TITULAR' ? 'Sim' : 'Não'),
+          instrutor: p.instrutor || (p.tipo_funcao === 'INSTRUTOR' ? '1' : undefined),
+          tipoFuncao: p.tipo_funcao,
           professorTitularId: p.professor_titular_id,
-          professorTitularNome: p.professor_titular_nome,
+          professorTitularNome: p.professor_titular_nome || p.nome_professor,
           siglaProfessor: p.sigla_professor,
           instrutorId: p.instrutor_id,
-          instrutorNome: p.instrutor_nome,
-          siglaInstrutor: p.sigla_instrutor,
+          instrutorNome: p.instrutor_nome || p.nome_professor,
+          siglaInstrutor: p.sigla_instrutor || p.sigla_professor,
         })),
         createdAt: r.created_at
       });
@@ -3331,15 +3376,17 @@ apiRouter.post('/equipes-calendario', async (req: Request, res: Response) => {
       id: reqId,
       nome_da_equipe,
       materia,
-      tipo_curso,
       nome_do_curso,
+      codigo_curso,
+      dates_curso,
       modulo,
+      ano,
       data,
       professor_titular_equipe,
       professor_titular_id,
       sigla_professor,
+      instrutores, // array of { instrutorNome, siglaInstrutor }
       instrutor_equipe,
-      instrutor_id,
       sigla_instrutor,
       actor
     } = req.body;
@@ -3350,19 +3397,31 @@ apiRouter.post('/equipes-calendario', async (req: Request, res: Response) => {
 
     const pool = getPool();
     const id = reqId || `eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
-    const tipoCursoVal = tipo_curso || 'Curso de Formação';
+    const tipoCursoVal = 'Curso de Formação';
+    const anoVal = ano ? String(ano) : new Date().getFullYear().toString();
     const dataVal = data || new Date().toISOString().split('T')[0];
+
+    // Normalized list of instructors
+    const instrList: { instrutorNome: string; siglaInstrutor: string }[] = Array.isArray(instrutores) && instrutores.length > 0
+      ? instrutores
+      : (instrutor_equipe || sigla_instrutor) ? [{ instrutorNome: instrutor_equipe || '', siglaInstrutor: sigla_instrutor || '' }] : [];
+
+    const primaryInstrutorNome = instrList[0]?.instrutorNome || instrutor_equipe || '';
+    const primarySiglaInstrutor = instrList[0]?.siglaInstrutor || sigla_instrutor || '';
 
     await pool.query(
       `INSERT INTO equipe_calendario
-        (id, nome_da_equipe, materia, tipo_curso, nome_do_curso, modulo, data, professor_titular_id, professor_titular_nome, sigla_professor, instrutor_id, instrutor_nome, sigla_instrutor, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        (id, nome_da_equipe, materia, tipo_curso, nome_do_curso, codigo_curso, dates_curso, modulo, ano, data, professor_titular_id, professor_titular_nome, sigla_professor, instrutor_id, instrutor_nome, sigla_instrutor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE
         nome_da_equipe = VALUES(nome_da_equipe),
         materia = VALUES(materia),
         tipo_curso = VALUES(tipo_curso),
         nome_do_curso = VALUES(nome_do_curso),
+        codigo_curso = VALUES(codigo_curso),
+        dates_curso = VALUES(dates_curso),
         modulo = VALUES(modulo),
+        ano = VALUES(ano),
         data = VALUES(data),
         professor_titular_id = VALUES(professor_titular_id),
         professor_titular_nome = VALUES(professor_titular_nome),
@@ -3376,37 +3435,65 @@ apiRouter.post('/equipes-calendario', async (req: Request, res: Response) => {
         materia,
         tipoCursoVal,
         nome_do_curso,
+        codigo_curso || null,
+        dates_curso || null,
         modulo || 'Módulo I',
+        anoVal,
         dataVal,
         professor_titular_id || null,
         professor_titular_equipe || null,
         sigla_professor || null,
-        instrutor_id || null,
-        instrutor_equipe || null,
-        sigla_instrutor || null
+        null,
+        primaryInstrutorNome || null,
+        primarySiglaInstrutor || null
       ]
     );
 
     // Sync professores_equipe table
     await pool.query('DELETE FROM professores_equipe WHERE equipe_id = ?', [id]);
-    const profEqId = `prof-eq-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    await pool.query(
-      `INSERT INTO professores_equipe
-        (id, equipe_id, professor_titular_id, professor_titular_nome, sigla_professor, instrutor_id, instrutor_nome, sigla_instrutor, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        profEqId,
-        id,
-        professor_titular_id || null,
-        professor_titular_equipe || null,
-        sigla_professor || null,
-        instrutor_id || null,
-        instrutor_equipe || null,
-        sigla_instrutor || null
-      ]
-    );
 
-    await insertAuditLog('Calendário', 'Salvar Equipe', `Cadastrada/Atualizada Equipe ${nome_da_equipe} (${materia}) para curso ${nome_do_curso}`, actor, req.ip);
+    // Insert Professor Titular row (titular: "Sim", instrutor: null)
+    if (professor_titular_equipe || sigla_professor) {
+      const profTitId = `prof-tit-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      await pool.query(
+        `INSERT INTO professores_equipe
+          (id, equipe_id, nome_professor, sigla_professor, titular, instrutor, tipo_funcao, professor_titular_id, professor_titular_nome, created_at)
+         VALUES (?, ?, ?, ?, 'Sim', NULL, 'TITULAR', ?, ?, NOW())`,
+        [
+          profTitId,
+          id,
+          professor_titular_equipe || null,
+          sigla_professor || null,
+          professor_titular_id || null,
+          professor_titular_equipe || null
+        ]
+      );
+    }
+
+    // Insert Instrutores rows (titular: "Não", instrutor: "1", "2", "3", "4")
+    for (let i = 0; i < instrList.length; i++) {
+      const inst = instrList[i];
+      if (inst.instrutorNome || inst.siglaInstrutor) {
+        const instId = `prof-inst-${Date.now()}-${i}-${Math.random().toString(36).substring(2, 6)}`;
+        const numInstrutor = String(i + 1);
+        await pool.query(
+          `INSERT INTO professores_equipe
+            (id, equipe_id, nome_professor, sigla_professor, titular, instrutor, tipo_funcao, instrutor_nome, sigla_instrutor, created_at)
+           VALUES (?, ?, ?, ?, 'Não', ?, 'INSTRUTOR', ?, ?, NOW())`,
+          [
+            instId,
+            id,
+            inst.instrutorNome || null,
+            inst.siglaInstrutor || null,
+            numInstrutor,
+            inst.instrutorNome || null,
+            inst.siglaInstrutor || null
+          ]
+        );
+      }
+    }
+
+    await insertAuditLog('Calendário', 'Salvar Equipe', `Cadastrada/Atualizada Equipe ${nome_da_equipe} (${materia}) para curso ${nome_do_curso} (${anoVal})`, actor, req.ip);
     return res.json({ success: true, id });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

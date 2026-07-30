@@ -50,6 +50,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   // Teacher states
   const [isTeacher, setIsTeacher] = useState(false);
   const [teacherSubject, setTeacherSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
+  const [professorSigla, setProfessorSigla] = useState('');
   const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
   const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
   const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -116,6 +117,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setUserCourses(usr.courses || []);
       setIsTeacher(Boolean(usr.isTeacher));
       setTeacherSubject(usr.teacherSubject || 'MEAF');
+      setProfessorSigla(usr.professorSigla || '');
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -134,6 +136,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setUserCourses([]);
       setIsTeacher(false);
       setTeacherSubject('MEAF');
+      setProfessorSigla('');
     }
     setShowUserModal(true);
   };
@@ -209,7 +212,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           managementScope,
           courses: userCourses,
           isTeacher,
-          teacherSubject: isTeacher ? teacherSubject : undefined
+          teacherSubject: isTeacher ? teacherSubject : undefined,
+          professorSigla: professorSigla.trim() || undefined
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -227,7 +231,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           managementScope,
           courses: userCourses,
           isTeacher,
-          teacherSubject: isTeacher ? teacherSubject : undefined
+          teacherSubject: isTeacher ? teacherSubject : undefined,
+          professorSigla: professorSigla.trim() || undefined
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -516,6 +521,18 @@ export const UserModule: React.FC<UserModuleProps> = ({
                                 >
                                   {usr.role}
                                 </span>
+                                {usr.isTeacher && (
+                                  <div className="mt-1 flex flex-wrap items-center gap-1">
+                                    <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
+                                      Prof ({usr.teacherSubject || 'MEAF'})
+                                    </span>
+                                    {usr.professorSigla && (
+                                      <span className="bg-slate-950 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded text-[10px] font-mono font-black">
+                                        [{usr.professorSigla}]
+                                      </span>
+                                    )}
+                                  </div>
+                                )}
                               </td>
 
                               {/* Unit */}
@@ -800,20 +817,34 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     </div>
 
                     {isTeacher && (
-                      <div>
-                        <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
-                          Matéria Leccionada
-                        </label>
-                        <select
-                          value={teacherSubject}
-                          onChange={(e) => setTeacherSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
-                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
-                        >
-                          <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
-                          <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
-                          <option value="DP">DP (Defesa Pessoal)</option>
-                        </select>
-                      </div>
+                      <>
+                        <div>
+                          <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                            Matéria Leccionada
+                          </label>
+                          <select
+                            value={teacherSubject}
+                            onChange={(e) => setTeacherSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                            className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                          >
+                            <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                            <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                            <option value="DP">DP (Defesa Pessoal)</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                            Sigla do Professor
+                          </label>
+                          <input
+                            type="text"
+                            value={professorSigla}
+                            onChange={(e) => setProfessorSigla(e.target.value)}
+                            placeholder="Ex: SILVA / MEAF"
+                            className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold uppercase"
+                          />
+                        </div>
+                      </>
                     )}
                   </>
                 )}

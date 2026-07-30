@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe } from '../types';
+import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem } from '../types';
 import { storage } from '../services/storage';
 import {
   Calendar,
@@ -180,12 +180,11 @@ const DEFAULT_FORMACAO_COURSES = [
 ];
 
 const TEAM_NAMES_LIST = [
-  'Alpha', 'Bravo', 'Charlie', 'Delta', 'Eco', 'Foxtrot', 'Golf',
-  'Hotel', 'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November',
-  'Oscar', 'Papa', 'Quebec', 'Romeu', 'Sierra', 'Tango', 'Uniform',
+  'Alpha', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf',
+  'Hotel', 'India', 'Juliett', 'Kilo', 'Lima', 'Mike', 'November',
+  'Oscar', 'Papa', 'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform',
   'Victor', 'Whiskey', 'X-Ray', 'Yankee', 'Zulu'
 ];
-
 
 export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) => {
   const [records, setRecords] = useState<CalendarRecord[]>([]);
@@ -232,32 +231,77 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     materia: 'MEAF',
     tipo_curso: 'Curso de Formação',
     nome_do_curso: '',
-    modulo: 'Módulo I',
-    data: new Date().toISOString().split('T')[0],
     professor_titular_id: '',
     professor_titular_equipe: '',
-    sigla_professor: '',
-    instrutor_id: '',
-    instrutor_equipe: '',
-    sigla_instrutor: ''
+    sigla_professor: ''
   });
+
+  const [instrutoresForm, setInstrutoresForm] = useState<InstrutorItem[]>([
+    { rotulo: 'Instrutor 02', instrutorNome: '', siglaInstrutor: '' }
+  ]);
+
+  const handleAddInstrutorRow = () => {
+    setInstrutoresForm((prev) => [
+      ...prev,
+      { rotulo: `Instrutor 0${prev.length + 2}`, instrutorNome: '', siglaInstrutor: '' }
+    ]);
+  };
+
+  const handleRemoveInstrutorRow = (index: number) => {
+    setInstrutoresForm((prev) => {
+      const filtered = prev.length > 1 ? prev.filter((_, i) => i !== index) : [{ rotulo: 'Instrutor 02', instrutorNome: '', siglaInstrutor: '' }];
+      return filtered.map((item, idx) => ({
+        ...item,
+        rotulo: `Instrutor 0${idx + 2}`
+      }));
+    });
+  };
+
+  const handleSelectTitularUser = (userName: string) => {
+    const matchedUser = systemUsers.find((u) => u.name === userName);
+    const userSigla = matchedUser?.professorSigla || matchedUser?.professor_sigla || '';
+    setEquipeForm((prev) => ({
+      ...prev,
+      professor_titular_equipe: userName,
+      sigla_professor: userSigla ? userSigla.toUpperCase() : prev.sigla_professor
+    }));
+  };
+
+  const handleSelectInstrutorUser = (index: number, userName: string) => {
+    const matchedUser = systemUsers.find((u) => u.name === userName);
+    const userSigla = matchedUser?.professorSigla || matchedUser?.professor_sigla || '';
+    setInstrutoresForm((prev) => {
+      const copy = [...prev];
+      copy[index] = {
+        ...copy[index],
+        instrutorNome: userName,
+        siglaInstrutor: userSigla ? userSigla.toUpperCase() : copy[index].siglaInstrutor,
+        rotulo: `Instrutor 0${index + 2}`
+      };
+      return copy;
+    });
+  };
+
+  const handleUpdateInstrutorRow = (index: number, field: 'instrutorNome' | 'siglaInstrutor' | 'rotulo', value: string) => {
+    setInstrutoresForm((prev) => {
+      const copy = [...prev];
+      copy[index] = { ...copy[index], [field]: value };
+      return copy;
+    });
+  };
 
   const resetEquipeForm = () => {
     const defaultCourse = formacaoCoursesList[0]?.name || DEFAULT_FORMACAO_COURSES[0];
     setEquipeForm({
       nome_da_equipe: 'Alpha',
-      materia: 'MEAF',
+      materia: selectedDiscipline || 'MEAF',
       tipo_curso: 'Curso de Formação',
       nome_do_curso: defaultCourse,
-      modulo: 'Módulo I',
-      data: new Date().toISOString().split('T')[0],
       professor_titular_id: '',
       professor_titular_equipe: '',
-      sigla_professor: '',
-      instrutor_id: '',
-      instrutor_equipe: '',
-      sigla_instrutor: ''
+      sigla_professor: ''
     });
+    setInstrutoresForm([{ rotulo: 'Instrutor 02', instrutorNome: '', siglaInstrutor: '' }]);
     setEditingEquipeId(null);
   };
 
@@ -303,16 +347,27 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const lessonPlans = storage.getLessonPlans ? storage.getLessonPlans() : [];
       const courseClasses = storage.getCourseClasses ? storage.getCourseClasses() : [];
 
-      const combined: { name: string; module?: string; year?: number }[] = [];
+      const combined: { name: string; code?: string; dates?: string; module?: string; year?: number }[] = [];
 
       DEFAULT_FORMACAO_COURSES.forEach((c) => {
-        combined.push({ name: c, module: 'Módulo I', year: 2026 });
+        combined.push({
+          name: c,
+          code: 'CFP-2026',
+          dates: '2026-01-01 a 2026-12-31',
+          module: 'Módulo I',
+          year: 2026
+        });
       });
 
       academyCourses.forEach((ac: AcademyCourse) => {
         if (ac.name && !combined.some((c) => c.name.toLowerCase() === ac.name.toLowerCase())) {
+          const datesStr = ac.startDate && ac.endDate
+            ? `${ac.startDate} a ${ac.endDate}`
+            : (ac.dates && ac.dates.length > 0 ? ac.dates.join(', ') : '2026-01-01 a 2026-12-31');
           combined.push({
             name: ac.name,
+            code: ac.code || 'CFP-2026',
+            dates: datesStr,
             module: ac.module || 'Módulo I',
             year: ac.startDate ? new Date(ac.startDate).getFullYear() : 2026
           });
@@ -323,6 +378,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         if (lp.name && !combined.some((c) => c.name.toLowerCase() === lp.name.toLowerCase())) {
           combined.push({
             name: lp.name,
+            code: 'CFP-2026',
+            dates: '2026-01-01 a 2026-12-31',
             module: 'Módulo I',
             year: lp.year || 2026
           });
@@ -333,6 +390,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         if (cc.courseName && !combined.some((c) => c.name.toLowerCase() === cc.courseName.toLowerCase())) {
           combined.push({
             name: cc.courseName,
+            code: cc.code || 'CFP-2026',
+            dates: '2026-01-01 a 2026-12-31',
             module: 'Módulo I',
             year: 2026
           });
@@ -359,18 +418,26 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       return;
     }
 
+    const selectedCourseObj = formacaoCoursesList.find((c) => c.name === equipeForm.nome_do_curso);
+
     const payload: Partial<EquipeCalendario> = {
       id: editingEquipeId || undefined,
       nome_da_equipe: equipeForm.nome_da_equipe,
       materia: equipeForm.materia,
-      tipo_curso: equipeForm.tipo_curso || 'Curso de Formação',
+      tipo_curso: 'Curso de Formação',
       nome_do_curso: equipeForm.nome_do_curso,
-      modulo: equipeForm.modulo || 'Módulo I',
-      data: equipeForm.data || new Date().toISOString().split('T')[0],
+      codigo_curso: selectedCourseObj?.code || 'CFP-2026',
+      dates_curso: selectedCourseObj?.dates || '2026-01-01 a 2026-12-31',
+      modulo: selectedCourseObj?.module || 'Módulo I',
+      ano: new Date().getFullYear().toString(),
       professor_titular_equipe: equipeForm.professor_titular_equipe,
       sigla_professor: equipeForm.sigla_professor,
-      instrutor_equipe: equipeForm.instrutor_equipe,
-      sigla_instrutor: equipeForm.sigla_instrutor
+      instrutores: instrutoresForm
+        .filter((i) => i.instrutorNome.trim() || i.siglaInstrutor.trim())
+        .map((item, idx) => ({
+          ...item,
+          rotulo: item.rotulo || `Instrutor 0${idx + 2}`
+        }))
     };
 
     const res = await storage.saveEquipeCalendario(payload);
@@ -399,17 +466,20 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     setEquipeForm({
       nome_da_equipe: eq.nome_da_equipe || 'Alpha',
       materia: eq.materia || 'MEAF',
-      tipo_curso: eq.tipo_curso || 'Curso de Formação',
+      tipo_curso: 'Curso de Formação',
       nome_do_curso: eq.nome_do_curso || (formacaoCoursesList[0]?.name || ''),
-      modulo: eq.modulo || 'Módulo I',
-      data: eq.data || new Date().toISOString().split('T')[0],
       professor_titular_id: '',
       professor_titular_equipe: eq.professor_titular_equipe || '',
-      sigla_professor: eq.sigla_professor || '',
-      instrutor_id: '',
-      instrutor_equipe: eq.instrutor_equipe || '',
-      sigla_instrutor: eq.sigla_instrutor || ''
+      sigla_professor: eq.sigla_professor || ''
     });
+
+    if (eq.instrutores && eq.instrutores.length > 0) {
+      setInstrutoresForm(eq.instrutores.map((i) => ({ instrutorNome: i.instrutorNome || '', siglaInstrutor: i.siglaInstrutor || '' })));
+    } else if (eq.instrutor_equipe || eq.sigla_instrutor) {
+      setInstrutoresForm([{ instrutorNome: eq.instrutor_equipe || '', siglaInstrutor: eq.sigla_instrutor || '' }]);
+    } else {
+      setInstrutoresForm([{ instrutorNome: '', siglaInstrutor: '' }]);
+    }
   };
 
 
@@ -677,79 +747,96 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
+  // Helper to extract team professor siglas and details
+  const getTeamProfessorsSiglas = (rec: CalendarRecord) => {
+    const eqName = (rec.equipe_calendario || '').trim().toLowerCase();
+    const disc = (rec.sigla_calendario || selectedDiscipline || '').trim().toUpperCase();
+
+    const matched = equipesList.find((e) => {
+      const eName = (e.nome_da_equipe || '').trim().toLowerCase();
+      const eMat = (e.materia || '').trim().toUpperCase();
+      const nameMatch = eName === eqName || eqName.includes(eName) || eName.includes(eqName);
+      const matMatch = !disc || !eMat || eMat === disc;
+      return nameMatch && matMatch;
+    });
+
+    if (matched) {
+      const titularSigla = (matched.sigla_professor || '').trim();
+      const instrutoresSiglas = (matched.instrutores || [])
+        .map((i) => (i.siglaInstrutor || '').trim())
+        .filter(Boolean);
+
+      if (instrutoresSiglas.length === 0 && matched.sigla_instrutor) {
+        instrutoresSiglas.push(matched.sigla_instrutor.trim());
+      }
+
+      return {
+        equipeNome: matched.nome_da_equipe,
+        titularNome: matched.professor_titular_equipe || 'Prof. Titular',
+        titularSigla: titularSigla || (rec.equipe_calendario || 'TITULAR'),
+        instrutores: matched.instrutores || [],
+        instrutoresSiglas,
+      };
+    }
+
+    // Fallback if team is typed as string e.g., "SILVA/ALVES" or "Alpha"
+    return {
+      equipeNome: rec.equipe_calendario || '',
+      titularNome: '',
+      titularSigla: rec.equipe_calendario || '',
+      instrutores: [],
+      instrutoresSiglas: [],
+    };
+  };
+
   const renderSlotCellContent = (slotRecords: CalendarRecord[]) => {
     if (slotRecords.length === 0) {
       return <span className="text-slate-300 font-mono text-[10px]">-</span>;
     }
 
-    const groups: {
-      key: string;
-      turmasStr: string;
-      primaryRecord: CalendarRecord;
-      aulasStr: string;
-      records: CalendarRecord[];
-    }[] = [];
-
-    slotRecords.forEach((rec) => {
-      const key = `${rec.data_calendario}_${rec.sigla_calendario}_${rec.sala_calendario || ''}_${rec.equipe_calendario || ''}`;
-      const found = groups.find((g) => g.key === key);
-
-      const calcAulaNum = rec.numero_aula_calendario
-        ? String(rec.numero_aula_calendario).includes('Aula')
-          ? rec.numero_aula_calendario
-          : `${rec.numero_aula_calendario}ª Aula`
-        : `${getCalculatedLessonNumber(rec)}ª Aula`;
-
-      if (found) {
-        if (!found.records.some((r) => r.turma_calendario === rec.turma_calendario)) {
-          found.records.push(rec);
-          found.turmasStr = Array.from(new Set(found.records.map((r) => r.turma_calendario))).join(', ');
-          found.aulasStr = Array.from(new Set(found.records.map((r) => {
-            const num = r.numero_aula_calendario
-              ? String(r.numero_aula_calendario).includes('Aula')
-                ? r.numero_aula_calendario
-                : `${r.numero_aula_calendario}ª Aula`
-              : `${getCalculatedLessonNumber(r)}ª Aula`;
-            return num;
-          }))).join(' / ');
-        }
-      } else {
-        groups.push({
-          key,
-          turmasStr: rec.turma_calendario,
-          primaryRecord: rec,
-          aulasStr: String(calcAulaNum),
-          records: [rec]
-        });
-      }
-    });
-
     return (
-      <div className="space-y-1 p-0.5">
-        {groups.map((group) => {
-          const rec = group.primaryRecord;
-          const turma = group.turmasStr || rec.turma_calendario || '';
-          const aula = group.aulasStr || '';
-          const equipe = rec.equipe_calendario || '';
+      <div className="flex flex-col space-y-1 p-0.5 justify-center items-center w-full min-h-[36px]">
+        {slotRecords.map((rec) => {
+          const turma = (rec.turma_calendario || 'DL1').trim();
+          const numAulaOnly = rec.numero_aula_calendario
+            ? String(rec.numero_aula_calendario).replace(/\D/g, '') || String(rec.numero_aula_calendario)
+            : String(getCalculatedLessonNumber(rec));
 
-          // Formato solicitado: (TURMA CALENDARIO - NUMERO_AULA_CALENDARIO - PROFESSORES_EQUIPE_CALENDARIO)
-          const cellInfo = [turma, aula, equipe].filter(Boolean).join(' - ');
+          const teamInfo = getTeamProfessorsSiglas(rec);
 
           return (
             <div
-              key={group.key}
+              key={rec.id}
               onClick={() => setDetailRecord(rec)}
-              className="celula-aula cursor-pointer hover:bg-amber-100 transition p-1.5 border border-slate-300 rounded bg-white shadow-xs text-black text-center"
-              title="Clique para ver ou editar detalhes"
+              className="celula-aula cursor-pointer hover:bg-amber-100 transition py-1 px-1 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-1.5 overflow-hidden whitespace-nowrap text-[11px] leading-none min-h-[30px]"
+              title={`Clique para ver detalhes - ${turma} | ${numAulaOnly}ª Aula | Equipe ${teamInfo.equipeNome}`}
             >
-              <div className="turma font-black text-[10.5px] text-black leading-tight">
-                {cellInfo}
-              </div>
-              {rec.sala_calendario && (
-                <div className="instr text-[9px] text-slate-700 font-semibold mt-0.5">
-                  Sala: {rec.sala_calendario}
-                </div>
-              )}
+              {/* TURMA_CALENDARIO */}
+              <span className="font-black text-black font-mono tracking-tight shrink-0">
+                {turma}
+              </span>
+
+              {/* NUMERO_AULA_CALENDARIO */}
+              <span className="font-bold text-slate-800 font-mono shrink-0">
+                {numAulaOnly}ª
+              </span>
+
+              {/* SIGLAS DOS PROFESSORES DA EQUIPE (TITULAR EM NEGRITO) */}
+              <span className="flex items-center space-x-1 shrink-0">
+                {/* Professor Titular (Negrito) */}
+                {teamInfo.titularSigla && (
+                  <strong className="font-black text-slate-950 font-mono uppercase underline decoration-amber-500 decoration-2">
+                    {teamInfo.titularSigla}
+                  </strong>
+                )}
+
+                {/* Instrutores */}
+                {teamInfo.instrutoresSiglas.map((s, idx) => (
+                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[10.5px]">
+                    {s}
+                  </span>
+                ))}
+              </span>
             </div>
           );
         })}
@@ -841,7 +928,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 flex items-center space-x-2 transition"
           >
             <Users className="w-4 h-4" />
-            <span>Criar Equipe</span>
+            <span>Gerenciar Equipes</span>
           </button>
 
           {selectedDiscipline && (
@@ -1460,9 +1547,39 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 </div>
               </div>
 
-              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold mb-1">Equipe de Instrução</span>
-                <span className="text-slate-200 font-bold">{detailRecord.equipe_calendario || 'Não especificada'}</span>
+              <div className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-2">
+                <span className="text-[10px] text-amber-400 block uppercase font-mono font-bold tracking-wider">
+                  EQUIPE E PROFESSORES DA AULA
+                </span>
+                {(() => {
+                  const teamInfo = getTeamProfessorsSiglas(detailRecord);
+                  return (
+                    <div className="space-y-2 text-xs font-sans">
+                      <div className="flex items-center justify-between text-slate-200">
+                        <span>Equipe Selecionada: <strong className="text-amber-300 font-mono font-bold">Equipe {teamInfo.equipeNome || detailRecord.equipe_calendario || 'Não especificada'}</strong></span>
+                      </div>
+                      <div className="bg-slate-900/90 p-3 rounded-xl border border-slate-800 space-y-2">
+                        <div className="text-slate-100 font-semibold flex items-center justify-between">
+                          <span><span className="text-amber-400 font-bold">Professor Titular:</span> {teamInfo.titularNome || 'Titular'}</span>
+                          <span className="bg-amber-500/20 text-amber-300 px-2.5 py-0.5 rounded text-[10.5px] font-mono font-black border border-amber-500/30">
+                            [{teamInfo.titularSigla}]
+                          </span>
+                        </div>
+                        {teamInfo.instrutores.length > 0 && (
+                          <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                            <span className="text-[10px] text-indigo-300 font-mono font-bold uppercase block">Instrutores Auxiliares da Equipe:</span>
+                            {teamInfo.instrutores.map((inst, i) => (
+                              <div key={i} className="flex items-center justify-between text-[11px] text-slate-300 pl-2">
+                                <span><strong className="text-slate-400">{inst.rotulo || `Instrutor 0${i + 2}`}:</strong> {inst.instrutorNome || 'Instrutor'}</span>
+                                <span className="text-indigo-300 font-mono font-bold">[{inst.siglaInstrutor || '-'}]</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
 
               {detailRecord.observacao_calendario && (
@@ -1669,18 +1786,35 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   )}
                 </div>
 
-                {/* Equipe */}
+                {/* Equipe / Time Selecionado */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    EQUIPE / INSTRUTOR
+                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                    EQUIPE DA MATÉRIA *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={formState.equipe_calendario || ''}
                     onChange={(e) => setFormState({ ...formState, equipe_calendario: e.target.value })}
-                    placeholder="Ex: Equipe Alpha"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none"
-                  />
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl p-2 text-slate-100 font-bold focus:border-amber-500 focus:outline-none text-xs"
+                    required
+                  >
+                    <option value="">Selecione a Equipe...</option>
+                    {/* Registered teams for this subject */}
+                    {equipesList
+                      .filter((eq) => !formState.sigla_calendario || !eq.materia || eq.materia.toUpperCase() === (formState.sigla_calendario || '').toUpperCase())
+                      .map((eq) => (
+                        <option key={eq.id} value={eq.nome_da_equipe}>
+                          Equipe {eq.nome_da_equipe} ({eq.professor_titular_equipe ? `Titular: ${eq.professor_titular_equipe}` : 'Sem Titular'})
+                        </option>
+                      ))}
+                    {/* Fallback list for Phonetic alphabet team names */}
+                    <optgroup label="Todas as Equipes (Alfabeto Fonético)">
+                      {TEAM_NAMES_LIST.map((teamName) => (
+                        <option key={teamName} value={teamName}>
+                          Equipe {teamName}
+                        </option>
+                      ))}
+                    </optgroup>
+                  </select>
                 </div>
 
                 {/* Ano */}
@@ -1824,10 +1958,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* MODAL 4: CRIAR EQUIPE CALENDÁRIO */}
+      {/* MODAL 4: GERENCIAR EQUIPES CALENDÁRIO */}
       {showEquipeModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-6 space-y-6 shadow-2xl my-8">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-6 space-y-6 shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
                 <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
@@ -1835,10 +1969,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-slate-100">
-                    {editingEquipeId ? 'Editar Equipe do Calendário' : 'Criar Equipe do Calendário'}
+                    {editingEquipeId ? 'Editar Equipe do Calendário' : 'Gerenciar Equipes do Calendário'}
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Cadastre a equipe e atribua as siglas dos professores titulares e instrutores por matéria e curso.
+                    Cadastre a equipe e atribua as siglas do professor titular e múltiplos instrutores por matéria e curso.
                   </p>
                 </div>
               </div>
@@ -1903,26 +2037,24 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   </select>
                 </div>
 
-                {/* Tipo de Curso */}
+                {/* Tipo de Curso - Somente Leitura */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    TIPO DE CURSO *
+                    TIPO DE CURSO
                   </label>
-                  <select
-                    value={equipeForm.tipo_curso}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, tipo_curso: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-amber-400 font-bold focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    <option value="Curso de Formação">Curso de Formação (Pré-selecionado)</option>
-                    <option value="Curso de Ensino Continuado">Curso de Ensino Continuado</option>
-                  </select>
+                  <input
+                    type="text"
+                    value="Curso de Formação"
+                    readOnly
+                    disabled
+                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs text-amber-400 font-bold cursor-not-allowed opacity-90"
+                  />
                 </div>
 
-                {/* Nome do Curso de Formação */}
-                <div>
+                {/* Nome do Curso de Formação (com código e datas) */}
+                <div className="md:col-span-3">
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    CURSO DE FORMAÇÃO *
+                    CURSO DE FORMAÇÃO (CÓDIGO BANCO E DATAS) *
                   </label>
                   <select
                     value={equipeForm.nome_do_curso}
@@ -1932,107 +2064,111 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   >
                     {formacaoCoursesList.map((c, i) => (
                       <option key={i} value={c.name}>
-                        {c.name}
+                        [{c.code || 'CFP-2026'}] {c.name} — Datas: {c.dates || '2026-01-01 a 2026-12-31'}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Módulo */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    MÓDULO DO CURSO
-                  </label>
-                  <select
-                    value={equipeForm.modulo}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, modulo: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
-                  >
-                    {PRESET_MODULES.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Data */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    DATA DA EQUIPE
-                  </label>
-                  <input
-                    type="date"
-                    value={equipeForm.data}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, data: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-
-                {/* Professor Titular (do sistema) */}
+                {/* Professor Titular (Usuário) */}
                 <div>
                   <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    PROFESSOR TITULAR (USUÁRIO)
+                    PROFESSOR TITULAR (ÚNICO) *
                   </label>
                   <select
                     value={equipeForm.professor_titular_equipe}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, professor_titular_equipe: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    onChange={(e) => handleSelectTitularUser(e.target.value)}
+                    className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                    required
                   >
                     <option value="">Selecione o Professor Titular...</option>
                     {systemUsers.map((u) => (
                       <option key={u.id} value={u.name}>
-                        {u.name} ({u.cargo || 'Policial'})
+                        {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.cargo || 'Policial'})
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Sigla do Professor */}
-                <div>
+                {/* Sigla do Professor Titular */}
+                <div className="md:col-span-2">
                   <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    SIGLA DO PROFESSOR (ESCRITA MANUAL)
+                    SIGLA DO PROFESSOR TITULAR *
                   </label>
                   <input
                     type="text"
+                    required
                     value={equipeForm.sigla_professor}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value })}
-                    placeholder="Ex: PF-MEAF-01"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono uppercase focus:border-amber-500 focus:outline-none"
+                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value.toUpperCase() })}
+                    placeholder="Ex: SILVA, MEAF-01..."
+                    className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-mono font-bold uppercase focus:border-amber-500 focus:outline-none"
                   />
                 </div>
+              </div>
 
-                {/* Instrutor (do sistema) */}
-                <div>
-                  <label className="block text-[10px] font-bold text-indigo-400 uppercase mb-1">
-                    INSTRUTOR DA EQUIPE (USUÁRIO)
+              {/* SEÇÃO INSTRUTORES (MÚLTIPLOS: INSTRUTOR 02, INSTRUTOR 03, INSTRUTOR 04) */}
+              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Users className="w-4 h-4" />
+                    <span>INSTRUTORES AUXILIARES (INSTRUTOR 02, 03, 04...)</span>
                   </label>
-                  <select
-                    value={equipeForm.instrutor_equipe}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, instrutor_equipe: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                  <button
+                    type="button"
+                    onClick={handleAddInstrutorRow}
+                    className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center space-x-1"
                   >
-                    <option value="">Selecione o Instrutor...</option>
-                    {systemUsers.map((u) => (
-                      <option key={u.id} value={u.name}>
-                        {u.name} ({u.cargo || 'Policial'})
-                      </option>
-                    ))}
-                  </select>
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Adicionar Instrutor</span>
+                  </button>
                 </div>
 
-                {/* Sigla do Instrutor */}
-                <div>
-                  <label className="block text-[10px] font-bold text-indigo-400 uppercase mb-1">
-                    SIGLA DO INSTRUTOR (ESCRITA MANUAL)
-                  </label>
-                  <input
-                    type="text"
-                    value={equipeForm.sigla_instrutor}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_instrutor: e.target.value })}
-                    placeholder="Ex: INST-MEAF-01"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-mono uppercase focus:border-amber-500 focus:outline-none"
-                  />
+                <div className="space-y-2">
+                  {instrutoresForm.map((inst, index) => (
+                    <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                      <div className="md:col-span-6">
+                        <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                          {inst.rotulo || `INSTRUTOR 0${index + 2}`} (NOME DO PROFESSOR/INSTRUTOR)
+                        </label>
+                        <select
+                          value={inst.instrutorNome}
+                          onChange={(e) => handleSelectInstrutorUser(index, e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
+                        >
+                          <option value="">Selecione o Instrutor...</option>
+                          {systemUsers.map((u) => (
+                            <option key={u.id} value={u.name}>
+                              {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.cargo || 'Policial'})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-5">
+                        <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                          SIGLA DO {inst.rotulo || `INSTRUTOR 0${index + 2}`}
+                        </label>
+                        <input
+                          type="text"
+                          value={inst.siglaInstrutor}
+                          onChange={(e) => handleUpdateInstrutorRow(index, 'siglaInstrutor', e.target.value.toUpperCase())}
+                          placeholder="Ex: ALVES, INST-02..."
+                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-indigo-300 font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div className="md:col-span-1 flex justify-end pt-3 md:pt-0">
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveInstrutorRow(index)}
+                          className="p-2 text-slate-400 hover:text-rose-400 transition hover:bg-rose-500/10 rounded-lg"
+                          title="Remover Instrutor"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
@@ -2074,9 +2210,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                       <tr>
                         <th className="p-2.5">EQUIPE</th>
                         <th className="p-2.5">MATÉRIA</th>
-                        <th className="p-2.5">CURSO / MÓDULO</th>
-                        <th className="p-2.5">PROFESSOR (SIGLA)</th>
-                        <th className="p-2.5">INSTRUTOR (SIGLA)</th>
+                        <th className="p-2.5">CURSO / CÓDIGO / DATAS</th>
+                        <th className="p-2.5">PROFESSOR TITULAR</th>
+                        <th className="p-2.5">INSTRUTORES</th>
                         <th className="p-2.5 text-center">AÇÕES</th>
                       </tr>
                     </thead>
@@ -2091,7 +2227,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                           <td className="p-2.5 font-mono text-amber-300 font-bold">{eq.materia}</td>
                           <td className="p-2.5 text-[11px]">
                             <div className="font-semibold text-slate-200">{eq.nome_do_curso}</div>
-                            <div className="text-[10px] text-slate-400">{eq.modulo} ({eq.data})</div>
+                            <div className="text-[10px] text-slate-400 font-mono">
+                              Código: {eq.codigo_curso || 'CFP-2026'} | Datas: {eq.dates_curso || '2026'}
+                            </div>
                           </td>
                           <td className="p-2.5 text-[11px]">
                             <div className="font-semibold">{eq.professor_titular_equipe || '-'}</div>
@@ -2100,9 +2238,24 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                             )}
                           </td>
                           <td className="p-2.5 text-[11px]">
-                            <div className="font-semibold">{eq.instrutor_equipe || '-'}</div>
-                            {eq.sigla_instrutor && (
-                              <span className="text-[10px] font-mono text-indigo-400 font-bold">[{eq.sigla_instrutor}]</span>
+                            {eq.instrutores && eq.instrutores.length > 0 ? (
+                              <div className="space-y-1">
+                                {eq.instrutores.map((ins, idx) => (
+                                  <div key={idx} className="flex items-center space-x-1">
+                                    <span className="text-slate-300 font-medium">{ins.instrutorNome || 'Instrutor'}</span>
+                                    {ins.siglaInstrutor && (
+                                      <span className="text-[10px] font-mono text-indigo-400 font-bold">[{ins.siglaInstrutor}]</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="font-semibold">{eq.instrutor_equipe || '-'}</div>
+                                {eq.sigla_instrutor && (
+                                  <span className="text-[10px] font-mono text-indigo-400 font-bold">[{eq.sigla_instrutor}]</span>
+                                )}
+                              </div>
                             )}
                           </td>
                           <td className="p-2.5 text-center space-x-1">

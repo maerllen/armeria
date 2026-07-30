@@ -99,6 +99,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`has_system_access\` TINYINT(1) NOT NULL DEFAULT 1,
         \`password\` VARCHAR(255) NOT NULL,
         \`must_change_password\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`professor_sigla\` VARCHAR(64) DEFAULT NULL,
         \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
         UNIQUE KEY \`uk_users_masp\` (\`masp\`)
@@ -503,7 +504,10 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`materia\` VARCHAR(100) NOT NULL,
         \`tipo_curso\` VARCHAR(100) NOT NULL DEFAULT 'Curso de Formação',
         \`nome_do_curso\` VARCHAR(255) NOT NULL,
+        \`codigo_curso\` VARCHAR(100) DEFAULT NULL,
+        \`dates_curso\` TEXT DEFAULT NULL,
         \`modulo\` VARCHAR(100) NOT NULL,
+        \`ano\` VARCHAR(10) DEFAULT NULL,
         \`data\` DATE DEFAULT NULL,
         \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
         \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
@@ -522,9 +526,13 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       CREATE TABLE IF NOT EXISTS \`professores_equipe\` (
         \`id\` VARCHAR(64) NOT NULL,
         \`equipe_id\` VARCHAR(64) NOT NULL,
+        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
+        \`titular\` VARCHAR(10) DEFAULT 'Não',
+        \`instrutor\` VARCHAR(10) DEFAULT NULL,
+        \`tipo_funcao\` VARCHAR(50) DEFAULT 'INSTRUTOR',
         \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
         \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
         \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
         \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
         \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
@@ -534,6 +542,34 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
     logs.push("Tabela 'professores_equipe' verificada/criada.");
+
+    try {
+      await connection.query("ALTER TABLE `users` ADD COLUMN `professor_sigla` VARCHAR(64) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `codigo_curso` VARCHAR(100) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `dates_curso` TEXT DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `ano` VARCHAR(10) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `nome_professor` VARCHAR(255) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `sigla_professor` VARCHAR(64) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `titular` VARCHAR(10) DEFAULT 'Não';");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `instrutor` VARCHAR(10) DEFAULT NULL;");
+    } catch (e) {}
+    try {
+      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `tipo_funcao` VARCHAR(50) DEFAULT 'INSTRUTOR';");
+    } catch (e) {}
 
     try {
       await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `modulo_calendario` VARCHAR(100) DEFAULT NULL;");
