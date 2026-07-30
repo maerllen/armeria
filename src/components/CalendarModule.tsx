@@ -2056,7 +2056,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     required
                     value={equipeForm.sigla_professor}
                     onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value.toUpperCase() })}
-                    placeholder="Ex: SILVA, MEAF-01..."
+                    placeholder="Ex: JÃO SILVA JS"
                     className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-mono font-bold uppercase focus:border-amber-500 focus:outline-none"
                   />
                 </div>
@@ -2108,7 +2108,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                           type="text"
                           value={inst.siglaInstrutor}
                           onChange={(e) => handleUpdateInstrutorRow(index, 'siglaInstrutor', e.target.value.toUpperCase())}
-                          placeholder="Ex: ALVES, INST-02..."
+                          placeholder="Ex: JOÃO SILVA JS."
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-indigo-300 font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
                         />
                       </div>
