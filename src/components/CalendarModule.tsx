@@ -750,6 +750,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
+  const weekPairs = useMemo(() => {
+    const pairs: (typeof monthWeeks)[] = [];
+    for (let i = 0; i < monthWeeks.length; i += 2) {
+      pairs.push(monthWeeks.slice(i, i + 2));
+    }
+    return pairs;
+  }, [monthWeeks]);
+
   const availableTeachersForEquipe = useMemo(() => {
     const currentSubj = (equipeForm.materia || selectedDiscipline || '').trim().toUpperCase();
 
@@ -814,14 +822,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const renderSlotCellContent = (slotRecords: CalendarRecord[]) => {
     if (slotRecords.length === 0) {
       return (
-        <div className="flex items-center justify-center h-full w-full min-h-[90px]">
+        <div className="flex items-center justify-center h-full w-full min-h-[58px]">
           <span className="text-slate-400 font-mono text-[10px]">-</span>
         </div>
       );
     }
 
     return (
-      <div className="flex flex-col space-y-1 justify-start items-center w-full h-full min-h-[90px] py-0.5">
+      <div className="flex flex-col space-y-0.5 justify-start items-center w-full h-full min-h-[58px] py-0.5">
         {slotRecords.map((rec) => {
           const turma = (rec.turma_calendario || 'DL1').trim();
           const numAulaOnly = String(getCalculatedLessonNumber(rec));
@@ -832,7 +840,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             <div
               key={rec.id}
               onClick={() => setDetailRecord(rec)}
-              className="celula-aula cursor-pointer hover:bg-amber-100 transition py-0.5 px-1 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-1.5 overflow-hidden whitespace-nowrap text-[10.5px] leading-tight h-[27px] shrink-0"
+              className="celula-aula cursor-pointer hover:bg-amber-100 transition py-0.5 px-1 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-1 overflow-hidden whitespace-nowrap text-[10px] leading-tight h-[21px] shrink-0"
               title={`Clique para ver detalhes - ${turma} | ${numAulaOnly}ª Aula | Equipe ${teamInfo.equipeNome}`}
             >
               {/* TURMA_CALENDARIO */}
@@ -846,7 +854,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               </span>
 
               {/* SIGLAS DOS PROFESSORES DA EQUIPE (TITULAR EM NEGRITO) */}
-              <span className="flex items-center space-x-1 shrink-0 overflow-hidden text-ellipsis">
+              <span className="flex items-center space-x-0.5 shrink-0 overflow-hidden text-ellipsis">
                 {/* Professor Titular (Negrito) */}
                 {teamInfo.titularSigla && (
                   <strong className="font-black text-slate-950 font-mono uppercase underline decoration-amber-500 decoration-2">
@@ -856,7 +864,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
                 {/* Instrutores */}
                 {teamInfo.instrutoresSiglas.map((s, idx) => (
-                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[10px]">
+                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[9.5px]">
                     {s}
                   </span>
                 ))}
@@ -1229,13 +1237,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
           </div>
 
-          {/* MAIN VIEW: HTML TEMPLATE STYLE TABLE (PER WEEK) */}
+          {/* MAIN VIEW: HTML TEMPLATE STYLE TABLE (2 WEEKS PER SHEET PAGE) */}
           <div className="space-y-6">
             <style>{`
               @media print {
                 @page {
                   size: landscape;
-                  margin: 6mm;
+                  margin: 4mm;
                 }
                 html, body {
                   width: 100% !important;
@@ -1249,36 +1257,40 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .print\\:hidden {
                   display: none !important;
                 }
-                .folha {
+                .folha-pagina {
                   page-break-after: always !important;
                   break-after: page !important;
                   box-shadow: none !important;
                   border: none !important;
-                  margin: 0 0 12px 0 !important;
+                  margin: 0 0 4px 0 !important;
                   padding: 0 !important;
                   width: 100% !important;
                   max-width: 100% !important;
                 }
-                .folha table {
+                .folha-pagina:last-child {
+                  page-break-after: auto !important;
+                  break-after: auto !important;
+                }
+                .folha-pagina table {
                   width: 100% !important;
                   table-layout: fixed !important;
                 }
               }
-              .folha {
+              .folha-pagina {
                 background: #ffffff !important;
                 color: #000000 !important;
                 font-family: Calibri, Arial, sans-serif !important;
               }
-              .folha table {
+              .folha-pagina table {
                 width: 100% !important;
                 border-collapse: collapse !important;
-                font-size: 11px !important;
+                font-size: 10px !important;
                 color: #000000 !important;
                 table-layout: fixed !important;
               }
-              .folha th, .folha td {
+              .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
-                padding: 3px 2px !important;
+                padding: 2px 2px !important;
                 text-align: center !important;
                 vertical-align: middle !important;
                 color: #000000 !important;
@@ -1286,11 +1298,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 26px !important; }
+              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 18px !important; }
               .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula .turma { background: #ffffff !important; font-size: 11px !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula .instr { background: #f8fafc !important; font-size: 10px !important; color: #334155 !important; }
+              .celula-aula .turma { background: #ffffff !important; font-size: 10px !important; font-weight: bold !important; color: #000000 !important; }
+              .celula-aula .instr { background: #f8fafc !important; font-size: 9.5px !important; color: #334155 !important; }
             `}</style>
 
             {monthWeeks.length === 0 ? (
@@ -1298,120 +1310,130 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 Nenhuma semana encontrada para este mês.
               </div>
             ) : (
-              monthWeeks.map((week) => (
-                <div key={week.weekNum} className="folha bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 overflow-x-auto my-4 text-black">
-                  {/* Header Banner for Week */}
-                  <div className="bg-slate-100 px-4 py-2.5 border-b-2 border-black text-center font-bold text-xs text-black">
-                    <div className="text-center font-black text-sm uppercase text-black tracking-wide">
-                      {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'}
+              weekPairs.map((pair, pageIdx) => (
+                <div key={`page-${pageIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 p-2.5 my-6 text-black">
+                  {pair.map((week, wIdx) => (
+                    <div key={week.weekNum} className={wIdx > 0 ? 'mt-3' : ''}>
+                      {/* Header Banner for Week */}
+                      {wIdx === 0 ? (
+                        <div className="bg-slate-100 px-3 py-1.5 border-b-2 border-black text-center font-bold text-xs text-black mb-1">
+                          <div className="text-center font-black text-xs uppercase text-black tracking-wide">
+                            {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'} — {MONTH_NAMES[selectedMonth]} DE {selectedYear}
+                          </div>
+                          <div className="text-center font-bold text-[10px] text-slate-800 mt-0.5">
+                            SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bg-slate-100 px-3 py-1 border-b border-black text-center font-bold text-[10.5px] text-black mb-1">
+                          SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+                        </div>
+                      )}
+
+                      <table className="w-full border-collapse text-[10px] text-black" style={{ tableLayout: 'fixed' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '60px' }} className="bg-dia"></th>
+                            <th style={{ width: '80px' }} className="bg-dia">DIA</th>
+                            {week.days.map((day) => (
+                              <th key={day.dateStr} colSpan={4} className="bg-dia" style={{ width: '18%' }}>
+                                {day.formattedDate}
+                              </th>
+                            ))}
+                          </tr>
+                          <tr>
+                            <th className="bg-manha">MANHÃ</th>
+                            <th className="bg-hora">HORA</th>
+                            {week.days.map((day) => (
+                              <th key={day.dateStr} colSpan={4} className="bg-seg">
+                                {day.dayName}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {/* 8:00-9:40 */}
+                          <tr>
+                            <td className="bg-manha" rowSpan={2} style={{ fontWeight: 900 }}>
+                              MANHÃ
+                            </td>
+                            <td className="bg-hora">8:00-9:40</td>
+                            {week.days.map((day) => {
+                              const slotRecords = activeDisciplineRecords.filter(
+                                (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '08:00 as 09:40'
+                              );
+                              return (
+                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                  {renderSlotCellContent(slotRecords)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* 10:00-11:40 */}
+                          <tr>
+                            <td className="bg-hora">10:00-11:40</td>
+                            {week.days.map((day) => {
+                              const slotRecords = activeDisciplineRecords.filter(
+                                (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '10:00 as 11:40'
+                              );
+                              return (
+                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                  {renderSlotCellContent(slotRecords)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* ALMOÇO */}
+                          <tr>
+                            <td className="bg-tarde" style={{ fontWeight: 900 }}>
+                              TARDE
+                            </td>
+                            <td className="bg-hora">12:00-14:00</td>
+                            {week.days.map((day) => (
+                              <td key={day.dateStr} colSpan={4} className="bg-almoco" style={{ height: '18px' }}>
+                                ALMOÇO
+                              </td>
+                            ))}
+                          </tr>
+
+                          {/* 14:00-15:40 */}
+                          <tr>
+                            <td className="bg-tarde" rowSpan={2} style={{ fontWeight: 900 }}>
+                              TARDE
+                            </td>
+                            <td className="bg-hora">14:00-15:40</td>
+                            {week.days.map((day) => {
+                              const slotRecords = activeDisciplineRecords.filter(
+                                (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '14:00 as 15:40'
+                              );
+                              return (
+                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                  {renderSlotCellContent(slotRecords)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* 16:00-17:40 */}
+                          <tr>
+                            <td className="bg-hora">16:00-17:40</td>
+                            {week.days.map((day) => {
+                              const slotRecords = activeDisciplineRecords.filter(
+                                (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '16:00 as 17:40'
+                              );
+                              return (
+                                <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '62px', minHeight: '62px', maxHeight: '62px' }}>
+                                  {renderSlotCellContent(slotRecords)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="text-center font-bold text-[11px] text-slate-800 mt-0.5">
-                      SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate}) — {MONTH_NAMES[selectedMonth]} DE {selectedYear}
-                    </div>
-                  </div>
-
-                  <table className="w-full border-collapse text-[11px] text-black" style={{ tableLayout: 'fixed' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ width: '65px' }} className="bg-dia"></th>
-                        <th style={{ width: '85px' }} className="bg-dia">DIA</th>
-                        {week.days.map((day) => (
-                          <th key={day.dateStr} colSpan={4} className="bg-dia" style={{ width: '18%' }}>
-                            {day.formattedDate}
-                          </th>
-                        ))}
-                      </tr>
-                      <tr>
-                        <th className="bg-manha">MANHÃ</th>
-                        <th className="bg-hora">HORA</th>
-                        {week.days.map((day) => (
-                          <th key={day.dateStr} colSpan={4} className="bg-seg">
-                            {day.dayName}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {/* 8:00-9:40 */}
-                      <tr>
-                        <td className="bg-manha" rowSpan={2} style={{ fontWeight: 900 }}>
-                          MANHÃ
-                        </td>
-                        <td className="bg-hora">8:00-9:40</td>
-                        {week.days.map((day) => {
-                          const slotRecords = activeDisciplineRecords.filter(
-                            (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '08:00 as 09:40'
-                          );
-                          return (
-                            <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                              {renderSlotCellContent(slotRecords)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-
-                      {/* 10:00-11:40 */}
-                      <tr>
-                        <td className="bg-hora">10:00-11:40</td>
-                        {week.days.map((day) => {
-                          const slotRecords = activeDisciplineRecords.filter(
-                            (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '10:00 as 11:40'
-                          );
-                          return (
-                            <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                              {renderSlotCellContent(slotRecords)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-
-                      {/* ALMOÇO */}
-                      <tr>
-                        <td className="bg-tarde" style={{ fontWeight: 900 }}>
-                          TARDE
-                        </td>
-                        <td className="bg-hora">12:00-14:00</td>
-                        {week.days.map((day) => (
-                          <td key={day.dateStr} colSpan={4} className="bg-almoco">
-                            ALMOÇO
-                          </td>
-                        ))}
-                      </tr>
-
-                      {/* 14:00-15:40 */}
-                      <tr>
-                        <td className="bg-tarde" rowSpan={2} style={{ fontWeight: 900 }}>
-                          TARDE
-                        </td>
-                        <td className="bg-hora">14:00-15:40</td>
-                        {week.days.map((day) => {
-                          const slotRecords = activeDisciplineRecords.filter(
-                            (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '14:00 as 15:40'
-                          );
-                          return (
-                            <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                              {renderSlotCellContent(slotRecords)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-
-                      {/* 16:00-17:40 */}
-                      <tr>
-                        <td className="bg-hora">16:00-17:40</td>
-                        {week.days.map((day) => {
-                          const slotRecords = activeDisciplineRecords.filter(
-                            (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '16:00 as 17:40'
-                          );
-                          return (
-                            <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                              {renderSlotCellContent(slotRecords)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    </tbody>
-                  </table>
+                  ))}
                 </div>
               ))
             )}
@@ -1419,137 +1441,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* SPECIAL PRINTABLE REPORT VIEW */}
-      <div className="hidden print:block text-black bg-white p-4 font-sans text-xs">
-        <div className="border-b-2 border-black pb-3 mb-3 flex items-center justify-between">
-          <div className="flex-1 text-center">
-            <h1 className="text-base font-black uppercase tracking-tight">ACADEPOL - ACADEMIA DE POLÍCIA CIVIL</h1>
-            <h2 className="text-sm font-black text-slate-900 uppercase my-0.5">
-              DISCIPLINA: {selectedDisciplineName}
-            </h2>
-            <p className="text-[11px] text-slate-700 font-bold">
-              Mês / Ano: {MONTH_NAMES[selectedMonth]} / {selectedYear}
-            </p>
-          </div>
-          <div className="text-right text-[10px] font-mono shrink-0">
-            <div>Data de Impressão: {new Date().toLocaleDateString('pt-BR')}</div>
-            <div>Total de Aulas: {activeDisciplineRecords.length}</div>
-          </div>
-        </div>
-
-        {monthWeeks.map((week) => (
-          <div key={week.weekNum} className="folha bg-white w-full overflow-x-auto my-4 text-black page-break-after-always">
-            <div className="bg-slate-100 px-3 py-1.5 border-b border-black font-bold text-[11px] text-black text-center">
-              <div className="font-black text-xs uppercase">
-                DISCIPLINA: {selectedDisciplineName}
-              </div>
-              <div className="font-bold text-[10px] text-slate-800">
-                SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
-              </div>
-            </div>
-            <table className="w-full border-collapse text-[10px] text-black" style={{ tableLayout: 'fixed' }}>
-              <thead>
-                <tr>
-                  <th style={{ width: '60px' }} className="bg-dia"></th>
-                  <th style={{ width: '80px' }} className="bg-dia">DIA</th>
-                  {week.days.map((day) => (
-                    <th key={day.dateStr} colSpan={4} className="bg-dia" style={{ width: '18%' }}>
-                      {day.formattedDate}
-                    </th>
-                  ))}
-                </tr>
-                <tr>
-                  <th className="bg-manha">MANHÃ</th>
-                  <th className="bg-hora">HORA</th>
-                  {week.days.map((day) => (
-                    <th key={day.dateStr} colSpan={4} className="bg-seg">
-                      {day.dayName}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td className="bg-manha" rowSpan={2} style={{ fontWeight: 900 }}>MANHÃ</td>
-                  <td className="bg-hora">8:00-9:40</td>
-                  {week.days.map((day) => {
-                    const slotRecords = activeDisciplineRecords.filter(
-                      (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '08:00 as 09:40'
-                    );
-                    return (
-                      <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                        {renderSlotCellContent(slotRecords)}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr>
-                  <td className="bg-hora">10:00-11:40</td>
-                  {week.days.map((day) => {
-                    const slotRecords = activeDisciplineRecords.filter(
-                      (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '10:00 as 11:40'
-                    );
-                    return (
-                      <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                        {renderSlotCellContent(slotRecords)}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr>
-                  <td className="bg-tarde" style={{ fontWeight: 900 }}>TARDE</td>
-                  <td className="bg-hora">12:00-14:00</td>
-                  {week.days.map((day) => (
-                    <td key={day.dateStr} colSpan={4} className="bg-almoco">ALMOÇO</td>
-                  ))}
-                </tr>
-                <tr>
-                  <td className="bg-tarde" rowSpan={2} style={{ fontWeight: 900 }}>TARDE</td>
-                  <td className="bg-hora">14:00-15:40</td>
-                  {week.days.map((day) => {
-                    const slotRecords = activeDisciplineRecords.filter(
-                      (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '14:00 as 15:40'
-                    );
-                    return (
-                      <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                        {renderSlotCellContent(slotRecords)}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr>
-                  <td className="bg-hora">16:00-17:40</td>
-                  {week.days.map((day) => {
-                    const slotRecords = activeDisciplineRecords.filter(
-                      (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '16:00 as 17:40'
-                    );
-                    return (
-                      <td key={day.dateStr} colSpan={4} className="p-0.5 align-top text-center" style={{ height: '96px', minHeight: '96px', maxHeight: '96px' }}>
-                        {renderSlotCellContent(slotRecords)}
-                      </td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ))}
-
-        <div className="mt-8 flex justify-around text-[10px] font-bold text-slate-900 pt-6 border-t border-slate-400">
-          <div className="text-center">
-            __________________________________________<br />
-            Coordenadoria Pedagógica - ACADEPOL
-          </div>
-          <div className="text-center">
-            __________________________________________<br />
-            Chefia de Ensino e Instrução
-          </div>
-        </div>
-      </div>
-
       {/* MODAL 1: DETALHES DA AULA (CLICKED FROM GRID) */}
       {detailRecord && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in duration-150">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
@@ -1679,7 +1573,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 2: NEW / EDIT RECORD FORM */}
       {showRecordModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <h3 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
@@ -1924,7 +1818,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 3: EXCEL IMPORT */}
       {showImportModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
@@ -2017,7 +1911,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 4: GERENCIAR EQUIPES CALENDÁRIO */}
       {showEquipeModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-6 space-y-6 shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
