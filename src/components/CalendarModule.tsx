@@ -930,7 +930,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       )}
 
       {/* HEADER BAR (Hidden on Print) */}
-      <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl backdrop-blur-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+      <div className="print:hidden bg-slate-200/90 border border-slate-800 rounded-3xl p-5 shadow-xl backdrop-blur-xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center space-x-2.5">
             <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl text-amber-400">
