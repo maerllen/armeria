@@ -914,9 +914,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       {/* Toast Feedback */}
       {feedback && (
         <div
-          className={`fixed top-4 right-4 z-50 p-4 rounded-xl border shadow-2xl flex items-center space-x-3 transition-all animate-bounce ${
+          className={`fixed top-15 right-4 z-50 p-4 rounded-xl border shadow-2xl flex items-center space-x-3 transition-all animate-bounce ${
             feedback.type === 'success'
-              ? 'bg-emerald-1950/90 text-emerald-300 border-emerald-500/50'
+              ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
               : 'bg-rose-950/90 text-rose-300 border-rose-500/50'
           }`}
         >
