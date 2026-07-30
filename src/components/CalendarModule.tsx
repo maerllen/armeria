@@ -1245,7 +1245,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   size: landscape;
                   margin: 4mm;
                 }
-                html, body {
+                html, body, #root, main {
                   width: 100% !important;
                   margin: 0 !important;
                   padding: 0 !important;
@@ -1253,8 +1253,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   color: #000000 !important;
                   -webkit-print-color-adjust: exact !important;
                   print-color-adjust: exact !important;
+                  box-shadow: none !important;
                 }
-                .print\\:hidden {
+                .print\\:hidden, header, aside, footer {
                   display: none !important;
                 }
                 .folha-pagina {
@@ -1262,10 +1263,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   break-after: page !important;
                   box-shadow: none !important;
                   border: none !important;
+                  border-radius: 0 !important;
                   margin: 0 0 4px 0 !important;
                   padding: 0 !important;
                   width: 100% !important;
                   max-width: 100% !important;
+                  background: #ffffff !important;
                 }
                 .folha-pagina:last-child {
                   page-break-after: auto !important;
@@ -1274,6 +1277,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .folha-pagina table {
                   width: 100% !important;
                   table-layout: fixed !important;
+                  border-collapse: collapse !important;
+                  border: none !important;
                 }
               }
               .folha-pagina {
@@ -1311,12 +1316,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               </div>
             ) : (
               weekPairs.map((pair, pageIdx) => (
-                <div key={`page-${pageIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 p-2.5 my-6 text-black">
+                <div key={`page-${pageIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-2.5 print:p-0 my-6 print:my-0 text-black">
                   {pair.map((week, wIdx) => (
                     <div key={week.weekNum} className={wIdx > 0 ? 'mt-3' : ''}>
                       {/* Header Banner for Week */}
                       {wIdx === 0 ? (
-                        <div className="bg-slate-100 px-3 py-1.5 border-b-2 border-black text-center font-bold text-xs text-black mb-1">
+                        <div className="px-3 py-1 text-center font-bold text-xs text-black mb-1">
                           <div className="text-center font-black text-xs uppercase text-black tracking-wide">
                             {selectedDisciplineName ? `DISCIPLINA: ${selectedDisciplineName}` : 'GRADE DA DISCIPLINA'} — {MONTH_NAMES[selectedMonth]} DE {selectedYear}
                           </div>
@@ -1325,7 +1330,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                           </div>
                         </div>
                       ) : (
-                        <div className="bg-slate-100 px-3 py-1 border-b border-black text-center font-bold text-[10.5px] text-black mb-1">
+                        <div className="px-3 py-1 text-center font-bold text-[10.5px] uppercase text-black mb-1 mt-3">
                           SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
                         </div>
                       )}

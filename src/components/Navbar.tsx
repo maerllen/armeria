@@ -29,7 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   };
 
   return (
-    <header className="glass border-b border-slate-800/80 text-slate-100 sticky top-0 z-30 shadow-2xl backdrop-blur-md">
+    <header className="glass border-b border-slate-800/80 text-slate-100 sticky top-0 z-30 shadow-2xl backdrop-blur-md print:hidden">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         
         {/* Left: Brand Logo */}
