@@ -250,6 +250,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [showImportModal, setShowImportModal] = useState<boolean>(false);
   const [showRecordModal, setShowRecordModal] = useState<boolean>(false);
   const [showEquipeModal, setShowEquipeModal] = useState<boolean>(false);
+  const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+  const [printOption, setPrintOption] = useState<'month' | 'all'>('month');
+  const [printMonthChoice, setPrintMonthChoice] = useState<number>(selectedMonth);
+  const [printYearChoice, setPrintYearChoice] = useState<number>(selectedYear);
+  const [isPrintingAllMonths, setIsPrintingAllMonths] = useState<boolean>(false);
   const [detailRecord, setDetailRecord] = useState<CalendarRecord | null>(null);
   const [editingRecordId, setEditingRecordId] = useState<string | null>(null);
   const [previewRecords, setPreviewRecords] = useState<CalendarRecord[]>([]);
@@ -884,13 +889,56 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
-  const weekPairs = useMemo(() => {
-    const pairs: (typeof monthWeeks)[] = [];
-    for (let i = 0; i < monthWeeks.length; i += 2) {
-      pairs.push(monthWeeks.slice(i, i + 2));
+  const pagesToRender = useMemo(() => {
+    if (isPrintingAllMonths) {
+      const allPages: {
+        year: number;
+        month: number;
+        monthName: string;
+        pair: CalendarWeekInfo[][];
+      }[] = [];
+
+      for (let m = 0; m < 12; m++) {
+        const mWeeks = getMonthWeeks(printYearChoice, m);
+        if (mWeeks.length === 0) continue;
+
+        for (let i = 0; i < mWeeks.length; i += 2) {
+          allPages.push({
+            year: printYearChoice,
+            month: m,
+            monthName: MONTH_NAMES[m],
+            pair: mWeeks.slice(i, i + 2)
+          });
+        }
+      }
+      return allPages;
+    } else {
+      const pairs: {
+        year: number;
+        month: number;
+        monthName: string;
+        pair: CalendarWeekInfo[][];
+      }[] = [];
+
+      for (let i = 0; i < monthWeeks.length; i += 2) {
+        pairs.push({
+          year: selectedYear,
+          month: selectedMonth,
+          monthName: MONTH_NAMES[selectedMonth],
+          pair: monthWeeks.slice(i, i + 2)
+        });
+      }
+      return pairs;
     }
-    return pairs;
-  }, [monthWeeks]);
+  }, [isPrintingAllMonths, printYearChoice, selectedYear, selectedMonth, monthWeeks]);
+
+  useEffect(() => {
+    const handleAfterPrint = () => {
+      setIsPrintingAllMonths(false);
+    };
+    window.addEventListener('afterprint', handleAfterPrint);
+    return () => window.removeEventListener('afterprint', handleAfterPrint);
+  }, []);
 
   const availableTeachersForEquipe = useMemo(() => {
     const currentSubj = (equipeForm.materia || selectedDiscipline || '').trim().toUpperCase();
@@ -1010,9 +1058,28 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     );
   };
 
-  // Print PDF for the selected discipline
+  // Open Print Modal for the selected discipline
   const handlePrintPDF = () => {
-    window.print();
+    setPrintMonthChoice(selectedMonth);
+    setPrintYearChoice(selectedYear);
+    setPrintOption('month');
+    setShowPrintModal(true);
+  };
+
+  const handleConfirmPrint = () => {
+    if (printOption === 'month') {
+      setSelectedMonth(printMonthChoice);
+      setSelectedYear(printYearChoice);
+      setIsPrintingAllMonths(false);
+    } else {
+      setSelectedYear(printYearChoice);
+      setIsPrintingAllMonths(true);
+    }
+    setShowPrintModal(false);
+
+    setTimeout(() => {
+      window.print();
+    }, 250);
   };
 
   const openNewRecordModalForDiscipline = () => {
@@ -1391,7 +1458,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   print-color-adjust: exact !important;
                   box-shadow: none !important;
                 }
-                .print\\:hidden, header, aside, footer, nav {
+                .print\\:hidden, header, aside, footer, nav, button {
                   display: none !important;
                 }
                 .folha-pagina {
@@ -1404,11 +1471,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   box-shadow: none !important;
                   border: none !important;
                   border-radius: 0 !important;
-                  margin: 0 !important;
+                  margin: 0 auto !important;
                   padding: 0 !important;
                   width: 100% !important;
                   max-width: 100% !important;
                   background: #ffffff !important;
+                  color: #000000 !important;
+                  display: block !important;
                 }
                 .folha-pagina:first-of-type {
                   page-break-before: auto !important;
@@ -1421,7 +1490,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 3mm !important;
+                  margin-bottom: 2mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1432,12 +1501,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   break-inside: avoid !important;
                 }
                 td.cell-slot {
-                  height: 46px !important;
-                  min-height: 46px !important;
-                  max-height: 46px !important;
+                  height: 44px !important;
+                  min-height: 44px !important;
+                  max-height: 44px !important;
                 }
                 td.cell-slot > div {
-                  min-height: 46px !important;
+                  min-height: 44px !important;
                 }
               }
               .folha-pagina {
@@ -1469,15 +1538,32 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .celula-aula .instr { background: #f8fafc !important; font-size: 9.5px !important; color: #334155 !important; }
             `}</style>
 
-            {monthWeeks.length === 0 ? (
+            {pagesToRender.length === 0 ? (
               <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center text-slate-400 text-xs">
-                Nenhuma semana encontrada para este mês.
+                Nenhuma semana encontrada para este período.
               </div>
             ) : (
-              weekPairs.map((pair, pageIdx) => (
-                <div key={`page-${pageIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-2.5 print:p-0 my-6 print:my-0 text-black">
-                  {pair.map((week, wIdx) => (
-                    <div key={week.weekNum} className={`semana-bloco ${wIdx > 0 ? 'mt-3 print:mt-2' : ''}`}>
+              pagesToRender.map((pageItem, pIdx) => (
+                <div key={`page-${pageItem.month}-${pIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-2.5 print:p-0 my-6 print:my-0 text-black">
+                  {/* Header do Documento por Folha */}
+                  <div className="text-center pb-1 border-b border-black mb-1.5 font-sans flex items-center justify-between px-1">
+                    <div className="text-left">
+                      <span className="text-[9px] font-bold text-slate-700 block uppercase font-mono leading-tight">
+                        ACADEPOL • CURSO DE FORMAÇÃO
+                      </span>
+                      <h3 className="font-extrabold text-[11px] uppercase tracking-wide text-black leading-tight">
+                        {selectedDisciplineName || selectedDiscipline}
+                      </h3>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-[10px] font-black text-black font-mono uppercase bg-slate-100 px-2 py-0.5 rounded border border-black">
+                        MÊS: {pageItem.monthName.toUpperCase()} / {pageItem.year}
+                      </span>
+                    </div>
+                  </div>
+
+                  {pageItem.pair.map((week, wIdx) => (
+                    <div key={week.weekNum} className={`semana-bloco ${wIdx > 0 ? 'mt-2.5 print:mt-1.5' : ''}`}>
                       {/* Week Header */}
                       <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans">
                         SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
@@ -2385,6 +2471,145 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   </table>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL IMPRESSÃO PDF: ESCOLHA ENTRE MÊS OU CALENDÁRIO COMPLETO */}
+      {showPrintModal && (
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/30 rounded-2xl text-cyan-400">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-100 text-base">
+                    Opções de Impressão PDF
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-medium">
+                    {selectedDisciplineName || selectedDiscipline}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrintModal(false)}
+                className="text-slate-400 hover:text-slate-100 p-1.5 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 text-xs">
+              <p className="text-slate-300 font-semibold leading-relaxed">
+                Qual escopo do calendário você deseja imprimir em formato PDF?
+              </p>
+
+              <div className="space-y-3">
+                {/* Opção A: Mês Específico */}
+                <div
+                  onClick={() => setPrintOption('month')}
+                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start space-x-3 ${
+                    printOption === 'month'
+                      ? 'bg-cyan-950/40 border-cyan-500/60 text-slate-100 shadow-lg'
+                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="printScope"
+                    checked={printOption === 'month'}
+                    onChange={() => setPrintOption('month')}
+                    className="mt-0.5 text-cyan-500 focus:ring-cyan-500"
+                  />
+                  <div className="space-y-2.5 w-full">
+                    <div>
+                      <span className="font-bold text-slate-100 block text-xs">Apenas o Mês Específico</span>
+                      <span className="text-[11px] text-slate-400 block mt-0.5">
+                        Gera as páginas relativas apenas ao mês e ano selecionados.
+                      </span>
+                    </div>
+
+                    {printOption === 'month' && (
+                      <div className="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/80">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Selecione o Mês</label>
+                          <select
+                            value={printMonthChoice}
+                            onChange={(e) => setPrintMonthChoice(Number(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-100 font-semibold text-xs focus:border-cyan-400 focus:outline-none"
+                          >
+                            {MONTH_NAMES.map((m, idx) => (
+                              <option key={idx} value={idx}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Ano</label>
+                          <select
+                            value={printYearChoice}
+                            onChange={(e) => setPrintYearChoice(Number(e.target.value))}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-slate-100 font-semibold text-xs focus:border-cyan-400 focus:outline-none"
+                          >
+                            {[2024, 2025, 2026, 2027, 2028].map((y) => (
+                              <option key={y} value={y}>
+                                {y}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Opção B: Todo o Calendário */}
+                <div
+                  onClick={() => setPrintOption('all')}
+                  className={`p-3.5 rounded-2xl border cursor-pointer transition flex items-start space-x-3 ${
+                    printOption === 'all'
+                      ? 'bg-cyan-950/40 border-cyan-500/60 text-slate-100 shadow-lg'
+                      : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="printScope"
+                    checked={printOption === 'all'}
+                    onChange={() => setPrintOption('all')}
+                    className="mt-0.5 text-cyan-500 focus:ring-cyan-500"
+                  />
+                  <div className="space-y-1 w-full">
+                    <span className="font-bold text-slate-100 block text-xs">Todo o Calendário Letivo</span>
+                    <span className="text-[11px] text-slate-400 block">
+                      Gera o documento completo contendo todas as folhas de todos os meses do ano letivo ({printYearChoice}).
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setShowPrintModal(false)}
+                className="px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-bold transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPrint}
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-extrabold px-4 py-2.5 rounded-xl text-xs flex items-center space-x-2 shadow-lg shadow-cyan-600/20 transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir PDF</span>
+              </button>
             </div>
           </div>
         </div>
