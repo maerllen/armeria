@@ -3579,23 +3579,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           <div className="flex items-center space-x-2 text-[10px] text-slate-400 mt-0.5">
                             {stu.maspAluno && <span>MASP: {formatMasp(stu.maspAluno)}</span>}
                             <span>• Situação: <strong className="text-emerald-400">{stu.situacaoAluno || 'Ativo'}</strong></span>
-                            {stu.instrutor1Aluno && <span className="text-amber-400">• Instrutor Ext: {stu.instrutor1Aluno}</span>}
                           </div>
                         </div>
                       </div>
 
                       <div className="flex items-center space-x-2 self-end md:self-auto">
-                        {/* Botão Aulas e Notas */}
-                        <button
-                          type="button"
-                          onClick={() => handleOpenLessonsModal(stu)}
-                          className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/60 text-indigo-200 px-2.5 py-1 rounded-lg font-semibold text-[11px] flex items-center space-x-1 transition"
-                          title="Visualizar ou registrar aulas e notas deste aluno"
-                        >
-                          <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
-                          <span>Aulas & Notas ({(stu.aulas || []).length})</span>
-                        </button>
-
                         {/* Botão Transferir Aluno */}
                         <button
                           type="button"
@@ -3607,12 +3595,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           <span>Mudar de Turma</span>
                         </button>
 
-                        {/* Editar Instrutores / Dados */}
+                        {/* Editar Dados */}
                         <button
                           type="button"
                           onClick={() => handleOpenEditStudent(stu)}
                           className="text-slate-400 hover:text-amber-400 p-1 rounded-lg hover:bg-slate-800 transition"
-                          title="Editar / Cadastrar Instrutores Adicionais"
+                          title="Editar Dados do Aluno"
                         >
                           <Edit2 className="w-3.5 h-3.5" />
                         </button>
@@ -3646,14 +3634,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       )}
 
-      {/* Sub-Modal: Editar Dados do Aluno / Instrutores Adicionais */}
+      {/* Sub-Modal: Editar Dados do Aluno */}
       {editingStudent && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <Edit2 className="w-4 h-4 text-amber-400" />
-                <span>Editar Aluno e Instrutores - {editingStudent.nomeAluno}</span>
+                <span>Editar Aluno - {editingStudent.nomeAluno}</span>
               </h4>
               <button onClick={() => setEditingStudent(null)} className="text-slate-400 hover:text-slate-200">✕</button>
             </div>
@@ -3691,53 +3679,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     <option value="Desligado">Desligado</option>
                     <option value="Concluído">Concluído</option>
                   </select>
-                </div>
-              </div>
-
-              {/* Instrutores Adicionais 1 a 4 */}
-              <div className="pt-2 border-t border-slate-800 space-y-2">
-                <p className="text-[11px] font-bold text-amber-400 uppercase tracking-wider">Instrutores Adicionais da Turma</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 1</label>
-                    <input
-                      type="text"
-                      value={editStudentInstrutor1}
-                      onChange={(e) => setEditStudentInstrutor1(e.target.value)}
-                      placeholder="Nome do 2º professor"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 2</label>
-                    <input
-                      type="text"
-                      value={editStudentInstrutor2}
-                      onChange={(e) => setEditStudentInstrutor2(e.target.value)}
-                      placeholder="Nome do 3º professor"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 3</label>
-                    <input
-                      type="text"
-                      value={editStudentInstrutor3}
-                      onChange={(e) => setEditStudentInstrutor3(e.target.value)}
-                      placeholder="Nome do 4º professor"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] text-slate-400 mb-0.5">Instrutor 4</label>
-                    <input
-                      type="text"
-                      value={editStudentInstrutor4}
-                      onChange={(e) => setEditStudentInstrutor4(e.target.value)}
-                      placeholder="Nome do 5º professor"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-slate-100"
-                    />
-                  </div>
                 </div>
               </div>
             </div>
