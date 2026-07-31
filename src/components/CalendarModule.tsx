@@ -1472,14 +1472,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             <style>{`
               @media print {
                 @page {
-                  size: A4 landscape;
-                  margin: 0mm;
+                  size: A4 portrait;
+                  margin: 8mm;
                 }
-                html, body, #root, #root *, main, div, section, article {
-                  background: #ffffff !important;
+                * {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                html, body, #root, #root * {
                   background-color: #ffffff !important;
+                  background-image: none !important;
                   color: #000000 !important;
-                  overflow: visible !important;
                   box-shadow: none !important;
                   text-shadow: none !important;
                 }
@@ -1487,33 +1490,24 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   margin: 0 !important;
                   padding: 0 !important;
                   background: #ffffff !important;
-                  background-color: #ffffff !important;
                   color: #000000 !important;
-                  -webkit-print-color-adjust: exact !important;
-                  print-color-adjust: exact !important;
+                  overflow: visible !important;
                 }
                 .print\\:hidden, header, aside, footer, nav, button, input, select {
                   display: none !important;
                 }
                 .folha-wrapper {
-                  width: 100vw !important;
-                  height: 100vh !important;
-                  min-height: 100vh !important;
-                  max-height: 100vh !important;
-                  display: flex !important;
-                  flex-direction: column !important;
-                  justify-content: center !important;
-                  align-items: center !important;
                   page-break-before: always !important;
                   break-before: page !important;
-                  page-break-after: always !important;
-                  break-after: page !important;
+                  page-break-after: auto !important;
+                  break-after: auto !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  box-sizing: border-box !important;
-                  padding: 5mm 8mm !important;
+                  margin: 0 !important;
+                  padding: 0 !important;
+                  width: 100% !important;
                   background: #ffffff !important;
-                  background-color: #ffffff !important;
+                  box-sizing: border-box !important;
                 }
                 .folha-wrapper:first-of-type {
                   page-break-before: avoid !important;
@@ -1525,46 +1519,42 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 }
                 .folha-pagina {
                   width: 100% !important;
-                  max-width: 282mm !important;
+                  max-width: 100% !important;
                   margin: 0 auto !important;
                   background: #ffffff !important;
-                  background-color: #ffffff !important;
+                  border: 2px solid #000000 !important;
                   border-top: 4px solid #000000 !important;
-                  border-bottom: 2px solid #000000 !important;
-                  border-left: 1px solid #000000 !important;
-                  border-right: 1px solid #000000 !important;
-                  border-radius: 0 !important;
-                  padding: 3.5mm !important;
+                  border-bottom: 3px solid #000000 !important;
+                  padding: 4mm !important;
                   box-shadow: none !important;
                   box-sizing: border-box !important;
+                  border-radius: 0 !important;
                 }
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 2mm !important;
+                  margin-bottom: 3mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
                   table-layout: fixed !important;
                   border-collapse: collapse !important;
-                  border: none !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                   background-color: #ffffff !important;
                 }
                 td.cell-slot {
-                  height: 40px !important;
-                  min-height: 40px !important;
-                  max-height: 40px !important;
+                  height: 48px !important;
+                  min-height: 48px !important;
                 }
                 td.cell-slot > div {
-                  min-height: 40px !important;
+                  min-height: 48px !important;
                 }
               }
               .folha-pagina {
                 background: #ffffff !important;
                 color: #000000 !important;
-                font-family: Calibri, Arial, sans-serif !important;
+                font-family: Arial, Helvetica, sans-serif !important;
               }
               .folha-pagina table {
                 width: 100% !important;
@@ -1575,19 +1565,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               }
               .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
-                padding: 2px 2px !important;
+                padding: 3px 2px !important;
                 text-align: center !important;
                 vertical-align: middle !important;
                 color: #000000 !important;
               }
-              .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
-              .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula .turma { background: #ffffff !important; font-size: 10px !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula .instr { background: #f8fafc !important; font-size: 9.5px !important; color: #334155 !important; }
+              .bg-dia { background-color: #e2e8f0 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-manha { background-color: #dbeafe !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-tarde { background-color: #fef3c7 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-almoco { background-color: #fde68a !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 18px !important; }
+              .bg-hora { background-color: #f1f5f9 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-seg { background-color: #dcfce7 !important; font-weight: bold !important; color: #000000 !important; }
+              .celula-aula { background: #ffffff !important; border: 1px solid #94a3b8 !important; }
             `}</style>
 
             {pagesToRender.length === 0 ? (
@@ -1600,7 +1589,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   key={`page-${pageItem.month}-${pIdx}`}
                   className={`folha-wrapper my-6 print:my-0 ${!pageItem.hasClasses ? 'print:hidden' : ''}`}
                 >
-                  <div className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-t-4 print:border-t-black print:border-b-2 print:border-b-black print:border-x print:border-x-black print:shadow-none print:rounded-none p-3 print:p-1 text-black">
+                  <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-2 print:border-black print:border-t-4 print:shadow-none print:rounded-none p-3 print:p-2 text-black">
                     {/* Header do Documento por Folha */}
                     <div className="text-center pb-1.5 border-b-2 border-black mb-2 font-sans flex items-center justify-between px-1">
                       <div className="text-left">
