@@ -46,6 +46,31 @@ import {
 import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { AcademyReceiptModal } from './AcademyReceiptModal';
+import { formatTurmaCode } from './CalendarModule';
+
+export const parseTurmaCalendarCode = (rawCode: string) => {
+  const formatted = formatTurmaCode(rawCode);
+  const upper = formatted.toUpperCase();
+
+  let career: 'Delegado' | 'Investigador' | 'Escrivão' | 'Perito' | 'Médico Legista' = 'Delegado';
+
+  if (upper.startsWith('EP') || upper.includes('ESCRIV')) {
+    career = 'Escrivão';
+  } else if (upper.startsWith('IP') || upper.includes('INVESTIGADOR')) {
+    career = 'Investigador';
+  } else if (upper.startsWith('PC') || upper.includes('PERITO')) {
+    career = 'Perito';
+  } else if (upper.startsWith('ML') || upper.includes('MEDICO') || upper.includes('LEGISTA')) {
+    career = 'Médico Legista';
+  } else if (upper.startsWith('DL') || upper.includes('DELEGADO')) {
+    career = 'Delegado';
+  }
+
+  const digitsMatch = upper.match(/\d+/);
+  const digits = digitsMatch ? digitsMatch[0].padStart(2, '0').slice(-2) : '01';
+
+  return { career, turmaNumber: digits, formattedCode: formatted };
+};
 
 const ACADEPOL_CATALOG = [
   { name: 'Curso de Táticas Policiais Especiais', code: 'EC-TPE-2026' },
@@ -128,6 +153,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const courseClasses = storage.getCourseClasses();
   const courseMovements = storage.getCourseMovements();
   const lessonPlans = storage.getLessonPlans();
+  const calendarRecords = storage.getCalendarRecords();
+
+  const availableCalendarTurmas = React.useMemo(() => {
+    const set = new Set<string>();
+    calendarRecords.forEach(r => {
+      if (r.turma_calendario && r.turma_calendario.trim()) {
+        set.add(formatTurmaCode(r.turma_calendario));
+      }
+    });
+    return Array.from(set).sort();
+  }, [calendarRecords]);
 
   const filteredMovements = courseMovements.filter(mov => {
     if (courseTypeFilterProp) {
@@ -632,6 +668,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [classCourseId, setClassCourseId] = useState('');
   const [classCareer, setClassCareer] = useState('Delegado');
   const [classTurmaNum, setClassTurmaNum] = useState('01');
+  const [selectedCalendarTurma, setSelectedCalendarTurma] = useState('');
   const [classTeacherId, setClassTeacherId] = useState('');
   const [classTeacherName, setClassTeacherName] = useState('');
   const [classSubject, setClassSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -943,7 +980,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return 'Nenhum vinculado';
   };
 
-  const handleOpenClassModal = (cls?: CourseClass, targetType: 'Formação' | 'Ensino Continuado' = 'Formação') => {
+  const handleOpenClassModal = (cls?: CourseClass | null, targetType: 'Formação' | 'Ensino Continuado' = 'Formação', initialCalTurma?: string) => {
     if (cls) {
       const linked = academyCourses.find(c => c.id === cls.courseId);
       const effectiveType = linked?.type || targetType;
@@ -953,6 +990,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassCareer(cls.career);
       const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
       setClassTurmaNum(digits ? digits.padStart(2, '0').slice(-2) : '01');
+      setSelectedCalendarTurma(initialCalTurma || '');
       const primaryTeacher = cls.teacherUserId || (cls.teacherUserIds && cls.teacherUserIds[0]) || '';
       setClassTeacherId(primaryTeacher);
       const teacherObj = teachers.find(t => t.id === primaryTeacher || t.userId === primaryTeacher);
@@ -970,8 +1008,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setEditingClass(null);
       setClassModalCourseType(targetType);
       setClassCourseId(matchingCourses[0]?.id || '');
-      setClassCareer('Delegado');
-      setClassTurmaNum('01');
+
+      if (initialCalTurma) {
+        setSelectedCalendarTurma(initialCalTurma);
+        const parsed = parseTurmaCalendarCode(initialCalTurma);
+        setClassCareer(parsed.career);
+        setClassTurmaNum(parsed.turmaNumber);
+      } else {
+        setSelectedCalendarTurma('');
+        setClassCareer('Delegado');
+        setClassTurmaNum('01');
+      }
+
       setClassSubject(initialSubject);
       setClassTeacherId(defaultTeacher?.id || '');
       setClassTeacherName(defaultTeacher?.name || '');
@@ -1935,6 +1983,30 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <Smartphone className="w-4 h-4 text-indigo-400" />
                 <span>📱 Link Celular Estande</span>
               </button>
+
+              {availableCalendarTurmas.length > 0 && (
+                <button
+                  onClick={() => {
+                    const existingCodes = new Set(courseClasses.map(c => {
+                      const abbr = c.careerAbbreviation || getCareerAbbr(c.career);
+                      const num = (c.turmaNumber || '01').padStart(2, '0').slice(-2);
+                      return `${abbr} ${num}`;
+                    }));
+
+                    const uncreated = availableCalendarTurmas.filter(t => !existingCodes.has(t));
+                    if (uncreated.length === 0) {
+                      handleOpenClassModal(null, 'Formação', availableCalendarTurmas[0]);
+                    } else {
+                      handleOpenClassModal(null, 'Formação', uncreated[0]);
+                    }
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                  title="Criar Turma a partir das turmas do Horário/Calendário de Aulas (turma_calendario)"
+                >
+                  <Calendar className="w-4 h-4 text-amber-400" />
+                  <span>Importar do Calendário</span>
+                </button>
+              )}
 
               <button
                 onClick={() => handleOpenClassModal(undefined, 'Formação')}
@@ -3098,6 +3170,48 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   );
                 })()}
               </div>
+
+              {/* Relacionar com turma_calendario da tabela calendario_aulas */}
+              {classModalCourseType === 'Formação' && (
+                <div className="bg-slate-950/90 border border-amber-500/40 rounded-xl p-3 space-y-2">
+                  <label className="block text-amber-400 font-bold text-xs flex items-center space-x-1.5">
+                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Relacionar com Turma do Calendário de Aulas (turma_calendario)</span>
+                  </label>
+                  <select
+                    value={selectedCalendarTurma}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedCalendarTurma(val);
+                      if (val) {
+                        const parsed = parseTurmaCalendarCode(val);
+                        setClassCareer(parsed.career);
+                        setClassTurmaNum(parsed.turmaNumber);
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-medium text-xs focus:border-amber-400 focus:outline-none"
+                  >
+                    <option value="">-- Selecione uma Turma do Calendário de Aulas --</option>
+                    {availableCalendarTurmas.map(tCode => {
+                      const count = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === tCode).length;
+                      return (
+                        <option key={tCode} value={tCode}>
+                          Turma {tCode} ({count} aula{count === 1 ? '' : 's'} no horário/calendário)
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {availableCalendarTurmas.length === 0 ? (
+                    <p className="text-[10px] text-slate-400 italic">
+                      Nenhuma turma encontrada no Calendário de Aulas. Crie aulas no Módulo Calendário.
+                    </p>
+                  ) : (
+                    <p className="text-[10px] text-slate-400">
+                      Ao selecionar a turma do calendário, a carreira e o número da turma serão preenchidos automaticamente.
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">Carreira Policial</label>
