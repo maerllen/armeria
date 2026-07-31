@@ -1526,7 +1526,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   margin: 0 auto !important;
                   background: #ffffff !important;
                   border: 2px solid #000000 !important;
-                  border-top: 4px solid #000000 !important;
+                  border-top: 1px solid #000000 !important;
                   border-bottom: 3px solid #000000 !important;
                   padding: 3mm !important;
                   box-shadow: none !important;
