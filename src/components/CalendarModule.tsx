@@ -1589,6 +1589,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }.bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
               .celula-aula { background-color: #ffffff !important; border: 1px solid #64748b !important; }
             `}</style>
 
