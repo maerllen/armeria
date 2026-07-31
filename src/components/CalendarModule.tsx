@@ -1033,14 +1033,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const renderSlotCellContent = (slotRecords: CalendarRecord[]) => {
     if (slotRecords.length === 0) {
       return (
-        <div className="flex items-center justify-center h-full w-full min-h-[58px]">
-          <span className="text-slate-400 font-mono text-[10px]">-</span>
+        <div className="flex items-center justify-center h-full w-full min-h-[36px] print:min-h-[30px]">
+          <span className="text-slate-400 font-mono text-[9px]">-</span>
         </div>
       );
     }
 
     return (
-      <div className="flex flex-col space-y-0.5 justify-start items-center w-full h-full min-h-[58px] py-0.5">
+      <div className="flex flex-col space-y-0.5 justify-start items-center w-full h-full min-h-[36px] print:min-h-[30px] py-0.5">
         {slotRecords.map((rec) => {
           const turma = (rec.turma_calendario || 'DL1').trim();
           const numAulaOnly = String(getCalculatedLessonNumber(rec));
@@ -1051,7 +1051,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             <div
               key={rec.id}
               onClick={() => setDetailRecord(rec)}
-              className="celula-aula cursor-pointer hover:bg-amber-100 transition py-0.5 px-1 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-1 overflow-hidden whitespace-nowrap text-[10px] leading-tight h-[21px] shrink-0"
+              className="celula-aula cursor-pointer hover:bg-amber-100 transition py-0.5 px-0.5 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-0.5 overflow-hidden whitespace-nowrap text-[9.5px] print:text-[8.5px] leading-tight h-[20px] print:h-[18px] shrink-0"
               title={`Clique para ver detalhes - ${turma} | ${numAulaOnly}ª Aula | Equipe ${teamInfo.equipeNome}`}
             >
               {/* TURMA_CALENDARIO */}
@@ -1075,7 +1075,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
                 {/* Instrutores */}
                 {teamInfo.instrutoresSiglas.map((s, idx) => (
-                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[9.5px]">
+                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[9px] print:text-[8px]">
                     {s}
                   </span>
                 ))}
@@ -1473,11 +1473,12 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               @media print {
                 @page {
                   size: A4 portrait;
-                  margin: 8mm;
+                  margin: 6mm;
                 }
                 * {
                   -webkit-print-color-adjust: exact !important;
                   print-color-adjust: exact !important;
+                  box-sizing: border-box !important;
                 }
                 html, body, #root, #root * {
                   background-color: #ffffff !important;
@@ -1492,6 +1493,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   background: #ffffff !important;
                   color: #000000 !important;
                   overflow: visible !important;
+                  width: 100% !important;
                 }
                 .print\\:hidden, header, aside, footer, nav, button, input, select {
                   display: none !important;
@@ -1506,6 +1508,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   margin: 0 !important;
                   padding: 0 !important;
                   width: 100% !important;
+                  max-width: 100% !important;
                   background: #ffffff !important;
                   box-sizing: border-box !important;
                 }
@@ -1525,30 +1528,38 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   border: 2px solid #000000 !important;
                   border-top: 4px solid #000000 !important;
                   border-bottom: 3px solid #000000 !important;
-                  padding: 4mm !important;
+                  padding: 3mm !important;
                   box-shadow: none !important;
                   box-sizing: border-box !important;
                   border-radius: 0 !important;
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
                 }
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 3mm !important;
+                  margin-bottom: 2mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
+                  max-width: 100% !important;
                   table-layout: fixed !important;
                   border-collapse: collapse !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                   background-color: #ffffff !important;
                 }
+                tr, td, th {
+                  page-break-inside: avoid !important;
+                  break-inside: avoid !important;
+                }
                 td.cell-slot {
-                  height: 48px !important;
-                  min-height: 48px !important;
+                  height: 34px !important;
+                  min-height: 34px !important;
+                  padding: 1px !important;
                 }
                 td.cell-slot > div {
-                  min-height: 48px !important;
+                  min-height: 34px !important;
                 }
               }
               .folha-pagina {
@@ -1559,21 +1570,23 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .folha-pagina table {
                 width: 100% !important;
                 border-collapse: collapse !important;
-                font-size: 10px !important;
+                font-size: 9.5px !important;
                 color: #000000 !important;
                 table-layout: fixed !important;
               }
               .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
-                padding: 3px 2px !important;
+                padding: 2px 2px !important;
                 text-align: center !important;
                 vertical-align: middle !important;
                 color: #000000 !important;
+                word-wrap: break-word !important;
+                overflow: hidden !important;
               }
               .bg-dia { background-color: #e2e8f0 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-manha { background-color: #dbeafe !important; font-weight: bold !important; color: #000000 !important; }
               .bg-tarde { background-color: #fef3c7 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-almoco { background-color: #fde68a !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 18px !important; }
+              .bg-almoco { background-color: #fde68a !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
               .bg-hora { background-color: #f1f5f9 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-seg { background-color: #dcfce7 !important; font-weight: bold !important; color: #000000 !important; }
               .celula-aula { background: #ffffff !important; border: 1px solid #94a3b8 !important; }
@@ -1617,19 +1630,19 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                       <table className="w-full border-collapse text-[10px] text-black" style={{ tableLayout: 'fixed' }}>
                         <thead>
                           <tr>
-                            <th style={{ width: '60px' }} className="bg-dia"></th>
-                            <th style={{ width: '80px' }} className="bg-dia">DIA</th>
+                            <th style={{ width: '8%' }} className="bg-dia"></th>
+                            <th style={{ width: '12%' }} className="bg-dia">DIA</th>
                             {week.days.map((day) => (
-                              <th key={day.dateStr} colSpan={4} className="bg-dia" style={{ width: '18%' }}>
+                              <th key={day.dateStr} colSpan={4} className="bg-dia" style={{ width: '16%' }}>
                                 {day.formattedDate}
                               </th>
                             ))}
                           </tr>
                           <tr>
-                            <th className="bg-manha">MANHÃ</th>
-                            <th className="bg-hora">HORA</th>
+                            <th style={{ width: '8%' }} className="bg-manha">MANHÃ</th>
+                            <th style={{ width: '12%' }} className="bg-hora">HORA</th>
                             {week.days.map((day) => (
-                              <th key={day.dateStr} colSpan={4} className="bg-seg">
+                              <th key={day.dateStr} colSpan={4} className="bg-seg" style={{ width: '16%' }}>
                                 {day.dayName}
                               </th>
                             ))}
@@ -1647,7 +1660,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '08:00 as 09:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center">
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1662,7 +1675,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '10:00 as 11:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center">
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1693,7 +1706,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '14:00 as 15:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center">
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
@@ -1708,7 +1721,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                 (r) => r.data_calendario === day.dateStr && normalizeTimeSlot(r.horario_calendario) === '16:00 as 17:40'
                               );
                               return (
-                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center" style={{ height: '52px', minHeight: '52px' }}>
+                                <td key={day.dateStr} colSpan={4} className="cell-slot p-0.5 align-top text-center">
                                   {renderSlotCellContent(slotRecords)}
                                 </td>
                               );
