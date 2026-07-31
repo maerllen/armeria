@@ -1014,6 +1014,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         const parsed = parseTurmaCalendarCode(initialCalTurma);
         setClassCareer(parsed.career);
         setClassTurmaNum(parsed.turmaNumber);
+      } else if (targetType === 'Formação' && availableCalendarTurmas.length > 0) {
+        const firstCal = availableCalendarTurmas[0];
+        setSelectedCalendarTurma(firstCal);
+        const parsed = parseTurmaCalendarCode(firstCal);
+        setClassCareer(parsed.career);
+        setClassTurmaNum(parsed.turmaNumber);
       } else {
         setSelectedCalendarTurma('');
         setClassCareer('Delegado');
@@ -1021,9 +1027,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       }
 
       setClassSubject(initialSubject);
-      setClassTeacherId(defaultTeacher?.id || '');
-      setClassTeacherName(defaultTeacher?.name || '');
-      setClassStudentCount(20);
+      setClassTeacherId('');
+      setClassTeacherName('');
+      setClassStudentCount(0);
       setClassLessonPlanId('');
     }
     setShowClassModal(true);
@@ -1056,7 +1062,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       return;
     }
 
-    const finalTeacherName = classTeacherName.trim() || selectedTeacher?.name || 'Professor';
+    const finalTeacherName = classTeacherName.trim() || selectedTeacher?.name || (classTeacherId ? 'Professor' : 'A definir');
 
     let firstClassDate: string | undefined = editingClass?.firstClassDate;
     let lastClassDate: string | undefined = editingClass?.lastClassDate;
@@ -3149,14 +3155,86 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               {editingClass ? `Editar Turma (${classModalCourseType})` : `Nova Turma - ${classModalCourseType}`}
             </h3>
             <form onSubmit={handleSaveClass} className="space-y-4 text-xs">
+              {/* 1. Primeiro Momento: Turma do Calendário de Aulas (Formação) */}
+              {classModalCourseType === 'Formação' && (
+                <div className="bg-slate-950/90 border border-amber-500/50 rounded-xl p-3.5 space-y-2 shadow-inner">
+                  <label className="block text-amber-400 font-bold text-xs flex items-center space-x-1.5">
+                    <Calendar className="w-4 h-4 text-amber-400" />
+                    <span>1. Turma do Calendário de Aulas (turma_calendario) *</span>
+                  </label>
+                  <select
+                    value={selectedCalendarTurma}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedCalendarTurma(val);
+                      if (val) {
+                        const parsed = parseTurmaCalendarCode(val);
+                        setClassCareer(parsed.career);
+                        setClassTurmaNum(parsed.turmaNumber);
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-amber-500/40 rounded-xl px-3 py-2 text-slate-100 font-semibold text-xs focus:border-amber-400 focus:outline-none"
+                  >
+                    <option value="">-- Selecione uma Turma do Calendário de Aulas --</option>
+                    {availableCalendarTurmas.map(tCode => {
+                      const count = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === tCode).length;
+                      return (
+                        <option key={tCode} value={tCode}>
+                          Turma {tCode} ({count} aula{count === 1 ? '' : 's'} no horário/calendário)
+                        </option>
+                      );
+                    })}
+                  </select>
+
+                  {selectedCalendarTurma ? (() => {
+                    const matchingCalRecords = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === selectedCalendarTurma && r.data_calendario);
+                    const sortedDates = matchingCalRecords.map(r => r.data_calendario).sort();
+                    const firstDate = sortedDates[0];
+                    const lastDate = sortedDates[sortedDates.length - 1];
+                    const fmtDate = (dStr: string) => {
+                      if (!dStr) return '';
+                      const [y, m, d] = dStr.split('-');
+                      return `${d}/${m}/${y}`;
+                    };
+                    return (
+                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-200 space-y-1 mt-1">
+                        <div className="flex items-center justify-between font-semibold text-[11px]">
+                          <span className="flex items-center gap-1">
+                            <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                            Informações Herdadas do Calendário:
+                          </span>
+                          <span className="bg-amber-500/20 text-amber-300 font-mono px-2 py-0.5 rounded text-[10px] font-bold">
+                            {getCareerAbbr(classCareer)} {classTurmaNum}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-300">
+                          Carreira identificada: <strong className="text-amber-300">{classCareer} ({getCareerAbbr(classCareer)})</strong>
+                        </div>
+                        {sortedDates.length > 0 && (
+                          <div className="font-mono text-amber-300 font-bold text-[10px] pt-1 border-t border-amber-500/20 flex justify-between">
+                            <span>1ª Aula: {fmtDate(firstDate)}</span>
+                            <span>Última Aula: {fmtDate(lastDate)}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })() : (
+                    <p className="text-[10px] text-slate-400">
+                      Ao selecionar a turma do calendário, o código e a carreira (DL, IP, EP, PC, ML) serão definidos automaticamente.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* 2. Curso de Formação Vinculado */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
-                  Curso Vinculado <span className="text-amber-400 font-mono">({classModalCourseType})</span>
+                  2. Curso de {classModalCourseType} Vinculado *
                 </label>
                 <select
                   value={classCourseId}
                   onChange={(e) => setClassCourseId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-medium"
                   required
                 >
                   <option value="">-- Selecione o Curso de {classModalCourseType} --</option>
@@ -3171,225 +3249,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     Nenhum curso do tipo "{classModalCourseType}" cadastrado. Crie um curso de {classModalCourseType} no catálogo.
                   </p>
                 )}
-
-                {/* Exibição de Dados Herdados para a Turma */}
-                {(() => {
-                  const acadC = academyCourses.find(c => c.id === classCourseId);
-                  if (!acadC) return null;
-
-                  return (
-                    <div className="bg-slate-950/80 p-3 rounded-xl border border-amber-500/30 text-xs space-y-1.5 mt-2">
-                      <div className="text-amber-400 font-sans font-bold flex items-center justify-between border-b border-slate-800 pb-1">
-                        <span>Dados do Curso Vinculado</span>
-                        <span className="text-[10px] bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
-                          {acadC.name}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between pt-0.5">
-                        <span className="text-slate-400 font-sans">Tipo do Curso:</span>
-                        <span className="text-slate-200 font-semibold">{acadC.type}</span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-400 font-sans">Código do Curso:</span>
-                        <span className="text-amber-400 font-mono">{acadC.code || 'N/A'}</span>
-                      </div>
-                    </div>
-                  );
-                })()}
               </div>
 
-              {/* Relacionar com turma_calendario da tabela calendario_aulas */}
-              {classModalCourseType === 'Formação' && (
-                <div className="bg-slate-950/90 border border-amber-500/40 rounded-xl p-3 space-y-2">
-                  <label className="block text-amber-400 font-bold text-xs flex items-center space-x-1.5">
-                    <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Relacionar com Turma do Calendário de Aulas (turma_calendario)</span>
-                  </label>
-                  <select
-                    value={selectedCalendarTurma}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSelectedCalendarTurma(val);
-                      if (val) {
-                        const parsed = parseTurmaCalendarCode(val);
-                        setClassCareer(parsed.career);
-                        setClassTurmaNum(parsed.turmaNumber);
-                      }
-                    }}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-medium text-xs focus:border-amber-400 focus:outline-none"
-                  >
-                    <option value="">-- Selecione uma Turma do Calendário de Aulas --</option>
-                    {availableCalendarTurmas.map(tCode => {
-                      const count = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === tCode).length;
-                      return (
-                        <option key={tCode} value={tCode}>
-                          Turma {tCode} ({count} aula{count === 1 ? '' : 's'} no horário/calendário)
-                        </option>
-                      );
-                    })}
-                  </select>
-                  {selectedCalendarTurma && (() => {
-                    const matchingCalRecords = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === selectedCalendarTurma && r.data_calendario);
-                    if (matchingCalRecords.length === 0) return null;
-                    const sortedDates = matchingCalRecords.map(r => r.data_calendario).sort();
-                    const firstDate = sortedDates[0];
-                    const lastDate = sortedDates[sortedDates.length - 1];
-                    const fmtDate = (dStr: string) => {
-                      if (!dStr) return '';
-                      const [y, m, d] = dStr.split('-');
-                      return `${d}/${m}/${y}`;
-                    };
-                    return (
-                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 mt-1">
-                        <span className="font-semibold flex items-center gap-1 text-[11px]">
-                          <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                          Datas identificadas do Horário:
-                        </span>
-                        <div className="font-mono text-amber-300 font-bold space-x-2 text-[11px]">
-                          <span>Primeira Aula: {fmtDate(firstDate)}</span>
-                          <span>•</span>
-                          <span>Última Aula: {fmtDate(lastDate)}</span>
-                        </div>
-                      </div>
-                    );
-                  })()}
-                  {availableCalendarTurmas.length === 0 ? (
-                    <p className="text-[10px] text-slate-400 italic">
-                      Nenhuma turma encontrada no Calendário de Aulas. Crie aulas no Módulo Calendário.
-                    </p>
-                  ) : (
-                    <p className="text-[10px] text-slate-400">
-                      Ao selecionar a turma do calendário, a carreira, o número e as datas da 1ª e última aula serão associados automaticamente.
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Carreira Policial</label>
-                <select
-                  value={classCareer}
-                  onChange={(e) => setClassCareer(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
-                >
-                  <option value="Delegado">DELEGADO (DL)</option>
-                  <option value="Investigador">INVESTIGADOR DE POLÍCIA (IP)</option>
-                  <option value="Escrivão">ESCRIVÃO DE POLÍCIA (EP)</option>
-                  <option value="Perito">PERITO CRIMINAL (PC)</option>
-                  <option value="Médico Legista">MÉDICO LEGISTA (ML)</option>
-                </select>
-              </div>
-
+              {/* 3. Módulo / Plano de Aula Vinculado */}
               <div>
                 <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                  <span>Número Identificador da Turma (2 Dígitos)</span>
-                  <span className="text-amber-400 font-bold text-xs bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 font-mono">
-                    Código Final: {getCareerAbbr(classCareer)} {classTurmaNum.padStart(2, '0').slice(-2)}
-                  </span>
-                </label>
-                <div className="flex items-center space-x-3">
-                  <span className="text-sm font-bold text-slate-300 font-mono bg-slate-950 px-3 py-2 rounded-xl border border-slate-800">
-                    {getCareerAbbr(classCareer)}
-                  </span>
-                  <input
-                    type="text"
-                    maxLength={2}
-                    value={classTurmaNum}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/\D/g, '').slice(0, 2);
-                      setClassTurmaNum(val);
-                    }}
-                    placeholder="01"
-                    className="w-24 bg-slate-950 border border-amber-500/40 rounded-xl px-3.5 py-2 text-amber-400 font-mono font-extrabold text-base text-center tracking-widest focus:border-amber-400 focus:outline-none"
-                    required
-                  />
-                  <span className="text-xs text-slate-400">Ex: 01, 02, 03</span>
-                </div>
-                <p className="text-[10px] text-slate-400 mt-1">
-                  Não é possível salvar duas turmas com o mesmo número na mesma carreira e curso.
-                </p>
-              </div>
-
-              {/* 1. Matéria Leccionada (Selecionada Primeiro) */}
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Matéria Leccionada</label>
-                <select
-                  value={classSubject}
-                  onChange={(e) => {
-                    const newSub = e.target.value as 'MEAF' | 'TAP' | 'DP';
-                    setClassSubject(newSub);
-                    const matching = teachers.filter(t => t.teacherSubject === newSub);
-                    if (matching.length > 0) {
-                      if (!matching.some(t => t.id === classTeacherId)) {
-                        setClassTeacherId(matching[0].id);
-                        setClassTeacherName(matching[0].name);
-                      }
-                    } else {
-                      setClassTeacherId('');
-                      setClassTeacherName('');
-                    }
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
-                >
-                  <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
-                  <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
-                  <option value="DP">DP (Defesa Pessoal)</option>
-                </select>
-              </div>
-
-              {/* 2. Professor Titular */}
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                  <span>Professor Titular</span>
-                  <span className="text-[10px] text-amber-400 font-normal">
-                    Filtro ativo: {classSubject}
-                  </span>
-                </label>
-                <select
-                  value={classTeacherId}
-                  onChange={(e) => {
-                    const selectedId = e.target.value;
-                    setClassTeacherId(selectedId);
-                    const found = teachers.find(t => t.id === selectedId);
-                    if (found) {
-                      setClassTeacherName(found.name);
-                    }
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
-                  required
-                >
-                  <option value="">-- Selecione o Professor ({classSubject}) --</option>
-                  {(teachers.filter(t => t.teacherSubject === classSubject).length > 0
-                    ? teachers.filter(t => t.teacherSubject === classSubject)
-                    : teachers
-                  ).map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} (MASP: {formatMasp(t.masp)}) {t.teacherSubject ? `• ${t.teacherSubject}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1">
-                <label className="block text-slate-300 font-semibold text-xs">Quantidade de Alunos</label>
-                <p className="text-[11px] text-amber-400/90 font-medium leading-relaxed">
-                  Calculada automaticamente conforme os alunos cadastrados na turma (botão <strong>Alunos</strong>).
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
-                  <span>Plano de Aula Vinculado</span>
-                  <span className="text-[10px] text-amber-400 font-normal">
-                    Selecione o plano
-                  </span>
+                  <span>3. Módulo / Plano de Aula Vinculado</span>
+                  <span className="text-[10px] text-slate-400 font-normal">(Opcional)</span>
                 </label>
                 <select
                   value={classLessonPlanId}
                   onChange={(e) => setClassLessonPlanId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-medium"
                 >
-                  <option value="">-- Selecione o Plano de Aula Vinculado (Opcional) --</option>
+                  <option value="">-- Selecione o Módulo / Plano de Aula (Opcional) --</option>
                   {lessonPlans.map((plan) => (
                     <option key={plan.id} value={plan.id}>
                       {plan.name} ({plan.career} • {plan.lessonCount} Aulas)
@@ -3402,7 +3275,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   return (
                     <div className="bg-slate-950/80 p-2.5 rounded-xl border border-amber-500/30 text-[11px] space-y-1 mt-1.5">
                       <div className="text-amber-400 font-bold flex items-center justify-between">
-                        <span className="truncate max-w-[240px]">Plano: {p.name}</span>
+                        <span className="truncate max-w-[240px]">Módulo/Plano: {p.name}</span>
                         <span className="bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30 text-[10px] font-mono shrink-0">
                           {p.lessonCount} Aulas
                         </span>
@@ -3417,17 +3290,111 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 })()}
               </div>
 
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              {/* Seção de Demais Informações (Preenchimento Posterior) */}
+              <div className="border-t border-slate-800 pt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+                    Informações Adicionais (Preenchimento Posterior)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Carreira Policial</label>
+                    <select
+                      value={classCareer}
+                      onChange={(e) => setClassCareer(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-slate-100 font-medium text-xs"
+                    >
+                      <option value="Delegado">DELEGADO (DL)</option>
+                      <option value="Investigador">INVESTIGADOR DE POLÍCIA (IP)</option>
+                      <option value="Escrivão">ESCRIVÃO DE POLÍCIA (EP)</option>
+                      <option value="Perito">PERITO CRIMINAL (PC)</option>
+                      <option value="Médico Legista">MÉDICO LEGISTA (ML)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-semibold mb-1">Nº Identificador</label>
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-slate-400 font-mono bg-slate-950 px-2 py-1.5 rounded-lg border border-slate-800">
+                        {getCareerAbbr(classCareer)}
+                      </span>
+                      <input
+                        type="text"
+                        maxLength={2}
+                        value={classTurmaNum}
+                        onChange={(e) => {
+                          const val = e.target.value.replace(/\D/g, '').slice(0, 2);
+                          setClassTurmaNum(val);
+                        }}
+                        placeholder="01"
+                        className="w-16 bg-slate-950 border border-amber-500/40 rounded-lg px-2 py-1.5 text-amber-400 font-mono font-bold text-xs text-center focus:border-amber-400 focus:outline-none"
+                        required
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">Matéria Leccionada</label>
+                  <select
+                    value={classSubject}
+                    onChange={(e) => {
+                      const newSub = e.target.value as 'MEAF' | 'TAP' | 'DP';
+                      setClassSubject(newSub);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-1.5 text-slate-100 font-medium text-xs"
+                  >
+                    <option value="MEAF">MEAF (Manejo e Emprego de Armas de Fogo)</option>
+                    <option value="TAP">TAP (Técnicas de Ações Policiais)</option>
+                    <option value="DP">DP (Defesa Pessoal)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1 flex items-center justify-between">
+                    <span>Professor Titular</span>
+                    <span className="text-[10px] text-slate-400 font-normal">(Opcional / A definir)</span>
+                  </label>
+                  <select
+                    value={classTeacherId}
+                    onChange={(e) => {
+                      const selectedId = e.target.value;
+                      setClassTeacherId(selectedId);
+                      const found = teachers.find(t => t.id === selectedId);
+                      if (found) {
+                        setClassTeacherName(found.name);
+                      } else {
+                        setClassTeacherName('');
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-1.5 text-slate-100 text-xs"
+                  >
+                    <option value="">-- Definir Professor Posteriormente --</option>
+                    {(teachers.filter(t => t.teacherSubject === classSubject).length > 0
+                      ? teachers.filter(t => t.teacherSubject === classSubject)
+                      : teachers
+                    ).map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} (MASP: {formatMasp(t.masp)}) {t.teacherSubject ? `• ${t.teacherSubject}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowClassModal(false)}
-                  className="px-4 py-2 text-slate-400 hover:text-slate-200"
+                  className="px-4 py-2 text-slate-400 hover:text-slate-200 text-xs font-semibold"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-500 text-slate-950 font-bold px-4 py-2 rounded-xl"
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition shadow"
                 >
                   Salvar Turma
                 </button>
