@@ -678,6 +678,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Expand / Collapse details & Alunos Modal
   const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
   const [selectedStudentsClass, setSelectedStudentsClass] = useState<CourseClass | null>(null);
+  const [classStudentsMap, setClassStudentsMap] = useState<Record<string, AlunoTurma[]>>({});
+  const [loadingClassStudentsMap, setLoadingClassStudentsMap] = useState<Record<string, boolean>>({});
 
   // ALUNO TURMA & ALUNO AULAS STATE
   const [classStudents, setClassStudents] = useState<AlunoTurma[]>([]);
@@ -717,11 +719,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [lessonFormGrade, setLessonFormGrade] = useState('');
   const [savingLesson, setSavingLesson] = useState(false);
 
-  const toggleClassDetails = (classId: string) => {
+  const toggleClassDetails = async (classId: string) => {
+    const isNowExpanded = !expandedClasses[classId];
     setExpandedClasses(prev => ({
       ...prev,
-      [classId]: !prev[classId]
+      [classId]: isNowExpanded
     }));
+
+    if (isNowExpanded && !classStudentsMap[classId]) {
+      setLoadingClassStudentsMap(prev => ({ ...prev, [classId]: true }));
+      try {
+        const students = await storage.getAlunosTurma(classId);
+        setClassStudentsMap(prev => ({ ...prev, [classId]: students }));
+      } catch (err) {
+        console.error('Erro ao carregar alunos:', err);
+      } finally {
+        setLoadingClassStudentsMap(prev => ({ ...prev, [classId]: false }));
+      }
+    }
   };
 
   const handleOpenStudentsModal = async (cls: CourseClass) => {
@@ -736,6 +751,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     try {
       const students = await storage.getAlunosTurma(cls.id);
       setClassStudents(students);
+      setClassStudentsMap(prev => ({ ...prev, [cls.id]: students }));
     } catch (err: any) {
       setErrorMsg('Erro ao carregar alunos da turma.');
     } finally {
@@ -748,6 +764,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     try {
       const students = await storage.getAlunosTurma(classId);
       setClassStudents(students);
+      setClassStudentsMap(prev => ({ ...prev, [classId]: students }));
     } catch (err) {
       console.error(err);
     } finally {
@@ -978,6 +995,60 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     }
     if (cls.lessonPlanName) return cls.lessonPlanName;
     return 'Nenhum vinculado';
+  };
+
+  const getClassStartAndEndDates = (cls: CourseClass) => {
+    let firstDate = cls.firstClassDate || '';
+    let lastDate = cls.lastClassDate || '';
+
+    if (!firstDate || !lastDate) {
+      const codeToMatch = formatTurmaCode(cls.turmaCalendario || cls.code || cls.name || '');
+      const matchingCal = calendarRecords.filter(r => {
+        if (!r.data_calendario) return false;
+        const formattedRecTurma = formatTurmaCode(r.turma_calendario || '');
+        if (codeToMatch && formattedRecTurma === codeToMatch) return true;
+
+        const abbr = cls.careerAbbreviation || getCareerAbbr(cls.career);
+        const num = (cls.turmaNumber || '01').padStart(2, '0').slice(-2);
+        const targetStr = `${abbr}${num}`.toUpperCase();
+        const recStr = (r.turma_calendario || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+        return recStr.includes(targetStr);
+      });
+
+      if (matchingCal.length > 0) {
+        const sortedDates = matchingCal.map(r => r.data_calendario).sort();
+        if (!firstDate) firstDate = sortedDates[0];
+        if (!lastDate) lastDate = sortedDates[sortedDates.length - 1];
+      }
+    }
+
+    if (!firstDate || !lastDate) {
+      const linkedCourse = academyCourses.find(c => c.id === cls.courseId);
+      if (linkedCourse) {
+        if (!firstDate && linkedCourse.startDate) firstDate = linkedCourse.startDate;
+        if (!lastDate && linkedCourse.endDate) lastDate = linkedCourse.endDate;
+        if (linkedCourse.dates && linkedCourse.dates.length > 0) {
+          const sorted = [...linkedCourse.dates].sort();
+          if (!firstDate) firstDate = sorted[0];
+          if (!lastDate) lastDate = sorted[sorted.length - 1];
+        }
+      }
+    }
+
+    const formatDate = (dStr?: string) => {
+      if (!dStr) return 'Não informada';
+      if (dStr.includes('/')) return dStr;
+      const parts = dStr.split('-');
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return dStr;
+    };
+
+    return {
+      firstClassDateFormatted: formatDate(firstDate),
+      lastClassDateFormatted: formatDate(lastDate)
+    };
   };
 
   const handleOpenClassModal = (cls?: CourseClass | null, targetType: 'Formação' | 'Ensino Continuado' = 'Formação', initialCalTurma?: string) => {
@@ -2102,60 +2173,154 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </div>
 
                     {/* Expanded Details Section */}
-                    {isExpanded && (
-                      <div className="space-y-3 pt-2.5 border-t border-slate-800/80 animate-fadeIn">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-100 flex items-center justify-between">
-                            <span>Turma {classCodeStr}</span>
-                            <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
-                              Carreira: {cls.career}
-                            </span>
-                          </h3>
-                          <div className="text-xs font-mono text-slate-300 mt-1 bg-slate-950/40 p-2 rounded-lg border border-slate-800">
-                            <span className="text-slate-400 block text-[10px] uppercase font-bold font-sans">Curso Vinculado:</span>
-                            <span className="text-amber-400 font-bold text-xs">
-                              Código: {linkedCourse?.code || 'S/ CÓDIGO'}
-                            </span>
-                            {linkedCourse?.name && (
-                              <span className="text-slate-300 text-[11px] block mt-0.5">
-                                ({linkedCourse.name})
+                    {isExpanded && (() => {
+                      const dates = getClassStartAndEndDates(cls);
+                      const students = classStudentsMap[cls.id] || [];
+                      const isLoadingStudents = !!loadingClassStudentsMap[cls.id];
+
+                      return (
+                        <div className="space-y-3.5 pt-3 border-t border-slate-800/80 animate-fadeIn">
+                          {/* Course & Class Header */}
+                          <div className="bg-slate-950/60 p-3 rounded-xl border border-slate-800 space-y-1.5">
+                            <div className="flex items-center justify-between flex-wrap gap-1">
+                              <h3 className="text-xs font-bold text-slate-100 flex items-center space-x-2">
+                                <span>Turma {classCodeStr}</span>
+                                <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded text-slate-300 border border-slate-700 uppercase font-sans">
+                                  Carreira: {cls.career}
+                                </span>
+                              </h3>
+                              <span className="text-[10px] text-amber-400 font-extrabold font-mono uppercase bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/30">
+                                Curso: {linkedCourse?.code || 'CFTP'}
                               </span>
+                            </div>
+                            {linkedCourse?.name && (
+                              <div className="text-[11px] text-slate-300">
+                                {linkedCourse.name}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Datas da 1ª e Última Aula */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex items-center space-x-2.5">
+                              <div className="p-2 bg-emerald-500/10 text-emerald-400 rounded-lg border border-emerald-500/20">
+                                <Calendar className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase text-slate-400 font-bold block">
+                                  Data da 1ª Aula
+                                </span>
+                                <span className="text-xs font-mono font-bold text-emerald-400">
+                                  {dates.firstClassDateFormatted}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 flex items-center space-x-2.5">
+                              <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+                                <Calendar className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <span className="text-[10px] uppercase text-slate-400 font-bold block">
+                                  Data da Última Aula
+                                </span>
+                                <span className="text-xs font-mono font-bold text-amber-400">
+                                  {dates.lastClassDateFormatted}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Informações Complementares */}
+                          <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-sans">Professor:</span>
+                              <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
+                                Prof. {getTeacherDisplayName(cls)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-sans">Disciplina:</span>
+                              <span className="text-amber-400 font-bold">{cls.subject}</span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-sans">Plano de Aula:</span>
+                              <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
+                                {getLessonPlanDisplayName(cls)}
+                              </span>
+                            </div>
+                            <div className="flex items-center justify-between">
+                              <span className="text-slate-400 font-sans">Total de Alunos:</span>
+                              <span className="text-slate-100 font-bold">{students.length > 0 ? students.length : cls.studentCount} alunos</span>
+                            </div>
+                          </div>
+
+                          {/* Lista com Nome dos Alunos */}
+                          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                              <span className="text-xs font-bold text-slate-100 flex items-center space-x-1.5">
+                                <Users className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Alunos da Turma ({students.length})</span>
+                              </span>
+                              <button
+                                onClick={() => handleOpenStudentsModal(cls)}
+                                className="text-[11px] bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 px-2 py-0.5 rounded-lg border border-amber-500/40 font-bold transition flex items-center space-x-1"
+                              >
+                                <span>Gerenciar</span>
+                              </button>
+                            </div>
+
+                            {isLoadingStudents ? (
+                              <div className="py-3 text-center text-xs text-slate-400 flex items-center justify-center space-x-2">
+                                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                                <span>Carregando alunos...</span>
+                              </div>
+                            ) : students.length === 0 ? (
+                              <div className="py-3 text-center text-xs text-slate-500 italic space-y-1">
+                                <p>Nenhum aluno cadastrado nesta turma.</p>
+                                <button
+                                  onClick={() => handleOpenStudentsModal(cls)}
+                                  className="text-[10px] text-amber-400 hover:underline font-semibold"
+                                >
+                                  + Clique aqui para adicionar alunos
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="max-h-48 overflow-y-auto space-y-1 pr-1">
+                                <table className="w-full text-left text-[11px]">
+                                  <thead className="bg-slate-900/90 text-slate-400 text-[10px] uppercase font-mono border-b border-slate-800 sticky top-0">
+                                    <tr>
+                                      <th className="py-1 px-1.5 w-6">#</th>
+                                      <th className="py-1 px-1.5">Nome do Aluno</th>
+                                      <th className="py-1 px-1.5">MASP</th>
+                                      <th className="py-1 px-1.5 text-right">Situação</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/60">
+                                    {students.map((st, idx) => (
+                                      <tr key={st.id || idx} className="hover:bg-slate-900/60 transition">
+                                        <td className="py-1 px-1.5 font-mono text-slate-500 text-[10px]">{idx + 1}</td>
+                                        <td className="py-1 px-1.5 font-bold text-slate-100">{st.nomeAluno}</td>
+                                        <td className="py-1 px-1.5 font-mono text-slate-400 text-[10px]">{st.maspAluno || 'N/I'}</td>
+                                        <td className="py-1 px-1.5 text-right">
+                                          <span className={`inline-block px-1.5 py-0.2 rounded text-[9px] font-bold ${
+                                            (st.situacaoAluno || 'Ativo') === 'Ativo'
+                                              ? 'bg-emerald-950 text-emerald-300 border border-emerald-800/80'
+                                              : 'bg-red-950 text-red-300 border border-red-800/80'
+                                          }`}>
+                                            {st.situacaoAluno || 'Ativo'}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
                             )}
                           </div>
                         </div>
-
-                        <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400 font-sans">Professor:</span>
-                            <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
-                              Prof. {getTeacherDisplayName(cls)}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400 font-sans">Disciplina:</span>
-                            <span className="text-amber-400 font-bold">{cls.subject}</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400 font-sans">Plano de Aula:</span>
-                            <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
-                              {getLessonPlanDisplayName(cls)}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <span className="text-slate-400 font-sans">Alunos na Turma:</span>
-                            <span className="text-slate-100 font-bold">{cls.studentCount} alunos</span>
-                          </div>
-                          {(cls.firstClassDate || cls.lastClassDate) && (
-                            <div className="pt-2 border-t border-slate-800 text-[11px] space-y-0.5">
-                              <span className="text-slate-400 font-sans block">Datas Aulas (Calendário):</span>
-                              <span className="text-amber-300 font-bold font-mono block">
-                                1ª Aula: {cls.firstClassDate ? `${cls.firstClassDate.split('-')[2]}/${cls.firstClassDate.split('-')[1]}/${cls.firstClassDate.split('-')[0]}` : 'N/I'} | Última Aula: {cls.lastClassDate ? `${cls.lastClassDate.split('-')[2]}/${cls.lastClassDate.split('-')[1]}/${cls.lastClassDate.split('-')[0]}` : 'N/I'}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })
