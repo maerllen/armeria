@@ -890,12 +890,21 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
   const pagesToRender = useMemo(() => {
+    const targetRecords = selectedDiscipline ? activeDisciplineRecords : sortedAllRecords;
+
+    const pairHasRecords = (pair: CalendarWeekInfo[][]) => {
+      const dates = new Set<string>();
+      pair.forEach((w) => w.days.forEach((d) => dates.add(d.dateStr)));
+      return targetRecords.some((r) => dates.has(r.data_calendario));
+    };
+
     if (isPrintingAllMonths) {
       const allPages: {
         year: number;
         month: number;
         monthName: string;
         pair: CalendarWeekInfo[][];
+        hasClasses: boolean;
       }[] = [];
 
       for (let m = 0; m < 12; m++) {
@@ -903,12 +912,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         if (mWeeks.length === 0) continue;
 
         for (let i = 0; i < mWeeks.length; i += 2) {
-          allPages.push({
-            year: printYearChoice,
-            month: m,
-            monthName: MONTH_NAMES[m],
-            pair: mWeeks.slice(i, i + 2)
-          });
+          const pair = mWeeks.slice(i, i + 2);
+          const hasClasses = pairHasRecords(pair);
+          if (hasClasses) {
+            allPages.push({
+              year: printYearChoice,
+              month: m,
+              monthName: MONTH_NAMES[m],
+              pair,
+              hasClasses: true
+            });
+          }
         }
       }
       return allPages;
@@ -918,19 +932,32 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         month: number;
         monthName: string;
         pair: CalendarWeekInfo[][];
+        hasClasses: boolean;
       }[] = [];
 
       for (let i = 0; i < monthWeeks.length; i += 2) {
+        const pair = monthWeeks.slice(i, i + 2);
+        const hasClasses = pairHasRecords(pair);
         pairs.push({
           year: selectedYear,
           month: selectedMonth,
           monthName: MONTH_NAMES[selectedMonth],
-          pair: monthWeeks.slice(i, i + 2)
+          pair,
+          hasClasses
         });
       }
       return pairs;
     }
-  }, [isPrintingAllMonths, printYearChoice, selectedYear, selectedMonth, monthWeeks]);
+  }, [
+    isPrintingAllMonths,
+    printYearChoice,
+    selectedYear,
+    selectedMonth,
+    monthWeeks,
+    activeDisciplineRecords,
+    sortedAllRecords,
+    selectedDiscipline
+  ]);
 
   useEffect(() => {
     const handleAfterPrint = () => {
@@ -1444,21 +1471,26 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               @media print {
                 @page {
                   size: A4 landscape;
-                  margin: 4mm;
+                  margin: 5mm;
                 }
-                html, body, #root, main, div {
+                html, body, #root, #root *, main, div, section, article {
+                  background: #ffffff !important;
+                  background-color: #ffffff !important;
+                  color: #000000 !important;
                   overflow: visible !important;
+                  box-shadow: none !important;
+                  text-shadow: none !important;
                 }
                 body {
                   margin: 0 !important;
                   padding: 0 !important;
                   background: #ffffff !important;
+                  background-color: #ffffff !important;
                   color: #000000 !important;
                   -webkit-print-color-adjust: exact !important;
                   print-color-adjust: exact !important;
-                  box-shadow: none !important;
                 }
-                .print\\:hidden, header, aside, footer, nav, button {
+                .print\\:hidden, header, aside, footer, nav, button, input, select {
                   display: none !important;
                 }
                 .folha-pagina {
@@ -1469,23 +1501,28 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                   box-shadow: none !important;
-                  border: none !important;
+                  border-top: 3px solid #000000 !important;
+                  border-bottom: 1px solid #000000 !important;
+                  border-left: 1px solid #d1d5db !important;
+                  border-right: 1px solid #d1d5db !important;
                   border-radius: 0 !important;
                   margin: 0 auto !important;
-                  padding: 0 !important;
+                  padding: 3mm !important;
                   width: 100% !important;
                   max-width: 100% !important;
                   background: #ffffff !important;
+                  background-color: #ffffff !important;
                   color: #000000 !important;
                   display: block !important;
+                  box-sizing: border-box !important;
                 }
                 .folha-pagina:first-of-type {
-                  page-break-before: auto !important;
-                  break-before: auto !important;
+                  page-break-before: avoid !important;
+                  break-before: avoid !important;
                 }
                 .folha-pagina:last-of-type {
-                  page-break-after: auto !important;
-                  break-after: auto !important;
+                  page-break-after: avoid !important;
+                  break-after: avoid !important;
                 }
                 .semana-bloco {
                   page-break-inside: avoid !important;
@@ -1499,14 +1536,15 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   border: none !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
+                  background-color: #ffffff !important;
                 }
                 td.cell-slot {
-                  height: 44px !important;
-                  min-height: 44px !important;
-                  max-height: 44px !important;
+                  height: 42px !important;
+                  min-height: 42px !important;
+                  max-height: 42px !important;
                 }
                 td.cell-slot > div {
-                  min-height: 44px !important;
+                  min-height: 42px !important;
                 }
               }
               .folha-pagina {
@@ -1544,19 +1582,24 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               </div>
             ) : (
               pagesToRender.map((pageItem, pIdx) => (
-                <div key={`page-${pageItem.month}-${pIdx}`} className="folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-2.5 print:p-0 my-6 print:my-0 text-black">
+                <div
+                  key={`page-${pageItem.month}-${pIdx}`}
+                  className={`folha-pagina bg-white max-w-[1200px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-t-4 print:border-t-black print:border-b print:border-b-black print:border-x-0 print:shadow-none print:rounded-none p-3 print:p-1 my-6 print:my-0 text-black ${
+                    !pageItem.hasClasses ? 'print:hidden' : ''
+                  }`}
+                >
                   {/* Header do Documento por Folha */}
-                  <div className="text-center pb-1 border-b border-black mb-1.5 font-sans flex items-center justify-between px-1">
+                  <div className="text-center pb-1.5 border-b-2 border-black mb-2 font-sans flex items-center justify-between px-1">
                     <div className="text-left">
-                      <span className="text-[9px] font-bold text-slate-700 block uppercase font-mono leading-tight">
+                      <span className="text-[9px] font-bold text-slate-800 block uppercase font-mono leading-tight">
                         ACADEPOL • CURSO DE FORMAÇÃO
                       </span>
-                      <h3 className="font-extrabold text-[11px] uppercase tracking-wide text-black leading-tight">
-                        {selectedDisciplineName || selectedDiscipline}
+                      <h3 className="font-extrabold text-[12px] uppercase tracking-wide text-black leading-tight">
+                        {selectedDisciplineName || selectedDiscipline || 'CALENDÁRIO LETIVO'}
                       </h3>
                     </div>
                     <div className="text-right">
-                      <span className="text-[10px] font-black text-black font-mono uppercase bg-slate-100 px-2 py-0.5 rounded border border-black">
+                      <span className="text-[10px] font-black text-black font-mono uppercase bg-slate-100 px-2.5 py-1 rounded border border-black inline-block">
                         MÊS: {pageItem.monthName.toUpperCase()} / {pageItem.year}
                       </span>
                     </div>
