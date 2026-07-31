@@ -1604,7 +1604,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   key={`page-${pageItem.month}-${pIdx}`}
                   className={`folha-wrapper my-6 print:my-0 ${!pageItem.hasClasses ? 'print:hidden' : ''}`}
                 >
-                  <div className="folha-pagina bg-white max-w-[10px] w-full mx-auto shadow-2xl rounded border border-slate-4 print:border-2 print:border-black print:border-t-4 print:shadow-none print:rounded-none p-3 print:p-2 text-black">
+                  <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-2 print:border-black print:border-t-4 print:shadow-none print:rounded-none p-3 print:p-2 text-black">
                     {/* Header do Documento por Folha */}
                     <div className="text-center pb-1.5 border-b-2 border-black mb-2 font-sans flex items-center justify-between px-1">
                       <div className="text-left">
