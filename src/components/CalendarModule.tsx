@@ -1525,8 +1525,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   max-width: 100% !important;
                   margin: 0 auto !important;
                   background: #ffffff !important;
-                  border: none !important;
-                  padding: 0 !important;
+                  border: 2px solid #000000 !important;
+                  border-top: 4px solid #000000 !important;
+                  border-bottom: 3px solid #000000 !important;
+                  padding: 3mm !important;
                   box-shadow: none !important;
                   box-sizing: border-box !important;
                   border-radius: 0 !important;
@@ -1546,23 +1548,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                   background-color: #ffffff !important;
-                  border: none !important;
-                }
-                .folha-pagina table tr:first-child th,
-                .folha-pagina table tr:first-child td {
-                  border-top: none !important;
-                }
-                .folha-pagina table tr:last-child th,
-                .folha-pagina table tr:last-child td {
-                  border-bottom: none !important;
-                }
-                .folha-pagina table tr th:first-child,
-                .folha-pagina table tr td:first-child {
-                  border-left: none !important;
-                }
-                .folha-pagina table tr th:last-child,
-                .folha-pagina table tr td:last-child {
-                  border-right: none !important;
+                  border: 1px solid #000000 !important;
                 }
                 tr, td, th {
                   page-break-inside: avoid !important;
@@ -1617,7 +1603,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   key={`page-${pageItem.month}-${pIdx}`}
                   className={`folha-wrapper my-6 print:my-0 ${!pageItem.hasClasses ? 'print:hidden' : ''}`}
                 >
-                  <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-3 print:p-0 text-black">
+                  <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-2 print:border-black print:border-t-4 print:shadow-none print:rounded-none p-3 print:p-2 text-black">
                     {/* Header do Documento por Folha */}
                     <div className="text-center pb-1.5 border-b-2 border-black mb-2 font-sans flex items-center justify-between px-1">
                       <div className="text-left">
