@@ -424,6 +424,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `plano_de_aula` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
     try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `teacher_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
     try { await connection.query("ALTER TABLE `course_classes` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `first_class_date` VARCHAR(32) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `last_class_date` VARCHAR(32) DEFAULT NULL;"); } catch (e) {}
+    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `turma_calendario` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
 
     // Aluno Turma Table
     await connection.query(`

@@ -990,7 +990,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setClassCareer(cls.career);
       const digits = (cls.turmaNumber || cls.code || cls.name || '').replace(/\D/g, '');
       setClassTurmaNum(digits ? digits.padStart(2, '0').slice(-2) : '01');
-      setSelectedCalendarTurma(initialCalTurma || '');
+      setSelectedCalendarTurma(initialCalTurma || cls.turmaCalendario || '');
       const primaryTeacher = cls.teacherUserId || (cls.teacherUserIds && cls.teacherUserIds[0]) || '';
       setClassTeacherId(primaryTeacher);
       const teacherObj = teachers.find(t => t.id === primaryTeacher || t.userId === primaryTeacher);
@@ -1058,6 +1058,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
     const finalTeacherName = classTeacherName.trim() || selectedTeacher?.name || 'Professor';
 
+    let firstClassDate: string | undefined = editingClass?.firstClassDate;
+    let lastClassDate: string | undefined = editingClass?.lastClassDate;
+
+    if (selectedCalendarTurma) {
+      const matchingCalRecords = calendarRecords.filter(
+        r => formatTurmaCode(r.turma_calendario) === selectedCalendarTurma && r.data_calendario
+      );
+      if (matchingCalRecords.length > 0) {
+        const sortedDates = matchingCalRecords.map(r => r.data_calendario).sort();
+        firstClassDate = sortedDates[0];
+        lastClassDate = sortedDates[sortedDates.length - 1];
+      }
+    }
+
     try {
       const res = await storage.saveCourseClass({
         id: editingClass?.id,
@@ -1076,6 +1090,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         plano_de_aula: classLessonPlanId || undefined,
         lessonPlanId: classLessonPlanId || undefined,
         lessonPlanName: selectedPlan ? selectedPlan.name : undefined,
+        firstClassDate,
+        lastClassDate,
+        turmaCalendario: selectedCalendarTurma || undefined,
         departmentId: currentUser.departmentId
       });
       if (!res.success) throw new Error(res.error);
@@ -1970,52 +1987,54 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 Cadastro de turmas vinculadas a cursos, carreiras policiais, professores e disciplinas
               </p>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => {
-                  const mobileUrl = `${window.location.origin}/?mode=mobile-class`;
-                  navigator.clipboard.writeText(mobileUrl);
-                  alert(`Link de acesso exclusivo para Celular copiado com sucesso!\n\n${mobileUrl}\n\nEnvie aos instrutores no estande.`);
-                }}
-                className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-                title="Copiar link de acesso direto do celular para instrutores no estande"
-              >
-                <Smartphone className="w-4 h-4 text-indigo-400" />
-                <span>📱 Link Celular Estande</span>
-              </button>
-
-              {availableCalendarTurmas.length > 0 && (
+            {currentUser.role === 'Geral' && (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => {
-                    const existingCodes = new Set(courseClasses.map(c => {
-                      const abbr = c.careerAbbreviation || getCareerAbbr(c.career);
-                      const num = (c.turmaNumber || '01').padStart(2, '0').slice(-2);
-                      return `${abbr} ${num}`;
-                    }));
-
-                    const uncreated = availableCalendarTurmas.filter(t => !existingCodes.has(t));
-                    if (uncreated.length === 0) {
-                      handleOpenClassModal(null, 'Formação', availableCalendarTurmas[0]);
-                    } else {
-                      handleOpenClassModal(null, 'Formação', uncreated[0]);
-                    }
+                    const mobileUrl = `${window.location.origin}/?mode=mobile-class`;
+                    navigator.clipboard.writeText(mobileUrl);
+                    alert(`Link de acesso exclusivo para Celular copiado com sucesso!\n\n${mobileUrl}\n\nEnvie aos instrutores no estande.`);
                   }}
-                  className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-                  title="Criar Turma a partir das turmas do Horário/Calendário de Aulas (turma_calendario)"
+                  className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                  title="Copiar link de acesso direto do celular para instrutores no estande"
                 >
-                  <Calendar className="w-4 h-4 text-amber-400" />
-                  <span>Importar do Calendário</span>
+                  <Smartphone className="w-4 h-4 text-indigo-400" />
+                  <span>📱 Link Celular Estande</span>
                 </button>
-              )}
 
-              <button
-                onClick={() => handleOpenClassModal(undefined, 'Formação')}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Nova Turma</span>
-              </button>
-            </div>
+                {availableCalendarTurmas.length > 0 && (
+                  <button
+                    onClick={() => {
+                      const existingCodes = new Set(courseClasses.map(c => {
+                        const abbr = c.careerAbbreviation || getCareerAbbr(c.career);
+                        const num = (c.turmaNumber || '01').padStart(2, '0').slice(-2);
+                        return `${abbr} ${num}`;
+                      }));
+
+                      const uncreated = availableCalendarTurmas.filter(t => !existingCodes.has(t));
+                      if (uncreated.length === 0) {
+                        handleOpenClassModal(null, 'Formação', availableCalendarTurmas[0]);
+                      } else {
+                        handleOpenClassModal(null, 'Formação', uncreated[0]);
+                      }
+                    }}
+                    className="bg-slate-800 hover:bg-slate-700 border border-amber-500/50 text-amber-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                    title="Criar Turma a partir das turmas do Horário/Calendário de Aulas (turma_calendario)"
+                  >
+                    <Calendar className="w-4 h-4 text-amber-400" />
+                    <span>Importar do Calendário</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => handleOpenClassModal(undefined, 'Formação')}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Nova Turma</span>
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -2120,6 +2139,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <span className="text-slate-400 font-sans">Alunos na Turma:</span>
                             <span className="text-slate-100 font-bold">{cls.studentCount} alunos</span>
                           </div>
+                          {(cls.firstClassDate || cls.lastClassDate) && (
+                            <div className="pt-2 border-t border-slate-800 text-[11px] space-y-0.5">
+                              <span className="text-slate-400 font-sans block">Datas Aulas (Calendário):</span>
+                              <span className="text-amber-300 font-bold font-mono block">
+                                1ª Aula: {cls.firstClassDate ? `${cls.firstClassDate.split('-')[2]}/${cls.firstClassDate.split('-')[1]}/${cls.firstClassDate.split('-')[0]}` : 'N/I'} | Última Aula: {cls.lastClassDate ? `${cls.lastClassDate.split('-')[2]}/${cls.lastClassDate.split('-')[1]}/${cls.lastClassDate.split('-')[0]}` : 'N/I'}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -3201,13 +3228,38 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       );
                     })}
                   </select>
+                  {selectedCalendarTurma && (() => {
+                    const matchingCalRecords = calendarRecords.filter(r => formatTurmaCode(r.turma_calendario) === selectedCalendarTurma && r.data_calendario);
+                    if (matchingCalRecords.length === 0) return null;
+                    const sortedDates = matchingCalRecords.map(r => r.data_calendario).sort();
+                    const firstDate = sortedDates[0];
+                    const lastDate = sortedDates[sortedDates.length - 1];
+                    const fmtDate = (dStr: string) => {
+                      if (!dStr) return '';
+                      const [y, m, d] = dStr.split('-');
+                      return `${d}/${m}/${y}`;
+                    };
+                    return (
+                      <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-2.5 text-xs text-amber-200 flex flex-wrap items-center justify-between gap-2 mt-1">
+                        <span className="font-semibold flex items-center gap-1 text-[11px]">
+                          <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                          Datas identificadas do Horário:
+                        </span>
+                        <div className="font-mono text-amber-300 font-bold space-x-2 text-[11px]">
+                          <span>Primeira Aula: {fmtDate(firstDate)}</span>
+                          <span>•</span>
+                          <span>Última Aula: {fmtDate(lastDate)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
                   {availableCalendarTurmas.length === 0 ? (
                     <p className="text-[10px] text-slate-400 italic">
                       Nenhuma turma encontrada no Calendário de Aulas. Crie aulas no Módulo Calendário.
                     </p>
                   ) : (
                     <p className="text-[10px] text-slate-400">
-                      Ao selecionar a turma do calendário, a carreira e o número da turma serão preenchidos automaticamente.
+                      Ao selecionar a turma do calendário, a carreira, o número e as datas da 1ª e última aula serão associados automaticamente.
                     </p>
                   )}
                 </div>
@@ -3221,9 +3273,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-semibold"
                 >
                   <option value="Delegado">DELEGADO (DL)</option>
-                  <option value="Investigador">INVESTIGADOR (IP)</option>
-                  <option value="Escrivão">ESCRIVÃO (EP)</option>
-                  <option value="Perito">PERITO (PC)</option>
+                  <option value="Investigador">INVESTIGADOR DE POLÍCIA (IP)</option>
+                  <option value="Escrivão">ESCRIVÃO DE POLÍCIA (EP)</option>
+                  <option value="Perito">PERITO CRIMINAL (PC)</option>
                   <option value="Médico Legista">MÉDICO LEGISTA (ML)</option>
                 </select>
               </div>

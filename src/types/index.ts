@@ -379,6 +379,9 @@ export interface CourseClass {
   lessonPlanId?: string;
   lessonPlanName?: string;
   plano_de_aula?: string;
+  firstClassDate?: string;
+  lastClassDate?: string;
+  turmaCalendario?: string;
   departmentId?: string;
   unitId?: string;
   createdAt: string;
