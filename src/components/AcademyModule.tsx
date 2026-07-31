@@ -2231,29 +2231,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             </div>
                           </div>
 
-                          {/* Informações Complementares */}
-                          <div className="space-y-1.5 text-xs text-slate-300 font-mono bg-slate-950/60 p-3 rounded-xl border border-slate-800">
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-sans">Professor:</span>
-                              <span className="text-emerald-400 font-bold bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/80">
-                                Prof. {getTeacherDisplayName(cls)}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-sans">Disciplina:</span>
-                              <span className="text-amber-400 font-bold">{cls.subject}</span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-sans">Plano de Aula:</span>
-                              <span className={`font-bold truncate max-w-[170px] ${getLessonPlanDisplayName(cls) !== 'Nenhum vinculado' ? 'text-amber-400' : 'text-slate-500 italic'}`} title={getLessonPlanDisplayName(cls)}>
-                                {getLessonPlanDisplayName(cls)}
-                              </span>
-                            </div>
-                            <div className="flex items-center justify-between">
-                              <span className="text-slate-400 font-sans">Total de Alunos:</span>
-                              <span className="text-slate-100 font-bold">{students.length > 0 ? students.length : cls.studentCount} alunos</span>
-                            </div>
-                          </div>
+
 
                           {/* Lista com Nome dos Alunos */}
                           <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-2">
