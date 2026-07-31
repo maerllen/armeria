@@ -1480,7 +1480,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   print-color-adjust: exact !important;
                   box-sizing: border-box !important;
                 }
-                html, body, #root, #root * {
+                html, body {
                   background-color: #ffffff !important;
                   background-image: none !important;
                   color: #000000 !important;
@@ -1538,7 +1538,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 4mm !important;
+                  margin-bottom: 3mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1548,7 +1548,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
                   background-color: #ffffff !important;
-                  border: 1px solid #000000 !important;
+                  border: 1.5px solid #000000 !important;
                 }
                 tr, td, th {
                   page-break-inside: avoid !important;
@@ -1574,6 +1574,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 font-size: 9.5px !important;
                 color: #000000 !important;
                 table-layout: fixed !important;
+                border: 1.5px solid #000000 !important;
               }
               .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
@@ -1584,13 +1585,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 word-wrap: break-word !important;
                 overflow: hidden !important;
               }
-              .bg-dia { background-color: #e2e8f0 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-manha { background-color: #dbeafe !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-tarde { background-color: #fef3c7 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-almoco { background-color: #fde68a !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
-              .bg-hora { background-color: #f1f5f9 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-seg { background-color: #dcfce7 !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula { background: #ffffff !important; border: 1px solid #94a3b8 !important; }
+              .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
+              .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
+              .celula-aula { background-color: #ffffff !important; border: 1px solid #64748b !important; }
             `}</style>
 
             {pagesToRender.length === 0 ? (
