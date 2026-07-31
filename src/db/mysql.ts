@@ -1,8 +1,6 @@
 import mysql from 'mysql2/promise';
 
 const rawHost = process.env.DB_HOST || '127.0.0.1';
-// In Node mysql2, 'localhost' resolves to IPv6 '::1' which causes "Access denied for user@'::1'".
-// Defaulting to IPv4 '127.0.0.1' ensures proper loopback socket matching for local MySQL.
 const effectiveHost = rawHost === 'localhost' ? '127.0.0.1' : rawHost;
 
 export const dbConfig = {
@@ -58,377 +56,367 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
     await connection.query(`USE \`${dbConfig.database}\`;`);
     logs.push(`Banco de dados '${dbConfig.database}' selecionado.`);
 
-    // Create departments
+    // Disable FK checks during initialization
+    await connection.query('SET FOREIGN_KEY_CHECKS = 0;');
+
+    // 1. Departamentos
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`departments\` (
+      CREATE TABLE IF NOT EXISTS \`departamentos\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`code\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`codigo\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'departments' verificada/criada.");
 
-    // Create units
+    // 2. Unidades
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`units\` (
+      CREATE TABLE IF NOT EXISTS \`unidades\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
-        KEY \`idx_units_dept\` (\`department_id\`)
+        KEY \`idx_unidades_dept\` (\`departamento_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'units' verificada/criada.");
 
-    // Create users
+    // 3. Usuários
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`users\` (
+      CREATE TABLE IF NOT EXISTS \`usuarios\` (
         \`id\` VARCHAR(64) NOT NULL,
         \`masp\` VARCHAR(32) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`phone\` VARCHAR(32) DEFAULT NULL,
+        \`senha\` VARCHAR(255) NOT NULL,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`telefone\` VARCHAR(32) DEFAULT NULL,
         \`cargo\` VARCHAR(64) NOT NULL,
-        \`role\` ENUM('Policial', 'Armeiro', 'Administrador', 'Geral') NOT NULL DEFAULT 'Policial',
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`can_move_ammo\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`can_move_weapons\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`has_system_access\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`password\` VARCHAR(255) NOT NULL,
-        \`must_change_password\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`perfil\` ENUM('Policial', 'Armeiro', 'Administrador', 'Geral') NOT NULL DEFAULT 'Policial',
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`pode_mover_municao\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`pode_mover_armas\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`tem_acesso_sistema\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`eh_professor\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`disciplina_professor\` VARCHAR(32) DEFAULT NULL,
         \`professor_sigla\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`deve_alterar_senha\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_users_masp\` (\`masp\`)
+        UNIQUE KEY \`uk_usuarios_masp\` (\`masp\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'users' verificada/criada.");
 
-    // Create calibers
+    // 4. Calibres
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`calibers\` (
+      CREATE TABLE IF NOT EXISTS \`calibres\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(128) NOT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(128) NOT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_calibers_name\` (\`name\`)
+        UNIQUE KEY \`uk_calibres_nome\` (\`nome\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'calibers' verificada/criada.");
 
-    // Create courses
+    // 5. Cursos
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`courses\` (
+      CREATE TABLE IF NOT EXISTS \`cursos\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`allowed_models\` JSON NOT NULL,
-        \`allowed_calibers\` JSON NOT NULL,
-        \`allowed_weapon_types\` JSON DEFAULT NULL,
-        \`shots_per_student\` INT DEFAULT 0,
-        \`shots_per_weapon_type\` JSON DEFAULT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`modelos_permitidos\` JSON NOT NULL,
+        \`calibres_permitidos\` JSON NOT NULL,
+        \`tipos_armas_permitidos\` JSON DEFAULT NULL,
+        \`tiros_por_aluno\` INT DEFAULT 0,
+        \`tiros_por_tipo_arma\` JSON DEFAULT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'courses' verificada/criada.");
 
-    // Create available_weapon_types
+    // 6. Tipos de Armas
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`available_weapon_types\` (
+      CREATE TABLE IF NOT EXISTS \`tipos_armas\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(100) NOT NULL,
-        \`models\` JSON NOT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(100) NOT NULL,
+        \`modelos\` JSON NOT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'available_weapon_types' verificada/criada.");
 
-    // Create user_courses
+    // 7. Cursos do Usuário
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`user_courses\` (
+      CREATE TABLE IF NOT EXISTS \`usuario_cursos\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`user_id\` VARCHAR(64) NOT NULL,
-        \`course_id\` VARCHAR(64) NOT NULL,
-        \`completion_date\` DATE DEFAULT NULL,
-        \`expiration_date\` DATE DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_uc_user\` (\`user_id\`),
-        KEY \`idx_uc_course\` (\`course_id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-    logs.push("Tabela 'user_courses' verificada/criada.");
-
-    // Create vault_spaces
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`vault_spaces\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`code\` VARCHAR(64) NOT NULL,
-        \`type\` ENUM('ARMAS', 'MUNIÇÕES') NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`usuario_id\` VARCHAR(64) NOT NULL,
+        \`curso_id\` VARCHAR(64) NOT NULL,
+        \`data_conclusao\` DATE DEFAULT NULL,
+        \`data_validade\` DATE DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'vault_spaces' verificada/criada.");
 
-    // Create weapons
+    // 8. Cofres
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`weapons\` (
+      CREATE TABLE IF NOT EXISTS \`cofres\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`type\` VARCHAR(64) NOT NULL,
-        \`serial_number\` VARCHAR(128) NOT NULL,
-        \`manufacturer\` VARCHAR(128) NOT NULL,
-        \`model\` VARCHAR(128) NOT NULL,
-        \`caliber\` VARCHAR(128) NOT NULL,
-        \`magazine_quantity\` INT NOT NULL DEFAULT 1,
+        \`codigo\` VARCHAR(64) NOT NULL,
+        \`tipo\` ENUM('ARMAS', 'MUNIÇÕES') NOT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 9. Armas
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`armas\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`tipo\` VARCHAR(64) NOT NULL,
+        \`numero_serie\` VARCHAR(128) NOT NULL,
+        \`fabricante\` VARCHAR(128) NOT NULL,
+        \`modelo\` VARCHAR(128) NOT NULL,
+        \`calibre\` VARCHAR(128) NOT NULL,
+        \`quantidade_carregadores\` INT NOT NULL DEFAULT 1,
         \`status\` ENUM('No Cofre', 'Em Trânsito', 'Manutenção', 'Pendente de Recibo') NOT NULL DEFAULT 'No Cofre',
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`last_maintenance_date\` DATE DEFAULT NULL,
-        \`last_maintenance_responsible\` VARCHAR(255) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
+        \`observacao_localizacao\` VARCHAR(255) DEFAULT NULL,
+        \`data_ultima_manutencao\` DATE DEFAULT NULL,
+        \`responsavel_ultima_manutencao\` VARCHAR(255) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_weapons_serial\` (\`serial_number\`)
+        UNIQUE KEY \`uk_armas_serie\` (\`numero_serie\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'weapons' verificada/criada.");
 
-    // Create ammo_stocks
+    // 10. Estoque de Munições
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`ammo_stocks\` (
+      CREATE TABLE IF NOT EXISTS \`estoque_municoes\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`caliber_id\` VARCHAR(64) NOT NULL,
-        \`quantity\` INT NOT NULL DEFAULT 0,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        \`calibre_id\` VARCHAR(64) NOT NULL,
+        \`quantidade\` INT NOT NULL DEFAULT 0,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'ammo_stocks' verificada/criada.");
 
-    // Create weapon_movements
+    // 11. Movimentações de Armas
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`weapon_movements\` (
+      CREATE TABLE IF NOT EXISTS \`movimentacoes_armas\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`weapon_id\` VARCHAR(64) NOT NULL,
-        \`weapon_serial_number\` VARCHAR(128) NOT NULL,
-        \`weapon_model\` VARCHAR(128) NOT NULL,
-        \`weapon_type\` VARCHAR(64) DEFAULT NULL,
-        \`caliber\` VARCHAR(128) DEFAULT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`requester_id\` VARCHAR(64) NOT NULL,
-        \`requester_name\` VARCHAR(255) NOT NULL,
-        \`requester_masp\` VARCHAR(32) NOT NULL,
-        \`withdrawal_vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`return_vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`ammunition_count\` INT NOT NULL DEFAULT 0,
-        \`magazine_count\` INT NOT NULL DEFAULT 0,
-        \`returning_ammunition_count\` INT NOT NULL DEFAULT 0,
-        \`returning_magazine_count\` INT NOT NULL DEFAULT 0,
+        \`arma_id\` VARCHAR(64) NOT NULL,
+        \`numero_serie_arma\` VARCHAR(128) NOT NULL,
+        \`modelo_arma\` VARCHAR(128) NOT NULL,
+        \`tipo_arma\` VARCHAR(64) DEFAULT NULL,
+        \`calibre\` VARCHAR(128) DEFAULT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`requerente_id\` VARCHAR(64) NOT NULL,
+        \`nome_requerente\` VARCHAR(255) NOT NULL,
+        \`masp_requerente\` VARCHAR(32) NOT NULL,
+        \`cofre_retirada_id\` VARCHAR(64) DEFAULT NULL,
+        \`cofre_devolucao_id\` VARCHAR(64) DEFAULT NULL,
+        \`quantidade_municao\` INT NOT NULL DEFAULT 0,
+        \`quantidade_carregadores\` INT NOT NULL DEFAULT 0,
+        \`quantidade_municao_devolucao\` INT NOT NULL DEFAULT 0,
+        \`quantidade_carregadores_devolucao\` INT NOT NULL DEFAULT 0,
         \`status\` VARCHAR(64) NOT NULL,
-        \`approved_by_user_id\` VARCHAR(64) DEFAULT NULL,
-        \`approved_by_user_name\` VARCHAR(255) DEFAULT NULL,
-        \`approval_date\` DATETIME DEFAULT NULL,
-        \`receipt_confirmed_by_user_id\` VARCHAR(64) DEFAULT NULL,
-        \`receipt_confirmed_by_user_name\` VARCHAR(255) DEFAULT NULL,
-        \`receipt_date\` DATETIME DEFAULT NULL,
-        \`has_divergence\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`divergence_justification\` TEXT DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        \`aprovado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`aprovado_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`data_aprovacao\` DATETIME DEFAULT NULL,
+        \`recibo_confirmado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`recibo_confirmado_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`data_recibo\` DATETIME DEFAULT NULL,
+        \`possui_divergencia\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`justificativa_divergencia\` TEXT DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'weapon_movements' verificada/criada.");
 
-    // Create ammo_movements
+    // 12. Movimentações de Munições
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`ammo_movements\` (
+      CREATE TABLE IF NOT EXISTS \`movimentacoes_municoes\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`type\` ENUM('Entrada', 'Saída') NOT NULL,
-        \`caliber_id\` VARCHAR(64) NOT NULL,
-        \`quantity\` INT NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`recipient_or_reason\` VARCHAR(255) NOT NULL,
-        \`responsible_type\` VARCHAR(32) DEFAULT 'SISTEMA',
-        \`responsible_user_id\` VARCHAR(64) DEFAULT NULL,
-        \`responsible_name\` VARCHAR(255) DEFAULT NULL,
-        \`responsible_masp\` VARCHAR(64) DEFAULT NULL,
-        \`observation\` VARCHAR(500) DEFAULT NULL,
-        \`returned_quantity\` INT DEFAULT 0,
-        \`returned_at\` DATETIME DEFAULT NULL,
-        \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL,
-        \`user_id\` VARCHAR(64) DEFAULT NULL,
-        \`user_name\` VARCHAR(255) NOT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`tipo\` ENUM('Entrada', 'Saída') NOT NULL,
+        \`calibre_id\` VARCHAR(64) NOT NULL,
+        \`quantidade\` INT NOT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
+        \`destinatario_ou_motivo\` VARCHAR(255) NOT NULL,
+        \`tipo_responsavel\` VARCHAR(32) DEFAULT 'SISTEMA',
+        \`responsavel_usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`responsavel_nome\` VARCHAR(255) DEFAULT NULL,
+        \`responsavel_masp\` VARCHAR(64) DEFAULT NULL,
+        \`observacao\` VARCHAR(500) DEFAULT NULL,
+        \`quantidade_devolvida\` INT DEFAULT 0,
+        \`data_devolucao\` DATETIME DEFAULT NULL,
+        \`devolvido_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_usuario\` VARCHAR(255) NOT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // Ensure columns exist on ammo_movements if table already existed
-    const ammoCols = ['responsible_type', 'responsible_user_id', 'responsible_name', 'responsible_masp', 'observation', 'returned_quantity', 'returned_at', 'returned_by_user_name'];
-    for (const col of ammoCols) {
-      try {
-        if (col === 'observation') {
-          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`observation\` VARCHAR(500) DEFAULT NULL;`);
-        } else if (col === 'returned_quantity') {
-          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_quantity\` INT DEFAULT 0;`);
-        } else if (col === 'returned_at') {
-          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_at\` DATETIME DEFAULT NULL;`);
-        } else if (col === 'returned_by_user_name') {
-          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
-        } else {
-          await connection.query(`ALTER TABLE \`ammo_movements\` ADD COLUMN \`${col}\` VARCHAR(255) DEFAULT NULL;`);
-        }
-      } catch (e) {
-        // column already exists, ignore error
-      }
-    }
-
-    logs.push("Tabela 'ammo_movements' verificada/criada.");
-
-    // Create audit_logs
+    // 13. Logs de Auditoria
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`audit_logs\` (
+      CREATE TABLE IF NOT EXISTS \`logs_auditoria\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`module\` VARCHAR(64) NOT NULL,
-        \`action\` VARCHAR(64) NOT NULL,
-        \`details\` TEXT NOT NULL,
-        \`user_id\` VARCHAR(64) DEFAULT NULL,
-        \`user_name\` VARCHAR(255) NOT NULL,
-        \`user_masp\` VARCHAR(32) NOT NULL,
-        \`user_role\` VARCHAR(32) NOT NULL,
-        \`ip_address\` VARCHAR(64) DEFAULT NULL,
-        \`timestamp\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`modulo\` VARCHAR(64) NOT NULL,
+        \`acao\` VARCHAR(64) NOT NULL,
+        \`detalhes\` TEXT NOT NULL,
+        \`usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_usuario\` VARCHAR(255) NOT NULL,
+        \`masp_usuario\` VARCHAR(32) NOT NULL,
+        \`perfil_usuario\` VARCHAR(32) NOT NULL,
+        \`endereco_ip\` VARCHAR(64) DEFAULT NULL,
+        \`data_hora\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'audit_logs' verificada/criada.");
 
-    // Column alters for users
-    try {
-      await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`is_teacher\` TINYINT(1) NOT NULL DEFAULT 0;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`users\` ADD COLUMN \`teacher_subject\` VARCHAR(32) DEFAULT NULL;`);
-    } catch (e) {}
-
-    // Column alters for weapons
-    try {
-      await connection.query(`ALTER TABLE \`weapons\` ADD COLUMN \`location_note\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (e) {}
-
-    // Academy Courses Table
+    // 14. Cursos Academia
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`academy_courses\` (
+      CREATE TABLE IF NOT EXISTS \`cursos_academia\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`type\` ENUM('Formação', 'Ensino Continuado') NOT NULL,
-        \`career\` VARCHAR(64) DEFAULT NULL,
-        \`code\` VARCHAR(64) DEFAULT NULL,
-        \`dates\` JSON DEFAULT NULL,
-        \`department_name\` VARCHAR(255) DEFAULT NULL,
-        \`start_date\` DATE DEFAULT NULL,
-        \`module_number\` INT DEFAULT NULL,
-        \`lesson_count\` INT NOT NULL DEFAULT 1,
-        \`lessons_data\` JSON NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`tipo\` ENUM('Formação', 'Ensino Continuado') NOT NULL,
+        \`carreira\` VARCHAR(64) DEFAULT NULL,
+        \`codigo\` VARCHAR(64) DEFAULT NULL,
+        \`datas\` JSON DEFAULT NULL,
+        \`nome_departamento\` VARCHAR(255) DEFAULT NULL,
+        \`data_inicio\` DATE DEFAULT NULL,
+        \`numero_modulo\` INT DEFAULT NULL,
+        \`quantidade_aulas\` INT NOT NULL DEFAULT 1,
+        \`dados_aulas\` JSON NOT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'academy_courses' verificada/criada.");
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `code` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `dates` JSON DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `end_date` DATE DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `module` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `teaching_department_id` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `location_department_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `location_department_id` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `duration_days` INT DEFAULT 1;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `academy_courses` ADD COLUMN `subject` VARCHAR(100) DEFAULT NULL;"); } catch (e) {}
 
-    // Weapon Boxes Table
+    // 15. Caixas de Armas
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`weapon_boxes\` (
+      CREATE TABLE IF NOT EXISTS \`caixas_armas\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`course_type\` VARCHAR(64) NOT NULL,
-        \`weapon_count\` INT NOT NULL,
-        \`weapon_ids\` JSON NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`tipo_curso\` VARCHAR(64) NOT NULL,
+        \`quantidade_armas\` INT NOT NULL,
+        \`ids_armas\` JSON NOT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'weapon_boxes' verificada/criada.");
 
-    // Weapon Box Replacements Table
+    // 16. Substituições Caixa de Armas
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`weapon_box_replacements\` (
+      CREATE TABLE IF NOT EXISTS \`substituicoes_caixa_armas\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`box_id\` VARCHAR(64) NOT NULL,
-        \`box_name\` VARCHAR(255) NOT NULL,
-        \`old_weapon_id\` VARCHAR(64) NOT NULL,
-        \`old_weapon_desc\` VARCHAR(255) NOT NULL,
-        \`new_weapon_id\` VARCHAR(64) NOT NULL,
-        \`new_weapon_desc\` VARCHAR(255) NOT NULL,
-        \`reason\` VARCHAR(500) NOT NULL,
-        \`teacher_name\` VARCHAR(255) DEFAULT NULL,
-        \`responsible_user_name\` VARCHAR(255) NOT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`caixa_id\` VARCHAR(64) NOT NULL,
+        \`nome_caixa\` VARCHAR(255) NOT NULL,
+        \`arma_antiga_id\` VARCHAR(64) NOT NULL,
+        \`descricao_arma_antiga\` VARCHAR(255) NOT NULL,
+        \`arma_nova_id\` VARCHAR(64) NOT NULL,
+        \`descricao_arma_nova\` VARCHAR(255) NOT NULL,
+        \`motivo\` VARCHAR(500) NOT NULL,
+        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
+        \`nome_responsavel\` VARCHAR(255) NOT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'weapon_box_replacements' verificada/criada.");
 
-    // Course Classes (Turmas) Table
+    // 17. Turmas do Curso
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`course_classes\` (
+      CREATE TABLE IF NOT EXISTS \`turmas_curso\` (
         \`id\` VARCHAR(64) NOT NULL,
-        \`course_id\` VARCHAR(64) DEFAULT NULL,
-        \`course_name\` VARCHAR(255) NOT NULL,
-        \`subject\` ENUM('MEAF', 'TAP', 'DP') NOT NULL,
-        \`career\` VARCHAR(64) NOT NULL,
-        \`career_abbreviation\` VARCHAR(16) NOT NULL,
-        \`turma_number\` VARCHAR(32) NOT NULL,
-        \`code\` VARCHAR(64) NOT NULL,
-        \`student_count\` INT NOT NULL DEFAULT 1,
-        \`teacher_user_ids\` JSON NOT NULL,
-        \`teacher_name\` VARCHAR(255) DEFAULT NULL,
-        \`plano_de_aula\` VARCHAR(64) DEFAULT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`curso_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_curso\` VARCHAR(255) NOT NULL,
+        \`disciplina\` ENUM('MEAF', 'TAP', 'DP') NOT NULL,
+        \`carreira\` VARCHAR(64) NOT NULL,
+        \`sigla_carreira\` VARCHAR(16) NOT NULL,
+        \`numero_turma\` VARCHAR(32) NOT NULL,
+        \`codigo\` VARCHAR(64) NOT NULL,
+        \`quantidade_alunos\` INT NOT NULL DEFAULT 1,
+        \`ids_professores\` JSON NOT NULL,
+        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`primeira_data_aula\` VARCHAR(32) DEFAULT NULL,
+        \`ultima_data_aula\` VARCHAR(32) DEFAULT NULL,
+        \`turma_calendario\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'course_classes' verificada/criada.");
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `plano_de_aula` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `teacher_name` VARCHAR(255) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `course_classes` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `first_class_date` VARCHAR(32) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `last_class_date` VARCHAR(32) DEFAULT NULL;"); } catch (e) {}
-    try { await connection.query("ALTER TABLE `course_classes` ADD COLUMN `turma_calendario` VARCHAR(64) DEFAULT NULL;"); } catch (e) {}
 
-    // Aluno Turma Table
+    // 18. Planos de Aula
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`planos_aula\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`nome\` VARCHAR(255) NOT NULL,
+        \`carreira\` VARCHAR(64) NOT NULL,
+        \`ano\` INT NOT NULL,
+        \`tipo\` VARCHAR(64) NOT NULL,
+        \`codigo_turma\` VARCHAR(64) DEFAULT NULL,
+        \`quantidade_aulas\` INT NOT NULL DEFAULT 1,
+        \`dados_aulas\` JSON NOT NULL,
+        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 19. Movimentações da Turma
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`movimentacoes_turma\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`curso_id\` VARCHAR(64) DEFAULT NULL,
+        \`turma_id\` VARCHAR(64) DEFAULT NULL,
+        \`codigo_turma\` VARCHAR(64) DEFAULT NULL,
+        \`plano_aula_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_plano_aula\` VARCHAR(255) DEFAULT NULL,
+        \`numero_aula\` INT NOT NULL DEFAULT 1,
+        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
+        \`caixa_armas_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_caixa_armas\` VARCHAR(255) DEFAULT NULL,
+        \`ids_armas\` JSON DEFAULT NULL,
+        \`calibre_id\` VARCHAR(64) DEFAULT NULL,
+        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
+        \`municao_fornecida\` INT DEFAULT 0,
+        \`quantidade_alunos\` INT DEFAULT 0,
+        \`tiros_por_aluno\` INT DEFAULT 0,
+        \`tiros_instrutor\` INT DEFAULT 0,
+        \`municao_usada\` INT DEFAULT 0,
+        \`municao_devolvida\` INT DEFAULT 0,
+        \`carregadores_extras\` INT DEFAULT 0,
+        \`status\` ENUM('Em Aula', 'Finalizada') NOT NULL DEFAULT 'Em Aula',
+        \`emitido_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`devolvido_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`materiais_devolvidos\` TEXT DEFAULT NULL,
+        \`observacoes\` TEXT DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_devolucao\` DATETIME DEFAULT NULL,
+        PRIMARY KEY (\`id\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    // 20. Aluno Turma
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`aluno_turma\` (
         \`id\` VARCHAR(64) NOT NULL,
@@ -444,16 +432,15 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`nome_aluno\` VARCHAR(255) NOT NULL,
         \`situacao_aluno\` VARCHAR(64) NOT NULL DEFAULT 'Ativo',
         \`departamento_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
         KEY \`idx_aluno_turma_id\` (\`turma_id\`),
         KEY \`idx_aluno_turma_code\` (\`turma_aluno\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'aluno_turma' verificada/criada.");
 
-    // Aluno Aulas Table
+    // 21. Aluno Aulas
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`aluno_aulas\` (
         \`id\` VARCHAR(64) NOT NULL,
@@ -465,15 +452,14 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`aula_conteudo_aluno\` VARCHAR(500) DEFAULT NULL,
         \`observacao_aluno\` TEXT DEFAULT NULL,
         \`nota_aluno\` VARCHAR(32) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`updated_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
-        KEY \`idx_aluno_aulas_aluno_id\` (\`aluno_id\`)
+        KEY \`idx_aluno_aulas_aluno\` (\`aluno_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'aluno_aulas' verificada/criada.");
 
-    // Calendario Aulas Table
+    // 22. Calendario Aulas
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`calendario_aulas\` (
         \`id\` VARCHAR(64) NOT NULL,
@@ -489,17 +475,12 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`numero_aula_calendario\` VARCHAR(64) DEFAULT NULL,
         \`equipe_calendario\` VARCHAR(100) DEFAULT NULL,
         \`observacao_calendario\` TEXT DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_cal_data\` (\`data_calendario\`),
-        KEY \`idx_cal_sigla\` (\`sigla_calendario\`),
-        KEY \`idx_cal_turma\` (\`turma_calendario\`),
-        KEY \`idx_cal_sala\` (\`sala_calendario\`)
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'calendario_aulas' verificada/criada.");
 
-    // Equipe Calendario Table
+    // 23. Equipe Calendario
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`equipe_calendario\` (
         \`id\` VARCHAR(64) NOT NULL,
@@ -518,13 +499,12 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
         \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
         \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'equipe_calendario' verificada/criada.");
 
-    // Professores Equipe Table
+    // 24. Professores Equipe
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`professores_equipe\` (
         \`id\` VARCHAR(64) NOT NULL,
@@ -539,217 +519,48 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
         \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
         \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`id\`),
         KEY \`idx_prof_eq_id\` (\`equipe_id\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
-    logs.push("Tabela 'professores_equipe' verificada/criada.");
 
+    // Create Backwards Compatible SQL Views for legacy English code queries
     try {
-      await connection.query("ALTER TABLE `users` ADD COLUMN `professor_sigla` VARCHAR(64) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `codigo_curso` VARCHAR(100) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `dates_curso` TEXT DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `equipe_calendario` ADD COLUMN `ano` VARCHAR(10) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `nome_professor` VARCHAR(255) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `sigla_professor` VARCHAR(64) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `titular` VARCHAR(10) DEFAULT 'Não';");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `instrutor` VARCHAR(10) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `professores_equipe` ADD COLUMN `tipo_funcao` VARCHAR(50) DEFAULT 'INSTRUTOR';");
-    } catch (e) {}
-
-    try {
-      await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `modulo_calendario` VARCHAR(100) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `calendario_aulas` ADD COLUMN `ano_calendario` VARCHAR(64) DEFAULT NULL;");
-    } catch (e) {}
-
-    // Plano de Aula (Curso de Formação) Main Table
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`plano_de_aula_curso_de_formacao\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome_do_plano\` VARCHAR(255) NOT NULL,
-        \`carreira\` VARCHAR(64) NOT NULL,
-        \`materia\` VARCHAR(100) NOT NULL DEFAULT 'MEAF',
-        \`ano_de_vigencia_do_plano\` INT NOT NULL,
-        \`numero_de_aulas\` INT NOT NULL DEFAULT 1,
-        \`turma_code\` VARCHAR(64) DEFAULT NULL,
-        \`type\` VARCHAR(64) NOT NULL DEFAULT 'curso de formação',
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-    logs.push("Tabela 'plano_de_aula_curso_de_formacao' verificada/criada.");
-
-    // Linked Table: Aulas do Plano de Aula
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`aulas_plano_de_aula_curso_de_formacao\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`plano_de_aula_id\` VARCHAR(64) NOT NULL,
-        \`numero_da_aula\` INT NOT NULL,
-        \`quantidade_de_tiros_por_aluno\` INT NOT NULL DEFAULT 0,
-        \`calibre_usado\` VARCHAR(64) NOT NULL DEFAULT '.40 S&W',
-        \`insumo_do_instrutor\` INT NOT NULL DEFAULT 0,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_plano_aula_num\` (\`plano_de_aula_id\`, \`numero_da_aula\`),
-        KEY \`idx_aulas_plano_id\` (\`plano_de_aula_id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-    logs.push("Tabela 'aulas_plano_de_aula_curso_de_formacao' verificada/criada.");
-
-    // Lesson Plans Table (Legacy / Generic)
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`lesson_plans\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`name\` VARCHAR(255) NOT NULL,
-        \`career\` VARCHAR(64) NOT NULL,
-        \`year\` INT NOT NULL,
-        \`type\` VARCHAR(64) NOT NULL,
-        \`lesson_count\` INT NOT NULL DEFAULT 1,
-        \`lessons_data\` JSON NOT NULL,
-        \`department_id\` VARCHAR(64) DEFAULT NULL,
-        \`unit_id\` VARCHAR(64) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-    logs.push("Tabela 'lesson_plans' verificada/criada.");
-    try {
-      await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `turma_code` VARCHAR(64) DEFAULT NULL;");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `lesson_plans` ADD COLUMN `subject` VARCHAR(32) DEFAULT 'MEAF';");
-    } catch (e) {}
-    try {
-      await connection.query("ALTER TABLE `course_class_movements` MODIFY COLUMN `course_id` VARCHAR(64) NULL DEFAULT NULL;");
-    } catch (e) {}
-
-    // Course Movements Table
-    await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`course_class_movements\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`course_id\` VARCHAR(64) DEFAULT NULL,
-        \`class_id\` VARCHAR(64) NOT NULL,
-        \`turma_code\` VARCHAR(64) NOT NULL,
-        \`lesson_plan_id\` VARCHAR(64) DEFAULT NULL,
-        \`lesson_plan_name\` VARCHAR(255) DEFAULT NULL,
-        \`lesson_number\` INT NOT NULL DEFAULT 1,
-        \`teacher_name\` VARCHAR(255) NOT NULL,
-        \`weapon_box_id\` VARCHAR(64) DEFAULT NULL,
-        \`weapon_box_name\` VARCHAR(255) DEFAULT NULL,
-        \`weapon_ids\` JSON DEFAULT NULL,
-        \`caliber_id\` VARCHAR(64) DEFAULT NULL,
-        \`vault_space_id\` VARCHAR(64) DEFAULT NULL,
-        \`ammo_supplied\` INT DEFAULT 0,
-        \`student_count\` INT DEFAULT 0,
-        \`shots_per_student\` INT DEFAULT 0,
-        \`instructor_shots\` INT DEFAULT 0,
-        \`ammo_used\` INT DEFAULT 0,
-        \`ammo_returned\` INT DEFAULT 0,
-        \`extra_magazines_count\` INT DEFAULT 0,
-        \`status\` ENUM('Em Aula', 'Finalizada') NOT NULL DEFAULT 'Em Aula',
-        \`issued_by_user_name\` VARCHAR(255) NOT NULL,
-        \`returned_by_user_name\` VARCHAR(255) DEFAULT NULL,
-        \`created_at\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`returned_at\` DATETIME DEFAULT NULL,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-    logs.push("Tabela 'course_class_movements' verificada/criada.");
-
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`lesson_plan_id\` VARCHAR(64) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`lesson_plan_name\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`class_id\` VARCHAR(64) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`turma_code\` VARCHAR(64) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`teacher_name\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` MODIFY COLUMN \`issued_by_user_name\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`returned_materials\` TEXT DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`course_class_movements\` ADD COLUMN \`notes\` TEXT DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`allowed_weapon_types\` JSON DEFAULT NULL;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`shots_per_student\` INT DEFAULT 0;`);
-    } catch (e) {}
-    try {
-      await connection.query(`ALTER TABLE \`courses\` ADD COLUMN \`shots_per_weapon_type\` JSON DEFAULT NULL;`);
-    } catch (e) {}
-
-    // Seed ACADEMIA DE POLICIA & MEAF unit
-    const [acadRows]: any = await connection.query(`SELECT id FROM departments WHERE name LIKE '%ACADEMIA%' LIMIT 1;`);
-    let acadDeptId = 'dept-acad';
-    if (acadRows.length === 0) {
-      await connection.query(`
-        INSERT INTO departments (id, name, code) VALUES
-        ('dept-acad', 'ACADEMIA DE POLICIA', 'ACADEPOL');
-      `);
-      logs.push("Departamento 'ACADEMIA DE POLICIA' inserido.");
-    } else {
-      acadDeptId = acadRows[0].id;
+      await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`units\` AS SELECT id, departamento_id AS department_id, nome AS name, data_criacao AS created_at FROM \`unidades\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`users\` AS SELECT id, masp, senha AS password, nome AS name, telefone AS phone, cargo, perfil AS role, departamento_id AS department_id, unidade_id AS unit_id, pode_mover_municao AS can_move_ammo, pode_mover_armas AS can_move_weapons, tem_acesso_sistema AS has_system_access, eh_professor AS is_teacher, disciplina_professor AS teacher_subject, professor_sigla, deve_alterar_senha AS must_change_password, data_criacao AS created_at FROM \`usuarios\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`calibers\` AS SELECT id, nome AS name, data_criacao AS created_at FROM \`calibres\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`available_weapon_types\` AS SELECT id, nome AS name, modelos AS models, data_criacao AS created_at FROM \`tipos_armas\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`vault_spaces\` AS SELECT id, codigo AS code, tipo AS type, departamento_id AS department_id, unidade_id AS unit_id, data_criacao AS created_at FROM \`cofres\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`weapons\` AS SELECT id, tipo AS type, numero_serie AS serial_number, fabricante AS manufacturer, modelo AS model, calibre, quantidade_carregadores AS magazine_quantity, status, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, observacao_localizacao AS location_note, data_ultima_manutencao AS last_maintenance_date, responsavel_ultima_manutencao AS last_maintenance_responsible, data_criacao AS created_at FROM \`armas\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`ammo_stocks\` AS SELECT id, calibre_id, quantidade AS quantity, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, data_atualizacao AS updated_at FROM \`estoque_municoes\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`courses\` AS SELECT id, nome AS name, modelos_permitidos AS allowed_models, calibres_permitidos AS allowed_calibers, tipos_armas_permitidos AS allowed_weapon_types, tiros_por_aluno AS shots_per_student, tiros_por_tipo_arma AS shots_per_weapon_type, departamento_id AS department_id, data_criacao AS created_at FROM \`cursos\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`user_courses\` AS SELECT id, usuario_id AS user_id, curso_id, data_conclusao AS completion_date, data_validade AS expiration_date, data_criacao AS created_at FROM \`usuario_cursos\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`audit_logs\` AS SELECT id, modulo AS module, acao AS action, detalhes AS details, usuario_id AS user_id, nome_usuario AS user_name, masp_usuario AS user_masp, perfil_usuario AS user_role, endereco_ip AS ip_address, data_hora AS timestamp FROM \`logs_auditoria\`;`);
+    } catch (e) {
+      console.warn('Views backwards compatibility warning:', e);
     }
 
-    const [meafRows]: any = await connection.query(`SELECT id FROM units WHERE department_id = ? AND name LIKE '%MEAF%' LIMIT 1;`, [acadDeptId]);
-    if (meafRows.length === 0) {
-      await connection.query(`
-        INSERT INTO units (id, department_id, name) VALUES
-        ('unit-acad-meaf', ?, 'MEAF - Módulo de Ensino de Armamento e Tiro');
-      `, [acadDeptId]);
-      logs.push("Unidade 'MEAF' inserida.");
-    }
-
-    // --- SEEDING INITIAL DATA IF EMPTY ---
-    const [deptRows]: any = await connection.query('SELECT COUNT(*) as count FROM departments');
+    // --- SEED INITIAL DATA IN PORTUGUESE TABLES IF EMPTY ---
+    const [deptRows]: any = await connection.query('SELECT COUNT(*) as count FROM departamentos');
     if (deptRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'departments'...");
+      logs.push("Inserindo dados iniciais em 'departamentos'...");
       await connection.query(`
-        INSERT INTO departments (id, name, code) VALUES
+        INSERT INTO departamentos (id, nome, codigo) VALUES
+        ('dept-acad', 'ACADEMIA DE POLICIA', 'ACADEPOL'),
         ('dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'DOE-COE'),
         ('dept-dhpp', 'DEPARTAMENTO DE HOMICÍDIOS E PROTEÇÃO À PESSOA (DHPP)', 'DHPP'),
         ('dept-dic', 'DEPARTAMENTO DE INVESTIGAÇÕES CRIMINAIS (DIC)', 'DIC');
       `);
     }
 
-    const [unitRows]: any = await connection.query('SELECT COUNT(*) as count FROM units');
+    const [unitRows]: any = await connection.query('SELECT COUNT(*) as count FROM unidades');
     if (unitRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'units'...");
+      logs.push("Inserindo dados iniciais em 'unidades'...");
       await connection.query(`
-        INSERT INTO units (id, department_id, name) VALUES
+        INSERT INTO unidades (id, departamento_id, nome) VALUES
+        ('unit-acad-meaf', 'dept-acad', 'MEAF - Módulo de Ensino de Armamento e Tiro'),
         ('unit-coe-insp', 'dept-coe', 'INSPETORIA COE'),
         ('unit-coe-grt', 'dept-coe', 'GRUPO DE RESGATE TÁTICO (GRT)'),
         ('unit-dhpp-1', 'dept-dhpp', '1ª DELEGACIA DE HOMICÍDIOS'),
@@ -757,11 +568,11 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [wtRows]: any = await connection.query('SELECT COUNT(*) as count FROM available_weapon_types');
+    const [wtRows]: any = await connection.query('SELECT COUNT(*) as count FROM tipos_armas');
     if (wtRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'available_weapon_types'...");
+      logs.push("Inserindo dados iniciais em 'tipos_armas'...");
       await connection.query(`
-        INSERT INTO available_weapon_types (id, name, models) VALUES
+        INSERT INTO tipos_armas (id, nome, modelos) VALUES
         ('wt-pistola', 'Pistola', '["PT100", "PT24/7", "TS9", "Glock G22", "Glock G17", "Glock G19", "PT840", "PT92", "M&P9", "APX"]'),
         ('wt-fuzil', 'Fuzil', '["T4", "IA2", "MD97", "FAL 7.62", "M4A1", "AR-15", "HK416"]'),
         ('wt-submet', 'Submetralhadora', '["SMT40", "MT12", "MP5", "UMP40", "SAF 9mm"]'),
@@ -771,11 +582,11 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [caliberRows]: any = await connection.query('SELECT COUNT(*) as count FROM calibers');
+    const [caliberRows]: any = await connection.query('SELECT COUNT(*) as count FROM calibres');
     if (caliberRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'calibers'...");
+      logs.push("Inserindo dados iniciais em 'calibres'...");
       await connection.query(`
-        INSERT INTO calibers (id, name) VALUES
+        INSERT INTO calibres (id, nome) VALUES
         ('cal-556', '5,56x45mm'),
         ('cal-40', '.40 S&W'),
         ('cal-9mm', '9x19mm'),
@@ -784,22 +595,24 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [courseRows]: any = await connection.query('SELECT COUNT(*) as count FROM courses');
+    const [courseRows]: any = await connection.query('SELECT COUNT(*) as count FROM cursos');
     if (courseRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'courses'...");
+      logs.push("Inserindo dados iniciais em 'cursos'...");
       await connection.query(`
-        INSERT INTO courses (id, name, allowed_models, allowed_calibers, department_id) VALUES
+        INSERT INTO cursos (id, nome, modelos_permitidos, calibres_permitidos, departamento_id) VALUES
         ('course-fuzil', 'Operador de fuzil', '["T4", "IA2", "M4A1"]', '["5,56x45mm"]', 'dept-coe'),
         ('course-pistola', 'Operador de Pistola', '["PT92", "Glock G22", "TH40", "PT840"]', '[".40 S&W", "9x19mm"]', 'dept-coe'),
         ('course-12', 'Operador de Espingarda C12', '["CBC 586-P", "Benelli M4"]', '["12 GA"]', 'dept-coe');
       `);
     }
 
-    const [vaultRows]: any = await connection.query('SELECT COUNT(*) as count FROM vault_spaces');
+    const [vaultRows]: any = await connection.query('SELECT COUNT(*) as count FROM cofres');
     if (vaultRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'vault_spaces'...");
+      logs.push("Inserindo dados iniciais em 'cofres'...");
       await connection.query(`
-        INSERT INTO vault_spaces (id, code, type, department_id, unit_id) VALUES
+        INSERT INTO cofres (id, codigo, tipo, departamento_id, unidade_id) VALUES
+        ('vault-acad-1', 'COFRE-MEAF-01', 'ARMAS', 'dept-acad', 'unit-acad-meaf'),
+        ('vault-acad-2', 'COFRE-MEAF-02', 'MUNIÇÕES', 'dept-acad', 'unit-acad-meaf'),
         ('vault-coe-1', 'A1-G1', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
         ('vault-coe-2', 'A1-G2', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
         ('vault-coe-3', 'C1-L1', 'MUNIÇÕES', 'dept-coe', 'unit-coe-insp'),
@@ -809,21 +622,21 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [userRows]: any = await connection.query('SELECT COUNT(*) as count FROM users');
+    const [userRows]: any = await connection.query('SELECT COUNT(*) as count FROM usuarios');
     if (userRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'users'...");
+      logs.push("Inserindo dados iniciais em 'usuarios'...");
       await connection.query(`
-        INSERT INTO users (id, masp, name, phone, cargo, role, department_id, unit_id, can_move_ammo, can_move_weapons, has_system_access, password, must_change_password) VALUES
-        ('usr-master-geral', '1255748', 'Administrador Geral Master', '31999998888', 'Delegado', 'Geral', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '1255748', 1),
-        ('usr-admin-coe', '2222222', 'Dr. Roberto Silva (Admin DOE)', '31988887777', 'Delegado', 'Administrador', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '2222222', 0),
-        ('usr-armeiro-coe', '3333333', 'Agente Carlos Andrade (Armeiro COE)', '31977776666', 'Investigador', 'Armeiro', 'dept-coe', 'unit-coe-insp', 1, 1, 1, '3333333', 0),
-        ('usr-policial-coe', '4444444', 'Policial Eduardo Costa', '31966665555', 'Investigador', 'Policial', 'dept-coe', 'unit-coe-insp', 0, 0, 1, '4444444', 0),
-        ('usr-policial-dhpp', '5555555', 'Escrivã Ana Lima', '31955554444', 'Escrivão', 'Policial', 'dept-dhpp', 'unit-dhpp-1', 0, 0, 1, '5555555', 0);
+        INSERT INTO usuarios (id, masp, senha, nome, telefone, cargo, perfil, departamento_id, unidade_id, pode_mover_municao, pode_mover_armas, tem_acesso_sistema, deve_alterar_senha) VALUES
+        ('usr-master-geral', '1255748', '1255748', 'Administrador Geral Master', '31999998888', 'Delegado', 'Geral', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 1),
+        ('usr-admin-coe', '2222222', '2222222', 'Dr. Roberto Silva (Admin DOE)', '31988887777', 'Delegado', 'Administrador', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 0),
+        ('usr-armeiro-coe', '3333333', '3333333', 'Agente Carlos Andrade (Armeiro COE)', '31977776666', 'Investigador', 'Armeiro', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 0),
+        ('usr-prof-meaf-1', '6666666', '6666666', 'Prof. Marcus Vinícius (Instrutor MEAF)', '31944443333', 'Investigador', 'Policial', 'dept-acad', 'unit-acad-meaf', 1, 1, 1, 0),
+        ('usr-policial-coe', '4444444', '4444444', 'Policial Eduardo Costa', '31966665555', 'Investigador', 'Policial', 'dept-coe', 'unit-coe-insp', 0, 0, 1, 0),
+        ('usr-policial-dhpp', '5555555', '5555555', 'Escrivã Ana Lima', '31955554444', 'Escrivão', 'Policial', 'dept-dhpp', 'unit-dhpp-1', 0, 0, 1, 0);
       `);
 
-      // Seed user_courses
       await connection.query(`
-        INSERT INTO user_courses (id, user_id, course_id, completion_date, expiration_date) VALUES
+        INSERT INTO usuario_cursos (id, usuario_id, curso_id, data_conclusao, data_validade) VALUES
         ('uc-1', 'usr-master-geral', 'course-fuzil', '2025-10-15', '2027-10-15'),
         ('uc-2', 'usr-master-geral', 'course-pistola', '2025-11-20', '2027-11-20'),
         ('uc-3', 'usr-admin-coe', 'course-fuzil', '2025-05-10', '2027-05-10'),
@@ -837,41 +650,45 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [weaponRows]: any = await connection.query('SELECT COUNT(*) as count FROM weapons');
+    const [weaponRows]: any = await connection.query('SELECT COUNT(*) as count FROM armas');
     if (weaponRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'weapons'...");
+      logs.push("Inserindo dados iniciais em 'armas'...");
       await connection.query(`
-        INSERT INTO weapons (id, type, serial_number, manufacturer, model, caliber, magazine_quantity, status, department_id, unit_id, vault_space_id, last_maintenance_date, last_maintenance_responsible) VALUES
+        INSERT INTO armas (id, tipo, numero_serie, fabricante, modelo, calibre, quantidade_carregadores, status, departamento_id, unidade_id, cofre_id, data_ultima_manutencao, responsavel_ultima_manutencao) VALUES
         ('weap-1', 'Fuzil', 'EKG-5486', 'Taurus', 'T4', '5,56x45mm', 4, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-1', '2026-05-10', 'Agente Carlos Andrade'),
         ('weap-2', 'Pistola', 'PT-998822', 'Taurus', 'PT92', '.40 S&W', 3, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-2', '2026-06-15', 'Agente Carlos Andrade'),
         ('weap-3', 'Espingarda', 'CBC-12009', 'CBC', 'CBC 586-P', '12 GA', 1, 'No Cofre', 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-1', '2026-04-01', 'Armeiro DHPP');
       `);
     }
 
-    const [ammoStockRows]: any = await connection.query('SELECT COUNT(*) as count FROM ammo_stocks');
+    const [ammoStockRows]: any = await connection.query('SELECT COUNT(*) as count FROM estoque_municoes');
     if (ammoStockRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'ammo_stocks'...");
+      logs.push("Inserindo dados iniciais em 'estoque_municoes'...");
       await connection.query(`
-        INSERT INTO ammo_stocks (id, caliber_id, quantity, department_id, unit_id, vault_space_id) VALUES
+        INSERT INTO estoque_municoes (id, calibre_id, quantidade, departamento_id, unidade_id, cofre_id) VALUES
         ('stock-1', 'cal-556', 2500, 'dept-coe', 'unit-coe-insp', 'vault-coe-3'),
         ('stock-2', 'cal-40', 1200, 'dept-coe', 'unit-coe-insp', 'vault-coe-4'),
-        ('stock-3', 'cal-9mm', 800, 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-2');
+        ('stock-3', 'cal-9mm', 800, 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-2'),
+        ('stock-acad-40', 'cal-40', 5000, 'dept-acad', 'unit-acad-meaf', 'vault-acad-2'),
+        ('stock-acad-9mm', 'cal-9mm', 5000, 'dept-acad', 'unit-acad-meaf', 'vault-acad-2');
       `);
     }
 
-    const [auditRows]: any = await connection.query('SELECT COUNT(*) as count FROM audit_logs');
+    const [auditRows]: any = await connection.query('SELECT COUNT(*) as count FROM logs_auditoria');
     if (auditRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'audit_logs'...");
+      logs.push("Inserindo dados iniciais em 'logs_auditoria'...");
       await connection.query(`
-        INSERT INTO audit_logs (id, timestamp, user_id, user_name, user_masp, user_role, module, action, details, ip_address) VALUES
-        ('log-1', NOW(), 'usr-master-geral', 'Administrador Geral Master', '1255748', 'Geral', 'Unidade', 'Criar', 'Inicialização do sistema e cadastro das unidades padrão no MySQL', '192.168.1.100');
+        INSERT INTO logs_auditoria (id, data_hora, usuario_id, nome_usuario, masp_usuario, perfil_usuario, modulo, acao, detalhes, endereco_ip) VALUES
+        ('log-1', NOW(), 'usr-master-geral', 'Administrador Geral Master', '1255748', 'Geral', 'Sistema', 'Remodelagem do Banco', 'Inicialização do banco de dados 100% remodelado e traduzido para o Português', '127.0.0.1');
       `);
     }
 
+    await connection.query('SET FOREIGN_KEY_CHECKS = 1;');
     connection.release();
+
     return {
       success: true,
-      message: 'Todas as tabelas do MySQL foram criadas/verificadas com sucesso!',
+      message: 'Todas as tabelas do MySQL foram remodeladas e organizadas em Português com sucesso!',
       log: logs,
     };
   } catch (err: any) {

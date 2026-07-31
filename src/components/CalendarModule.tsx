@@ -892,7 +892,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const pagesToRender = useMemo(() => {
     const targetRecords = selectedDiscipline ? activeDisciplineRecords : sortedAllRecords;
 
-    const pairHasRecords = (pair: CalendarWeekInfo[][]) => {
+    const pairHasRecords = (pair: CalendarWeekInfo[]) => {
       const dates = new Set<string>();
       pair.forEach((w) => w.days.forEach((d) => dates.add(d.dateStr)));
       return targetRecords.some((r) => dates.has(r.data_calendario));
@@ -903,7 +903,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         year: number;
         month: number;
         monthName: string;
-        pair: CalendarWeekInfo[][];
+        pair: CalendarWeekInfo[];
         hasClasses: boolean;
       }[] = [];
 
@@ -931,7 +931,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         year: number;
         month: number;
         monthName: string;
-        pair: CalendarWeekInfo[][];
+        pair: CalendarWeekInfo[];
         hasClasses: boolean;
       }[] = [];
 
