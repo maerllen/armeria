@@ -1473,7 +1473,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               @media print {
                 @page {
                   size: A4 portrait;
-                  margin: 6mm;
+                  margin: 4mm;
                 }
                 * {
                   -webkit-print-color-adjust: exact !important;
@@ -1483,7 +1483,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 html, body {
                   background-color: #ffffff !important;
                   background-image: none !important;
-                  color: #000000 !important;
+                  color: #ffffff !important;
                   box-shadow: none !important;
                   text-shadow: none !important;
                 }
