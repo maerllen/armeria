@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
+import * as pdfjsLib from 'pdfjs-dist';
 import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -98,6 +99,39 @@ const normalizeTimeSlot = (rawHora: any): string => {
   }
 
   return str;
+};
+
+/**
+ * Formats turma code according to rules:
+ * - Separates letter abbreviation and number with a space.
+ * - If the number has a single digit (1-9), pads with a leading zero (e.g., 'DL1' -> 'DL 01', 'MC2' -> 'MC 02').
+ * - Preserves double or multi-digit numbers with space (e.g., 'DL10' -> 'DL 10').
+ */
+export const formatTurmaCode = (raw: any): string => {
+  if (raw === null || raw === undefined) return 'DL 01';
+  let str = String(raw).trim();
+  if (!str) return 'DL 01';
+
+  // Normalize spaces
+  str = str.replace(/\s+/g, ' ');
+
+  // Match pattern: [letters][optional separator][digits][optional suffix]
+  const match = str.match(/^([A-Za-zÀ-ÿ]+)[_\-\s]*(\d+)(.*)$/);
+  if (match) {
+    const prefix = match[1].toUpperCase();
+    const numStr = match[2];
+    const suffix = match[3] ? match[3].trim().toUpperCase() : '';
+
+    const formattedNum = numStr.length === 1 ? numStr.padStart(2, '0') : numStr;
+
+    return `${prefix} ${formattedNum}${suffix ? ' ' + suffix : ''}`.trim();
+  }
+
+  if (/^\d+$/.test(str)) {
+    return str.length === 1 ? str.padStart(2, '0') : str;
+  }
+
+  return str.toUpperCase();
 };
 
 interface CalendarDayInfo {
@@ -312,7 +346,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [formState, setFormState] = useState<Partial<CalendarRecord>>({
     data_calendario: new Date().toISOString().split('T')[0],
     horario_calendario: '10:00 as 11:40',
-    turma_calendario: 'DL1',
+    turma_calendario: 'DL 01',
     sigla_calendario: 'MEAF',
     disciplina_calendario: 'Manuseio e Emprego de Armas de Fogo',
     sala_calendario: 'SL01',
@@ -333,7 +367,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     setLoading(true);
     try {
       await storage.refreshFromServer();
-      const loaded = storage.getCalendarRecords();
+      const loaded = storage.getCalendarRecords().map(r => ({
+        ...r,
+        turma_calendario: formatTurmaCode(r.turma_calendario)
+      }));
       setRecords(loaded);
 
       // Load Equipes & Users
@@ -515,11 +552,107 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     return index >= 0 ? index + 1 : (rec.numero_aula_calendario ? Number(String(rec.numero_aula_calendario).replace(/\D/g, '')) || 1 : 1);
   };
 
-  // --- EXCEL IMPORT PARSER ---
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- EXCEL & PDF IMPORT PARSER ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    const fileName = file.name.toLowerCase();
+
+    // PDF IMPORT HANDLER
+    if (fileName.endsWith('.pdf')) {
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        if (pdfjsLib && pdfjsLib.GlobalWorkerOptions) {
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version || '4.10.38'}/pdf.worker.min.mjs`;
+        }
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+
+        const extractedRecords: CalendarRecord[] = [];
+        let globalIdx = 0;
+
+        for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+          const page = await pdf.getPage(pageNum);
+          const textContent = await page.getTextContent();
+
+          const linesMap = new Map<number, { x: number; text: string }[]>();
+
+          textContent.items.forEach((item: any) => {
+            if (!item.str || !item.str.trim()) return;
+            const y = Math.round(item.transform[5]);
+            const x = Math.round(item.transform[4]);
+            if (!linesMap.has(y)) {
+              linesMap.set(y, []);
+            }
+            linesMap.get(y)!.push({ x, text: item.str.trim() });
+          });
+
+          const sortedY = Array.from(linesMap.keys()).sort((a, b) => b - a);
+
+          for (const y of sortedY) {
+            const itemsOnLine = linesMap.get(y)!.sort((a, b) => a.x - b.x);
+            const lineText = itemsOnLine.map(i => i.text).join(' ');
+
+            const dateMatch = lineText.match(/(\d{2}\/\d{2}\/\d{4}|\d{4}-\d{2}-\d{2})/);
+            if (!dateMatch) continue;
+
+            let formattedDate = new Date().toISOString().split('T')[0];
+            const rawDate = dateMatch[1];
+            if (rawDate.includes('/')) {
+              const parts = rawDate.split('/');
+              if (parts.length === 3) {
+                formattedDate = `${parts[2]}-${parts[1].padStart(2, '0')}-${parts[0].padStart(2, '0')}`;
+              }
+            } else {
+              formattedDate = rawDate;
+            }
+
+            const slotHora = normalizeTimeSlot(lineText);
+
+            const turmaMatch = lineText.match(/\b([A-Za-z]{1,10}\s*[-_]?\s*\d{1,3})\b/);
+            const rawTurma = turmaMatch ? turmaMatch[1] : 'DL 01';
+            const formattedTurma = formatTurmaCode(rawTurma);
+
+            const siglaMatch = lineText.match(/\b([A-Z]{2,8})\b/g);
+            let extractedSigla = 'DISC';
+            if (siglaMatch) {
+              const found = siglaMatch.find(s => s !== 'DL' && s !== 'MC' && s !== 'SL' && s !== 'AULA' && s !== 'AULAS');
+              if (found) extractedSigla = found;
+            }
+
+            extractedRecords.push({
+              id: `cal-imp-pdf-${Date.now()}-${globalIdx}-${Math.random().toString(36).substring(2, 6)}`,
+              data_calendario: formattedDate,
+              horario_calendario: slotHora,
+              turma_calendario: formattedTurma,
+              sigla_calendario: extractedSigla,
+              disciplina_calendario: '',
+              sala_calendario: 'SL01',
+              curso_calendario: 'Curso de Formação de Delegados de Polícia',
+              modulo_calendario: 'Módulo I',
+              ano_calendario: formattedDate.split('-')[0] || '2026',
+              numero_aula_calendario: globalIdx + 1,
+              equipe_calendario: '',
+              observacao_calendario: ''
+            });
+            globalIdx++;
+          }
+        }
+
+        if (extractedRecords.length === 0) {
+          showToast('error', 'Nenhum registro de aula pôde ser extraído do arquivo PDF.');
+          return;
+        }
+
+        setPreviewRecords(extractedRecords);
+        showToast('success', `${extractedRecords.length} registro(s) extraído(s) do PDF com sucesso!`);
+      } catch (pdfErr: any) {
+        showToast('error', 'Erro ao ler arquivo PDF: ' + (pdfErr.message || 'formato inválido.'));
+      }
+      return;
+    }
+
+    // EXCEL / CSV PARSER
     const reader = new FileReader();
     reader.onload = (evt) => {
       try {
@@ -574,12 +707,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
           let finalHora = normalizeTimeSlot(rawHora);
 
           const yearOfDate = formattedDate ? formattedDate.split('-')[0] : String(selectedYear);
+          const rawTurma = getVal('TURMA_CALENDARIO', 'TURMA CALENDARIO', 'TURMA') || 'DL 01';
 
           return {
             id: `cal-imp-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
             data_calendario: formattedDate,
             horario_calendario: finalHora,
-            turma_calendario: getVal('TURMA_CALENDARIO', 'TURMA CALENDARIO', 'TURMA') || 'DL1',
+            turma_calendario: formatTurmaCode(rawTurma),
             sigla_calendario: getVal('SIGLA_CALENDARIO', 'SIGLA CALENDARIO', 'SIGLA') || 'DISC',
             disciplina_calendario: getVal('DISCIPLINA_CALENDARIO', 'DISCIPLINA CALENDARIO', 'DISCIPLINA', 'MATERIA') || '',
             sala_calendario: getVal('SALA_CALENDARIO', 'SALA CALENDARIO', 'SALA', 'LOCAL') || 'SL01',
@@ -1646,14 +1780,15 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 {/* Turma */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    TURMA (ex: DL1, EP1) *
+                    TURMA (ex: DL 01, EP 01) *
                   </label>
                   <input
                     type="text"
                     required
                     value={formState.turma_calendario || ''}
                     onChange={(e) => setFormState({ ...formState, turma_calendario: e.target.value.toUpperCase() })}
-                    placeholder="Ex: DL1"
+                    onBlur={(e) => setFormState({ ...formState, turma_calendario: formatTurmaCode(e.target.value) })}
+                    placeholder="Ex: DL 01"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2 text-slate-100 focus:border-amber-500 focus:outline-none uppercase font-mono font-bold"
                   />
                 </div>
@@ -1835,7 +1970,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* MODAL 3: EXCEL IMPORT */}
+      {/* MODAL 3: IMPORT (EXCEL / PDF) */}
       {showImportModal && (
         <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl">
@@ -1843,7 +1978,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               <div className="flex items-center space-x-2.5">
                 <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-base font-extrabold text-slate-100">
-                  Importar Tabela Excel (.xlsx / .csv)
+                  Importar Tabela ou PDF (.pdf, .xlsx, .csv)
                 </h3>
               </div>
               <button
@@ -1858,17 +1993,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
 
             <p className="text-xs text-slate-400 leading-relaxed">
-              Selecione a planilha Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">MODULO</strong>, <strong className="text-amber-400">ANO</strong>.
+              Selecione o arquivo PDF ou a planilha Excel contendo as colunas: <strong className="text-amber-400">DATA</strong>, <strong className="text-amber-400">HORARIO</strong>, <strong className="text-amber-400">TURMA</strong>, <strong className="text-amber-400">SIGLA</strong>, <strong className="text-amber-400">DISCIPLINA</strong>, <strong className="text-amber-400">SALA</strong>, <strong className="text-amber-400">MODULO</strong>, <strong className="text-amber-400">ANO</strong>.
             </p>
 
             <div className="border-2 border-dashed border-indigo-500/40 hover:border-indigo-400 rounded-2xl p-6 text-center space-y-3 bg-slate-950/50 transition">
               <Upload className="w-8 h-8 text-indigo-400 mx-auto" />
               <div className="text-xs text-slate-300">
                 <label className="cursor-pointer font-extrabold text-amber-400 hover:underline">
-                  Clique aqui para selecionar o arquivo Excel
+                  Clique aqui para selecionar o arquivo PDF ou Excel
                   <input
                     type="file"
-                    accept=".xlsx, .xls, .csv"
+                    accept=".pdf, .xlsx, .xls, .csv"
                     onChange={handleFileUpload}
                     className="hidden"
                   />

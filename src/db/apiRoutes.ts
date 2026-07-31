@@ -3112,6 +3112,32 @@ apiRouter.delete('/aluno-turma/aulas/:aulaId', async (req: Request, res: Respons
 // CALENDÁRIO DE AULAS ENDPOINTS
 // -------------------------------------------------------------
 
+// Helper to format turma code (e.g. DL1 -> DL 01, MC2 -> MC 02, TURMA1 -> TURMA 01)
+function formatTurmaCode(raw: any): string {
+  if (raw === null || raw === undefined) return 'DL 01';
+  let str = String(raw).trim();
+  if (!str) return 'DL 01';
+
+  str = str.replace(/\s+/g, ' ');
+
+  const match = str.match(/^([A-Za-zÀ-ÿ]+)[_\-\s]*(\d+)(.*)$/);
+  if (match) {
+    const prefix = match[1].toUpperCase();
+    const numStr = match[2];
+    const suffix = match[3] ? match[3].trim().toUpperCase() : '';
+
+    const formattedNum = numStr.length === 1 ? numStr.padStart(2, '0') : numStr;
+
+    return `${prefix} ${formattedNum}${suffix ? ' ' + suffix : ''}`.trim();
+  }
+
+  if (/^\d+$/.test(str)) {
+    return str.length === 1 ? str.padStart(2, '0') : str;
+  }
+
+  return str.toUpperCase();
+}
+
 // GET /calendario-aulas
 apiRouter.get('/calendario-aulas', async (req: Request, res: Response) => {
   try {
@@ -3121,7 +3147,7 @@ apiRouter.get('/calendario-aulas', async (req: Request, res: Response) => {
       id: r.id,
       data_calendario: r.data_calendario ? String(r.data_calendario).split('T')[0] : '',
       horario_calendario: r.horario_calendario || '',
-      turma_calendario: r.turma_calendario || '',
+      turma_calendario: formatTurmaCode(r.turma_calendario),
       sigla_calendario: r.sigla_calendario || '',
       disciplina_calendario: r.disciplina_calendario || '',
       sala_calendario: r.sala_calendario || '',
@@ -3139,7 +3165,7 @@ apiRouter.get('/calendario-aulas', async (req: Request, res: Response) => {
   }
 });
 
-// POST /calendario-aulas/import (Batch import from Excel / UI)
+// POST /calendario-aulas/import (Batch import from Excel / PDF / UI)
 apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) => {
   try {
     const { records, actor } = req.body;
@@ -3154,7 +3180,7 @@ apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) =
       const id = rec.id || `cal-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
       const dataCal = rec.data_calendario || new Date().toISOString().split('T')[0];
       const horaCal = rec.horario_calendario || '08:00 as 09:40';
-      const turmaCal = rec.turma_calendario || 'Geral';
+      const turmaCal = formatTurmaCode(rec.turma_calendario || 'DL 01');
       const siglaCal = rec.sigla_calendario || 'DISC';
       const discCal = rec.disciplina_calendario || null;
       const salaCal = rec.sala_calendario || null;
@@ -3187,7 +3213,7 @@ apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) =
       importedCount++;
     }
 
-    await insertAuditLog('Calendário', 'Importar Excel', `Importados ${importedCount} registros de calendário`, actor, req.ip);
+    await insertAuditLog('Calendário', 'Importar Tabela/PDF', `Importados ${importedCount} registros de calendário`, actor, req.ip);
     return res.json({ success: true, count: importedCount });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -3220,6 +3246,7 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
 
     const pool = getPool();
     const id = reqId || `cal-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const formattedTurma = formatTurmaCode(turma_calendario);
 
     await pool.query(
       `INSERT INTO calendario_aulas 
@@ -3242,7 +3269,7 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
         id,
         data_calendario,
         horario_calendario || '08:00 as 09:40',
-        turma_calendario,
+        formattedTurma,
         sigla_calendario,
         disciplina_calendario || null,
         sala_calendario || null,
