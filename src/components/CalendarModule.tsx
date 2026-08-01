@@ -1536,7 +1536,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
             <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-300 print:border-none print:shadow-none print:rounded-none p-4 print:p-0 text-black">
               {/* Header Único do Documento */}
-              <div className="text-center pb-2 border-b-2 border-black mb-3 font-sans">
+              <div className="text-center pb-2 border-b border-black mb-3 font-sans">
                 <span className="text-[11px] font-bold text-slate-800 uppercase font-mono tracking-wider block">
                   ACADEPOL CURSO DE FORMAÇÃO
                 </span>
@@ -1554,7 +1554,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   {weeksToRender.map((week) => (
                     <div key={`${week.weekNum}-${week.days[0]?.dateStr}`} className="semana-bloco">
                       {/* Week Header */}
-                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans bg-slate-100 border border-slate-300 print:border-black">
+                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans bg-slate-100 border border-black print:border-black print:border" style={{ borderWidth: '1px' }}>
                         SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
                       </div>
 
