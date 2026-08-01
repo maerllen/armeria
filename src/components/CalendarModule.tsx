@@ -1162,7 +1162,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         const firstName = getProfFirstName(fullName);
         return {
           isSingleProf: true,
-          displayName: firstName ? `Prof ${firstName}` : (profsList[0].sigla || 'Prof'),
+          displayName: firstName || profsList[0].sigla || matchedAux.sigla_professor || '',
           equipeNome: matchedAux.nome_da_equipe,
           titularNome: fullName,
           titularSigla: profsList[0].sigla || matchedAux.sigla_professor || '',
@@ -1210,7 +1210,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         const firstName = getProfFirstName(matched.professor_titular_equipe);
         return {
           isSingleProf: true,
-          displayName: firstName ? `Prof ${firstName}` : (titularSigla || 'Prof'),
+          displayName: firstName || titularSigla || '',
           equipeNome: matched.nome_da_equipe,
           titularNome: matched.professor_titular_equipe,
           titularSigla: titularSigla || 'TITULAR',
@@ -1257,7 +1257,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     return (
       <div className="flex flex-col space-y-0.5 justify-start items-center w-full h-full min-h-[36px] print:min-h-[30px] py-0.5">
         {slotRecords.map((rec) => {
-          const turma = (rec.turma_calendario || 'DL1').trim();
+          const turmaFormatted = formatTurmaCode(rec.turma_calendario || 'DL 01');
           const numAulaOnly = String(getCalculatedLessonNumber(rec));
 
           const teamInfo = getTeamProfessorsSiglas(rec);
@@ -1267,19 +1267,19 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               key={rec.id}
               onClick={() => setDetailRecord(rec)}
               className="celula-aula cursor-pointer hover:bg-amber-100 transition py-0.5 px-0.5 border border-slate-300 rounded bg-white shadow-xs text-black w-full text-center flex items-center justify-center space-x-0.5 overflow-hidden whitespace-nowrap text-[9.5px] print:text-[8.5px] leading-tight h-[20px] print:h-[18px] shrink-0"
-              title={`Clique para ver detalhes - ${turma} | ${numAulaOnly}ª Aula | Equipe ${teamInfo.equipeNome}`}
+              title={`Clique para ver detalhes - ${turmaFormatted} | ${numAulaOnly}° Aula | Equipe ${teamInfo.equipeNome}`}
             >
-              {/* TURMA_CALENDARIO */}
+              {/* TURMA_CALENDARIO (ex: DL 01) */}
               <span className="font-black text-black font-mono tracking-tight shrink-0">
-                {turma}
+                {turmaFormatted}
               </span>
 
-              {/* NUMERO_AULA_CALENDARIO */}
+              {/* NUMERO_AULA_CALENDARIO (ex: 3°) */}
               <span className="font-bold text-slate-800 font-mono shrink-0">
-                {numAulaOnly}ª
+                {numAulaOnly}°
               </span>
 
-              {/* PROFESSOR DISPLAY: Single prof -> "Prof João", Multiple profs -> Siglas */}
+              {/* PROFESSOR DISPLAY: Single prof -> "Maerllen", Multiple profs -> Siglas: MC BR GD */}
               {teamInfo.isSingleProf ? (
                 <span className="font-bold text-slate-950 font-mono text-[9px] print:text-[8px] truncate shrink-0">
                   {teamInfo.displayName}
@@ -1288,7 +1288,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 <span className="flex items-center space-x-0.5 shrink-0 overflow-hidden text-ellipsis">
                   {/* Professor Titular (Negrito) */}
                   {teamInfo.titularSigla && (
-                    <strong className="font-black text-slate-950 font-mono uppercase underline decoration-amber-500 decoration-2">
+                    <strong className="font-black text-slate-950 font-mono uppercase">
                       {teamInfo.titularSigla}
                     </strong>
                   )}
@@ -2642,7 +2642,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
                     {auxInstrutoresForm.length === 0 ? (
                       <p className="text-[11px] text-slate-400 italic">
-                        Nenhum instrutor adicional. (Se houver apenas 1 professor titular, a exibição no calendário mostrará <strong className="text-amber-300">"Prof [Primeiro Nome]"</strong>, por exemplo: <strong className="text-amber-300">Prof João</strong>).
+                        Nenhum instrutor adicional. (Se houver apenas 1 professor titular, a exibição no calendário mostrará <strong className="text-amber-300">"[Primeiro Nome]"</strong>, por exemplo: <strong className="text-amber-300">Maerllen</strong>).
                       </p>
                     ) : (
                       <div className="space-y-2">
@@ -2811,7 +2811,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                   <div className="mt-1">
                                     {isSingle ? (
                                       <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded text-[10px] font-bold">
-                                        Exibe no Calendário: Prof {cleanFirstName}
+                                        Exibe no Calendário: {cleanFirstName}
                                       </span>
                                     ) : (
                                       <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold">
