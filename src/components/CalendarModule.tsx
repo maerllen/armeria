@@ -1487,7 +1487,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   break-inside: avoid !important;
                   break-inside: avoid-page !important;
                   background-color: #ffffff !important;
-                  border: 1px solid #000000 !important;
+                  border: none !important;
                 }
                 tr, td, th {
                   page-break-inside: avoid !important;
@@ -1514,7 +1514,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 font-size: 9.5px !important;
                 color: #000000 !important;
                 table-layout: fixed !important;
-                border: 1px solid #000000 !important;
+                border: none !important;
               }
               .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
@@ -1531,7 +1531,10 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
               .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
-              .celula-aula { background-color: #ffffff !important; border: 1px solid #64748b !important; }
+              .celula-aula { background-color: #ffffff !important; border: 1px solid #cbd5e1 !important; }
+              @media print {
+                .celula-aula { border: none !important; }
+              }
             `}</style>
 
             <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-300 print:border-none print:shadow-none print:rounded-none p-4 print:p-0 text-black">
