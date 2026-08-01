@@ -2823,6 +2823,194 @@ apiRouter.get('/aluno-turma', async (req: Request, res: Response) => {
   }
 });
 
+// GET /course-classes/:id/students (List students for specific course class)
+apiRouter.get('/course-classes/:id/students', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+
+    // Get class details
+    const [clsRows]: any = await pool.query('SELECT * FROM course_classes WHERE id = ?', [id]);
+    const cls = clsRows && clsRows.length > 0 ? clsRows[0] : null;
+
+    let rows: any = [];
+    if (cls) {
+      const clsCode = cls.code || `${cls.career_abbreviation || 'DL'}-${cls.turma_number || '01'}`;
+      const altCode = clsCode.replace('-', ' ');
+      [rows] = await pool.query(
+        'SELECT * FROM aluno_turma WHERE turma_id = ? OR turma_aluno = ? OR turma_aluno = ? ORDER BY nome_aluno ASC',
+        [id, clsCode, altCode]
+      );
+    } else {
+      [rows] = await pool.query(
+        'SELECT * FROM aluno_turma WHERE turma_id = ? OR turma_aluno = ? ORDER BY nome_aluno ASC',
+        [id, id]
+      );
+    }
+
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      turmaId: r.turma_id || id,
+      turmaAluno: r.turma_aluno,
+      moduloAluno: r.modulo_aluno,
+      professorAluno: r.professor_aluno,
+      instrutor1Aluno: r.instrutor1_aluno,
+      instrutor2Aluno: r.instrutor2_aluno,
+      instrutor3Aluno: r.instrutor3_aluno,
+      instrutor4Aluno: r.instrutor4_aluno,
+      maspAluno: r.masp_aluno,
+      nomeAluno: r.nome_aluno,
+      situacaoAluno: r.situacao_aluno || 'Ativo',
+      departamentoAluno: r.departamento_aluno
+    }));
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /course-students/:id/lessons
+apiRouter.get('/course-students/:id/lessons', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM aluno_aulas WHERE aluno_id = ? ORDER BY aula_numero_aluno ASC', [id]);
+    const mapped = (rows || []).map((a: any) => ({
+      id: a.id,
+      alunoId: a.aluno_id,
+      aulaNomeAluno: a.aula_nome_aluno,
+      aulaNumeroAluno: a.aula_numero_aluno,
+      aulaDataAluno: a.aula_data_aluno ? String(a.aula_data_aluno).split('T')[0] : undefined,
+      aulaHoraAluno: a.aula_hora_aluno,
+      aulaConteudoAluno: a.aula_conteudo_aluno,
+      observacaoAluno: a.observacao_aluno,
+      notaAluno: a.nota_aluno,
+      createdAt: a.created_at,
+      updatedAt: a.updated_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /course-students/:id/lessons
+apiRouter.post('/course-students/:id/lessons', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { aulaNomeAluno, aulaNumeroAluno, aulaDataAluno, aulaHoraAluno, aulaConteudoAluno, observacaoAluno, notaAluno } = req.body;
+    const pool = getPool();
+    const targetAulaId = `aula-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const truncatedConteudo = aulaConteudoAluno ? String(aulaConteudoAluno).slice(0, 500) : null;
+
+    await pool.query(
+      `INSERT INTO aluno_aulas (id, aluno_id, aula_nome_aluno, aula_numero_aluno, aula_data_aluno, aula_hora_aluno, aula_conteudo_aluno, observacao_aluno, nota_aluno, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        targetAulaId,
+        id,
+        aulaNomeAluno || 'Aula',
+        Number(aulaNumeroAluno) || 1,
+        aulaDataAluno || null,
+        aulaHoraAluno || null,
+        truncatedConteudo,
+        observacaoAluno || null,
+        notaAluno || null
+      ]
+    );
+    return res.json({ success: true, id: targetAulaId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /student-lessons/:id
+apiRouter.put('/student-lessons/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { aulaNomeAluno, aulaNumeroAluno, aulaDataAluno, aulaHoraAluno, aulaConteudoAluno, observacaoAluno, notaAluno } = req.body;
+    const pool = getPool();
+    const truncatedConteudo = aulaConteudoAluno ? String(aulaConteudoAluno).slice(0, 500) : null;
+
+    await pool.query(
+      `UPDATE aluno_aulas SET
+         aula_nome_aluno = COALESCE(?, aula_nome_aluno),
+         aula_numero_aluno = COALESCE(?, aula_numero_aluno),
+         aula_data_aluno = COALESCE(?, aula_data_aluno),
+         aula_hora_aluno = COALESCE(?, aula_hora_aluno),
+         aula_conteudo_aluno = COALESCE(?, aula_conteudo_aluno),
+         observacao_aluno = COALESCE(?, observacao_aluno),
+         nota_aluno = COALESCE(?, nota_aluno)
+       WHERE id = ?`,
+      [
+        aulaNomeAluno || null,
+        aulaNumeroAluno ? Number(aulaNumeroAluno) : null,
+        aulaDataAluno || null,
+        aulaHoraAluno || null,
+        truncatedConteudo,
+        observacaoAluno || null,
+        notaAluno || null,
+        id
+      ]
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /student-lessons/:id
+apiRouter.delete('/student-lessons/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await pool.query('DELETE FROM aluno_aulas WHERE id = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /course-students/:id/transfer
+apiRouter.put('/course-students/:id/transfer', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { newTurmaId, newClassId } = req.body;
+    const targetClassId = newTurmaId || newClassId;
+    const pool = getPool();
+
+    const [clsRows]: any = await pool.query('SELECT * FROM course_classes WHERE id = ?', [targetClassId]);
+    if (!clsRows || clsRows.length === 0) return res.status(404).json({ error: 'Turma não encontrada' });
+    const newCls = clsRows[0];
+
+    const [stuRows]: any = await pool.query('SELECT * FROM aluno_turma WHERE id = ?', [id]);
+    if (!stuRows || stuRows.length === 0) return res.status(404).json({ error: 'Aluno não encontrado' });
+    const oldClassId = stuRows[0].turma_id;
+
+    await pool.query(
+      `UPDATE aluno_turma SET
+         turma_id = ?,
+         turma_aluno = ?,
+         professor_aluno = ?
+       WHERE id = ?`,
+      [
+        newCls.id,
+        newCls.code || `${newCls.career_abbreviation || 'DL'}-${newCls.turma_number || '01'}`,
+        newCls.teacher_name || null,
+        id
+      ]
+    );
+
+    if (oldClassId) await syncClassStudentCount(pool, oldClassId);
+    await syncClassStudentCount(pool, newCls.id);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /aluno-turma (Cadastrar aluno ou bloco de alunos na turma)
 apiRouter.post('/aluno-turma', async (req: Request, res: Response) => {
   try {

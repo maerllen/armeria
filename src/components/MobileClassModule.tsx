@@ -24,7 +24,8 @@ import {
   Calendar,
   Clock,
   MapPin,
-  ChevronRight
+  ChevronRight,
+  X
 } from 'lucide-react';
 
 interface StudentData {
@@ -1126,14 +1127,23 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
       {/* MODAL: ADD STUDENT */}
       {showAddStudent && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h4 className="text-xs font-bold text-slate-100 flex items-center space-x-1.5">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setShowAddStudent(false); }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 z-50 overflow-y-auto"
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-sm max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl relative my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-xs font-bold text-slate-100 flex items-center space-x-2">
                 <Plus className="w-4 h-4 text-amber-400" />
                 <span>Cadastrar Aluno na Turma</span>
               </h4>
-              <button onClick={() => setShowAddStudent(false)} className="text-slate-400">✕</button>
+              <button 
+                type="button" 
+                onClick={() => setShowAddStudent(false)} 
+                className="p-1.5 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Mode switch */}
@@ -1167,7 +1177,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                     value={newStudentName}
                     onChange={(e) => setNewStudentName(e.target.value)}
                     placeholder="Nome do aluno"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -1177,7 +1187,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                     value={newStudentMasp}
                     onChange={(e) => setNewStudentMasp(e.target.value)}
                     placeholder="Ex: 1234567"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1191,7 +1201,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                   value={newStudentBatchText}
                   onChange={(e) => setNewStudentBatchText(e.target.value)}
                   placeholder={'Carlos Silva\nMariana Santos\nPedro Henrique'}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
                 />
               </div>
             )}
@@ -1200,7 +1210,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
               <button
                 type="button"
                 onClick={() => setShowAddStudent(false)}
-                className="px-3 py-1.5 text-xs text-slate-400"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
               >
                 Cancelar
               </button>
@@ -1208,7 +1218,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                 type="button"
                 onClick={handleAddStudents}
                 disabled={addingStudent}
-                className="bg-amber-500 text-slate-950 font-bold text-xs px-4 py-1.5 rounded-xl disabled:opacity-50"
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-1.5 rounded-xl disabled:opacity-50 transition"
               >
                 {addingStudent ? 'Salvando...' : 'Cadastrar'}
               </button>
@@ -1219,16 +1229,25 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
       {/* MODAL: LESSONS & GRADES FOR SINGLE STUDENT */}
       {selectedStudentForLessons && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 w-full max-w-md my-6 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setSelectedStudentForLessons(null); }}
+          className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 z-50 overflow-y-auto"
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-md max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl relative my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2 text-indigo-400">
                 <BookOpen className="w-4 h-4" />
-                <h4 className="text-xs font-bold text-slate-100">
+                <h4 className="text-xs font-bold text-slate-100 truncate max-w-[220px]">
                   Aulas e Notas - {selectedStudentForLessons.nomeAluno}
                 </h4>
               </div>
-              <button onClick={() => setSelectedStudentForLessons(null)} className="text-slate-400">✕</button>
+              <button 
+                type="button" 
+                onClick={() => setSelectedStudentForLessons(null)} 
+                className="p-1.5 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             {/* Lesson Form */}
@@ -1244,7 +1263,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                   value={lessonName}
                   onChange={(e) => setLessonName(e.target.value)}
                   placeholder="Ex: Manejo de Pistola / Tiromêtro"
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 focus:border-indigo-500 focus:outline-none"
                 />
               </div>
 
@@ -1256,7 +1275,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                     min={1}
                     value={lessonNumber}
                     onChange={(e) => setLessonNumber(parseInt(e.target.value) || 1)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 font-mono font-bold"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 font-mono font-bold focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
                 <div>
@@ -1266,7 +1285,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                     value={lessonGrade}
                     onChange={(e) => setLessonGrade(e.target.value)}
                     placeholder="Ex: 9.5"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-amber-400 font-bold"
+                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-amber-400 font-bold focus:border-indigo-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1284,7 +1303,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
                   value={lessonContent}
                   onChange={(e) => setLessonContent(e.target.value.slice(0, 500))}
                   placeholder="Resumo do conteúdo ministrado..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 text-xs"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 text-xs focus:border-indigo-500 focus:outline-none"
                 />
               </div>
 
@@ -1339,8 +1358,9 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
             <div className="flex justify-end pt-2 border-t border-slate-800">
               <button
+                type="button"
                 onClick={() => setSelectedStudentForLessons(null)}
-                className="bg-slate-800 text-slate-200 font-bold text-xs px-4 py-1.5 rounded-xl"
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs px-4 py-1.5 rounded-xl transition"
               >
                 Fechar
               </button>
@@ -1351,14 +1371,23 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
       {/* MODAL: TRANSFER STUDENT */}
       {transferStudent && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h4 className="text-xs font-bold text-amber-400 flex items-center space-x-1.5">
+        <div 
+          onClick={(e) => { if (e.target === e.currentTarget) setTransferStudent(null); }}
+          className="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 z-50 overflow-y-auto"
+        >
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-5 w-full max-w-sm max-h-[85vh] overflow-y-auto space-y-4 shadow-2xl relative my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h4 className="text-xs font-bold text-amber-400 flex items-center space-x-2">
                 <ArrowRightLeft className="w-4 h-4" />
                 <span>Transferir Aluno</span>
               </h4>
-              <button onClick={() => setTransferStudent(null)} className="text-slate-400">✕</button>
+              <button 
+                type="button" 
+                onClick={() => setTransferStudent(null)} 
+                className="p-1.5 rounded-xl bg-slate-800/80 text-slate-400 hover:text-white hover:bg-slate-700 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
             </div>
 
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-1">
@@ -1371,7 +1400,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
               <select
                 value={transferTargetClassId}
                 onChange={(e) => setTransferTargetClassId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-100 text-xs font-mono"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-100 text-xs font-mono focus:border-amber-500 focus:outline-none"
               >
                 <option value="">-- Selecione a Turma --</option>
                 {courseClasses
@@ -1386,15 +1415,17 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
             <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
               <button
+                type="button"
                 onClick={() => setTransferStudent(null)}
-                className="px-3 py-1.5 text-xs text-slate-400"
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-white"
               >
                 Cancelar
               </button>
               <button
+                type="button"
                 onClick={handleExecuteTransfer}
                 disabled={transferring || !transferTargetClassId}
-                className="bg-amber-500 text-slate-950 font-bold text-xs px-4 py-1.5 rounded-xl disabled:opacity-50"
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-1.5 rounded-xl disabled:opacity-50 transition"
               >
                 {transferring ? 'Transferindo...' : 'Transferir'}
               </button>

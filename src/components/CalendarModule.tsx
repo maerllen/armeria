@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
-import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem } from '../types';
+import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem, CourseClass } from '../types';
 import { storage } from '../services/storage';
 import {
   Calendar,
@@ -263,6 +263,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   // Equipes state & Auxiliar Tabela Equipe state
   const [equipesList, setEquipesList] = useState<EquipeCalendario[]>([]);
   const [auxiliarEquipesList, setAuxiliarEquipesList] = useState<AuxiliarTabelaEquipe[]>([]);
+  const [createdTurmasList, setCreatedTurmasList] = useState<CourseClass[]>([]);
   const [systemUsers, setSystemUsers] = useState<User[]>([]);
   const [editingEquipeId, setEditingEquipeId] = useState<string | null>(null);
   const [equipeModalTab, setEquipeModalTab] = useState<'auxiliar' | 'base'>('auxiliar');
@@ -459,6 +460,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
       const lessonPlans = storage.getLessonPlans ? storage.getLessonPlans() : [];
       const courseClasses = storage.getCourseClasses ? storage.getCourseClasses() : [];
+      setCreatedTurmasList(courseClasses);
 
       const combined: { name: string; code?: string; dates?: string; module?: string; year?: number }[] = [];
 
@@ -2488,19 +2490,39 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                       </select>
                     </div>
 
-                    {/* Turma */}
+                    {/* Turma (Seleção das turmas criadas em Curso de Formação) */}
                     <div>
                       <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                        TURMA VINCULADA *
+                        TURMA VINCULADA (CURSO DE FORMAÇÃO) *
                       </label>
-                      <input
-                        type="text"
-                        required
+                      <select
                         value={auxForm.codigo_turma}
-                        onChange={(e) => setAuxForm({ ...auxForm, codigo_turma: e.target.value })}
-                        placeholder="Ex: DL 01, IP 01"
-                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                      />
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setAuxForm({ ...auxForm, codigo_turma: val });
+                        }}
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        <option value="">-- Selecione a Turma --</option>
+                        {createdTurmasList.map((c) => {
+                          const codeLabel = c.code || `${c.careerAbbreviation || 'DL'}-${c.turmaNumber || '01'}`;
+                          return (
+                            <option key={c.id} value={codeLabel}>
+                              Turma {codeLabel} • {c.career || 'Carreira'} {c.teacherName ? `(Prof. ${c.teacherName})` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <div className="mt-1">
+                        <input
+                          type="text"
+                          value={auxForm.codigo_turma}
+                          onChange={(e) => setAuxForm({ ...auxForm, codigo_turma: e.target.value })}
+                          placeholder="Ou digite/ajuste a sigla da turma (Ex: DL 01)"
+                          className="w-full bg-slate-950/80 border border-slate-700/60 rounded-lg p-1.5 text-[11px] text-slate-300 font-mono focus:border-amber-500 focus:outline-none"
+                        />
+                      </div>
                     </div>
 
                     {/* Matéria */}
