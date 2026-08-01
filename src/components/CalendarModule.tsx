@@ -1443,20 +1443,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   print-color-adjust: exact !important;
                   box-sizing: border-box !important;
                 }
-                html, body {
+                html, body, #root, #root > div, main {
                   background-color: #ffffff !important;
                   background-image: none !important;
                   color: #000000 !important;
                   box-shadow: none !important;
                   text-shadow: none !important;
-                }
-                body {
                   margin: 0 !important;
                   padding: 0 !important;
-                  background: #ffffff !important;
-                  color: #000000 !important;
-                  overflow: visible !important;
                   width: 100% !important;
+                  max-width: 100% !important;
+                  overflow: visible !important;
                 }
                 .print\\:hidden, header, aside, footer, nav, button, input, select {
                   display: none !important;
@@ -1464,7 +1461,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .folha-pagina {
                   width: 100% !important;
                   max-width: 100% !important;
-                  margin: 0 auto !important;
+                  margin: 0 !important;
                   background: #ffffff !important;
                   border: none !important;
                   padding: 0 !important;
@@ -1477,6 +1474,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   break-inside: avoid !important;
                   break-inside: avoid-page !important;
                   margin-bottom: 5mm !important;
+                  background-color: #ffffff !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1501,6 +1499,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 }
                 td.cell-slot > div {
                   min-height: 34px !important;
+                }
+                .celula-aula {
+                  border: none !important;
                 }
               }
               .folha-pagina {
