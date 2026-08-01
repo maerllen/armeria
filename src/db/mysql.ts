@@ -525,6 +525,31 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 25. Auxiliar Tabela Equipe
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`auxiliar_tabela_equipe\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`equipe_id\` VARCHAR(64) DEFAULT NULL,
+        \`nome_da_equipe\` VARCHAR(100) NOT NULL,
+        \`turma_id\` VARCHAR(64) DEFAULT NULL,
+        \`codigo_turma\` VARCHAR(64) NOT NULL,
+        \`materia\` VARCHAR(100) NOT NULL,
+        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
+        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
+        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
+        \`professores\` JSON DEFAULT NULL,
+        \`data_inicio\` DATE NOT NULL,
+        \`data_fim\` DATE NOT NULL,
+        \`observacao\` TEXT DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_aux_eq_equipe\` (\`equipe_id\`),
+        KEY \`idx_aux_eq_turma\` (\`codigo_turma\`),
+        KEY \`idx_aux_eq_periodo\` (\`data_inicio\`, \`data_fim\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // Create Backwards Compatible SQL Views for legacy English code queries
     try {
       await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);

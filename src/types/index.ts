@@ -469,6 +469,32 @@ export interface ProfessorEquipe {
   tipoFuncao?: 'TITULAR' | 'INSTRUTOR';
 }
 
+export interface AuxiliarTabelaEquipeItem {
+  id?: string;
+  nome: string;
+  sigla: string;
+  tipo?: 'TITULAR' | 'INSTRUTOR';
+}
+
+export interface AuxiliarTabelaEquipe {
+  id: string;
+  equipe_id?: string;
+  equipeId?: string;
+  nome_da_equipe: string;
+  turma_id?: string;
+  turmaId?: string;
+  codigo_turma: string;
+  materia: string;
+  professor_titular_id?: string;
+  professor_titular_nome?: string;
+  sigla_professor?: string;
+  professores?: AuxiliarTabelaEquipeItem[];
+  data_inicio: string; // YYYY-MM-DD
+  data_fim: string; // YYYY-MM-DD
+  observacao?: string;
+  createdAt?: string;
+}
+
 export interface EquipeCalendario {
   id: string;
   nome_da_equipe: string;

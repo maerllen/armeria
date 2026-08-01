@@ -21,7 +21,8 @@ import {
   AlunoAula,
   CalendarRecord,
   EquipeCalendario,
-  ProfessorEquipe
+  ProfessorEquipe,
+  AuxiliarTabelaEquipe
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -47,6 +48,7 @@ export interface AppState {
   lessonPlans: LessonPlan[];
   calendarRecords: CalendarRecord[];
   equipesCalendario: EquipeCalendario[];
+  auxiliarTabelaEquipe?: AuxiliarTabelaEquipe[];
 }
 
 class StorageService {
@@ -71,7 +73,8 @@ class StorageService {
     courseMovements: [],
     lessonPlans: [],
     calendarRecords: [],
-    equipesCalendario: []
+    equipesCalendario: [],
+    auxiliarTabelaEquipe: []
   };
 
   constructor() {
@@ -109,7 +112,8 @@ class StorageService {
         courseMovsRes,
         lessonPlansRes,
         calendarRecordsRes,
-        equipesCalendarioRes
+        equipesCalendarioRes,
+        auxiliarTabelaEquipeRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -130,7 +134,8 @@ class StorageService {
         fetch('/api/course-movements').then(r => r.ok ? r.json() : []),
         fetch('/api/lesson-plans').then(r => r.ok ? r.json() : []),
         fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : []),
-        fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : [])
+        fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : []),
+        fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -153,6 +158,7 @@ class StorageService {
       this.state.lessonPlans = lessonPlansRes || [];
       this.state.calendarRecords = calendarRecordsRes || [];
       this.state.equipesCalendario = equipesCalendarioRes || [];
+      this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
 
 
       // Refresh current user reference if logged in
@@ -1375,6 +1381,45 @@ class StorageService {
   public async deleteEquipeCalendario(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/equipes-calendario/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- AUXILIAR TABELA EQUIPE METHODS ---
+  public getAuxiliarTabelaEquipe(): AuxiliarTabelaEquipe[] {
+    return this.state.auxiliarTabelaEquipe || [];
+  }
+
+  public async saveAuxiliarTabelaEquipe(aux: Partial<AuxiliarTabelaEquipe>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/auxiliar-tabela-equipe', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...aux, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAuxiliarTabelaEquipe(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/auxiliar-tabela-equipe/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })

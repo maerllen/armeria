@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
-import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem } from '../types';
+import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem } from '../types';
 import { storage } from '../services/storage';
 import {
   Calendar,
@@ -260,10 +260,77 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [previewRecords, setPreviewRecords] = useState<CalendarRecord[]>([]);
   const [importing, setImporting] = useState<boolean>(false);
 
-  // Equipes state
+  // Equipes state & Auxiliar Tabela Equipe state
   const [equipesList, setEquipesList] = useState<EquipeCalendario[]>([]);
+  const [auxiliarEquipesList, setAuxiliarEquipesList] = useState<AuxiliarTabelaEquipe[]>([]);
   const [systemUsers, setSystemUsers] = useState<User[]>([]);
   const [editingEquipeId, setEditingEquipeId] = useState<string | null>(null);
+  const [equipeModalTab, setEquipeModalTab] = useState<'auxiliar' | 'base'>('auxiliar');
+
+  // Helper to get complete course period dates
+  const getCoursePeriodDates = () => {
+    const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
+    const validCourses = academyCourses.filter((c) => c.startDate && c.endDate);
+    if (validCourses.length > 0) {
+      const startDates = validCourses.map((c) => c.startDate!).sort();
+      const endDates = validCourses.map((c) => c.endDate!).sort();
+      return {
+        start: startDates[0],
+        end: endDates[endDates.length - 1]
+      };
+    }
+
+    if (records && records.length > 0) {
+      const validRecordDates = records.map((r) => r.data_calendario).filter(Boolean).sort();
+      if (validRecordDates.length > 0) {
+        return {
+          start: validRecordDates[0],
+          end: validRecordDates[validRecordDates.length - 1]
+        };
+      }
+    }
+
+    return { start: '2026-01-01', end: '2026-12-31' };
+  };
+
+  // Auxiliar Tabela Equipe Form State
+  const [editingAuxId, setEditingAuxId] = useState<string | null>(null);
+  const [auxForm, setAuxForm] = useState({
+    nome_da_equipe: 'Alpha',
+    codigo_turma: 'DL 01',
+    materia: 'MEAF',
+    professor_titular_nome: '',
+    sigla_professor: '',
+    data_inicio: '2026-01-01',
+    data_fim: '2026-12-31',
+    observacao: ''
+  });
+
+  const [auxInstrutoresForm, setAuxInstrutoresForm] = useState<{ nome: string; sigla: string }[]>([]);
+
+  const handleAddAuxInstrutorRow = () => {
+    setAuxInstrutoresForm((prev) => [...prev, { nome: '', sigla: '' }]);
+  };
+
+  const handleRemoveAuxInstrutorRow = (index: number) => {
+    setAuxInstrutoresForm((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const resetAuxForm = () => {
+    const period = getCoursePeriodDates();
+    setAuxForm({
+      nome_da_equipe: 'Alpha',
+      codigo_turma: 'DL 01',
+      materia: selectedDiscipline || 'MEAF',
+      professor_titular_nome: '',
+      sigla_professor: '',
+      data_inicio: period.start,
+      data_fim: period.end,
+      observacao: ''
+    });
+    setAuxInstrutoresForm([]);
+    setEditingAuxId(null);
+  };
 
   const [equipeForm, setEquipeForm] = useState({
     nome_da_equipe: 'Alpha',
@@ -378,9 +445,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       }));
       setRecords(loaded);
 
-      // Load Equipes & Users
+      // Load Equipes, Auxiliar Equipes & Users
       const loadedEquipes = storage.getEquipesCalendario ? storage.getEquipesCalendario() : [];
       setEquipesList(loadedEquipes);
+
+      const loadedAuxiliar = storage.getAuxiliarTabelaEquipe ? storage.getAuxiliarTabelaEquipe() : [];
+      setAuxiliarEquipesList(loadedAuxiliar);
+
       const loadedUsers = storage.getUsers ? storage.getUsers() : [];
       setSystemUsers(loadedUsers);
 
@@ -501,6 +572,87 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     } else {
       showToast('error', 'Erro ao excluir equipe: ' + (res.error || ''));
     }
+  };
+
+  // --- AUXILIAR TABELA EQUIPE HANDLERS ---
+  const handleSaveAuxiliarEquipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auxForm.nome_da_equipe || !auxForm.codigo_turma || !auxForm.materia || !auxForm.data_inicio || !auxForm.data_fim) {
+      showToast('error', 'Preencha Nome da Equipe, Turma, Matéria, Data Início e Data Fim.');
+      return;
+    }
+
+    const profsList: AuxiliarTabelaEquipeItem[] = [];
+
+    if (auxForm.professor_titular_nome.trim() || auxForm.sigla_professor.trim()) {
+      profsList.push({
+        nome: auxForm.professor_titular_nome.trim(),
+        sigla: auxForm.sigla_professor.trim().toUpperCase(),
+        tipo: 'TITULAR'
+      });
+    }
+
+    auxInstrutoresForm.forEach((inst) => {
+      if (inst.nome.trim() || inst.sigla.trim()) {
+        profsList.push({
+          nome: inst.nome.trim(),
+          sigla: inst.sigla.trim().toUpperCase(),
+          tipo: 'INSTRUTOR'
+        });
+      }
+    });
+
+    const payload: Partial<AuxiliarTabelaEquipe> = {
+      id: editingAuxId || undefined,
+      nome_da_equipe: auxForm.nome_da_equipe,
+      codigo_turma: formatTurmaCode(auxForm.codigo_turma),
+      materia: auxForm.materia,
+      professor_titular_nome: auxForm.professor_titular_nome,
+      sigla_professor: auxForm.sigla_professor,
+      professores: profsList,
+      data_inicio: auxForm.data_inicio,
+      data_fim: auxForm.data_fim,
+      observacao: auxForm.observacao
+    };
+
+    const res = await storage.saveAuxiliarTabelaEquipe(payload);
+    if (res.success) {
+      showToast('success', editingAuxId ? 'Vínculo da equipe atualizado com sucesso!' : 'Vínculo da equipe criado na Tabela Auxiliar!');
+      resetAuxForm();
+      await loadData();
+    } else {
+      showToast('error', 'Erro ao salvar vínculo na tabela auxiliar: ' + (res.error || ''));
+    }
+  };
+
+  const handleDeleteAuxiliarEquipe = async (id: string) => {
+    if (!window.confirm('Deseja realmente excluir este vínculo da tabela auxiliar de equipe?')) return;
+    const res = await storage.deleteAuxiliarTabelaEquipe(id);
+    if (res.success) {
+      showToast('success', 'Vínculo excluído com sucesso!');
+      await loadData();
+    } else {
+      showToast('error', 'Erro ao excluir vínculo: ' + (res.error || ''));
+    }
+  };
+
+  const handleEditAuxiliarEquipe = (aux: AuxiliarTabelaEquipe) => {
+    setEditingAuxId(aux.id);
+    setAuxForm({
+      nome_da_equipe: aux.nome_da_equipe || 'Alpha',
+      codigo_turma: aux.codigo_turma || 'DL 01',
+      materia: aux.materia || selectedDiscipline || 'MEAF',
+      professor_titular_nome: aux.professor_titular_nome || '',
+      sigla_professor: aux.sigla_professor || '',
+      data_inicio: aux.data_inicio || '2026-01-01',
+      data_fim: aux.data_fim || '2026-05-01',
+      observacao: aux.observacao || ''
+    });
+
+    const insts = (aux.professores || [])
+      .filter((p) => p.tipo !== 'TITULAR')
+      .map((p) => ({ nome: p.nome || '', sigla: p.sigla || '' }));
+    setAuxInstrutoresForm(insts);
   };
 
   const handleEditEquipe = (eq: EquipeCalendario) => {
@@ -951,16 +1103,95 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     return teachersOnly.length > 0 ? teachersOnly : systemUsers;
   }, [systemUsers, equipeForm.materia, selectedDiscipline]);
 
-  // Helper to extract team professor siglas and details
-  const getTeamProfessorsSiglas = (rec: CalendarRecord) => {
-    const eqName = (rec.equipe_calendario || '').trim().toLowerCase();
-    const disc = (rec.sigla_calendario || selectedDiscipline || '').trim().toUpperCase();
+  const getProfFirstName = (fullName: string): string => {
+    if (!fullName) return '';
+    const clean = fullName.replace(/^(Dr\.|Dra\.|Prof\.|Professor|Professora)\s+/i, '').trim();
+    const firstName = clean.split(/\s+/)[0] || '';
+    if (!firstName) return '';
+    return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+  };
 
+  // Helper to extract team professor siglas and details (with Auxiliar Tabela Equipe support)
+  const getTeamProfessorsSiglas = (rec: CalendarRecord) => {
+    const recDate = rec.data_calendario;
+    const recTurma = formatTurmaCode(rec.turma_calendario || 'DL 01');
+    const recSigla = (rec.sigla_calendario || selectedDiscipline || '').trim().toUpperCase();
+    const eqName = (rec.equipe_calendario || '').trim().toLowerCase();
+
+    // 1. Check Auxiliar Tabela Equipe first (period + turma + materia link)
+    const matchedAux = auxiliarEquipesList.find((aux) => {
+      const auxTurma = formatTurmaCode(aux.codigo_turma || '');
+      const auxMat = (aux.materia || '').trim().toUpperCase();
+      const isTurmaMatch = auxTurma === recTurma;
+      const isMatMatch = !auxMat || !recSigla || auxMat === recSigla || recSigla.includes(auxMat) || auxMat.includes(recSigla);
+      const isDateMatch = recDate >= aux.data_inicio && recDate <= aux.data_fim;
+
+      return isTurmaMatch && isMatMatch && isDateMatch;
+    });
+
+    if (matchedAux) {
+      const profsList: { nome: string; sigla: string; tipo: string }[] = [];
+
+      if (matchedAux.professor_titular_nome || matchedAux.sigla_professor) {
+        profsList.push({
+          nome: matchedAux.professor_titular_nome || '',
+          sigla: matchedAux.sigla_professor || '',
+          tipo: 'TITULAR'
+        });
+      }
+
+      if (Array.isArray(matchedAux.professores)) {
+        matchedAux.professores.forEach((p) => {
+          if (p.nome || p.sigla) {
+            const isDup = profsList.some(
+              (ex) => (p.nome && ex.nome === p.nome) || (p.sigla && ex.sigla === p.sigla)
+            );
+            if (!isDup) {
+              profsList.push({
+                nome: p.nome || '',
+                sigla: p.sigla || '',
+                tipo: p.tipo || 'INSTRUTOR'
+              });
+            }
+          }
+        });
+      }
+
+      if (profsList.length === 1) {
+        const fullName = profsList[0].nome || matchedAux.professor_titular_nome || '';
+        const firstName = getProfFirstName(fullName);
+        return {
+          isSingleProf: true,
+          displayName: firstName ? `Prof ${firstName}` : (profsList[0].sigla || 'Prof'),
+          equipeNome: matchedAux.nome_da_equipe,
+          titularNome: fullName,
+          titularSigla: profsList[0].sigla || matchedAux.sigla_professor || '',
+          instrutores: [],
+          instrutoresSiglas: [],
+          isAuxiliarMatch: true
+        };
+      } else if (profsList.length > 1) {
+        const titular = profsList.find((p) => p.tipo === 'TITULAR') || profsList[0];
+        const instrutores = profsList.filter((p) => p !== titular);
+        return {
+          isSingleProf: false,
+          displayName: '',
+          equipeNome: matchedAux.nome_da_equipe,
+          titularNome: titular.nome,
+          titularSigla: titular.sigla || 'TITULAR',
+          instrutores,
+          instrutoresSiglas: instrutores.map((i) => i.sigla).filter(Boolean),
+          isAuxiliarMatch: true
+        };
+      }
+    }
+
+    // 2. Fallback to base Equipes List
     const matched = equipesList.find((e) => {
       const eName = (e.nome_da_equipe || '').trim().toLowerCase();
       const eMat = (e.materia || '').trim().toUpperCase();
       const nameMatch = eName === eqName || eqName.includes(eName) || eName.includes(eqName);
-      const matMatch = !disc || !eMat || eMat === disc;
+      const matMatch = !recSigla || !eMat || eMat === recSigla;
       return nameMatch && matMatch;
     });
 
@@ -974,22 +1205,43 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         instrutoresSiglas.push(matched.sigla_instrutor.trim());
       }
 
+      const totalCount = (titularSigla ? 1 : 0) + instrutoresSiglas.length;
+      if (totalCount === 1 && matched.professor_titular_equipe) {
+        const firstName = getProfFirstName(matched.professor_titular_equipe);
+        return {
+          isSingleProf: true,
+          displayName: firstName ? `Prof ${firstName}` : (titularSigla || 'Prof'),
+          equipeNome: matched.nome_da_equipe,
+          titularNome: matched.professor_titular_equipe,
+          titularSigla: titularSigla || 'TITULAR',
+          instrutores: matched.instrutores || [],
+          instrutoresSiglas: [],
+          isAuxiliarMatch: false
+        };
+      }
+
       return {
+        isSingleProf: false,
+        displayName: '',
         equipeNome: matched.nome_da_equipe,
         titularNome: matched.professor_titular_equipe || 'Prof. Titular',
         titularSigla: titularSigla || (rec.equipe_calendario || 'TITULAR'),
         instrutores: matched.instrutores || [],
         instrutoresSiglas,
+        isAuxiliarMatch: false
       };
     }
 
-    // Fallback if team is typed as string e.g., "SILVA/ALVES" or "Alpha"
+    // 3. Fallback string
     return {
+      isSingleProf: false,
+      displayName: '',
       equipeNome: rec.equipe_calendario || '',
       titularNome: '',
       titularSigla: rec.equipe_calendario || '',
       instrutores: [],
       instrutoresSiglas: [],
+      isAuxiliarMatch: false
     };
   };
 
@@ -1027,22 +1279,28 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 {numAulaOnly}ª
               </span>
 
-              {/* SIGLAS DOS PROFESSORES DA EQUIPE (TITULAR EM NEGRITO) */}
-              <span className="flex items-center space-x-0.5 shrink-0 overflow-hidden text-ellipsis">
-                {/* Professor Titular (Negrito) */}
-                {teamInfo.titularSigla && (
-                  <strong className="font-black text-slate-950 font-mono uppercase underline decoration-amber-500 decoration-2">
-                    {teamInfo.titularSigla}
-                  </strong>
-                )}
+              {/* PROFESSOR DISPLAY: Single prof -> "Prof João", Multiple profs -> Siglas */}
+              {teamInfo.isSingleProf ? (
+                <span className="font-bold text-slate-950 font-mono text-[9px] print:text-[8px] truncate shrink-0">
+                  {teamInfo.displayName}
+                </span>
+              ) : (
+                <span className="flex items-center space-x-0.5 shrink-0 overflow-hidden text-ellipsis">
+                  {/* Professor Titular (Negrito) */}
+                  {teamInfo.titularSigla && (
+                    <strong className="font-black text-slate-950 font-mono uppercase underline decoration-amber-500 decoration-2">
+                      {teamInfo.titularSigla}
+                    </strong>
+                  )}
 
-                {/* Instrutores */}
-                {teamInfo.instrutoresSiglas.map((s, idx) => (
-                  <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[9px] print:text-[8px]">
-                    {s}
-                  </span>
-                ))}
-              </span>
+                  {/* Instrutores */}
+                  {teamInfo.instrutoresSiglas.map((s, idx) => (
+                    <span key={idx} className="font-medium text-slate-700 font-mono uppercase text-[9px] print:text-[8px]">
+                      {s}
+                    </span>
+                  ))}
+                </span>
+              )}
             </div>
           );
         })}
@@ -2142,21 +2400,21 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       )}
 
-      {/* MODAL 4: GERENCIAR EQUIPES CALENDÁRIO */}
+      {/* MODAL 4: GERENCIAR EQUIPES E TABELA AUXILIAR */}
       {showEquipeModal && (
         <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-6 space-y-6 shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
-                <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
                   <Users className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-slate-100">
-                    {editingEquipeId ? 'Editar Equipe Curso de Formação' : 'Equipe Curso de Formação'}
+                    Gerenciamento de Equipes e Professores
                   </h3>
                   <p className="text-[11px] text-slate-400">
-                    Cadastre a equipe e atribua as siglas do professor titular e múltiplos instrutores por matéria e curso.
+                    Vincule turmas a equipes em determinados períodos ou cadastre as equipes base do sistema.
                   </p>
                 </div>
               </div>
@@ -2164,6 +2422,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 onClick={() => {
                   setShowEquipeModal(false);
                   resetEquipeForm();
+                  resetAuxForm();
                 }}
                 className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 transition"
               >
@@ -2171,300 +2430,722 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               </button>
             </div>
 
-            {/* FORM */}
-            <form onSubmit={handleSaveEquipe} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
-                {/* Nome da Equipe */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    NOME DA EQUIPE *
-                  </label>
-                  <select
-                    value={equipeForm.nome_da_equipe}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, nome_da_equipe: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    {TEAM_NAMES_LIST.map((teamName) => (
-                      <option key={teamName} value={teamName}>
-                        Equipe {teamName}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            {/* SELEÇÃO DE ABAS DO MODAL */}
+            <div className="flex border-b border-slate-800 space-x-2">
+              <button
+                onClick={() => setEquipeModalTab('auxiliar')}
+                className={`px-4 py-2.5 text-xs font-black rounded-t-xl transition flex items-center space-x-2 border-b-2 ${
+                  equipeModalTab === 'auxiliar'
+                    ? 'border-amber-500 text-amber-400 bg-amber-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span>Vínculo por Turma e Período (Tabela Auxiliar Equipe)</span>
+              </button>
 
-                {/* Matéria */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    MATÉRIA / DISCIPLINA *
-                  </label>
-                  <select
-                    value={equipeForm.materia}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, materia: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    {uniqueSubjectsMap.length > 0 ? (
-                      uniqueSubjectsMap.map((s) => (
-                        <option key={s.sigla} value={s.sigla}>
-                          {s.sigla} - {s.nome}
-                        </option>
-                      ))
-                    ) : (
-                      <>
-                        <option value="MEAF">MEAF - Manuseio e Emprego de Armas de Fogo</option>
-                        <option value="TAP">TAP - Táticas de Ação Policial</option>
-                        <option value="DP">DP - Direito Processual Penal</option>
-                        <option value="TIG">TIG - Técnicas de Investigação</option>
-                      </>
-                    )}
-                  </select>
-                </div>
-
-                {/* Tipo de Curso - Somente Leitura */}
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    TIPO DE CURSO
-                  </label>
-                  <input
-                    type="text"
-                    value="Curso de Formação"
-                    readOnly
-                    disabled
-                    className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs text-amber-400 font-bold cursor-not-allowed opacity-90"
-                  />
-                </div>
-
-                {/* Nome do Curso de Formação (com código e datas) */}
-                <div className="md:col-span-3">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                    CURSO DE FORMAÇÃO (CÓDIGO BANCO E DATAS) *
-                  </label>
-                  <select
-                    value={equipeForm.nome_do_curso}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, nome_do_curso: e.target.value })}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    {formacaoCoursesList.map((c, i) => (
-                      <option key={i} value={c.name}>
-                        [{c.code || 'CFP-2026'}] {c.name} — Datas: {c.dates || '2026-01-01 a 2026-12-31'}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Professor Titular (Usuário) */}
-                <div>
-                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    PROFESSOR TITULAR (DA MATÉRIA) *
-                  </label>
-                  <select
-                    value={equipeForm.professor_titular_equipe}
-                    onChange={(e) => handleSelectTitularUser(e.target.value)}
-                    className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
-                    required
-                  >
-                    <option value="">Selecione o Professor Titular...</option>
-                    {availableTeachersForEquipe.map((u) => (
-                      <option key={u.id} value={u.name}>
-                        {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Sigla do Professor Titular */}
-                <div className="md:col-span-2">
-                  <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
-                    SIGLA DO PROFESSOR TITULAR *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={equipeForm.sigla_professor}
-                    onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value.toUpperCase() })}
-                    placeholder="Ex: JÃO SILVA JS"
-                    className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-mono font-bold uppercase focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* SEÇÃO INSTRUTORES (MÚLTIPLOS: INSTRUTOR 02, INSTRUTOR 03, INSTRUTOR 04) */}
-              <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                  <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
-                    <Users className="w-4 h-4" />
-                    <span>INSTRUTORES AUXILIARES (INSTRUTOR 02, 03, 04...)</span>
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleAddInstrutorRow}
-                    className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center space-x-1"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Adicionar Instrutor</span>
-                  </button>
-                </div>
-
-                <div className="space-y-2">
-                  {instrutoresForm.map((inst, index) => (
-                    <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
-                      <div className="md:col-span-6">
-                        <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
-                          {inst.rotulo || `INSTRUTOR 0${index + 2}`} (NOME DO PROFESSOR/INSTRUTOR)
-                        </label>
-                        <select
-                          value={inst.instrutorNome}
-                          onChange={(e) => handleSelectInstrutorUser(index, e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
-                        >
-                          <option value="">Selecione o Instrutor...</option>
-                          {availableTeachersForEquipe.map((u) => (
-                            <option key={u.id} value={u.name}>
-                              {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="md:col-span-5">
-                        <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
-                          SIGLA DO {inst.rotulo || `INSTRUTOR 0${index + 2}`}
-                        </label>
-                        <input
-                          type="text"
-                          value={inst.siglaInstrutor}
-                          onChange={(e) => handleUpdateInstrutorRow(index, 'siglaInstrutor', e.target.value.toUpperCase())}
-                          placeholder="Ex: JOÃO SILVA JS."
-                          className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-indigo-300 font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
-                        />
-                      </div>
-
-                      <div className="md:col-span-1 flex justify-end pt-3 md:pt-0">
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveInstrutorRow(index)}
-                          className="p-2 text-slate-400 hover:text-rose-400 transition hover:bg-rose-500/10 rounded-lg"
-                          title="Remover Instrutor"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex items-center justify-end space-x-2 pt-2">
-                {editingEquipeId && (
-                  <button
-                    type="button"
-                    onClick={resetEquipeForm}
-                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
-                  >
-                    Cancelar Edição
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition flex items-center space-x-1.5"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>{editingEquipeId ? 'Atualizar Equipe' : 'Salvar Equipe'}</span>
-                </button>
-              </div>
-            </form>
-
-            {/* TABELA DE EQUIPES CADASTRADAS */}
-            <div className="space-y-3 pt-4 border-t border-slate-800">
-              <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-widest flex items-center space-x-2">
+              <button
+                onClick={() => setEquipeModalTab('base')}
+                className={`px-4 py-2.5 text-xs font-black rounded-t-xl transition flex items-center space-x-2 border-b-2 ${
+                  equipeModalTab === 'base'
+                    ? 'border-emerald-500 text-emerald-400 bg-emerald-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
                 <Users className="w-4 h-4" />
-                <span>Equipes Cadastradas no Sistema ({equipesList.length})</span>
-              </h4>
+                <span>Cadastro de Equipes Base ({equipesList.length})</span>
+              </button>
+            </div>
 
-              {equipesList.length === 0 ? (
-                <p className="text-xs text-slate-500 text-center py-4 bg-slate-950/40 rounded-xl border border-slate-800">
-                  Nenhuma equipe cadastrada ainda. Preencha o formulário acima para criar uma equipe.
-                </p>
-              ) : (
-                <div className="max-h-60 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 sticky top-0">
-                      <tr>
-                        <th className="p-2.5">EQUIPE</th>
-                        <th className="p-2.5">MATÉRIA</th>
-                        <th className="p-2.5">CURSO / CÓDIGO / DATAS</th>
-                        <th className="p-2.5">PROFESSOR TITULAR</th>
-                        <th className="p-2.5">INSTRUTORES</th>
-                        <th className="p-2.5 text-center">AÇÕES</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60 text-slate-200">
-                      {equipesList.map((eq) => (
-                        <tr key={eq.id} className="hover:bg-slate-900/40">
-                          <td className="p-2.5 font-bold">
-                            <span className="px-2 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg text-[11px]">
-                              Equipe {eq.nome_da_equipe}
-                            </span>
-                          </td>
-                          <td className="p-2.5 font-mono text-amber-300 font-bold">{eq.materia}</td>
-                          <td className="p-2.5 text-[11px]">
-                            <div className="font-semibold text-slate-200">{eq.nome_do_curso}</div>
-                            <div className="text-[10px] text-slate-400 font-mono">
-                              Código: {eq.codigo_curso || 'CFP-2026'} | Datas: {eq.dates_curso || '2026'}
+            {/* ABA 1: TABELA AUXILIAR EQUIPE (VÍNCULO POR TURMA, PERÍODO E PROFESSORES) */}
+            {equipeModalTab === 'auxiliar' && (
+              <div className="space-y-6">
+                <form onSubmit={handleSaveAuxiliarEquipe} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
+                    {/* Equipe */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        EQUIPE (NOME) *
+                      </label>
+                      <select
+                        value={auxForm.nome_da_equipe}
+                        onChange={(e) => setAuxForm({ ...auxForm, nome_da_equipe: e.target.value })}
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {TEAM_NAMES_LIST.map((teamName) => (
+                          <option key={teamName} value={teamName}>
+                            Equipe {teamName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Turma */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        TURMA VINCULADA *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={auxForm.codigo_turma}
+                        onChange={(e) => setAuxForm({ ...auxForm, codigo_turma: e.target.value })}
+                        placeholder="Ex: DL 01, IP 01"
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Matéria */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        MATÉRIA / DISCIPLINA *
+                      </label>
+                      <select
+                        value={auxForm.materia}
+                        onChange={(e) => setAuxForm({ ...auxForm, materia: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {uniqueSubjectsMap.length > 0 ? (
+                          uniqueSubjectsMap.map((s) => (
+                            <option key={s.sigla} value={s.sigla}>
+                              {s.sigla} - {s.nome}
+                            </option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="MEAF">MEAF - Manuseio e Emprego de Armas de Fogo</option>
+                            <option value="TAP">TAP - Táticas de Ação Policial</option>
+                            <option value="DP">DP - Direito Processual Penal</option>
+                            <option value="TIG">TIG - Técnicas de Investigação</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Professor Titular (Nome) */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        PROFESSOR TITULAR *
+                      </label>
+                      <select
+                        value={auxForm.professor_titular_nome}
+                        onChange={(e) => {
+                          const userName = e.target.value;
+                          const matchedUser = systemUsers.find((u) => u.name === userName);
+                          const userSigla = matchedUser?.professorSigla || matchedUser?.professor_sigla || '';
+                          setAuxForm((prev) => ({
+                            ...prev,
+                            professor_titular_nome: userName,
+                            sigla_professor: userSigla ? userSigla.toUpperCase() : prev.sigla_professor
+                          }));
+                        }}
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="">Selecione ou digite abaixo...</option>
+                        {availableTeachersForEquipe.map((u) => (
+                          <option key={u.id} value={u.name}>
+                            {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Campo Livre para Nome do Professor (se não estiver na lista) */}
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        NOME COMPLETO DO PROFESSOR TITULAR
+                      </label>
+                      <input
+                        type="text"
+                        value={auxForm.professor_titular_nome}
+                        onChange={(e) => setAuxForm({ ...auxForm, professor_titular_nome: e.target.value })}
+                        placeholder="Ex: João Evangelista Nascimento"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Sigla do Professor Titular */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        SIGLA DO PROFESSOR TITULAR
+                      </label>
+                      <input
+                        type="text"
+                        value={auxForm.sigla_professor}
+                        onChange={(e) => setAuxForm({ ...auxForm, sigla_professor: e.target.value.toUpperCase() })}
+                        placeholder="Ex: JEN"
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-mono font-bold uppercase focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Período: Início */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">
+                        DATA INÍCIO DO PERÍODO *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={auxForm.data_inicio}
+                        onChange={(e) => setAuxForm({ ...auxForm, data_inicio: e.target.value })}
+                        className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Período: Fim */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-emerald-400 uppercase mb-1">
+                        DATA FIM DO PERÍODO *
+                      </label>
+                      <input
+                        type="date"
+                        required
+                        value={auxForm.data_fim}
+                        onChange={(e) => setAuxForm({ ...auxForm, data_fim: e.target.value })}
+                        className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-mono focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Observação */}
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        OBSERVAÇÃO / DESCRIÇÃO
+                      </label>
+                      <input
+                        type="text"
+                        value={auxForm.observacao}
+                        onChange={(e) => setAuxForm({ ...auxForm, observacao: e.target.value })}
+                        placeholder="Ex: Equipe Alfa MEAF primeiro semestre 2026"
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* INSTRUTORES ADICIONAIS NA TABELA AUXILIAR */}
+                  <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
+                        <Users className="w-4 h-4" />
+                        <span>INSTRUTORES AUXILIARES / ADICIONAIS NESTE PERÍODO</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAddAuxInstrutorRow}
+                        className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Adicionar Instrutor</span>
+                      </button>
+                    </div>
+
+                    {auxInstrutoresForm.length === 0 ? (
+                      <p className="text-[11px] text-slate-400 italic">
+                        Nenhum instrutor adicional. (Se houver apenas 1 professor titular, a exibição no calendário mostrará <strong className="text-amber-300">"Prof [Primeiro Nome]"</strong>, por exemplo: <strong className="text-amber-300">Prof João</strong>).
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        {auxInstrutoresForm.map((inst, index) => (
+                          <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                            <div className="md:col-span-6 space-y-1">
+                              <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                                INSTRUTOR 0{index + 2} (PROFESSOR DA MATÉRIA) *
+                              </label>
+                              <select
+                                value={inst.nome}
+                                onChange={(e) => {
+                                  const userName = e.target.value;
+                                  const matchedUser = systemUsers.find((u) => u.name === userName);
+                                  const userSigla = matchedUser?.professorSigla || matchedUser?.professor_sigla || '';
+                                  setAuxInstrutoresForm((prev) => {
+                                    const copy = [...prev];
+                                    copy[index] = {
+                                      ...copy[index],
+                                      nome: userName,
+                                      sigla: userSigla ? userSigla.toUpperCase() : copy[index].sigla
+                                    };
+                                    return copy;
+                                  });
+                                }}
+                                className="w-full bg-slate-950 border border-indigo-500/50 rounded-lg p-2 text-xs text-slate-100 font-bold focus:border-indigo-500 focus:outline-none"
+                              >
+                                <option value="">Selecione o Instrutor da matéria ({auxForm.materia || selectedDiscipline})...</option>
+                                {availableTeachersForEquipe.map((u) => (
+                                  <option key={u.id} value={u.name}>
+                                    {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
+                                  </option>
+                                ))}
+                              </select>
+
+                              {/* Campo livre em caso de nome customizado */}
+                              <input
+                                type="text"
+                                value={inst.nome}
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  setAuxInstrutoresForm((prev) => {
+                                    const copy = [...prev];
+                                    copy[index] = { ...copy[index], nome: val };
+                                    return copy;
+                                  });
+                                }}
+                                placeholder="Ou digite o nome completo..."
+                                className="w-full bg-slate-950/60 border border-slate-800 rounded-lg p-1.5 text-[11px] text-slate-300 focus:border-indigo-500 focus:outline-none font-medium"
+                              />
                             </div>
-                          </td>
-                          <td className="p-2.5 text-[11px]">
-                            <div className="font-semibold">{eq.professor_titular_equipe || '-'}</div>
-                            {eq.sigla_professor && (
-                              <span className="text-[10px] font-mono text-amber-400 font-bold">[{eq.sigla_professor}]</span>
-                            )}
-                          </td>
-                          <td className="p-2.5 text-[11px]">
-                            {eq.instrutores && eq.instrutores.length > 0 ? (
-                              <div className="space-y-1">
-                                {eq.instrutores.map((ins, idx) => (
-                                  <div key={idx} className="flex items-center space-x-1">
-                                    <span className="text-slate-300 font-medium">{ins.instrutorNome || 'Instrutor'}</span>
-                                    {ins.siglaInstrutor && (
-                                      <span className="text-[10px] font-mono text-indigo-400 font-bold">[{ins.siglaInstrutor}]</span>
+
+                            <div className="md:col-span-5">
+                              <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                                SIGLA DO INSTRUTOR 0{index + 2}
+                              </label>
+                              <input
+                                type="text"
+                                value={inst.sigla}
+                                onChange={(e) => {
+                                  const val = e.target.value.toUpperCase();
+                                  setAuxInstrutoresForm((prev) => {
+                                    const copy = [...prev];
+                                    copy[index] = { ...copy[index], sigla: val };
+                                    return copy;
+                                  });
+                                }}
+                                placeholder="Ex: FLS"
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-indigo-300 font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
+                              />
+                            </div>
+
+                            <div className="md:col-span-1 flex justify-end pt-5 md:pt-4">
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveAuxInstrutorRow(index)}
+                                className="p-2 text-slate-400 hover:text-rose-400 transition hover:bg-rose-500/10 rounded-lg"
+                                title="Remover Instrutor"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-2 pt-2">
+                    {editingAuxId && (
+                      <button
+                        type="button"
+                        onClick={resetAuxForm}
+                        className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
+                      >
+                        Cancelar Edição
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="px-6 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-amber-500/20 transition flex items-center space-x-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{editingAuxId ? 'Atualizar Vínculo' : 'Salvar Vínculo na Tabela Auxiliar'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* TABELA DE VÍNCULOS REGISTRADOS NA TABELA AUXILIAR */}
+                <div className="space-y-3 pt-4 border-t border-slate-800">
+                  <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-widest flex items-center space-x-2">
+                    <Layers className="w-4 h-4" />
+                    <span>Vínculos Cadastrados na Tabela Auxiliar ({auxiliarEquipesList.length})</span>
+                  </h4>
+
+                  {auxiliarEquipesList.length === 0 ? (
+                    <p className="text-xs text-slate-500 text-center py-4 bg-slate-950/40 rounded-xl border border-slate-800">
+                      Nenhum vínculo por período cadastrado ainda. Preencha o formulário acima para vincular uma turma, equipe e professores a um período.
+                    </p>
+                  ) : (
+                    <div className="max-h-64 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 sticky top-0">
+                          <tr>
+                            <th className="p-2.5">TURMA & EQUIPE</th>
+                            <th className="p-2.5">MATÉRIA</th>
+                            <th className="p-2.5">PERÍODO (INÍCIO A FIM)</th>
+                            <th className="p-2.5">PROFESSORES & EXIBIÇÃO NO CALENDÁRIO</th>
+                            <th className="p-2.5 text-center">AÇÕES</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                          {auxiliarEquipesList.map((aux) => {
+                            const profs = aux.professores || [];
+                            const isSingle = profs.length <= 1;
+                            const profName = aux.professor_titular_nome || (profs[0]?.nome) || '';
+                            const cleanFirstName = profName.replace(/^(Dr\.|Dra\.|Prof\.|Professor|Professora)\s+/i, '').trim().split(/\s+/)[0];
+
+                            return (
+                              <tr key={aux.id} className="hover:bg-slate-900/40">
+                                <td className="p-2.5 font-bold">
+                                  <div className="flex items-center space-x-1.5">
+                                    <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded text-[11px] font-mono">
+                                      {aux.codigo_turma}
+                                    </span>
+                                    <span className="text-slate-200">Equipe {aux.nome_da_equipe}</span>
+                                  </div>
+                                </td>
+
+                                <td className="p-2.5 font-mono text-amber-300 font-bold">{aux.materia}</td>
+
+                                <td className="p-2.5 font-mono text-emerald-400 text-[11px]">
+                                  {aux.data_inicio} <span className="text-slate-500">até</span> {aux.data_fim}
+                                </td>
+
+                                <td className="p-2.5 text-[11px]">
+                                  <div className="font-semibold text-slate-200">
+                                    Titular: {aux.professor_titular_nome || profs[0]?.nome || '-'}
+                                    {aux.sigla_professor && <span className="text-amber-400 font-mono ml-1">[{aux.sigla_professor}]</span>}
+                                  </div>
+                                  {profs.length > 1 && (
+                                    <div className="text-[10px] text-slate-400">
+                                      Instrutores: {profs.filter((p) => p.tipo !== 'TITULAR').map((p) => `${p.nome} [${p.sigla}]`).join(', ')}
+                                    </div>
+                                  )}
+                                  <div className="mt-1">
+                                    {isSingle ? (
+                                      <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded text-[10px] font-bold">
+                                        Exibe no Calendário: Prof {cleanFirstName}
+                                      </span>
+                                    ) : (
+                                      <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold">
+                                        Exibe no Calendário Siglas: {[aux.sigla_professor, ...profs.filter((p) => p.tipo !== 'TITULAR').map((p) => p.sigla)].filter(Boolean).join(' ')}
+                                      </span>
                                     )}
                                   </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div>
-                                <div className="font-semibold">{eq.instrutor_equipe || '-'}</div>
-                                {eq.sigla_instrutor && (
-                                  <span className="text-[10px] font-mono text-indigo-400 font-bold">[{eq.sigla_instrutor}]</span>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          <td className="p-2.5 text-center space-x-1">
-                            <button
-                              onClick={() => handleEditEquipe(eq)}
-                              className="p-1 text-slate-400 hover:text-amber-400 transition"
-                              title="Editar Equipe"
+                                </td>
+
+                                <td className="p-2.5 text-center space-x-1">
+                                  <button
+                                    onClick={() => handleEditAuxiliarEquipe(aux)}
+                                    className="p-1 text-slate-400 hover:text-amber-400 transition"
+                                    title="Editar Vínculo"
+                                  >
+                                    <Edit3 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteAuxiliarEquipe(aux.id)}
+                                    className="p-1 text-slate-400 hover:text-rose-400 transition"
+                                    title="Excluir Vínculo"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ABA 2: CADASTRO DE EQUIPES BASE */}
+            {equipeModalTab === 'base' && (
+              <div className="space-y-6">
+                <form onSubmit={handleSaveEquipe} className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 bg-slate-950/60 p-4 rounded-2xl border border-slate-800">
+                    {/* Nome da Equipe */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        NOME DA EQUIPE *
+                      </label>
+                      <select
+                        value={equipeForm.nome_da_equipe}
+                        onChange={(e) => setEquipeForm({ ...equipeForm, nome_da_equipe: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {TEAM_NAMES_LIST.map((teamName) => (
+                          <option key={teamName} value={teamName}>
+                            Equipe {teamName}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Matéria */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        MATÉRIA / DISCIPLINA *
+                      </label>
+                      <select
+                        value={equipeForm.materia}
+                        onChange={(e) => setEquipeForm({ ...equipeForm, materia: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {uniqueSubjectsMap.length > 0 ? (
+                          uniqueSubjectsMap.map((s) => (
+                            <option key={s.sigla} value={s.sigla}>
+                              {s.sigla} - {s.nome}
+                            </option>
+                          ))
+                        ) : (
+                          <>
+                            <option value="MEAF">MEAF - Manuseio e Emprego de Armas de Fogo</option>
+                            <option value="TAP">TAP - Táticas de Ação Policial</option>
+                            <option value="DP">DP - Direito Processual Penal</option>
+                            <option value="TIG">TIG - Técnicas de Investigação</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Tipo de Curso */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        TIPO DE CURSO
+                      </label>
+                      <input
+                        type="text"
+                        value="Curso de Formação"
+                        readOnly
+                        disabled
+                        className="w-full bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs text-amber-400 font-bold cursor-not-allowed opacity-90"
+                      />
+                    </div>
+
+                    {/* Nome do Curso de Formação */}
+                    <div className="md:col-span-3">
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        CURSO DE FORMAÇÃO (CÓDIGO BANCO E DATAS) *
+                      </label>
+                      <select
+                        value={equipeForm.nome_do_curso}
+                        onChange={(e) => setEquipeForm({ ...equipeForm, nome_do_curso: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        {formacaoCoursesList.map((c, i) => (
+                          <option key={i} value={c.name}>
+                            [{c.code || 'CFP-2026'}] {c.name} — Datas: {c.dates || '2026-01-01 a 2026-12-31'}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Professor Titular */}
+                    <div>
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        PROFESSOR TITULAR *
+                      </label>
+                      <select
+                        value={equipeForm.professor_titular_equipe}
+                        onChange={(e) => handleSelectTitularUser(e.target.value)}
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-slate-100 font-bold focus:border-amber-500 focus:outline-none"
+                        required
+                      >
+                        <option value="">Selecione o Professor Titular...</option>
+                        {availableTeachersForEquipe.map((u) => (
+                          <option key={u.id} value={u.name}>
+                            {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Sigla do Professor Titular */}
+                    <div className="md:col-span-2">
+                      <label className="block text-[10px] font-bold text-amber-400 uppercase mb-1">
+                        SIGLA DO PROFESSOR TITULAR *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={equipeForm.sigla_professor}
+                        onChange={(e) => setEquipeForm({ ...equipeForm, sigla_professor: e.target.value.toUpperCase() })}
+                        placeholder="Ex: JÃO SILVA JS"
+                        className="w-full bg-slate-900 border border-amber-500/50 rounded-xl p-2.5 text-xs text-amber-300 font-mono font-bold uppercase focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* SEÇÃO INSTRUTORES */}
+                  <div className="bg-slate-950/60 p-4 rounded-2xl border border-slate-800 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                      <label className="text-xs font-bold text-indigo-400 uppercase tracking-wider flex items-center space-x-1.5">
+                        <Users className="w-4 h-4" />
+                        <span>INSTRUTORES AUXILIARES</span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleAddInstrutorRow}
+                        className="px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Adicionar Instrutor</span>
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {instrutoresForm.map((inst, index) => (
+                        <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+                          <div className="md:col-span-6">
+                            <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                              {inst.rotulo || `INSTRUTOR 0${index + 2}`} (NOME)
+                            </label>
+                            <select
+                              value={inst.instrutorNome}
+                              onChange={(e) => handleSelectInstrutorUser(index, e.target.value)}
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-slate-100 focus:border-indigo-500 focus:outline-none"
                             >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
+                              <option value="">Selecione o Instrutor...</option>
+                              {availableTeachersForEquipe.map((u) => (
+                                <option key={u.id} value={u.name}>
+                                  {u.name} {u.professorSigla ? `[${u.professorSigla}]` : ''} ({u.teacherSubject || u.teacher_subject || 'Professor'})
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="md:col-span-5">
+                            <label className="block text-[9px] font-bold text-indigo-300 uppercase mb-0.5">
+                              SIGLA DO {inst.rotulo || `INSTRUTOR 0${index + 2}`}
+                            </label>
+                            <input
+                              type="text"
+                              value={inst.siglaInstrutor}
+                              onChange={(e) => handleUpdateInstrutorRow(index, 'siglaInstrutor', e.target.value.toUpperCase())}
+                              placeholder="Ex: JS"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2 text-xs text-indigo-300 font-mono font-bold uppercase focus:border-indigo-500 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="md:col-span-1 flex justify-end pt-3 md:pt-0">
                             <button
-                              onClick={() => handleDeleteEquipe(eq.id)}
-                              className="p-1 text-slate-400 hover:text-rose-400 transition"
-                              title="Excluir Equipe"
+                              type="button"
+                              onClick={() => handleRemoveInstrutorRow(index)}
+                              className="p-2 text-slate-400 hover:text-rose-400 transition hover:bg-rose-500/10 rounded-lg"
+                              title="Remover Instrutor"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
-                          </td>
-                        </tr>
+                          </div>
+                        </div>
                       ))}
-                    </tbody>
-                  </table>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end space-x-2 pt-2">
+                    {editingEquipeId && (
+                      <button
+                        type="button"
+                        onClick={resetEquipeForm}
+                        className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-700"
+                      >
+                        Cancelar Edição
+                      </button>
+                    )}
+                    <button
+                      type="submit"
+                      className="px-6 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs shadow-lg shadow-emerald-500/20 transition flex items-center space-x-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>{editingEquipeId ? 'Atualizar Equipe' : 'Salvar Equipe Base'}</span>
+                    </button>
+                  </div>
+                </form>
+
+                {/* TABELA DE EQUIPES CADASTRADAS */}
+                <div className="space-y-3 pt-4 border-t border-slate-800">
+                  <h4 className="text-xs font-extrabold text-amber-400 uppercase tracking-widest flex items-center space-x-2">
+                    <Users className="w-4 h-4" />
+                    <span>Equipes Base Cadastradas ({equipesList.length})</span>
+                  </h4>
+
+                  {equipesList.length === 0 ? (
+                    <p className="text-xs text-slate-500 text-center py-4 bg-slate-950/40 rounded-xl border border-slate-800">
+                      Nenhuma equipe cadastrada ainda. Preencha o formulário acima para criar uma equipe.
+                    </p>
+                  ) : (
+                    <div className="max-h-60 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-slate-900 text-slate-400 font-bold border-b border-slate-800 sticky top-0">
+                          <tr>
+                            <th className="p-2.5">EQUIPE</th>
+                            <th className="p-2.5">MATÉRIA</th>
+                            <th className="p-2.5">CURSO / CÓDIGO / DATAS</th>
+                            <th className="p-2.5">PROFESSOR TITULAR</th>
+                            <th className="p-2.5">INSTRUTORES</th>
+                            <th className="p-2.5 text-center">AÇÕES</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                          {equipesList.map((eq) => (
+                            <tr key={eq.id} className="hover:bg-slate-900/40">
+                              <td className="p-2.5 font-bold">
+                                <span className="px-2 py-1 bg-amber-500/10 text-amber-400 border border-amber-500/30 rounded-lg text-[11px]">
+                                  Equipe {eq.nome_da_equipe}
+                                </span>
+                              </td>
+                              <td className="p-2.5 font-mono text-amber-300 font-bold">{eq.materia}</td>
+                              <td className="p-2.5 text-[11px]">
+                                <div className="font-semibold text-slate-200">{eq.nome_do_curso}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  Código: {eq.codigo_curso || 'CFP-2026'} | Datas: {eq.dates_curso || '2026'}
+                                </div>
+                              </td>
+                              <td className="p-2.5 text-[11px]">
+                                <div className="font-semibold">{eq.professor_titular_equipe || '-'}</div>
+                                {eq.sigla_professor && (
+                                  <span className="text-[10px] font-mono text-amber-400 font-bold">[{eq.sigla_professor}]</span>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-[11px]">
+                                {eq.instrutores && eq.instrutores.length > 0 ? (
+                                  <div className="space-y-1">
+                                    {eq.instrutores.map((ins, idx) => (
+                                      <div key={idx} className="flex items-center space-x-1">
+                                        <span className="text-slate-300 font-medium">{ins.instrutorNome || 'Instrutor'}</span>
+                                        {ins.siglaInstrutor && (
+                                          <span className="text-[10px] font-mono text-indigo-400 font-bold">[{ins.siglaInstrutor}]</span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <div className="font-semibold">{eq.instrutor_equipe || '-'}</div>
+                                    {eq.sigla_instrutor && (
+                                      <span className="text-[10px] font-mono text-indigo-400 font-bold">[{eq.sigla_instrutor}]</span>
+                                    )}
+                                  </div>
+                                )}
+                              </td>
+                              <td className="p-2.5 text-center space-x-1">
+                                <button
+                                  onClick={() => handleEditEquipe(eq)}
+                                  className="p-1 text-slate-400 hover:text-amber-400 transition"
+                                  title="Editar Equipe"
+                                >
+                                  <Edit3 className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteEquipe(eq.id)}
+                                  className="p-1 text-slate-400 hover:text-rose-400 transition"
+                                  title="Excluir Equipe"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}

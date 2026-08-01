@@ -3554,3 +3554,127 @@ apiRouter.delete('/equipes-calendario/:id', async (req: Request, res: Response) 
   }
 });
 
+// -------------------------------------------------------------
+// AUXILIAR TABELA EQUIPE ENDPOINTS
+// -------------------------------------------------------------
+
+// GET /auxiliar-tabela-equipe
+apiRouter.get('/auxiliar-tabela-equipe', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM auxiliar_tabela_equipe ORDER BY data_inicio ASC, data_criacao DESC');
+    const mapped = (rows || []).map((r: any) => {
+      let profsParsed: any[] = [];
+      if (typeof r.professores === 'string') {
+        try { profsParsed = JSON.parse(r.professores); } catch { profsParsed = []; }
+      } else if (Array.isArray(r.professores)) {
+        profsParsed = r.professores;
+      }
+
+      return {
+        id: r.id,
+        equipe_id: r.equipe_id || '',
+        equipeId: r.equipe_id || '',
+        nome_da_equipe: r.nome_da_equipe || '',
+        turma_id: r.turma_id || '',
+        turmaId: r.turma_id || '',
+        codigo_turma: r.codigo_turma || '',
+        materia: r.materia || '',
+        professor_titular_id: r.professor_titular_id || '',
+        professor_titular_nome: r.professor_titular_nome || '',
+        sigla_professor: r.sigla_professor || '',
+        professores: profsParsed,
+        data_inicio: r.data_inicio ? String(r.data_inicio).split('T')[0] : '',
+        data_fim: r.data_fim ? String(r.data_fim).split('T')[0] : '',
+        observacao: r.observacao || '',
+        createdAt: r.data_criacao
+      };
+    });
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /auxiliar-tabela-equipe
+apiRouter.post('/auxiliar-tabela-equipe', async (req: Request, res: Response) => {
+  try {
+    const {
+      id: reqId,
+      equipe_id,
+      nome_da_equipe,
+      turma_id,
+      codigo_turma,
+      materia,
+      professor_titular_id,
+      professor_titular_nome,
+      sigla_professor,
+      professores,
+      data_inicio,
+      data_fim,
+      observacao,
+      actor
+    } = req.body;
+
+    if (!nome_da_equipe || !codigo_turma || !materia || !data_inicio || !data_fim) {
+      return res.status(400).json({ error: 'Nome da Equipe, Turma, Matéria, Data Início e Data Fim são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = reqId || `aux-eq-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    const formattedTurma = formatTurmaCode(codigo_turma);
+    const profsJson = JSON.stringify(professores || []);
+
+    await pool.query(
+      `INSERT INTO auxiliar_tabela_equipe
+        (id, equipe_id, nome_da_equipe, turma_id, codigo_turma, materia, professor_titular_id, professor_titular_nome, sigla_professor, professores, data_inicio, data_fim, observacao, data_criacao)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+        equipe_id = VALUES(equipe_id),
+        nome_da_equipe = VALUES(nome_da_equipe),
+        turma_id = VALUES(turma_id),
+        codigo_turma = VALUES(codigo_turma),
+        materia = VALUES(materia),
+        professor_titular_id = VALUES(professor_titular_id),
+        professor_titular_nome = VALUES(professor_titular_nome),
+        sigla_professor = VALUES(sigla_professor),
+        professores = VALUES(professores),
+        data_inicio = VALUES(data_inicio),
+        data_fim = VALUES(data_fim),
+        observacao = VALUES(observacao)`,
+      [
+        id,
+        equipe_id || null,
+        nome_da_equipe,
+        turma_id || null,
+        formattedTurma,
+        materia,
+        professor_titular_id || null,
+        professor_titular_nome || null,
+        sigla_professor || null,
+        profsJson,
+        data_inicio,
+        data_fim,
+        observacao || null
+      ]
+    );
+
+    await insertAuditLog('Calendário', 'Salvar Vínculo Auxiliar Equipe', `Cadastrado/Atualizado vínculo da Equipe ${nome_da_equipe} com Turma ${formattedTurma} (${materia}) do dia ${data_inicio} até ${data_fim}`, actor, req.ip);
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /auxiliar-tabela-equipe/:id
+apiRouter.delete('/auxiliar-tabela-equipe/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await pool.query('DELETE FROM auxiliar_tabela_equipe WHERE id = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
