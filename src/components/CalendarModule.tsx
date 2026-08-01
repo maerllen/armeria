@@ -1436,7 +1436,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               @media print {
                 @page {
                   size: A4 portrait;
-                  margin: 6mm;
+                  margin: 10mm 8mm;
                 }
                 * {
                   -webkit-print-color-adjust: exact !important;
@@ -1472,9 +1472,11 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   border-radius: 0 !important;
                 }
                 .semana-bloco {
+                  display: block !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 4mm !important;
+                  break-inside: avoid-page !important;
+                  margin-bottom: 5mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1483,12 +1485,14 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   border-collapse: collapse !important;
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
+                  break-inside: avoid-page !important;
                   background-color: #ffffff !important;
-                  border: 1.5px solid #000000 !important;
+                  border: 1px solid #000000 !important;
                 }
                 tr, td, th {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
+                  break-inside: avoid-page !important;
                 }
                 td.cell-slot {
                   height: 34px !important;
@@ -1510,7 +1514,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 font-size: 9.5px !important;
                 color: #000000 !important;
                 table-layout: fixed !important;
-                border: 1.5px solid #000000 !important;
+                border: 1px solid #000000 !important;
               }
               .folha-pagina th, .folha-pagina td {
                 border: 1px solid #000000 !important;
@@ -1530,7 +1534,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               .celula-aula { background-color: #ffffff !important; border: 1px solid #64748b !important; }
             `}</style>
 
-            <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-4 print:p-2 text-black">
+            <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-300 print:border-none print:shadow-none print:rounded-none p-4 print:p-0 text-black">
               {/* Header Único do Documento */}
               <div className="text-center pb-2 border-b-2 border-black mb-3 font-sans">
                 <span className="text-[11px] font-bold text-slate-800 uppercase font-mono tracking-wider block">

@@ -13,8 +13,11 @@ import {
   GraduationCap,
   Award,
   Smartphone,
-  Calendar
+  Calendar,
+  X,
+  Shield
 } from 'lucide-react';
+import { formatMasp } from '../utils/masks';
 
 interface SidebarProps {
   currentUser: UserType | null;
@@ -22,6 +25,8 @@ interface SidebarProps {
   activeModule: ModuleType;
   onSelectModule: (module: ModuleType) => void;
   pendingMovementsCount?: number;
+  isOpenMobile?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -29,7 +34,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   departments = [],
   activeModule,
   onSelectModule,
-  pendingMovementsCount = 0
+  pendingMovementsCount = 0,
+  isOpenMobile = false,
+  onCloseMobile
 }) => {
   const userRole = currentUser?.role || 'Policial';
 
@@ -83,6 +90,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
     },
     {
+      id: 'iniciar-aula-mobile',
+      label: 'Iniciar Aula (Modo Celular)',
+      icon: Smartphone,
+      visible: true
+    },
+    {
       id: 'cursos',
       label: 'Curso de Formação',
       icon: GraduationCap,
@@ -114,10 +127,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
   ];
 
-  return (
-    <aside className="w-full md:w-64 glass border-r border-slate-800/80 shrink-0 min-h-[calc(100vh-4rem)] p-4 flex flex-col justify-between print:hidden">
-      <div className="space-y-1">
-        <div className="px-3 py-2 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest font-mono">
+  const handleItemClick = (mod: ModuleType) => {
+    onSelectModule(mod);
+    if (onCloseMobile) {
+      onCloseMobile();
+    }
+  };
+
+  const sidebarContent = (
+    <div className="flex flex-col justify-between h-full p-4 space-y-4">
+      <div className="space-y-3">
+        {/* Mobile-only header inside drawer */}
+        <div className="flex items-center justify-between pb-3 border-b border-slate-800 md:hidden">
+          <div className="flex items-center space-x-2.5">
+            <div className="bg-amber-500 p-1.5 rounded-lg text-slate-950 font-bold">
+              <Shield className="w-4 h-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-slate-100">{currentUser?.name}</p>
+              <p className="text-[10px] text-slate-400 font-mono">MASP: {formatMasp(currentUser?.masp || '')}</p>
+            </div>
+          </div>
+          {onCloseMobile && (
+            <button
+              onClick={onCloseMobile}
+              className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+
+        <div className="px-3 py-1 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest font-mono">
           MÓDULOS DA ARMERIA
         </div>
         <nav className="space-y-1.5">
@@ -129,7 +170,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               return (
                 <button
                   key={item.id}
-                  onClick={() => onSelectModule(item.id)}
+                  onClick={() => handleItemClick(item.id)}
                   className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all duration-200 ${
                     isActive
                       ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20 neon-border'
@@ -158,10 +199,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
 
       {/* Footer Info */}
-      <div className="mt-8 pt-4 border-t border-slate-800/80 text-[11px] text-slate-500 space-y-1">
+      <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-500 space-y-1">
         <p className="font-semibold text-slate-400 font-mono">Armeria v2.0 • Polícia Civil</p>
         <p className="text-[10px] text-slate-500">Gestão Tática de Armamento</p>
       </div>
-    </aside>
+    </div>
+  );
+
+  return (
+    <>
+      {/* Desktop Sidebar */}
+      <aside className="hidden md:flex w-64 glass border-r border-slate-800/80 shrink-0 min-h-[calc(100vh-4rem)] flex-col justify-between print:hidden">
+        {sidebarContent}
+      </aside>
+
+      {/* Mobile Sidebar Overlay Drawer */}
+      {isOpenMobile && (
+        <div className="fixed inset-0 z-50 md:hidden flex print:hidden">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm transition-opacity"
+            onClick={onCloseMobile}
+          />
+
+          {/* Drawer Container */}
+          <div className="relative w-4/5 max-w-xs bg-slate-900 border-r border-slate-800 h-full shadow-2xl flex flex-col z-10 overflow-y-auto">
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+    </>
   );
 };
+

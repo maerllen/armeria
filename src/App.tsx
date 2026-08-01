@@ -3,6 +3,8 @@ import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, M
 import { storage } from './services/storage';
 import { Navbar } from './components/Navbar';
 import { Sidebar } from './components/Sidebar';
+import { MobileBottomNav } from './components/MobileBottomNav';
+import { useDeviceDetection } from './utils/deviceDetection';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { ProfileModule } from './components/ProfileModule';
@@ -21,8 +23,10 @@ import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertT
 import { formatTimestamp } from './utils/masks';
 
 export default function App() {
+  const { deviceInfo, setDeviceMode } = useDeviceDetection();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>('meu-perfil');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // App domain state from storage service
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -66,7 +70,7 @@ export default function App() {
     }
   };
 
-  const isMobileMode = React.useMemo(() => {
+  const isMobileUrlMode = React.useMemo(() => {
     if (typeof window === 'undefined') return false;
     const search = window.location.search;
     const path = window.location.pathname;
@@ -74,8 +78,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (isMobileUrlMode) {
+      setActiveModule('iniciar-aula-mobile');
+    }
     refreshData();
-  }, []);
+  }, [isMobileUrlMode]);
 
   const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
     setLoginError('');
@@ -113,18 +120,18 @@ export default function App() {
     refreshData();
   };
 
-  if (isMobileMode) {
-    return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
-        <MobileClassModule
-          currentUser={currentUser || ({ id: 'temp-mobile', masp: '', name: 'Instrutor', role: 'Armeiro', cargo: 'Inspetor de Polícia' } as unknown as User)}
-          onRefresh={refreshData}
-        />
-      </div>
-    );
-  }
-
   if (!currentUser) {
+    if (isMobileUrlMode) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+          <MobileClassModule
+            currentUser={({ id: 'temp-mobile', masp: '', name: 'Instrutor', role: 'Armeiro', cargo: 'Inspetor de Polícia' } as unknown as User)}
+            onRefresh={refreshData}
+          />
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
         <LoginModal
@@ -136,6 +143,8 @@ export default function App() {
     );
   }
 
+  const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
@@ -145,71 +154,79 @@ export default function App() {
         onLogout={handleLogout}
         onChangePasswordClick={() => setShowChangePasswordModal(true)}
         onUserSwitched={refreshData}
+        deviceInfo={deviceInfo}
+        onSetDeviceMode={setDeviceMode}
+        isMobileMenuOpen={isMobileMenuOpen}
+        onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
       />
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative">
         
-        {/* Sidebar Navigation */}
+        {/* Sidebar Navigation (Desktop & Mobile Drawer) */}
         <Sidebar
           currentUser={currentUser}
           departments={departments}
           activeModule={activeModule}
-          onSelectModule={(mod) => setActiveModule(mod)}
-          pendingMovementsCount={movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length}
+          onSelectModule={(mod) => {
+            setActiveModule(mod);
+            setIsMobileMenuOpen(false);
+          }}
+          pendingMovementsCount={pendingMovementsCount}
+          isOpenMobile={isMobileMenuOpen}
+          onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
 
         {/* Main Workspace */}
-        <main className="flex-1 p-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-6">
+        <main className="flex-1 p-3 sm:p-6 pb-20 md:pb-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-4 sm:space-y-6">
           
           {/* Dashboard Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 print:hidden">
-            <div className="glass-card hover:border-amber-500/40 rounded-2xl p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                <Crosshair className="w-5 h-5" />
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
+            <div className="glass-card hover:border-amber-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+              <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 shrink-0">
+                <Crosshair className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono">Armas em Acervo</span>
-                <p className="text-xl font-black text-slate-100 font-mono">{weapons.length}</p>
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Armas em Acervo</span>
+                <p className="text-lg sm:text-xl font-black text-slate-100 font-mono">{weapons.length}</p>
               </div>
             </div>
 
-            <div className="glass-card hover:border-cyan-500/40 rounded-2xl p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20">
-                <Disc className="w-5 h-5" />
+            <div className="glass-card hover:border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+              <div className="p-2 sm:p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20 shrink-0">
+                <Disc className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono">Munições em Estoque</span>
-                <p className="text-xl font-black text-slate-100 font-mono">
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Munições em Estoque</span>
+                <p className="text-lg sm:text-xl font-black text-slate-100 font-mono truncate">
                   {ammoStocks.reduce((acc, curr) => acc + curr.quantity, 0)} <span className="text-xs text-slate-400 font-normal">un</span>
                 </p>
               </div>
             </div>
 
-            <div className="glass-card hover:border-purple-500/40 rounded-2xl p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2.5 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20">
-                <ArrowRightLeft className="w-5 h-5" />
+            <div className="glass-card hover:border-purple-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+              <div className="p-2 sm:p-2.5 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20 shrink-0">
+                <ArrowRightLeft className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono">Em Trânsito</span>
-                <p className="text-xl font-black text-amber-400 font-mono">
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Em Trânsito</span>
+                <p className="text-lg sm:text-xl font-black text-amber-400 font-mono">
                   {weapons.filter(w => w.status === 'Em Trânsito').length}
                 </p>
               </div>
             </div>
 
-            <div className="glass-card hover:border-emerald-500/40 rounded-2xl p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20">
-                <Vault className="w-5 h-5" />
+            <div className="glass-card hover:border-emerald-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+              <div className="p-2 sm:p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
+                <Vault className="w-4 h-4 sm:w-5 sm:h-5" />
               </div>
-              <div>
-                <span className="text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono">No Cofre</span>
-                <p className="text-xl font-black text-emerald-400 font-mono">
+              <div className="min-w-0">
+                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">No Cofre</span>
+                <p className="text-lg sm:text-xl font-black text-emerald-400 font-mono">
                   {weapons.filter(w => w.status === 'No Cofre').length}
                 </p>
               </div>
             </div>
           </div>
-
 
           {/* Module Views */}
           {activeModule === 'meu-perfil' && currentUser && (
@@ -361,7 +378,7 @@ export default function App() {
           {/* Footer Bar with Audit Log Trigger */}
           <footer className="pt-6 border-t border-slate-800 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 print:hidden">
             <div>
-              Polícia Civil • <strong className="text-slate-400">Armeria</strong> v2.0
+              Polícia Civil • <strong className="text-slate-400">Armeria</strong> v2.0 ({deviceInfo.isMobile ? 'Modo Celular' : 'Modo Computador'})
             </div>
 
             <button
@@ -375,6 +392,19 @@ export default function App() {
 
         </main>
       </div>
+
+      {/* Mobile Bottom Navigation Bar */}
+      {deviceInfo.isMobile && (
+        <MobileBottomNav
+          activeModule={activeModule}
+          onSelectModule={(mod) => {
+            setActiveModule(mod);
+            setIsMobileMenuOpen(false);
+          }}
+          onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
+          pendingMovementsCount={pendingMovementsCount}
+        />
+      )}
 
       {/* Change Password Modal */}
       {(showChangePasswordModal || currentUser.password === currentUser.masp || currentUser.mustChangePassword) && currentUser && (
@@ -433,3 +463,4 @@ export default function App() {
     </div>
   );
 }
+
