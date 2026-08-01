@@ -1157,28 +1157,30 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         });
       }
 
-      if (profsList.length === 1) {
-        const fullName = profsList[0].nome || matchedAux.professor_titular_nome || '';
+      const titular = profsList.find((p) => p.tipo === 'TITULAR') || profsList[0];
+      const instrutores = profsList.filter((p) => p !== titular && (p.tipo === 'INSTRUTOR' || p.tipo === 'INSTRUTORES'));
+      const hasInstructors = instrutores.length > 0;
+
+      if (!hasInstructors) {
+        const fullName = titular?.nome || matchedAux.professor_titular_nome || '';
         const firstName = getProfFirstName(fullName);
         return {
-          isSingleProf: true,
-          displayName: firstName || profsList[0].sigla || matchedAux.sigla_professor || '',
+          hasInstructors: false,
+          displayName: firstName || fullName || titular?.sigla || matchedAux.sigla_professor || '',
           equipeNome: matchedAux.nome_da_equipe,
           titularNome: fullName,
-          titularSigla: profsList[0].sigla || matchedAux.sigla_professor || '',
+          titularSigla: titular?.sigla || matchedAux.sigla_professor || '',
           instrutores: [],
           instrutoresSiglas: [],
           isAuxiliarMatch: true
         };
-      } else if (profsList.length > 1) {
-        const titular = profsList.find((p) => p.tipo === 'TITULAR') || profsList[0];
-        const instrutores = profsList.filter((p) => p !== titular);
+      } else {
         return {
-          isSingleProf: false,
+          hasInstructors: true,
           displayName: '',
           equipeNome: matchedAux.nome_da_equipe,
-          titularNome: titular.nome,
-          titularSigla: titular.sigla || 'TITULAR',
+          titularNome: titular?.nome || matchedAux.professor_titular_nome || '',
+          titularSigla: titular?.sigla || matchedAux.sigla_professor || 'TITULAR',
           instrutores,
           instrutoresSiglas: instrutores.map((i) => i.sigla).filter(Boolean),
           isAuxiliarMatch: true
@@ -1205,37 +1207,39 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         instrutoresSiglas.push(matched.sigla_instrutor.trim());
       }
 
-      const totalCount = (titularSigla ? 1 : 0) + instrutoresSiglas.length;
-      if (totalCount === 1 && matched.professor_titular_equipe) {
-        const firstName = getProfFirstName(matched.professor_titular_equipe);
+      const hasInstructors = instrutoresSiglas.length > 0;
+
+      if (!hasInstructors) {
+        const fullName = matched.professor_titular_equipe || '';
+        const firstName = getProfFirstName(fullName);
         return {
-          isSingleProf: true,
-          displayName: firstName || titularSigla || '',
+          hasInstructors: false,
+          displayName: firstName || fullName || titularSigla || '',
           equipeNome: matched.nome_da_equipe,
-          titularNome: matched.professor_titular_equipe,
+          titularNome: fullName,
           titularSigla: titularSigla || 'TITULAR',
-          instrutores: matched.instrutores || [],
+          instrutores: [],
           instrutoresSiglas: [],
           isAuxiliarMatch: false
         };
+      } else {
+        return {
+          hasInstructors: true,
+          displayName: '',
+          equipeNome: matched.nome_da_equipe,
+          titularNome: matched.professor_titular_equipe || 'Prof. Titular',
+          titularSigla: titularSigla || (rec.equipe_calendario || 'TITULAR'),
+          instrutores: matched.instrutores || [],
+          instrutoresSiglas,
+          isAuxiliarMatch: false
+        };
       }
-
-      return {
-        isSingleProf: false,
-        displayName: '',
-        equipeNome: matched.nome_da_equipe,
-        titularNome: matched.professor_titular_equipe || 'Prof. Titular',
-        titularSigla: titularSigla || (rec.equipe_calendario || 'TITULAR'),
-        instrutores: matched.instrutores || [],
-        instrutoresSiglas,
-        isAuxiliarMatch: false
-      };
     }
 
     // 3. Fallback string
     return {
-      isSingleProf: false,
-      displayName: '',
+      hasInstructors: false,
+      displayName: rec.equipe_calendario || '',
       equipeNome: rec.equipe_calendario || '',
       titularNome: '',
       titularSigla: rec.equipe_calendario || '',
@@ -1279,10 +1283,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 {numAulaOnly}°
               </span>
 
-              {/* PROFESSOR DISPLAY: Single prof -> "Maerllen", Multiple profs -> Siglas: MC BR GD */}
-              {teamInfo.isSingleProf ? (
-                <span className="font-bold text-slate-950 font-mono text-[9px] print:text-[8px] truncate shrink-0">
-                  {teamInfo.displayName}
+              {/* PROFESSOR DISPLAY: Equipes apenas com professores -> NOME (fonte reduzida para não alterar tabela). Com instrutores -> SIGLAS */}
+              {!teamInfo.hasInstructors ? (
+                <span
+                  className="font-bold text-slate-950 font-mono text-[8.5px] print:text-[7.5px] truncate max-w-[65px] leading-tight shrink-0"
+                  title={teamInfo.titularNome || teamInfo.displayName}
+                >
+                  {teamInfo.displayName || teamInfo.titularNome || teamInfo.titularSigla}
                 </span>
               ) : (
                 <span className="flex items-center space-x-0.5 shrink-0 overflow-hidden text-ellipsis">
@@ -2777,7 +2784,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                         <tbody className="divide-y divide-slate-800/60 text-slate-200">
                           {auxiliarEquipesList.map((aux) => {
                             const profs = aux.professores || [];
-                            const isSingle = profs.length <= 1;
+                            const hasInstructors = profs.some((p) => p.tipo === 'INSTRUTOR' || p.tipo === 'INSTRUTORES');
+                            const isOnlyProfessors = !hasInstructors;
                             const profName = aux.professor_titular_nome || (profs[0]?.nome) || '';
                             const cleanFirstName = profName.replace(/^(Dr\.|Dra\.|Prof\.|Professor|Professora)\s+/i, '').trim().split(/\s+/)[0];
 
@@ -2803,19 +2811,19 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                                     Titular: {aux.professor_titular_nome || profs[0]?.nome || '-'}
                                     {aux.sigla_professor && <span className="text-amber-400 font-mono ml-1">[{aux.sigla_professor}]</span>}
                                   </div>
-                                  {profs.length > 1 && (
+                                  {profs.length > 0 && profs.some((p) => p.tipo !== 'TITULAR') && (
                                     <div className="text-[10px] text-slate-400">
                                       Instrutores: {profs.filter((p) => p.tipo !== 'TITULAR').map((p) => `${p.nome} [${p.sigla}]`).join(', ')}
                                     </div>
                                   )}
                                   <div className="mt-1">
-                                    {isSingle ? (
+                                    {isOnlyProfessors ? (
                                       <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 rounded text-[10px] font-bold">
-                                        Exibe no Calendário: {cleanFirstName}
+                                        Exibe no Calendário (Nome): {cleanFirstName}
                                       </span>
                                     ) : (
                                       <span className="px-2 py-0.5 bg-indigo-500/10 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-bold">
-                                        Exibe no Calendário Siglas: {[aux.sigla_professor, ...profs.filter((p) => p.tipo !== 'TITULAR').map((p) => p.sigla)].filter(Boolean).join(' ')}
+                                        Exibe no Calendário (Siglas): {[aux.sigla_professor, ...profs.filter((p) => p.tipo !== 'TITULAR').map((p) => p.sigla)].filter(Boolean).join(' ')}
                                       </span>
                                     )}
                                   </div>
