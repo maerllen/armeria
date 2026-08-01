@@ -889,72 +889,35 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   const monthWeeks = useMemo(() => getMonthWeeks(selectedYear, selectedMonth), [selectedYear, selectedMonth]);
 
-  const pagesToRender = useMemo(() => {
+  const weeksToRender = useMemo(() => {
     const targetRecords = selectedDiscipline ? activeDisciplineRecords : sortedAllRecords;
 
-    const pairHasRecords = (pair: CalendarWeekInfo[]) => {
-      const dates = new Set<string>();
-      pair.forEach((w) => w.days.forEach((d) => dates.add(d.dateStr)));
+    const weekHasRecords = (week: CalendarWeekInfo) => {
+      const dates = new Set<string>(week.days.map((d) => d.dateStr));
       return targetRecords.some((r) => dates.has(r.data_calendario));
     };
 
     if (isPrintingAllMonths) {
-      const allPages: {
-        year: number;
-        month: number;
-        monthName: string;
-        pair: CalendarWeekInfo[];
-        hasClasses: boolean;
-      }[] = [];
-
+      const allWeeks: CalendarWeekInfo[] = [];
       for (let m = 0; m < 12; m++) {
         const mWeeks = getMonthWeeks(printYearChoice, m);
-        if (mWeeks.length === 0) continue;
-
-        for (let i = 0; i < mWeeks.length; i += 2) {
-          const pair = mWeeks.slice(i, i + 2);
-          const hasClasses = pairHasRecords(pair);
-          if (hasClasses) {
-            allPages.push({
-              year: printYearChoice,
-              month: m,
-              monthName: MONTH_NAMES[m],
-              pair,
-              hasClasses: true
-            });
+        mWeeks.forEach((w) => {
+          if (weekHasRecords(w)) {
+            const firstDate = w.days[0]?.dateStr;
+            if (!allWeeks.some((exist) => exist.days[0]?.dateStr === firstDate)) {
+              allWeeks.push(w);
+            }
           }
-        }
-      }
-      return allPages;
-    } else {
-      const pairs: {
-        year: number;
-        month: number;
-        monthName: string;
-        pair: CalendarWeekInfo[];
-        hasClasses: boolean;
-      }[] = [];
-
-      for (let i = 0; i < monthWeeks.length; i += 2) {
-        const pair = monthWeeks.slice(i, i + 2);
-        const hasClasses = pairHasRecords(pair);
-        pairs.push({
-          year: selectedYear,
-          month: selectedMonth,
-          monthName: MONTH_NAMES[selectedMonth],
-          pair,
-          hasClasses
         });
       }
-
-      const pagesWithClasses = pairs.filter((p) => p.hasClasses);
-      return pagesWithClasses.length > 0 ? pagesWithClasses : pairs;
+      return allWeeks;
+    } else {
+      const weeksWithClasses = monthWeeks.filter((w) => weekHasRecords(w));
+      return weeksWithClasses.length > 0 ? weeksWithClasses : monthWeeks;
     }
   }, [
     isPrintingAllMonths,
     printYearChoice,
-    selectedYear,
-    selectedMonth,
     monthWeeks,
     activeDisciplineRecords,
     sortedAllRecords,
@@ -1467,13 +1430,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
           </div>
 
-          {/* MAIN VIEW: HTML TEMPLATE STYLE TABLE (2 WEEKS PER SHEET PAGE) */}
+          {/* MAIN VIEW: CONTINUOUS HTML TEMPLATE STYLE TABLE */}
           <div className="space-y-6">
             <style>{`
               @media print {
                 @page {
                   size: A4 portrait;
-                  margin: 4mm;
+                  margin: 6mm;
                 }
                 * {
                   -webkit-print-color-adjust: exact !important;
@@ -1483,7 +1446,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 html, body {
                   background-color: #ffffff !important;
                   background-image: none !important;
-                  color: #ffffff !important;
+                  color: #000000 !important;
                   box-shadow: none !important;
                   text-shadow: none !important;
                 }
@@ -1498,47 +1461,20 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 .print\\:hidden, header, aside, footer, nav, button, input, select {
                   display: none !important;
                 }
-                .folha-wrapper {
-                  page-break-before: always !important;
-                  break-before: page !important;
-                  page-break-after: auto !important;
-                  break-after: auto !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
-                  margin: 0 !important;
-                  padding: 0 !important;
-                  width: 100% !important;
-                  max-width: 100% !important;
-                  background: #ffffff !important;
-                  box-sizing: border-box !important;
-                }
-                .folha-wrapper:first-of-type {
-                  page-break-before: avoid !important;
-                  break-before: avoid !important;
-                }
-                .folha-wrapper:last-of-type {
-                  page-break-after: avoid !important;
-                  break-after: avoid !important;
-                }
                 .folha-pagina {
                   width: 100% !important;
                   max-width: 100% !important;
                   margin: 0 auto !important;
                   background: #ffffff !important;
-                  border: 2px solid #000000 !important;
-                  border-top: 1px solid #000000 !important;
-                  border-bottom: 3px solid #000000 !important;
-                  padding: 3mm !important;
+                  border: none !important;
+                  padding: 0 !important;
                   box-shadow: none !important;
-                  box-sizing: border-box !important;
                   border-radius: 0 !important;
-                  page-break-inside: avoid !important;
-                  break-inside: avoid !important;
                 }
                 .semana-bloco {
                   page-break-inside: avoid !important;
                   break-inside: avoid !important;
-                  margin-bottom: 3mm !important;
+                  margin-bottom: 4mm !important;
                 }
                 .folha-pagina table {
                   width: 100% !important;
@@ -1587,44 +1523,34 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
               }
               .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
               .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }.bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
-              .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
               .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 2px !important; color: #000000 !important; text-align: center !important; height: 16px !important; }
+              .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
+              .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
               .celula-aula { background-color: #ffffff !important; border: 1px solid #64748b !important; }
             `}</style>
 
-            {pagesToRender.length === 0 ? (
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-10 text-center text-slate-400 text-xs">
-                Nenhuma semana encontrada para este período.
+            <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-none print:shadow-none print:rounded-none p-4 print:p-2 text-black">
+              {/* Header Único do Documento */}
+              <div className="text-center pb-2 border-b-2 border-black mb-3 font-sans">
+                <span className="text-[11px] font-bold text-slate-800 uppercase font-mono tracking-wider block">
+                  ACADEPOL CURSO DE FORMAÇÃO
+                </span>
+                <h2 className="font-extrabold text-sm uppercase tracking-wide text-black mt-0.5">
+                  {selectedDisciplineName || selectedDiscipline || 'CALENDÁRIO LETIVO'}
+                </h2>
               </div>
-            ) : (
-              pagesToRender.map((pageItem, pIdx) => (
-                <div
-                  key={`page-${pageItem.month}-${pIdx}`}
-                  className={`folha-wrapper my-6 print:my-0 ${!pageItem.hasClasses ? 'print:hidden' : ''}`}
-                >
-                  <div className="folha-pagina bg-white max-w-[1000px] w-full mx-auto shadow-2xl rounded border border-slate-400 print:border-2 print:border-black print:border-t-4 print:shadow-none print:rounded-none p-3 print:p-2 text-black">
-                    {/* Header do Documento por Folha */}
-                    <div className="text-center pb-1.5 border-b-2 border-black mb-2 font-sans flex items-center justify-between px-1">
-                      <div className="text-left">
-                        <span className="text-[9px] font-bold text-slate-800 block uppercase font-mono leading-tight">
-                          ACADEPOL • CURSO DE FORMAÇÃO
-                        </span>
-                        <h3 className="font-extrabold text-[12px] uppercase tracking-wide text-black leading-tight">
-                          {selectedDisciplineName || selectedDiscipline || 'CALENDÁRIO LETIVO'}
-                        </h3>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-[10px] font-black text-black font-mono uppercase bg-slate-100 px-2.5 py-1 rounded border border-black inline-block">
-                          MÊS: {pageItem.monthName.toUpperCase()} / {pageItem.year}
-                        </span>
-                      </div>
-                    </div>
 
-                  {pageItem.pair.map((week, wIdx) => (
-                    <div key={week.weekNum} className={`semana-bloco ${wIdx > 0 ? 'mt-2.5 print:mt-1.5' : ''}`}>
+              {weeksToRender.length === 0 ? (
+                <div className="text-center text-slate-500 py-8 text-xs font-mono">
+                  Nenhuma semana encontrada para esta matéria no período.
+                </div>
+              ) : (
+                <div className="space-y-4 print:space-y-3">
+                  {weeksToRender.map((week) => (
+                    <div key={`${week.weekNum}-${week.days[0]?.dateStr}`} className="semana-bloco">
                       {/* Week Header */}
-                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans">
+                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans bg-slate-100 border border-slate-300 print:border-black">
                         SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
                       </div>
 
@@ -1733,9 +1659,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                     </div>
                   ))}
                 </div>
-              </div>
-            ))
-            )}
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -1,7 +1,7 @@
 import mysql from 'mysql2/promise';
 
-const rawHost = process.env.DB_HOST || '127.0.0.1';
-const effectiveHost = rawHost === 'localhost' ? '127.0.0.1' : rawHost;
+const rawHost = process.env.DB_HOST || 'srv888.hstgr.io';
+const effectiveHost = (rawHost === 'localhost' || rawHost === '127.0.0.1') ? 'srv888.hstgr.io' : rawHost;
 
 export const dbConfig = {
   host: effectiveHost,
