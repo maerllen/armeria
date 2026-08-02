@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getPool, dbConfig } from './mysql';
 import crypto from 'crypto';
+import { GoogleGenAI, Type } from '@google/genai';
 
 export const apiRouter = Router();
 
@@ -3863,6 +3864,123 @@ apiRouter.delete('/auxiliar-tabela-equipe/:id', async (req: Request, res: Respon
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /parse-lesson-plan - Uses Gemini AI to extract structured lesson plan details
+apiRouter.post('/parse-lesson-plan', async (req: Request, res: Response) => {
+  try {
+    const { fileText, base64, mimeType } = req.body;
+    if (!fileText && !base64) {
+      return res.status(400).json({ error: 'Nenhum texto ou arquivo foi enviado para interpretação.' });
+    }
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não configurada no servidor.' });
+    }
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build'
+        }
+      }
+    });
+
+    const promptText = `Você é um especialista em análise de planos de aula da Academia de Polícia Civil (ACADEPOL).
+Sua tarefa é ler, interpretar o documento/texto de plano de aula enviado e extrair de forma estruturada as informações em formato JSON.
+
+As informações obrigatórias para cada aula do plano de aula são:
+1. "lessonNumber": Número da aula (ex: 1, 2, 3...)
+2. "weaponUsed": Arma usada na aula (ex: "Pistola .40", "Fuzil 5.56", "Revolver .38", "Espingarda 12", "Nenhuma/Teoria")
+3. "content": Conteúdo lecionado (ex: "Manejo e regras de segurança na linha de tiro")
+4. "description": Descrição detalhada do desenvolvimento da aula
+5. "shotsPerStudent": Quantidade de tiros efetuados por cada aluno nesta aula (número inteiro; se não houver tiros, coloque 0)
+6. "instructorShots": SE TIVER TIROS POR ALUNO (> 0), coloque metade da quantidade de tiros do aluno (ex: Math.ceil(shotsPerStudent / 2)) como uso e insumo para o professor/instrutor. Se não houver tiros, coloque 0.
+7. "caliberName": Nome do calibre da munição usada (ex: ".40 S&W", "9mm", "5,56x45mm", ".38 SPL", "12 GA"), se aplicável.
+
+Também extraia se houver no documento:
+- "name": Nome do plano de aula ou da disciplina (ex: "Armamento e Tiro Tático I")
+- "subject": Matéria ("MEAF", "TAP", "DP")
+- "career": Carreira do curso ("Investigador", "Escrivão", "Delegado", "Perito", "Médico Legista")
+- "year": Ano do plano (número, ex: 2026)
+
+Mantenha a ordenação ordinal crescente das aulas (Aula 1, Aula 2, etc.).
+Se o número de tiros por aluno for X (ex: 50), o professor deve obrigatoriamente receber metade (ex: 25).`;
+
+    let contents: any;
+    if (base64 && mimeType) {
+      contents = {
+        parts: [
+          { inlineData: { data: base64, mimeType } },
+          { text: promptText + (fileText ? `\n\nTexto adicional extraído:\n${fileText}` : '') }
+        ]
+      };
+    } else {
+      contents = promptText + `\n\nCONTEÚDO DO DOCUMENTO DO PLANO DE AULA:\n${fileText}`;
+    }
+
+    const response = await ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            name: { type: Type.STRING },
+            subject: { type: Type.STRING },
+            career: { type: Type.STRING },
+            year: { type: Type.NUMBER },
+            lessons: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  lessonNumber: { type: Type.INTEGER },
+                  weaponUsed: { type: Type.STRING },
+                  content: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  shotsPerStudent: { type: Type.INTEGER },
+                  instructorShots: { type: Type.INTEGER },
+                  caliberName: { type: Type.STRING }
+                },
+                required: ['lessonNumber', 'shotsPerStudent', 'instructorShots']
+              }
+            }
+          },
+          required: ['lessons']
+        }
+      }
+    });
+
+    const textOutput = response.text || '';
+    let parsed: any = {};
+    try {
+      parsed = JSON.parse(textOutput);
+    } catch {
+      parsed = { lessons: [] };
+    }
+
+    if (Array.isArray(parsed.lessons)) {
+      parsed.lessons = parsed.lessons.map((item: any) => {
+        const shots = Number(item.shotsPerStudent) || 0;
+        const calcInstructorShots = shots > 0 ? Math.ceil(shots / 2) : 0;
+        return {
+          ...item,
+          lessonNumber: Number(item.lessonNumber) || 1,
+          shotsPerStudent: shots,
+          instructorShots: item.instructorShots !== undefined && item.instructorShots !== null ? Number(item.instructorShots) : calcInstructorShots
+        };
+      });
+    }
+
+    return res.json({ success: true, data: parsed });
+  } catch (err: any) {
+    console.error('Error parsing lesson plan with Gemini:', err);
+    return res.status(500).json({ error: err.message || 'Erro ao interpretar plano de aula com IA.' });
   }
 });
 

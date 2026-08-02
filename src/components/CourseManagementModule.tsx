@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import mammoth from 'mammoth';
 import {
   GraduationCap,
   Box,
@@ -30,7 +31,12 @@ import {
   ListPlus,
   Award,
   Eye,
-  CheckSquare
+  CheckSquare,
+  Sparkles,
+  Upload,
+  Loader2,
+  CheckCircle2,
+  FileText
 } from 'lucide-react';
 
 interface CourseManagementModuleProps {
@@ -360,9 +366,115 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   const [planLessonCount, setPlanLessonCount] = useState<number>(5);
   const [planLessonsData, setPlanLessonsData] = useState<LessonPlanItem[]>([]);
   const [planModalError, setPlanModalError] = useState('');
+  const [isParsingAi, setIsParsingAi] = useState(false);
+  const [aiMessage, setAiMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const handleImportDocument = async (file: File) => {
+    setIsParsingAi(true);
+    setAiMessage(null);
+    setPlanModalError('');
+
+    try {
+      let fileText = '';
+      let base64 = '';
+      const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+
+      if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const result = await mammoth.extractRawText({ arrayBuffer });
+          fileText = result.value || '';
+        } catch (e) {
+          console.warn('Could not extract docx text locally, sending base64 to server', e);
+        }
+      } else if (file.name.endsWith('.txt')) {
+        fileText = await file.text();
+      }
+
+      const base64Data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Clean = result.includes(',') ? result.split(',')[1] : result;
+          resolve(base64Clean);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      base64 = base64Data;
+
+      const response = await fetch('/api/parse-lesson-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileText,
+          base64: file.name.endsWith('.pdf') ? base64 : undefined,
+          mimeType
+        })
+      });
+
+      const resData = await response.json();
+
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.error || 'Erro ao interpretar plano de aula com IA.');
+      }
+
+      const parsed = resData.data;
+
+      if (parsed.name) setPlanName(parsed.name);
+      if (parsed.subject && ['MEAF', 'TAP', 'DP'].includes(parsed.subject.toUpperCase())) {
+        setPlanSubject(parsed.subject.toUpperCase() as any);
+      }
+      if (parsed.career && ['Delegado', 'Médico Legista', 'Perito', 'Investigador', 'Escrivão'].includes(parsed.career)) {
+        setPlanCareer(parsed.career as any);
+      }
+      if (parsed.year && typeof parsed.year === 'number') setPlanYear(parsed.year);
+
+      if (Array.isArray(parsed.lessons) && parsed.lessons.length > 0) {
+        const defaultCaliber = calibers[0]?.name || '.40 S&W';
+        const newItems: LessonPlanItem[] = parsed.lessons.map((item: any, idx: number) => {
+          const shots = Number(item.shotsPerStudent) || 0;
+          const calcInstructorShots = item.instructorShots !== undefined && item.instructorShots !== null
+            ? Number(item.instructorShots)
+            : (shots > 0 ? Math.ceil(shots / 2) : 0);
+
+          return {
+            lessonNumber: item.lessonNumber || idx + 1,
+            weaponUsed: item.weaponUsed || '',
+            content: item.content || '',
+            description: item.description || '',
+            shotsPerStudent: shots,
+            caliberName: item.caliberName || defaultCaliber,
+            instructorShots: calcInstructorShots
+          };
+        });
+
+        setPlanLessonCount(newItems.length);
+        setPlanLessonsData(newItems);
+        setAiMessage({
+          type: 'success',
+          text: `Plano de aula interpretado com sucesso pela IA! Extraídas ${newItems.length} aula(s) com armas, conteúdos, descrições e insumos de professores calculados (50% dos tiros).`
+        });
+      } else {
+        setAiMessage({
+          type: 'error',
+          text: 'Nenhuma aula pôde ser identificada no documento enviado. Verifique se o arquivo possui a estrutura do plano de aula.'
+        });
+      }
+    } catch (err: any) {
+      console.error('Import error:', err);
+      setAiMessage({
+        type: 'error',
+        text: err.message || 'Erro ao importar documento do Word ou PDF.'
+      });
+    } finally {
+      setIsParsingAi(false);
+    }
+  };
 
   const handleOpenPlanModal = (plan?: LessonPlan) => {
     setPlanModalError('');
+    setAiMessage(null);
     if (plan) {
       setEditingPlan(plan);
       setPlanName(plan.name);
@@ -922,13 +1034,30 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center justify-between">
                       <span>Aulas Previstas ({plan.lessonCount} aulas):</span>
                     </div>
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
                       {(plan.lessonsData || []).map((item, idx) => (
-                        <div key={idx} className="bg-slate-950 p-2 rounded-xl border border-slate-800 text-[11px] flex items-center justify-between font-mono">
-                          <span className="font-bold text-amber-400">Aula {item.lessonNumber}</span>
-                          <span className="text-slate-300">{item.shotsPerStudent} tiros/aluno</span>
-                          <span className="text-slate-400">Cal: {item.caliberName}</span>
-                          <span className="text-emerald-400">Prof: +{item.instructorShots} un</span>
+                        <div key={idx} className="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-[11px] space-y-1">
+                          <div className="flex items-center justify-between font-mono flex-wrap gap-1">
+                            <span className="font-bold text-amber-400">Aula {item.lessonNumber}</span>
+                            {item.weaponUsed && (
+                              <span className="text-amber-300 font-sans font-semibold bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                {item.weaponUsed}
+                              </span>
+                            )}
+                            <span className="text-slate-300">{item.shotsPerStudent} tiros/aluno</span>
+                            <span className="text-slate-400">Cal: {item.caliberName}</span>
+                            <span className="text-emerald-400 font-bold">Prof: +{item.instructorShots ?? Math.ceil(item.shotsPerStudent / 2)} un</span>
+                          </div>
+                          {item.content && (
+                            <div className="text-slate-200 text-[10px] font-sans">
+                              <span className="text-amber-400/80 font-bold">Conteúdo:</span> {item.content}
+                            </div>
+                          )}
+                          {item.description && (
+                            <div className="text-slate-400 text-[10px] font-sans italic leading-relaxed">
+                              {item.description}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1360,6 +1489,63 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
             )}
 
             <form onSubmit={handleSavePlan} className="space-y-4 text-xs">
+              {/* AI Import Banner */}
+              <div className="bg-slate-950 border border-amber-500/40 rounded-2xl p-4 space-y-3 relative overflow-hidden shadow-lg">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-pulse shrink-0" />
+                    <span>Importar Plano de Aula com IA (Word ou PDF)</span>
+                  </div>
+                  <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/30 font-mono">
+                    .docx, .doc, .pdf
+                  </span>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Selecione ou envie o arquivo do plano de aula. A Inteligência Artificial lerá o documento, identificará as aulas, armas utilizadas, conteúdo lecionado, descrição e aplicará o cálculo automático de tiros (com 50% alocados como insumo/uso para o professor).
+                </p>
+
+                <div className="flex items-center space-x-3 pt-1">
+                  <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${
+                    isParsingAi 
+                      ? 'bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed' 
+                      : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/50 text-amber-300'
+                  }`}>
+                    {isParsingAi ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                        <span>Interpretando documento com IA...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>Importar Arquivo Word / PDF</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept=".docx,.doc,.pdf,.txt"
+                      disabled={isParsingAi}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleImportDocument(file);
+                        e.target.value = '';
+                      }}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+
+                {aiMessage && (
+                  <div className={`p-3 rounded-xl text-xs flex items-start space-x-2 border ${
+                    aiMessage.type === 'success' ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300' : 'bg-red-950/80 border-red-500/40 text-red-300'
+                  }`}>
+                    {aiMessage.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400 mt-0.5" /> : <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />}
+                    <span className="leading-relaxed">{aiMessage.text}</span>
+                  </div>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
@@ -1370,7 +1556,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     value={planName}
                     onChange={(e) => setPlanName(e.target.value)}
                     placeholder="Ex: Armamento e Tiro Tático I"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                     required
                   />
                 </div>
@@ -1380,7 +1566,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                   <select
                     value={planCareer}
                     onChange={(e) => setPlanCareer(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                   >
                     <option value="Investigador">Investigador</option>
                     <option value="Escrivão">Escrivão</option>
@@ -1399,7 +1585,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                   <select
                     value={planSubject}
                     onChange={(e) => setPlanSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-amber-400 font-extrabold"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-amber-400 font-extrabold focus:border-amber-500 focus:outline-none"
                   >
                     <option value="MEAF">MEAF</option>
                     <option value="TAP">TAP</option>
@@ -1413,7 +1599,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     type="number"
                     value={planYear}
                     onChange={(e) => setPlanYear(parseInt(e.target.value) || new Date().getFullYear())}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 focus:border-amber-500 focus:outline-none"
                   />
                 </div>
 
@@ -1425,7 +1611,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     max="100"
                     value={planLessonCount}
                     onChange={(e) => handlePlanLessonCountChange(parseInt(e.target.value) || 1)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-bold font-mono text-amber-400"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-slate-100 font-bold font-mono text-amber-400 focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
@@ -1433,69 +1619,136 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               {/* Tabela Dinâmica de Aulas */}
               <div className="space-y-2 border-t border-slate-800 pt-3">
                 <label className="block font-bold text-amber-400 text-xs">
-                  Configuração de Aulas ({planLessonsData.length} aulas):
+                  Configuração Detalhada das Aulas ({planLessonsData.length} aulas):
                 </label>
-                <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
                   {planLessonsData.map((item, idx) => (
-                    <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 grid grid-cols-1 sm:grid-cols-4 gap-2 items-center">
-                      <span className="font-bold text-amber-400 font-mono text-xs">
-                        Aula {item.lessonNumber}
-                      </span>
+                    <div key={idx} className="bg-slate-950 p-3.5 rounded-2xl border border-slate-800 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                        <span className="font-bold text-amber-400 font-mono text-xs flex items-center space-x-1">
+                          <BookOpen className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Aula {item.lessonNumber}</span>
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">Aula #{idx + 1}</span>
+                      </div>
 
-                      <div>
-                        <label className="block text-[10px] text-slate-400">Tiros/Aluno:</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.shotsPerStudent}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setPlanLessonsData(prev => {
-                              const copy = [...prev];
-                              copy[idx] = { ...copy[idx], shotsPerStudent: val };
-                              return copy;
-                            });
-                          }}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 font-mono"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Arma Usada:</label>
+                          <input
+                            type="text"
+                            value={item.weaponUsed || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[idx] = { ...copy[idx], weaponUsed: val };
+                                return copy;
+                              });
+                            }}
+                            placeholder="Ex: Pistola .40, Fuzil 5.56"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs focus:border-amber-500 focus:outline-none"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-slate-400 mb-0.5">Conteúdo Lecionado:</label>
+                          <input
+                            type="text"
+                            value={item.content || ''}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[idx] = { ...copy[idx], content: val };
+                                return copy;
+                              });
+                            }}
+                            placeholder="Ex: Manejo e regras de segurança"
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100 text-xs focus:border-amber-500 focus:outline-none"
+                          />
+                        </div>
                       </div>
 
                       <div>
-                        <label className="block text-[10px] text-slate-400">Calibre:</label>
-                        <select
-                          value={item.caliberName}
+                        <label className="block text-[10px] text-slate-400 mb-0.5">Descrição da Aula:</label>
+                        <textarea
+                          value={item.description || ''}
                           onChange={(e) => {
                             const val = e.target.value;
                             setPlanLessonsData(prev => {
                               const copy = [...prev];
-                              copy[idx] = { ...copy[idx], caliberName: val };
+                              copy[idx] = { ...copy[idx], description: val };
                               return copy;
                             });
                           }}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 text-xs"
-                        >
-                          {calibers.map(c => (
-                            <option key={c.id} value={c.name}>{c.name}</option>
-                          ))}
-                        </select>
+                          placeholder="Resumo das atividades práticas e teóricas da aula..."
+                          rows={2}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2 text-slate-100 text-xs focus:border-amber-500 focus:outline-none"
+                        />
                       </div>
 
-                      <div>
-                        <label className="block text-[10px] text-slate-400">Insumo Instrutor:</label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.instructorShots || 0}
-                          onChange={(e) => {
-                            const val = parseInt(e.target.value) || 0;
-                            setPlanLessonsData(prev => {
-                              const copy = [...prev];
-                              copy[idx] = { ...copy[idx], instructorShots: val };
-                              return copy;
-                            });
-                          }}
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-400 font-mono"
-                        />
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-center pt-2 border-t border-slate-800/60">
+                        <div>
+                          <label className="block text-[10px] text-slate-400">Qtd. Tiros/Aluno:</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.shotsPerStudent}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              const calcInst = val > 0 ? Math.ceil(val / 2) : 0;
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[idx] = { 
+                                  ...copy[idx], 
+                                  shotsPerStudent: val,
+                                  instructorShots: calcInst
+                                };
+                                return copy;
+                              });
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-amber-400 font-mono font-bold focus:border-amber-500 focus:outline-none text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-slate-400">Insumo/Prof. (50%):</label>
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.instructorShots ?? (item.shotsPerStudent > 0 ? Math.ceil(item.shotsPerStudent / 2) : 0)}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value) || 0;
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[idx] = { ...copy[idx], instructorShots: val };
+                                return copy;
+                              });
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-emerald-400 font-mono font-bold focus:border-emerald-500 focus:outline-none text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] text-slate-400">Calibre:</label>
+                          <select
+                            value={item.caliberName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setPlanLessonsData(prev => {
+                                const copy = [...prev];
+                                copy[idx] = { ...copy[idx], caliberName: val };
+                                return copy;
+                              });
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 text-xs focus:border-amber-500 focus:outline-none"
+                          >
+                            {calibers.map(c => (
+                              <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
+                          </select>
+                        </div>
                       </div>
                     </div>
                   ))}

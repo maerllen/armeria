@@ -220,6 +220,9 @@ export type AcademyCareer = 'Delegado' | 'Médico Legista' | 'Perito' | 'Investi
 
 export interface LessonPlanItem {
   lessonNumber: number;
+  weaponUsed?: string;
+  content?: string;
+  description?: string;
   shotsPerStudent: number;
   caliberId?: string;
   caliberName: string;
