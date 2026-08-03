@@ -3875,9 +3875,11 @@ apiRouter.post('/parse-lesson-plan', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Nenhum texto ou arquivo foi enviado para interpretação.' });
     }
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: 'Chave GEMINI_API_KEY não configurada no servidor.' });
+    const apiKey = (process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.VITE_GEMINI_API_KEY || '').trim();
+    if (!apiKey || apiKey === 'sua_chave_gemini_aqui') {
+      return res.status(500).json({ 
+        error: 'Chave GEMINI_API_KEY não configurada no servidor. Por favor, adicione sua chave API do Gemini no arquivo .env ou no painel de configurações (GEMINI_API_KEY=sua_chave).' 
+      });
     }
 
     const ai = new GoogleGenAI({
