@@ -160,7 +160,7 @@ export default function App() {
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
       />
 
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden relative">
         
         {/* Sidebar Navigation (Desktop & Mobile Drawer) */}
         <Sidebar
@@ -177,7 +177,7 @@ export default function App() {
         />
 
         {/* Main Workspace */}
-        <main className="flex-1 p-3 sm:p-6 pb-20 md:pb-6 overflow-y-auto max-w-7xl mx-auto w-full space-y-4 sm:space-y-6">
+        <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-7xl mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
           {/* Dashboard Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">

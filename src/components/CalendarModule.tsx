@@ -1942,8 +1942,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 1: DETALHES DA AULA (CLICKED FROM GRID) */}
       {detailRecord && (
-        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 space-y-5 shadow-2xl animate-in fade-in zoom-in duration-150">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-5 sm:p-6 space-y-5 shadow-2xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative animate-in fade-in zoom-in duration-150">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <span className="px-2.5 py-1 bg-amber-500 text-slate-950 font-black text-xs font-mono rounded-lg">
@@ -2072,8 +2072,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 2: NEW / EDIT RECORD FORM */}
       {showRecordModal && (
-        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-6 space-y-5 shadow-2xl">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-5 shadow-2xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <h3 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
                 <Plus className="w-5 h-5 text-amber-400" />
@@ -2318,8 +2318,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 3: IMPORT (EXCEL / PDF) */}
       {showImportModal && (
-        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-6 space-y-5 shadow-2xl">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-6 space-y-5 shadow-2xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
                 <FileSpreadsheet className="w-5 h-5 text-indigo-400" />
@@ -2411,8 +2411,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
       {/* MODAL 4: GERENCIAR EQUIPES E TABELA AUXILIAR */}
       {showEquipeModal && (
-        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-6 space-y-6 shadow-2xl my-8">
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-5xl w-full p-5 sm:p-6 space-y-6 shadow-2xl max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2.5">
                 <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">

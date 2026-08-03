@@ -1073,8 +1073,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       {/* MODAL: CADASTRO/EDIÇÃO DE CURSO DE HABILITAÇÃO                            */}
       {/* ========================================================================= */}
       {showQualModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl space-y-5 my-8">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-xl shadow-2xl space-y-5 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <GraduationCap className="w-5 h-5 text-amber-400" />
@@ -1245,8 +1245,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       {/* MODAL: CADASTRO/EDIÇÃO DE CAIXA DE ARMAS                                 */}
       {/* ========================================================================= */}
       {showBoxModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl space-y-5 my-8">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-xl shadow-2xl space-y-5 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <Box className="w-5 h-5 text-amber-400" />
@@ -1366,8 +1366,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       {/* MODAL: SUBSTITUIÇÃO DE ARMA EM CAIXA                                     */}
       {/* ========================================================================= */}
       {showReplaceModal && replacingBox && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <RefreshCw className="w-5 h-5 text-amber-400" />
@@ -1467,8 +1467,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
       {/* MODAL: CADASTRO/EDIÇÃO DE PLANO DE AULA                                  */}
       {/* ========================================================================= */}
       {showPlanModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-5 my-8">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-2xl shadow-2xl space-y-5 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <ClipboardList className="w-5 h-5 text-amber-400" />
@@ -1777,8 +1777,8 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
 
       {/* Modal: Ver Armas da Caixa */}
       {viewingBoxWeaponsModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 my-8">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2.5">
                 <Box className="w-5 h-5 text-amber-400" />
