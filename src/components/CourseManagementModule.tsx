@@ -36,7 +36,8 @@ import {
   Upload,
   Loader2,
   CheckCircle2,
-  FileText
+  FileText,
+  Key
 } from 'lucide-react';
 
 interface CourseManagementModuleProps {
@@ -370,17 +371,34 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   const [aiMessage, setAiMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [showPasteBox, setShowPasteBox] = useState(false);
   const [rawTextInput, setRawTextInput] = useState('');
+  const [geminiApiKeyInput, setGeminiApiKeyInput] = useState(() => localStorage.getItem('gemini_api_key') || '');
+  const [showApiKeyField, setShowApiKeyField] = useState(false);
+
+  const handleSaveApiKey = (keyVal: string) => {
+    setGeminiApiKeyInput(keyVal);
+    if (keyVal.trim()) {
+      localStorage.setItem('gemini_api_key', keyVal.trim());
+    } else {
+      localStorage.removeItem('gemini_api_key');
+    }
+  };
 
   const parsePlanWithAi = async (payload: { fileText?: string; base64?: string; mimeType?: string }) => {
+    const activeKey = geminiApiKeyInput.trim() || localStorage.getItem('gemini_api_key') || undefined;
+    const bodyPayload = { ...payload, apiKey: activeKey };
+
     const response = await fetch('/api/parse-lesson-plan', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(bodyPayload)
     });
 
     const resData = await response.json();
 
     if (!response.ok || !resData.success) {
+      if (resData.error && resData.error.toLowerCase().includes('chave gemini_api_key')) {
+        setShowApiKeyField(true);
+      }
       throw new Error(resData.error || 'Erro ao interpretar plano de aula com IA.');
     }
 
@@ -1576,7 +1594,46 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     <FileText className="w-4 h-4 text-indigo-400" />
                     <span>{showPasteBox ? 'Ocultar Caixa de Texto' : 'Colar Texto Diretamente'}</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKeyField(!showApiKeyField)}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition flex items-center space-x-1.5 ${
+                      geminiApiKeyInput.trim() 
+                        ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300 hover:bg-emerald-900/60'
+                        : 'bg-amber-950/40 border-amber-500/40 text-amber-300 hover:bg-amber-900/60'
+                    }`}
+                  >
+                    <Key className="w-4 h-4 text-amber-400" />
+                    <span>{geminiApiKeyInput.trim() ? 'Chave IA Salva' : 'Configurar Chave IA'}</span>
+                  </button>
                 </div>
+
+                {showApiKeyField && (
+                  <div className="p-3 bg-slate-900/90 border border-amber-500/30 rounded-xl space-y-2 animate-in fade-in duration-150">
+                    <label className="text-[11px] font-bold text-amber-300 flex items-center space-x-1.5">
+                      <Key className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Chave API do Gemini (GEMINI_API_KEY)</span>
+                    </label>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="password"
+                        value={geminiApiKeyInput}
+                        onChange={(e) => handleSaveApiKey(e.target.value)}
+                        placeholder="Cole sua chave API Gemini aqui (ex: AIzaSy...)"
+                        className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500 focus:outline-none font-mono"
+                      />
+                      {geminiApiKeyInput.trim() && (
+                        <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/30 shrink-0 font-medium">
+                          Salvo no navegador
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-tight">
+                      A chave fornecida será enviada com as requisições de IA e salva com segurança no seu navegador.
+                    </p>
+                  </div>
+                )}
 
                 {showPasteBox && (
                   <div className="space-y-2 pt-2 border-t border-slate-800 animate-in fade-in duration-150">
