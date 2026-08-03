@@ -368,6 +368,65 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
   const [planModalError, setPlanModalError] = useState('');
   const [isParsingAi, setIsParsingAi] = useState(false);
   const [aiMessage, setAiMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [showPasteBox, setShowPasteBox] = useState(false);
+  const [rawTextInput, setRawTextInput] = useState('');
+
+  const parsePlanWithAi = async (payload: { fileText?: string; base64?: string; mimeType?: string }) => {
+    const response = await fetch('/api/parse-lesson-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    const resData = await response.json();
+
+    if (!response.ok || !resData.success) {
+      throw new Error(resData.error || 'Erro ao interpretar plano de aula com IA.');
+    }
+
+    const parsed = resData.data;
+
+    if (parsed.name) setPlanName(parsed.name);
+    if (parsed.subject && ['MEAF', 'TAP', 'DP'].includes(parsed.subject.toUpperCase())) {
+      setPlanSubject(parsed.subject.toUpperCase() as any);
+    }
+    if (parsed.career && ['Delegado', 'Médico Legista', 'Perito', 'Investigador', 'Escrivão'].includes(parsed.career)) {
+      setPlanCareer(parsed.career as any);
+    }
+    if (parsed.year && typeof parsed.year === 'number') setPlanYear(parsed.year);
+
+    if (Array.isArray(parsed.lessons) && parsed.lessons.length > 0) {
+      const defaultCaliber = calibers[0]?.name || '.40 S&W';
+      const newItems: LessonPlanItem[] = parsed.lessons.map((item: any, idx: number) => {
+        const shots = Number(item.shotsPerStudent) || 0;
+        const calcInstructorShots = item.instructorShots !== undefined && item.instructorShots !== null
+          ? Number(item.instructorShots)
+          : (shots > 0 ? Math.ceil(shots / 2) : 0);
+
+        return {
+          lessonNumber: item.lessonNumber || idx + 1,
+          weaponUsed: item.weaponUsed || '',
+          content: item.content || '',
+          description: item.description || '',
+          shotsPerStudent: shots,
+          caliberName: item.caliberName || defaultCaliber,
+          instructorShots: calcInstructorShots
+        };
+      });
+
+      setPlanLessonCount(newItems.length);
+      setPlanLessonsData(newItems);
+      setAiMessage({
+        type: 'success',
+        text: `Plano de aula interpretado com sucesso pela IA! Extraídas ${newItems.length} aula(s) com armas, conteúdos, descrições e insumos de professores calculados (50% dos tiros).`
+      });
+    } else {
+      setAiMessage({
+        type: 'error',
+        text: 'Nenhuma aula pôde ser identificada no conteúdo enviado. Verifique se o texto/arquivo possui a estrutura de plano de aula.'
+      });
+    }
+  };
 
   const handleImportDocument = async (file: File) => {
     setIsParsingAi(true);
@@ -377,21 +436,31 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
     try {
       let fileText = '';
       let base64 = '';
-      const mimeType = file.type || (file.name.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
+      const lowerName = file.name.toLowerCase();
+      const mimeType = file.type || (lowerName.endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream');
 
-      if (file.name.endsWith('.docx') || file.name.endsWith('.doc')) {
+      if (lowerName.endsWith('.docx') || lowerName.endsWith('.doc')) {
         try {
           const arrayBuffer = await file.arrayBuffer();
           const result = await mammoth.extractRawText({ arrayBuffer });
           fileText = result.value || '';
         } catch (e) {
-          console.warn('Could not extract docx text locally, sending base64 to server', e);
+          console.warn('Could not extract docx text locally with mammoth', e);
         }
-      } else if (file.name.endsWith('.txt')) {
-        fileText = await file.text();
       }
 
-      const base64Data = await new Promise<string>((resolve, reject) => {
+      if (!fileText) {
+        try {
+          const text = await file.text();
+          if (text && !text.includes('\0') && text.trim().length > 0) {
+            fileText = text;
+          }
+        } catch (e) {
+          console.warn('Direct file.text fallback failed:', e);
+        }
+      }
+
+      base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
           const result = reader.result as string;
@@ -401,71 +470,35 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      base64 = base64Data;
 
-      const response = await fetch('/api/parse-lesson-plan', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fileText,
-          base64: file.name.endsWith('.pdf') ? base64 : undefined,
-          mimeType
-        })
-      });
-
-      const resData = await response.json();
-
-      if (!response.ok || !resData.success) {
-        throw new Error(resData.error || 'Erro ao interpretar plano de aula com IA.');
-      }
-
-      const parsed = resData.data;
-
-      if (parsed.name) setPlanName(parsed.name);
-      if (parsed.subject && ['MEAF', 'TAP', 'DP'].includes(parsed.subject.toUpperCase())) {
-        setPlanSubject(parsed.subject.toUpperCase() as any);
-      }
-      if (parsed.career && ['Delegado', 'Médico Legista', 'Perito', 'Investigador', 'Escrivão'].includes(parsed.career)) {
-        setPlanCareer(parsed.career as any);
-      }
-      if (parsed.year && typeof parsed.year === 'number') setPlanYear(parsed.year);
-
-      if (Array.isArray(parsed.lessons) && parsed.lessons.length > 0) {
-        const defaultCaliber = calibers[0]?.name || '.40 S&W';
-        const newItems: LessonPlanItem[] = parsed.lessons.map((item: any, idx: number) => {
-          const shots = Number(item.shotsPerStudent) || 0;
-          const calcInstructorShots = item.instructorShots !== undefined && item.instructorShots !== null
-            ? Number(item.instructorShots)
-            : (shots > 0 ? Math.ceil(shots / 2) : 0);
-
-          return {
-            lessonNumber: item.lessonNumber || idx + 1,
-            weaponUsed: item.weaponUsed || '',
-            content: item.content || '',
-            description: item.description || '',
-            shotsPerStudent: shots,
-            caliberName: item.caliberName || defaultCaliber,
-            instructorShots: calcInstructorShots
-          };
-        });
-
-        setPlanLessonCount(newItems.length);
-        setPlanLessonsData(newItems);
-        setAiMessage({
-          type: 'success',
-          text: `Plano de aula interpretado com sucesso pela IA! Extraídas ${newItems.length} aula(s) com armas, conteúdos, descrições e insumos de professores calculados (50% dos tiros).`
-        });
-      } else {
-        setAiMessage({
-          type: 'error',
-          text: 'Nenhuma aula pôde ser identificada no documento enviado. Verifique se o arquivo possui a estrutura do plano de aula.'
-        });
-      }
+      await parsePlanWithAi({ fileText, base64, mimeType });
     } catch (err: any) {
       console.error('Import error:', err);
       setAiMessage({
         type: 'error',
-        text: err.message || 'Erro ao importar documento do Word ou PDF.'
+        text: err.message || 'Erro ao processar o arquivo para importação.'
+      });
+    } finally {
+      setIsParsingAi(false);
+    }
+  };
+
+  const handleImportRawText = async () => {
+    if (!rawTextInput || !rawTextInput.trim()) {
+      setAiMessage({ type: 'error', text: 'Cole ou digite o texto do plano de aula antes de enviar.' });
+      return;
+    }
+    setIsParsingAi(true);
+    setAiMessage(null);
+    setPlanModalError('');
+
+    try {
+      await parsePlanWithAi({ fileText: rawTextInput.trim() });
+    } catch (err: any) {
+      console.error('Import text error:', err);
+      setAiMessage({
+        type: 'error',
+        text: err.message || 'Erro ao interpretar o texto fornecido.'
       });
     } finally {
       setIsParsingAi(false);
@@ -1502,11 +1535,11 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                 </div>
 
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Selecione ou envie o arquivo do plano de aula. A Inteligência Artificial lerá o documento, identificará as aulas, armas utilizadas, conteúdo lecionado, descrição e aplicará o cálculo automático de tiros (com 50% alocados como insumo/uso para o professor).
+                  Envie qualquer arquivo (Word, PDF, TXT, ODT, etc.) ou cole o texto do plano de aula. A IA extrairá as aulas, armas, conteúdos, descrições e calculará os tiros dos alunos e instrutores (50%).
                 </p>
 
-                <div className="flex items-center space-x-3 pt-1">
-                  <label className={`cursor-pointer px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${
+                <div className="flex flex-wrap items-center gap-2 pt-1">
+                  <label className={`cursor-pointer px-3.5 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border shadow-sm ${
                     isParsingAi 
                       ? 'bg-slate-800 border-slate-700 text-slate-400 cursor-not-allowed' 
                       : 'bg-amber-500/20 hover:bg-amber-500/30 border-amber-500/50 text-amber-300'
@@ -1514,17 +1547,17 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                     {isParsingAi ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                        <span>Interpretando documento com IA...</span>
+                        <span>Interpretando...</span>
                       </>
                     ) : (
                       <>
-                        <Upload className="w-4 h-4" />
-                        <span>Importar Arquivo Word / PDF</span>
+                        <Upload className="w-4 h-4 text-amber-400" />
+                        <span>Enviar Qualquer Arquivo</span>
                       </>
                     )}
                     <input
                       type="file"
-                      accept=".docx,.doc,.pdf,.txt"
+                      accept="*"
                       disabled={isParsingAi}
                       onChange={(e) => {
                         const file = e.target.files?.[0];
@@ -1534,7 +1567,48 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                       className="hidden"
                     />
                   </label>
+
+                  <button
+                    type="button"
+                    onClick={() => setShowPasteBox(!showPasteBox)}
+                    className="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 transition flex items-center space-x-1.5"
+                  >
+                    <FileText className="w-4 h-4 text-indigo-400" />
+                    <span>{showPasteBox ? 'Ocultar Caixa de Texto' : 'Colar Texto Diretamente'}</span>
+                  </button>
                 </div>
+
+                {showPasteBox && (
+                  <div className="space-y-2 pt-2 border-t border-slate-800 animate-in fade-in duration-150">
+                    <textarea
+                      rows={4}
+                      value={rawTextInput}
+                      onChange={(e) => setRawTextInput(e.target.value)}
+                      placeholder="Cole aqui o texto do plano de aula em qualquer formato (copiado do Word, PDF, E-mape, WhatsApp, e-mail...)..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none font-mono"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleImportRawText}
+                        disabled={isParsingAi || !rawTextInput.trim()}
+                        className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition flex items-center space-x-2 shadow disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isParsingAi ? (
+                          <>
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                            <span>Interpretando...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-4 h-4" />
+                            <span>Interpretar Texto Colado com IA</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {aiMessage && (
                   <div className={`p-3 rounded-xl text-xs flex items-start space-x-2 border ${

@@ -3910,21 +3910,49 @@ Também extraia se houver no documento:
 Mantenha a ordenação ordinal crescente das aulas (Aula 1, Aula 2, etc.).
 Se o número de tiros por aluno for X (ex: 50), o professor deve obrigatoriamente receber metade (ex: 25).`;
 
-    let contents: any;
-    if (base64 && mimeType) {
-      contents = {
-        parts: [
-          { inlineData: { data: base64, mimeType } },
-          { text: promptText + (fileText ? `\n\nTexto adicional extraído:\n${fileText}` : '') }
-        ]
-      };
+    let finalPromptText = promptText;
+    let contentsPayload: any;
+
+    const isMultimodalSupported = base64 && (
+      mimeType === 'application/pdf' ||
+      mimeType?.startsWith('image/') ||
+      mimeType?.startsWith('text/')
+    );
+
+    if (isMultimodalSupported && (mimeType === 'application/pdf' || mimeType?.startsWith('image/'))) {
+      contentsPayload = [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { data: base64, mimeType } },
+            { text: finalPromptText + (fileText ? `\n\nTexto adicional extraído:\n${fileText}` : '') }
+          ]
+        }
+      ];
     } else {
-      contents = promptText + `\n\nCONTEÚDO DO DOCUMENTO DO PLANO DE AULA:\n${fileText}`;
+      let extractedString = fileText || '';
+      if (!extractedString && base64) {
+        try {
+          const decoded = Buffer.from(base64, 'base64').toString('utf-8');
+          extractedString = decoded.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ');
+        } catch (e) {
+          console.warn('Could not decode base64 as string:', e);
+        }
+      }
+
+      contentsPayload = [
+        {
+          role: 'user',
+          parts: [
+            { text: finalPromptText + `\n\nCONTEÚDO DO DOCUMENTO / TEXTO DO PLANO DE AULA ENVIADO:\n${extractedString}` }
+          ]
+        }
+      ];
     }
 
     const response = await ai.models.generateContent({
       model: 'gemini-3.6-flash',
-      contents,
+      contents: contentsPayload,
       config: {
         responseMimeType: 'application/json',
         responseSchema: {
