@@ -1412,17 +1412,6 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => {
-              resetEquipeForm();
-              setShowEquipeModal(true);
-            }}
-            className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 flex items-center space-x-2 transition"
-          >
-            <Users className="w-4 h-4" />
-            <span>Equipe Curso de Formação</span>
-          </button>
-
           {selectedDiscipline && (
             <button
               onClick={handlePrintPDF}
