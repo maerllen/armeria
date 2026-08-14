@@ -19,6 +19,8 @@ import { AcademyModule } from './components/AcademyModule';
 import { CourseManagementModule } from './components/CourseManagementModule';
 import { MobileClassModule } from './components/MobileClassModule';
 import { CalendarModule } from './components/CalendarModule';
+import { CertificateVerificationModule } from './components/CertificateVerificationModule';
+import { PublicCertificateValidator } from './components/PublicCertificateValidator';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
@@ -77,6 +79,15 @@ export default function App() {
     return search.includes('mode=mobile-class') || search.includes('mobile=true') || path === '/iniciar-aula';
   }, []);
 
+  const [publicValidationCode, setPublicValidationCode] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('validar') || params.get('codigo') || params.get('cert');
+    if (code) return code;
+    if (window.location.pathname === '/validar-certificado') return '';
+    return null;
+  });
+
   useEffect(() => {
     if (isMobileUrlMode) {
       setActiveModule('iniciar-aula-mobile');
@@ -119,6 +130,20 @@ export default function App() {
     setCurrentUser(res.user);
     refreshData();
   };
+
+  // If opening via QR Code scan or direct validation URL, show public certificate validator
+  if (publicValidationCode !== null) {
+    return (
+      <PublicCertificateValidator
+        initialCode={publicValidationCode}
+        onBackToApp={() => {
+          // Clear query param and return to main app view
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setPublicValidationCode(null);
+        }}
+      />
+    );
+  }
 
   if (!currentUser) {
     if (isMobileUrlMode) {
@@ -350,6 +375,12 @@ export default function App() {
 
           {activeModule === 'calendario' && (
             <CalendarModule
+              currentUser={currentUser}
+            />
+          )}
+
+          {activeModule === 'certificados' && (
+            <CertificateVerificationModule
               currentUser={currentUser}
             />
           )}

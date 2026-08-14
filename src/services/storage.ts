@@ -22,7 +22,8 @@ import {
   CalendarRecord,
   EquipeCalendario,
   ProfessorEquipe,
-  AuxiliarTabelaEquipe
+  AuxiliarTabelaEquipe,
+  Certificado
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -49,6 +50,7 @@ export interface AppState {
   calendarRecords: CalendarRecord[];
   equipesCalendario: EquipeCalendario[];
   auxiliarTabelaEquipe?: AuxiliarTabelaEquipe[];
+  certificados: Certificado[];
 }
 
 class StorageService {
@@ -74,7 +76,8 @@ class StorageService {
     lessonPlans: [],
     calendarRecords: [],
     equipesCalendario: [],
-    auxiliarTabelaEquipe: []
+    auxiliarTabelaEquipe: [],
+    certificados: []
   };
 
   constructor() {
@@ -113,7 +116,8 @@ class StorageService {
         lessonPlansRes,
         calendarRecordsRes,
         equipesCalendarioRes,
-        auxiliarTabelaEquipeRes
+        auxiliarTabelaEquipeRes,
+        certificadosRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -135,7 +139,8 @@ class StorageService {
         fetch('/api/lesson-plans').then(r => r.ok ? r.json() : []),
         fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : []),
         fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : []),
-        fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : [])
+        fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : []),
+        fetch('/api/certificados').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -159,6 +164,7 @@ class StorageService {
       this.state.calendarRecords = calendarRecordsRes || [];
       this.state.equipesCalendario = equipesCalendarioRes || [];
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
+      this.state.certificados = certificadosRes || [];
 
 
       // Refresh current user reference if logged in
@@ -1433,7 +1439,70 @@ class StorageService {
       return { success: false, error: err.message };
     }
   }
+
+  // --- CERTIFICADOS METHODS ---
+  public getCertificados(): Certificado[] {
+    return this.state.certificados || [];
+  }
+
+  public async getCertificadoById(id: string): Promise<Certificado | null> {
+    try {
+      const res = await fetch(`/api/certificados/${id}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch {
+      return null;
+    }
+  }
+
+  public async verificarCertificado(codigo: string): Promise<{ success: boolean; valid?: boolean; certificate?: Certificado; error?: string }> {
+    try {
+      const res = await fetch(`/api/certificados/verificar/${encodeURIComponent(codigo)}`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        return { success: false, valid: false, error: data.error || 'Certificado não encontrado.' };
+      }
+      return { success: true, valid: data.valid, certificate: data.certificate };
+    } catch (err: any) {
+      return { success: false, valid: false, error: err.message || 'Erro ao consultar autenticidade do certificado.' };
+    }
+  }
+
+  public async saveCertificado(cert: Partial<Certificado>): Promise<{ success: boolean; id?: string; codigoAutenticacao?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/certificados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...cert, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id, codigoAutenticacao: data.codigoAutenticacao };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCertificado(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/certificados/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
+
 
 
 export const storage = new StorageService();

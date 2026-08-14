@@ -550,6 +550,35 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 26. Certificados
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`certificados\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`codigo_autenticacao\` VARCHAR(128) NOT NULL,
+        \`titulo\` VARCHAR(255) NOT NULL,
+        \`nome_aluno\` VARCHAR(255) NOT NULL,
+        \`cpf_masp\` VARCHAR(64) DEFAULT NULL,
+        \`descricao\` TEXT DEFAULT NULL,
+        \`nome_arquivo\` VARCHAR(255) NOT NULL,
+        \`pdf_base64\` LONGTEXT NOT NULL,
+        \`pdf_stamped_base64\` LONGTEXT DEFAULT NULL,
+        \`tamanho_bytes\` INT DEFAULT NULL,
+        \`tipo_mime\` VARCHAR(64) DEFAULT 'application/pdf',
+        \`data_emissao\` DATE DEFAULT NULL,
+        \`criado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
+        \`criado_por_nome\` VARCHAR(255) DEFAULT NULL,
+        \`status\` ENUM('Valido', 'Revogado') NOT NULL DEFAULT 'Valido',
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        UNIQUE KEY \`uk_codigo_autenticacao\` (\`codigo_autenticacao\`),
+        KEY \`idx_cert_nome_aluno\` (\`nome_aluno\`),
+        KEY \`idx_cert_cpf_masp\` (\`cpf_masp\`),
+        KEY \`idx_cert_data_emissao\` (\`data_emissao\`),
+        KEY \`idx_cert_status\` (\`status\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // Create Backwards Compatible SQL Views for legacy English code queries
     try {
       await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);

@@ -15,7 +15,8 @@ import {
   Smartphone,
   Calendar,
   X,
-  Shield
+  Shield,
+  ShieldCheck
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 
@@ -117,6 +118,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'calendario',
       label: 'Calendário Curso de Formação',
       icon: Calendar,
+      visible: true
+    },
+    {
+      id: 'certificados',
+      label: 'Verificar Certificados',
+      icon: ShieldCheck,
       visible: true
     },
     {

@@ -3866,4 +3866,261 @@ apiRouter.delete('/auxiliar-tabela-equipe/:id', async (req: Request, res: Respon
   }
 });
 
+// ============================================================================
+// CERTIFICADOS ENDPOINTS
+// ============================================================================
+
+// GET /certificados - List all certificates
+apiRouter.get('/certificados', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const includePdf = req.query.includePdf === 'true';
+    
+    // Select columns (optionally omit heavy base64 for fast listing)
+    const sql = includePdf 
+      ? 'SELECT * FROM certificados ORDER BY data_criacao DESC'
+      : `SELECT id, codigo_autenticacao, titulo, nome_aluno, cpf_masp, descricao, 
+                nome_arquivo, tamanho_bytes, tipo_mime, data_emissao, 
+                criado_por_usuario_id, criado_por_nome, status, data_criacao, data_atualizacao 
+         FROM certificados ORDER BY data_criacao DESC`;
+         
+    const [rows]: any = await pool.query(sql);
+    
+    const formatted = rows.map((r: any) => ({
+      id: r.id,
+      codigoAutenticacao: r.codigo_autenticacao,
+      titulo: r.titulo,
+      nomeAluno: r.nome_aluno,
+      cpfMasp: r.cpf_masp,
+      descricao: r.descricao,
+      nomeArquivo: r.nome_arquivo,
+      pdfBase64: r.pdf_base64 || '',
+      pdfStampedBase64: r.pdf_stamped_base64 || '',
+      tamanhoBytes: r.tamanho_bytes,
+      tipoMime: r.tipo_mime || 'application/pdf',
+      dataEmissao: r.data_emissao ? new Date(r.data_emissao).toISOString().split('T')[0] : null,
+      criadoPorUsuarioId: r.criado_por_usuario_id,
+      criadoPorNome: r.criado_por_nome,
+      status: r.status || 'Valido',
+      createdAt: r.data_criacao,
+      updatedAt: r.data_atualizacao
+    }));
+
+    return res.json(formatted);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /certificados/:id - Get specific certificate with full PDF
+apiRouter.get('/certificados/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT * FROM certificados WHERE id = ? OR codigo_autenticacao = ? LIMIT 1',
+      [id, id]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Certificado não encontrado.' });
+    }
+
+    const r = rows[0];
+    return res.json({
+      id: r.id,
+      codigoAutenticacao: r.codigo_autenticacao,
+      titulo: r.titulo,
+      nomeAluno: r.nome_aluno,
+      cpfMasp: r.cpf_masp,
+      descricao: r.descricao,
+      nomeArquivo: r.nome_arquivo,
+      pdfBase64: r.pdf_base64 || '',
+      pdfStampedBase64: r.pdf_stamped_base64 || '',
+      tamanhoBytes: r.tamanho_bytes,
+      tipoMime: r.tipo_mime || 'application/pdf',
+      dataEmissao: r.data_emissao ? new Date(r.data_emissao).toISOString().split('T')[0] : null,
+      criadoPorUsuarioId: r.criado_por_usuario_id,
+      criadoPorNome: r.criado_por_nome,
+      status: r.status || 'Valido',
+      createdAt: r.data_criacao,
+      updatedAt: r.data_atualizacao
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /certificados/verificar/:code - Public verification endpoint
+apiRouter.get('/certificados/verificar/:code', async (req: Request, res: Response) => {
+  try {
+    const code = (req.params.code || '').trim();
+    if (!code) {
+      return res.status(400).json({ error: 'Código de autenticação não informado.' });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT * FROM certificados WHERE codigo_autenticacao = ? OR id = ? LIMIT 1',
+      [code, code]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ 
+        success: false, 
+        valid: false, 
+        error: 'Certificado não localizado na base oficial de registros da ACADEPOL.' 
+      });
+    }
+
+    const r = rows[0];
+    return res.json({
+      success: true,
+      valid: r.status === 'Valido',
+      certificate: {
+        id: r.id,
+        codigoAutenticacao: r.codigo_autenticacao,
+        titulo: r.titulo,
+        nomeAluno: r.nome_aluno,
+        cpfMasp: r.cpf_masp,
+        descricao: r.descricao,
+        nomeArquivo: r.nome_arquivo,
+        pdfBase64: r.pdf_base64 || '',
+        pdfStampedBase64: r.pdf_stamped_base64 || r.pdf_base64 || '',
+        tamanhoBytes: r.tamanho_bytes,
+        tipoMime: r.tipo_mime || 'application/pdf',
+        dataEmissao: r.data_emissao ? new Date(r.data_emissao).toISOString().split('T')[0] : null,
+        criadoPorNome: r.criado_por_nome,
+        status: r.status || 'Valido',
+        createdAt: r.data_criacao
+      }
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /certificados - Create or update certificate
+apiRouter.post('/certificados', async (req: Request, res: Response) => {
+  try {
+    const {
+      id: rawId,
+      codigoAutenticacao: rawCode,
+      titulo,
+      nomeAluno,
+      cpfMasp,
+      descricao,
+      nomeArquivo,
+      pdfBase64,
+      pdfStampedBase64,
+      tamanhoBytes,
+      tipoMime,
+      dataEmissao,
+      status,
+      actor
+    } = req.body;
+
+    if (!titulo || !nomeAluno || !pdfBase64) {
+      return res.status(400).json({ error: 'Título, Nome do Aluno e Arquivo PDF são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = rawId || `cert-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+    const codigoAutenticacao = rawCode || `ACAD-${new Date().getFullYear()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+    const fileBytes = tamanhoBytes || Math.round((pdfBase64.length * 3) / 4);
+    const mime = tipoMime || 'application/pdf';
+    const filename = nomeArquivo || `certificado_${nomeAluno.toLowerCase().replace(/\s+/g, '_')}.pdf`;
+    const certStatus = status || 'Valido';
+    const emissionDate = dataEmissao ? new Date(dataEmissao) : new Date();
+
+    const criadoPorId = actor?.id || null;
+    const criadoPorNome = actor?.name || 'Administrador Geral';
+
+    await pool.query(
+      `INSERT INTO certificados (
+        id, codigo_autenticacao, titulo, nome_aluno, cpf_masp, descricao, 
+        nome_arquivo, pdf_base64, pdf_stamped_base64, tamanho_bytes, tipo_mime, 
+        data_emissao, criado_por_usuario_id, criado_por_nome, status, data_criacao
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        titulo = VALUES(titulo),
+        nome_aluno = VALUES(nome_aluno),
+        cpf_masp = VALUES(cpf_masp),
+        descricao = VALUES(descricao),
+        nome_arquivo = VALUES(nome_arquivo),
+        pdf_base64 = VALUES(pdf_base64),
+        pdf_stamped_base64 = VALUES(pdf_stamped_base64),
+        tamanho_bytes = VALUES(tamanho_bytes),
+        tipo_mime = VALUES(tipo_mime),
+        data_emissao = VALUES(data_emissao),
+        status = VALUES(status)`,
+      [
+        id,
+        codigoAutenticacao,
+        titulo,
+        nomeAluno,
+        cpfMasp || null,
+        descricao || null,
+        filename,
+        pdfBase64,
+        pdfStampedBase64 || pdfBase64,
+        fileBytes,
+        mime,
+        emissionDate,
+        criadoPorId,
+        criadoPorNome,
+        certStatus
+      ]
+    );
+
+    await insertAuditLog(
+      'Certificados',
+      'Importar e Validar Certificado',
+      `Certificado emitido/registrado: ${titulo} para ${nomeAluno} (Código: ${codigoAutenticacao})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      id,
+      codigoAutenticacao,
+      titulo,
+      nomeAluno
+    });
+  } catch (err: any) {
+    console.error('Error saving certificate:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /certificados/:id - Delete certificate
+apiRouter.delete('/certificados/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [rows]: any = await pool.query('SELECT titulo, nome_aluno, codigo_autenticacao FROM certificados WHERE id = ?', [id]);
+    const cert = rows[0];
+
+    await pool.query('DELETE FROM certificados WHERE id = ?', [id]);
+
+    if (cert) {
+      await insertAuditLog(
+        'Certificados',
+        'Excluir Certificado',
+        `Certificado excluído: ${cert.titulo} de ${cert.nome_aluno} (Código: ${cert.codigo_autenticacao})`,
+        actor,
+        req.ip
+      );
+    }
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 

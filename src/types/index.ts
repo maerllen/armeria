@@ -14,7 +14,8 @@ export type ModuleType =
   | 'ensino-continuado'
   | 'gerencia-cursos'
   | 'iniciar-aula-mobile'
-  | 'calendario';
+  | 'calendario'
+  | 'certificados';
 
 export type UserCargo = 
   | 'Delegado' 
@@ -517,3 +518,24 @@ export interface EquipeCalendario {
   professores_equipe?: ProfessorEquipe[];
   createdAt?: string;
 }
+
+export interface Certificado {
+  id: string;
+  codigoAutenticacao: string;
+  titulo: string;
+  nomeAluno: string;
+  cpfMasp?: string;
+  descricao?: string;
+  nomeArquivo: string;
+  pdfBase64: string;
+  pdfStampedBase64?: string;
+  tamanhoBytes?: number;
+  tipoMime?: string;
+  dataEmissao?: string;
+  criadoPorUsuarioId?: string;
+  criadoPorNome?: string;
+  status: 'Valido' | 'Revogado';
+  createdAt: string;
+  updatedAt?: string;
+}
+

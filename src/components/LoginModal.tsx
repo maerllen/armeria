@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
-import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck } from 'lucide-react';
 
 interface LoginModalProps {
   onLoginSuccess: (maspDigits: string, passwordDigits: string) => void;
@@ -176,6 +176,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
             <span>ENTRAR NO SISTEMA</span>
           </button>
         </form>
+
+        {/* Public Certificate Validator Shortcut */}
+        <div className="px-6 py-3 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-center">
+          <a
+            href="?validar="
+            className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center space-x-1.5 transition"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>Consultar Autenticidade de Certificado (Público)</span>
+          </a>
+        </div>
 
         <div className="bg-slate-950 px-6 py-4 border-t border-slate-800 text-center">
           <p className="text-[11px] text-slate-500">
