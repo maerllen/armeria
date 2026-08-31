@@ -1,9 +1,12 @@
 import React, { useState } from 'react';
-import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement } from '../types';
+import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { TransferWeaponModal } from './TransferWeaponModal';
+import { TransferReceiptModal } from './TransferReceiptModal';
+import { TransferHistoryModal } from './TransferHistoryModal';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -50,6 +53,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showTransitDetailModal, setShowTransitDetailModal] = useState(false);
+
+  // Transfer Modals state (Exclusive to Geral, Admin, and Armeiro)
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferInitialWeapon, setTransferInitialWeapon] = useState<Weapon | null>(null);
+  const [showTransferHistoryModal, setShowTransferHistoryModal] = useState(false);
+  const [selectedTransferForReceipt, setSelectedTransferForReceipt] = useState<WeaponTransfer | null>(null);
 
   const [selectedWeapon, setSelectedWeapon] = useState<Weapon | null>(null);
   const [weaponHistory, setWeaponHistory] = useState<Movement[]>([]);
@@ -182,6 +191,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const canAddEditWeapon = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
   const canDeleteWeapon = isGeral;
   const canManageMaintenance = isGeral || isArmeiro;
+  const canTransferWeapons = isGeral || isAdmin || isArmeiro;
+
+  const weaponTransfers = canTransferWeapons ? storage.getWeaponTransfers(currentUser) : [];
 
   // Vault spaces for weapons: MUST BE TYPE ARMAS
   const weaponVaultSpaces = vaultSpaces.filter(v => v.type === 'ARMAS' && v.unitId === (unitId || currentUser.unitId));
@@ -452,6 +464,36 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               <Layers className="w-4 h-4 text-amber-400" />
               <span>Armas Disponíveis (Tipos e Modelos)</span>
             </button>
+          )}
+
+          {canTransferWeapons && (
+            <>
+              <button
+                id="open-transfer-history-btn"
+                onClick={() => setShowTransferHistoryModal(true)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <FileText className="w-4 h-4 text-amber-400" />
+                <span>Histórico Transferências</span>
+                {weaponTransfers.length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-mono font-bold">
+                    {weaponTransfers.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                id="open-transfer-weapons-btn"
+                onClick={() => {
+                  setTransferInitialWeapon(null);
+                  setShowTransferModal(true);
+                }}
+                className="bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>Transferir Armas entre Unidades</span>
+              </button>
+            </>
           )}
 
           {canAddEditWeapon && (
@@ -828,6 +870,28 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   <History className="w-4 h-4 text-amber-400" />
                   <span>Histórico</span>
                 </button>
+
+                {/* Transfer Weapon Button (Geral, Admin, Armeiro) */}
+                {canTransferWeapons && (
+                  <button
+                    id="detail-transfer-weapon-btn"
+                    disabled={selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula'}
+                    onClick={() => {
+                      setTransferInitialWeapon(selectedWeaponDetail);
+                      setSelectedWeaponDetail(null);
+                      setShowTransferModal(true);
+                    }}
+                    title={
+                      selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula'
+                        ? `Arma ${selectedWeaponDetail.status}. Não é possível transferir no momento.`
+                        : 'Transferir esta arma para outra unidade'
+                    }
+                    className="bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 disabled:text-slate-500 disabled:border-slate-800 disabled:cursor-not-allowed text-white text-xs font-semibold px-3 py-2 rounded-xl border border-amber-500/30 transition flex items-center space-x-1.5"
+                  >
+                    <ArrowRightLeft className="w-4 h-4" />
+                    <span>Transferir Arma</span>
+                  </button>
+                )}
 
                 {/* Maintenance Button */}
                 {canManageMaintenance && (
@@ -1471,6 +1535,51 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
           </div>
         </div>
+      )}
+
+      {/* Transfer Weapon Modal (Armeiro, Administrador, Geral) */}
+      {showTransferModal && canTransferWeapons && (
+        <TransferWeaponModal
+          currentUser={currentUser}
+          weapons={weapons}
+          departments={departments}
+          units={units}
+          vaultSpaces={vaultSpaces}
+          initialWeapon={transferInitialWeapon}
+          onClose={() => {
+            setShowTransferModal(false);
+            setTransferInitialWeapon(null);
+          }}
+          onSuccess={(createdTransfer) => {
+            setShowTransferModal(false);
+            setTransferInitialWeapon(null);
+            onRefresh();
+            setSelectedTransferForReceipt(createdTransfer);
+            setSuccessMsg(`Transferência ${createdTransfer.protocolNumber} realizada com sucesso.`);
+          }}
+        />
+      )}
+
+      {/* Transfer Receipt Modal (PDF / Print) */}
+      {selectedTransferForReceipt && (
+        <TransferReceiptModal
+          transfer={selectedTransferForReceipt}
+          onClose={() => setSelectedTransferForReceipt(null)}
+        />
+      )}
+
+      {/* Transfer History Modal */}
+      {showTransferHistoryModal && canTransferWeapons && (
+        <TransferHistoryModal
+          transfers={weaponTransfers}
+          currentUser={currentUser}
+          onClose={() => setShowTransferHistoryModal(false)}
+          onSelectTransfer={(trf) => setSelectedTransferForReceipt(trf)}
+          onOpenNewTransfer={() => {
+            setTransferInitialWeapon(null);
+            setShowTransferModal(true);
+          }}
+        />
       )}
 
       {/* Confirm Delete Modal */}

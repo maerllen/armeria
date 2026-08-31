@@ -579,6 +579,42 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 27. Transferências de Armas entre Unidades
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`transferencias_armas\` (
+        \`id\` VARCHAR(64) NOT NULL,
+        \`numero_protocolo\` VARCHAR(64) DEFAULT NULL,
+        \`data_transferencia\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`origem_departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`origem_departamento_nome\` VARCHAR(255) DEFAULT NULL,
+        \`origem_unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`origem_unidade_nome\` VARCHAR(255) DEFAULT NULL,
+        \`destino_departamento_id\` VARCHAR(64) DEFAULT NULL,
+        \`destino_departamento_nome\` VARCHAR(255) DEFAULT NULL,
+        \`destino_unidade_id\` VARCHAR(64) DEFAULT NULL,
+        \`destino_unidade_nome\` VARCHAR(255) DEFAULT NULL,
+        \`destino_cofre_id\` VARCHAR(64) DEFAULT NULL,
+        \`destino_cofre_codigo\` VARCHAR(64) DEFAULT NULL,
+        \`responsavel_id\` VARCHAR(64) NOT NULL,
+        \`responsavel_nome\` VARCHAR(255) NOT NULL,
+        \`responsavel_masp\` VARCHAR(32) NOT NULL,
+        \`responsavel_perfil\` VARCHAR(64) NOT NULL,
+        \`transportador_nome\` VARCHAR(255) NOT NULL,
+        \`transportador_masp\` VARCHAR(32) NOT NULL,
+        \`transportador_cargo\` VARCHAR(64) DEFAULT NULL,
+        \`motivo\` TEXT NOT NULL,
+        \`armas_json\` JSON NOT NULL,
+        \`total_armas\` INT NOT NULL DEFAULT 1,
+        \`total_carregadores\` INT NOT NULL DEFAULT 0,
+        \`observacao\` TEXT DEFAULT NULL,
+        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`id\`),
+        KEY \`idx_trf_origem\` (\`origem_unidade_id\`),
+        KEY \`idx_trf_destino\` (\`destino_unidade_id\`),
+        KEY \`idx_trf_data\` (\`data_transferencia\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // Create Backwards Compatible SQL Views for legacy English code queries
     try {
       await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);
@@ -588,7 +624,9 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       await connection.query(`CREATE OR REPLACE VIEW \`available_weapon_types\` AS SELECT id, nome AS name, modelos AS models, data_criacao AS created_at FROM \`tipos_armas\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`vault_spaces\` AS SELECT id, codigo AS code, tipo AS type, departamento_id AS department_id, unidade_id AS unit_id, data_criacao AS created_at FROM \`cofres\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`weapons\` AS SELECT id, tipo AS type, numero_serie AS serial_number, fabricante AS manufacturer, modelo AS model, calibre, quantidade_carregadores AS magazine_quantity, status, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, observacao_localizacao AS location_note, data_ultima_manutencao AS last_maintenance_date, responsavel_ultima_manutencao AS last_maintenance_responsible, data_criacao AS created_at FROM \`armas\`;`);
+      await connection.query(`CREATE OR REPLACE VIEW \`weapon_transfers\` AS SELECT id, numero_protocolo AS protocol_number, data_transferencia AS transfer_date, origem_departamento_id AS origin_department_id, origem_departamento_nome AS origin_department_name, origem_unidade_id AS origin_unit_id, origem_unidade_nome AS origin_unit_name, destino_departamento_id AS destination_department_id, destino_departamento_nome AS destination_department_name, destino_unidade_id AS destination_unit_id, destino_unidade_nome AS destination_unit_name, destino_cofre_id AS destination_vault_space_id, destino_cofre_codigo AS destination_vault_space_code, responsavel_id AS transferred_by_user_id, responsavel_nome AS transferred_by_user_name, responsavel_masp AS transferred_by_user_masp, responsavel_perfil AS transferred_by_user_role, transportador_nome AS receiver_or_transporter_name, transportador_masp AS receiver_or_transporter_masp, transportador_cargo AS receiver_or_transporter_cargo, motivo AS reason, armas_json AS weapons_json, total_armas AS total_weapons, total_carregadores AS total_magazines, observacao AS observation, data_criacao AS created_at FROM \`transferencias_armas\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`ammo_stocks\` AS SELECT id, calibre_id, quantidade AS quantity, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, data_atualizacao AS updated_at FROM \`estoque_municoes\`;`);
+
       await connection.query(`CREATE OR REPLACE VIEW \`courses\` AS SELECT id, nome AS name, modelos_permitidos AS allowed_models, calibres_permitidos AS allowed_calibers, tipos_armas_permitidos AS allowed_weapon_types, tiros_por_aluno AS shots_per_student, tiros_por_tipo_arma AS shots_per_weapon_type, departamento_id AS department_id, data_criacao AS created_at FROM \`cursos\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`user_courses\` AS SELECT id, usuario_id AS user_id, curso_id, data_conclusao AS completion_date, data_validade AS expiration_date, data_criacao AS created_at FROM \`usuario_cursos\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`audit_logs\` AS SELECT id, modulo AS module, acao AS action, detalhes AS details, usuario_id AS user_id, nome_usuario AS user_name, masp_usuario AS user_masp, perfil_usuario AS user_role, endereco_ip AS ip_address, data_hora AS timestamp FROM \`logs_auditoria\`;`);

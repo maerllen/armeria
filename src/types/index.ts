@@ -539,3 +539,44 @@ export interface Certificado {
   updatedAt?: string;
 }
 
+export interface WeaponTransferItem {
+  weaponId: string;
+  serialNumber: string;
+  type: string;
+  model: string;
+  manufacturer: string;
+  caliber: string;
+  magazineQuantity: number;
+  originVaultCode?: string;
+}
+
+export interface WeaponTransfer {
+  id: string;
+  protocolNumber?: string;
+  transferDate: string;
+  originDepartmentId: string;
+  originDepartmentName: string;
+  originUnitId: string;
+  originUnitName: string;
+  destinationDepartmentId: string;
+  destinationDepartmentName: string;
+  destinationUnitId: string;
+  destinationUnitName: string;
+  destinationVaultSpaceId: string;
+  destinationVaultSpaceCode: string;
+  transferredByUserId: string;
+  transferredByUserName: string;
+  transferredByUserMasp: string;
+  transferredByUserRole: UserRole;
+  receiverOrTransporterName: string;
+  receiverOrTransporterMasp: string;
+  receiverOrTransporterCargo?: string;
+  reason: string;
+  weapons: WeaponTransferItem[];
+  totalWeapons: number;
+  totalMagazines: number;
+  observation?: string;
+  createdAt: string;
+}
+
+

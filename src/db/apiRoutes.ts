@@ -4122,5 +4122,296 @@ apiRouter.delete('/certificados/:id', async (req: Request, res: Response) => {
   }
 });
 
+// -------------------------------------------------------------
+// WEAPON TRANSFERS BETWEEN UNITS (TRANSFERÊNCIAS DE ARMAS)
+// Only Armeiro, Administrador, and Geral can view and transfer
+// -------------------------------------------------------------
+apiRouter.get('/weapon-transfers', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        id,
+        numero_protocolo as protocolNumber,
+        data_transferencia as transferDate,
+        origem_departamento_id as originDepartmentId,
+        origem_departamento_nome as originDepartmentName,
+        origem_unidade_id as originUnitId,
+        origem_unidade_nome as originUnitName,
+        destino_departamento_id as destinationDepartmentId,
+        destino_departamento_nome as destinationDepartmentName,
+        destino_unidade_id as destinationUnitId,
+        destino_unidade_nome as destinationUnitName,
+        destino_cofre_id as destinationVaultSpaceId,
+        destino_cofre_codigo as destinationVaultSpaceCode,
+        responsavel_id as transferredByUserId,
+        responsavel_nome as transferredByUserName,
+        responsavel_masp as transferredByUserMasp,
+        responsavel_perfil as transferredByUserRole,
+        transportador_nome as receiverOrTransporterName,
+        transportador_masp as receiverOrTransporterMasp,
+        transportador_cargo as receiverOrTransporterCargo,
+        motivo as reason,
+        armas_json as weaponsJson,
+        total_armas as totalWeapons,
+        total_carregadores as totalMagazines,
+        observacao as observation,
+        data_criacao as createdAt
+      FROM transferencias_armas
+      ORDER BY data_transferencia DESC
+    `);
+
+    const mapped = (rows || []).map((r: any) => {
+      let weapons = [];
+      try {
+        weapons = typeof r.weaponsJson === 'string' ? JSON.parse(r.weaponsJson) : (r.weaponsJson || []);
+      } catch (e) {
+        weapons = [];
+      }
+      return {
+        id: r.id,
+        protocolNumber: r.protocolNumber,
+        transferDate: r.transferDate,
+        originDepartmentId: r.originDepartmentId,
+        originDepartmentName: r.originDepartmentName,
+        originUnitId: r.originUnitId,
+        originUnitName: r.originUnitName,
+        destinationDepartmentId: r.destinationDepartmentId,
+        destinationDepartmentName: r.destinationDepartmentName,
+        destinationUnitId: r.destinationUnitId,
+        destinationUnitName: r.destinationUnitName,
+        destinationVaultSpaceId: r.destinationVaultSpaceId,
+        destinationVaultSpaceCode: r.destinationVaultSpaceCode,
+        transferredByUserId: r.transferredByUserId,
+        transferredByUserName: r.transferredByUserName,
+        transferredByUserMasp: r.transferredByUserMasp,
+        transferredByUserRole: r.transferredByUserRole,
+        receiverOrTransporterName: r.receiverOrTransporterName,
+        receiverOrTransporterMasp: r.receiverOrTransporterMasp,
+        receiverOrTransporterCargo: r.receiverOrTransporterCargo,
+        reason: r.reason,
+        weapons,
+        totalWeapons: r.totalWeapons || (weapons ? weapons.length : 1),
+        totalMagazines: r.totalMagazines || 0,
+        observation: r.observation,
+        createdAt: r.createdAt
+      };
+    });
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
+  try {
+    const {
+      originDepartmentId,
+      originDepartmentName,
+      originUnitId,
+      originUnitName,
+      destinationDepartmentId,
+      destinationDepartmentName,
+      destinationUnitId,
+      destinationUnitName,
+      destinationVaultSpaceId,
+      destinationVaultSpaceCode,
+      receiverOrTransporterName,
+      receiverOrTransporterMasp,
+      receiverOrTransporterCargo,
+      reason,
+      weapons,
+      observation,
+      actor
+    } = req.body;
+
+    if (!actor) {
+      return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
+    }
+
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
+    if (!allowedRoles.includes(actor.role)) {
+      return res.status(403).json({ error: 'Apenas Armeiro, Administrador e perfil Geral têm permissão para transferir armas entre unidades.' });
+    }
+
+    if (!destinationUnitId) {
+      return res.status(400).json({ error: 'Selecione a unidade de destino.' });
+    }
+
+    if (originUnitId === destinationUnitId) {
+      return res.status(400).json({ error: 'A unidade de destino deve ser diferente da unidade de origem.' });
+    }
+
+    if (!destinationVaultSpaceId) {
+      return res.status(400).json({ error: 'Selecione o local de guarda no cofre da unidade de destino.' });
+    }
+
+    if (!Array.isArray(weapons) || weapons.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos uma arma para transferir.' });
+    }
+
+    if (!receiverOrTransporterName || !receiverOrTransporterName.trim()) {
+      return res.status(400).json({ error: 'Informe o nome do policial transportador/recebedor responsável.' });
+    }
+
+    if (!receiverOrTransporterMasp || !receiverOrTransporterMasp.trim()) {
+      return res.status(400).json({ error: 'Informe o MASP do policial transportador/recebedor.' });
+    }
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Informe o motivo/justificativa da transferência.' });
+    }
+
+    const pool = getPool();
+    const currentYear = new Date().getFullYear();
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const transferId = `trf-${Date.now()}`;
+    const protocolNumber = `TRF-${currentYear}-${randomSuffix}`;
+    const nowIso = new Date().toISOString();
+
+    let totalMagazines = 0;
+    const weaponIdsToUpdate: string[] = [];
+
+    for (const w of weapons) {
+      if (w.weaponId) {
+        weaponIdsToUpdate.push(w.weaponId);
+      }
+      totalMagazines += Number(w.magazineQuantity) || 0;
+    }
+
+    // Verify all weapons are not 'Em Trânsito'
+    if (weaponIdsToUpdate.length > 0) {
+      const [dbWeaps]: any = await pool.query(
+        `SELECT id, numero_serie, status FROM armas WHERE id IN (${weaponIdsToUpdate.map(() => '?').join(',')})`,
+        weaponIdsToUpdate
+      );
+
+      for (const dw of (dbWeaps || [])) {
+        if (dw.status === 'Em Trânsito' || dw.status === 'Em Aula') {
+          return res.status(400).json({
+            error: `A arma de série ${dw.numero_serie} está com status "${dw.status}" e não pode ser transferida enquanto não for devolvida ao cofre.`
+          });
+        }
+      }
+
+      // Update weapons location to new department, unit, and vault space
+      for (const wId of weaponIdsToUpdate) {
+        await pool.query(
+          `UPDATE armas SET 
+            departamento_id = ?,
+            unidade_id = ?,
+            cofre_id = ?,
+            status = 'No Cofre'
+           WHERE id = ?`,
+          [destinationDepartmentId, destinationUnitId, destinationVaultSpaceId, wId]
+        );
+      }
+    }
+
+    // Save transfer record
+    await pool.query(
+      `INSERT INTO transferencias_armas (
+        id,
+        numero_protocolo,
+        data_transferencia,
+        origem_departamento_id,
+        origem_departamento_nome,
+        origem_unidade_id,
+        origem_unidade_nome,
+        destino_departamento_id,
+        destino_departamento_nome,
+        destino_unidade_id,
+        destino_unidade_nome,
+        destino_cofre_id,
+        destino_cofre_codigo,
+        responsavel_id,
+        responsavel_nome,
+        responsavel_masp,
+        responsavel_perfil,
+        transportador_nome,
+        transportador_masp,
+        transportador_cargo,
+        motivo,
+        armas_json,
+        total_armas,
+        total_carregadores,
+        observacao,
+        data_criacao
+      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        transferId,
+        protocolNumber,
+        originDepartmentId || null,
+        originDepartmentName || null,
+        originUnitId || null,
+        originUnitName || null,
+        destinationDepartmentId || null,
+        destinationDepartmentName || null,
+        destinationUnitId || null,
+        destinationUnitName || null,
+        destinationVaultSpaceId || null,
+        destinationVaultSpaceCode || null,
+        actor.id,
+        actor.name,
+        actor.masp,
+        actor.role,
+        receiverOrTransporterName.trim(),
+        receiverOrTransporterMasp.trim(),
+        receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
+        reason.trim(),
+        JSON.stringify(weapons),
+        weapons.length,
+        totalMagazines,
+        observation ? observation.trim() : null
+      ]
+    );
+
+    const weaponSerials = weapons.map((w: any) => w.serialNumber).join(', ');
+    await insertAuditLog(
+      'Armas',
+      'Transferência entre Unidades',
+      `Transferência de ${weapons.length} arma(s) (${weaponSerials}) de ${originUnitName} para ${destinationUnitName}. Protocolo: ${protocolNumber}`,
+      actor,
+      req.ip
+    );
+
+    const createdTransfer = {
+      id: transferId,
+      protocolNumber,
+      transferDate: nowIso,
+      originDepartmentId,
+      originDepartmentName,
+      originUnitId,
+      originUnitName,
+      destinationDepartmentId,
+      destinationDepartmentName,
+      destinationUnitId,
+      destinationUnitName,
+      destinationVaultSpaceId,
+      destinationVaultSpaceCode,
+      transferredByUserId: actor.id,
+      transferredByUserName: actor.name,
+      transferredByUserMasp: actor.masp,
+      transferredByUserRole: actor.role,
+      receiverOrTransporterName: receiverOrTransporterName.trim(),
+      receiverOrTransporterMasp: receiverOrTransporterMasp.trim(),
+      receiverOrTransporterCargo: receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : '',
+      reason: reason.trim(),
+      weapons,
+      totalWeapons: weapons.length,
+      totalMagazines,
+      observation: observation ? observation.trim() : '',
+      createdAt: nowIso
+    };
+
+    return res.json({ success: true, transfer: createdTransfer });
+  } catch (err: any) {
+    console.error('Error transferring weapons:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 

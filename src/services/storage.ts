@@ -23,7 +23,9 @@ import {
   EquipeCalendario,
   ProfessorEquipe,
   AuxiliarTabelaEquipe,
-  Certificado
+  Certificado,
+  WeaponTransfer,
+  WeaponTransferItem
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -37,6 +39,7 @@ export interface AppState {
   ammoStocks: AmmunitionStock[];
   ammoMovements: AmmunitionMovement[];
   weapons: Weapon[];
+  weaponTransfers: WeaponTransfer[];
   movements: Movement[];
   courses: Course[];
   availableWeaponTypes: AvailableWeaponType[];
@@ -64,6 +67,7 @@ class StorageService {
     ammoStocks: [],
     ammoMovements: [],
     weapons: [],
+    weaponTransfers: [],
     movements: [],
     courses: [],
     availableWeaponTypes: [],
@@ -117,7 +121,8 @@ class StorageService {
         calendarRecordsRes,
         equipesCalendarioRes,
         auxiliarTabelaEquipeRes,
-        certificadosRes
+        certificadosRes,
+        weaponTransfersRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -140,7 +145,8 @@ class StorageService {
         fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : []),
         fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : []),
         fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : []),
-        fetch('/api/certificados').then(r => r.ok ? r.json() : [])
+        fetch('/api/certificados').then(r => r.ok ? r.json() : []),
+        fetch('/api/weapon-transfers').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -165,6 +171,7 @@ class StorageService {
       this.state.equipesCalendario = equipesCalendarioRes || [];
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
       this.state.certificados = certificadosRes || [];
+      this.state.weaponTransfers = weaponTransfersRes || [];
 
 
       // Refresh current user reference if logged in
@@ -805,6 +812,63 @@ class StorageService {
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir arma.');
     await this.refreshFromServer();
     return true;
+  }
+
+  // --- WEAPON TRANSFERS BETWEEN UNITS ---
+  public getWeaponTransfers(currentUser?: User | null): WeaponTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    // Strict Role Check: ONLY Armeiro, Administrador, and Geral can view transfers
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
+    if (!allowedRoles.includes(actor.role)) return [];
+
+    if (actor.role === 'Geral') return this.state.weaponTransfers;
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      return this.state.weaponTransfers.filter(
+        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+      );
+    }
+    return this.state.weaponTransfers.filter(
+      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+    );
+  }
+
+  public async transferWeapons(data: {
+    originDepartmentId?: string;
+    originDepartmentName?: string;
+    originUnitId?: string;
+    originUnitName?: string;
+    destinationDepartmentId: string;
+    destinationDepartmentName: string;
+    destinationUnitId: string;
+    destinationUnitName: string;
+    destinationVaultSpaceId: string;
+    destinationVaultSpaceCode: string;
+    receiverOrTransporterName: string;
+    receiverOrTransporterMasp: string;
+    receiverOrTransporterCargo?: string;
+    reason: string;
+    weapons: {
+      weaponId: string;
+      serialNumber: string;
+      type: string;
+      model: string;
+      manufacturer: string;
+      caliber: string;
+      magazineQuantity: number;
+      originVaultCode?: string;
+    }[];
+    observation?: string;
+  }): Promise<WeaponTransfer> {
+    const res = await fetch('/api/weapon-transfers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, actor: this.state.currentUser })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao realizar transferência de armas.');
+    await this.refreshFromServer();
+    return result.transfer;
   }
 
   // --- WEAPON MOVEMENTS (CAUTELAS) ---
