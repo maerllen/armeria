@@ -23,7 +23,8 @@ interface TransferWeaponModalProps {
   vaultSpaces: VaultSpace[];
   currentUser: User;
   onClose: () => void;
-  onTransferSuccess: (transfer: WeaponTransfer) => void;
+  onTransferSuccess?: (transfer: WeaponTransfer) => void;
+  onSuccess?: (transfer: WeaponTransfer) => void;
 }
 
 export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
@@ -34,10 +35,15 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   vaultSpaces,
   currentUser,
   onClose,
-  onTransferSuccess
+  onTransferSuccess,
+  onSuccess
 }) => {
-  // Determine origin unit
-  const defaultOriginUnitId = initialWeapon?.unitId || currentUser.unitId || (units[0]?.id || '');
+  // Determine origin unit - Armeiro and Administrador are locked to their own unit
+  const isGeral = currentUser.role === 'Geral';
+  const defaultOriginUnitId = (!isGeral && currentUser.unitId)
+    ? currentUser.unitId
+    : (initialWeapon?.unitId || currentUser.unitId || (units[0]?.id || ''));
+
   const [originUnitId, setOriginUnitId] = useState<string>(defaultOriginUnitId);
   const originUnit = units.find(u => u.id === originUnitId);
   const originDept = departments.find(d => d.id === (originUnit?.departmentId || initialWeapon?.departmentId || currentUser.departmentId));
@@ -59,9 +65,9 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
 
   const [destVaultSpaceId, setDestVaultSpaceId] = useState<string>(destVaultSpaces[0]?.id || '');
 
-  // Selected weapons to transfer
+  // Selected weapons to transfer (must belong to originUnitId)
   const [selectedWeaponIds, setSelectedWeaponIds] = useState<string[]>(() => {
-    if (initialWeapon && initialWeapon.unitId === originUnitId) {
+    if (initialWeapon && initialWeapon.unitId === defaultOriginUnitId && initialWeapon.status !== 'Em Trânsito' && initialWeapon.status !== 'Em Aula' && initialWeapon.status !== 'Pendente de Recibo') {
       return [initialWeapon.id];
     }
     return [];
@@ -138,6 +144,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     e.preventDefault();
     setError(null);
 
+    if (!isGeral && currentUser.unitId && originUnitId !== currentUser.unitId) {
+      setError('Você só possui permissão para transferir armas pertencentes à sua própria unidade.');
+      return;
+    }
+
     if (!destUnitId) {
       setError('Por favor, selecione a unidade de destino.');
       return;
@@ -156,6 +167,16 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     if (selectedWeaponIds.length === 0) {
       setError('Selecione pelo menos uma arma para realizar a transferência.');
       return;
+    }
+
+    // Verify all selected weapons belong to originUnitId and actor's unit
+    for (const wId of selectedWeaponIds) {
+      const w = weapons.find(item => item.id === wId);
+      if (!w) continue;
+      if (!isGeral && currentUser.unitId && w.unitId !== currentUser.unitId) {
+        setError(`A arma ${w.serialNumber} não pertence à sua unidade.`);
+        return;
+      }
     }
 
     if (!transporterName.trim()) {
@@ -213,7 +234,12 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         observation: observation.trim()
       });
 
-      onTransferSuccess(createdTransfer);
+      if (typeof onTransferSuccess === 'function') {
+        onTransferSuccess(createdTransfer);
+      }
+      if (typeof onSuccess === 'function') {
+        onSuccess(createdTransfer);
+      }
     } catch (err: any) {
       setError(err.message || 'Erro ao realizar a transferência de armas.');
     } finally {
@@ -264,13 +290,32 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
             
             {/* Origin Unit Card */}
             <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                <Building2 className="w-4 h-4" /> 1. Unidade de Origem
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                  <Building2 className="w-4 h-4" /> 1. Unidade de Origem
+                </div>
+                {!isGeral && (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
+                    <Shield className="w-3 h-3" /> Unidade Fixa
+                  </span>
+                )}
               </div>
 
-              {isGeralOrAdmin ? (
+              {!isGeral && currentUser.unitId ? (
+                <div className="space-y-1.5 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 font-medium">Unidade do seu perfil:</span>
+                    <span className="text-[10px] font-bold text-amber-400 uppercase">{currentUser.role}</span>
+                  </div>
+                  <p className="font-bold text-white text-sm">{originUnit?.name || 'Sua Unidade'}</p>
+                  <p className="text-[11px] text-slate-400">{originDept?.name || 'Departamento'}</p>
+                  <p className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-800/60">
+                    * Armeiros e Administradores só podem transferir armamento pertencente à sua própria unidade.
+                  </p>
+                </div>
+              ) : (
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Selecionar Unidade de Origem</label>
+                  <label className="block text-xs text-slate-400 mb-1">Selecionar Unidade de Origem (Acesso Geral)</label>
                   <select
                     id="transfer-origin-unit-select"
                     value={originUnitId}
@@ -284,17 +329,13 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                     ))}
                   </select>
                 </div>
-              ) : (
-                <div className="space-y-1 text-xs">
-                  <span className="text-slate-400">Unidade Atual:</span>
-                  <p className="font-semibold text-white">{originUnit?.name || 'Sua Unidade'}</p>
-                  <p className="text-[11px] text-slate-500">{originDept?.name || 'Departamento'}</p>
-                </div>
               )}
 
-              <div className="pt-2 border-t border-slate-800/60 text-xs text-slate-400">
-                <span>Armas disponíveis para transferência: </span>
-                <span className="font-bold text-amber-400">{availableOriginWeapons.length}</span>
+              <div className="pt-2 border-t border-slate-800/60 text-xs text-slate-400 flex items-center justify-between">
+                <span>Armas disponíveis no cofre:</span>
+                <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                  {availableOriginWeapons.length} arma(s)
+                </span>
               </div>
             </div>
 
@@ -305,7 +346,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                {isGeralOrAdmin && departments.length > 1 && (
+                {departments.length > 1 && (
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Departamento de Destino</label>
                     <select

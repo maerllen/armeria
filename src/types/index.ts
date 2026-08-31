@@ -550,6 +550,8 @@ export interface WeaponTransferItem {
   originVaultCode?: string;
 }
 
+export type WeaponTransferStatus = 'Pendente' | 'Recebido' | 'Cancelado';
+
 export interface WeaponTransfer {
   id: string;
   protocolNumber?: string;
@@ -562,8 +564,8 @@ export interface WeaponTransfer {
   destinationDepartmentName: string;
   destinationUnitId: string;
   destinationUnitName: string;
-  destinationVaultSpaceId: string;
-  destinationVaultSpaceCode: string;
+  destinationVaultSpaceId?: string;
+  destinationVaultSpaceCode?: string;
   transferredByUserId: string;
   transferredByUserName: string;
   transferredByUserMasp: string;
@@ -576,6 +578,12 @@ export interface WeaponTransfer {
   totalWeapons: number;
   totalMagazines: number;
   observation?: string;
+  status: WeaponTransferStatus;
+  receivedAt?: string;
+  receivedByUserId?: string;
+  receivedByUserName?: string;
+  receivedByUserMasp?: string;
+  receivedByUserRole?: UserRole;
   createdAt: string;
 }
 

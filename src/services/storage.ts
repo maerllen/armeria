@@ -833,6 +833,26 @@ class StorageService {
     );
   }
 
+  public getPendingIncomingTransfers(currentUser?: User | null): WeaponTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const transfers = this.getWeaponTransfers(actor);
+    return transfers.filter(t => {
+      if (t.status !== 'Pendente') return false;
+      if (actor.role === 'Geral') return true;
+      if (actor.role === 'Administrador') {
+        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      }
+      if (actor.role === 'Armeiro') {
+        if (actor.managementScope !== 'unit') {
+          return t.destinationDepartmentId === actor.departmentId;
+        }
+        return t.destinationUnitId === actor.unitId;
+      }
+      return t.destinationUnitId === actor.unitId;
+    });
+  }
+
   public async transferWeapons(data: {
     originDepartmentId?: string;
     originDepartmentName?: string;
@@ -842,8 +862,8 @@ class StorageService {
     destinationDepartmentName: string;
     destinationUnitId: string;
     destinationUnitName: string;
-    destinationVaultSpaceId: string;
-    destinationVaultSpaceCode: string;
+    destinationVaultSpaceId?: string;
+    destinationVaultSpaceCode?: string;
     receiverOrTransporterName: string;
     receiverOrTransporterMasp: string;
     receiverOrTransporterCargo?: string;
@@ -869,6 +889,26 @@ class StorageService {
     if (!res.ok) throw new Error(result.error || 'Erro ao realizar transferência de armas.');
     await this.refreshFromServer();
     return result.transfer;
+  }
+
+  public async receiveWeaponTransfer(
+    transferId: string,
+    destinationVaultSpaceId: string,
+    observation?: string
+  ): Promise<boolean> {
+    const res = await fetch(`/api/weapon-transfers/${transferId}/receive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        destinationVaultSpaceId,
+        observation,
+        actor: this.state.currentUser
+      })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao receber armamento.');
+    await this.refreshFromServer();
+    return true;
   }
 
   // --- WEAPON MOVEMENTS (CAUTELAS) ---

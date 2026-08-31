@@ -4156,6 +4156,12 @@ apiRouter.get('/weapon-transfers', async (req: Request, res: Response) => {
         total_armas as totalWeapons,
         total_carregadores as totalMagazines,
         observacao as observation,
+        status,
+        recebido_em as receivedAt,
+        recebido_por_usuario_id as receivedByUserId,
+        recebido_por_nome as receivedByUserName,
+        recebido_por_masp as receivedByUserMasp,
+        recebido_por_perfil as receivedByUserRole,
         data_criacao as createdAt
       FROM transferencias_armas
       ORDER BY data_transferencia DESC
@@ -4194,6 +4200,12 @@ apiRouter.get('/weapon-transfers', async (req: Request, res: Response) => {
         totalWeapons: r.totalWeapons || (weapons ? weapons.length : 1),
         totalMagazines: r.totalMagazines || 0,
         observation: r.observation,
+        status: (r.status || (r.receivedAt ? 'Recebido' : 'Pendente')),
+        receivedAt: r.receivedAt,
+        receivedByUserId: r.receivedByUserId,
+        receivedByUserName: r.receivedByUserName,
+        receivedByUserMasp: r.receivedByUserMasp,
+        receivedByUserRole: r.receivedByUserRole,
         createdAt: r.createdAt
       };
     });
@@ -4235,16 +4247,21 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Apenas Armeiro, Administrador e perfil Geral têm permissão para transferir armas entre unidades.' });
     }
 
+    // Restrição de Segurança: Somente será possível transferir uma arma da unidade que pertencer o armeiro ou administrador
+    if (actor.role !== 'Geral') {
+      if (actor.unitId && originUnitId && originUnitId !== actor.unitId) {
+        return res.status(403).json({
+          error: 'Você só possui permissão para transferir armas pertencentes à sua própria unidade.'
+        });
+      }
+    }
+
     if (!destinationUnitId) {
       return res.status(400).json({ error: 'Selecione a unidade de destino.' });
     }
 
     if (originUnitId === destinationUnitId) {
       return res.status(400).json({ error: 'A unidade de destino deve ser diferente da unidade de origem.' });
-    }
-
-    if (!destinationVaultSpaceId) {
-      return res.status(400).json({ error: 'Selecione o local de guarda no cofre da unidade de destino.' });
     }
 
     if (!Array.isArray(weapons) || weapons.length === 0) {
@@ -4280,14 +4297,27 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       totalMagazines += Number(w.magazineQuantity) || 0;
     }
 
-    // Verify all weapons are not 'Em Trânsito'
+    // Verify all weapons belong to origin unit and are not 'Em Trânsito' or 'Em Aula'
     if (weaponIdsToUpdate.length > 0) {
       const [dbWeaps]: any = await pool.query(
-        `SELECT id, numero_serie, status FROM armas WHERE id IN (${weaponIdsToUpdate.map(() => '?').join(',')})`,
+        `SELECT id, numero_serie, status, unidade_id FROM armas WHERE id IN (${weaponIdsToUpdate.map(() => '?').join(',')})`,
         weaponIdsToUpdate
       );
 
       for (const dw of (dbWeaps || [])) {
+        // Validação da unidade da arma para Armeiro e Administrador
+        if (actor.role !== 'Geral' && actor.unitId && dw.unidade_id !== actor.unitId) {
+          return res.status(403).json({
+            error: `A arma de série ${dw.numero_serie} não pertence à sua unidade e não pode ser transferida por você.`
+          });
+        }
+
+        if (originUnitId && dw.unidade_id !== originUnitId) {
+          return res.status(400).json({
+            error: `A arma de série ${dw.numero_serie} não pertence à unidade de origem informada.`
+          });
+        }
+
         if (dw.status === 'Em Trânsito' || dw.status === 'Em Aula') {
           return res.status(400).json({
             error: `A arma de série ${dw.numero_serie} está com status "${dw.status}" e não pode ser transferida enquanto não for devolvida ao cofre.`
@@ -4295,21 +4325,36 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
         }
       }
 
-      // Update weapons location to new department, unit, and vault space
+      // Update weapons location to new department and unit with status 'Pendente de Recibo' in both weapons and armas tables
+      // This immediately moves the weapon to the new unit while leaving it unallocated to a vault space until received
       for (const wId of weaponIdsToUpdate) {
-        await pool.query(
-          `UPDATE armas SET 
-            departamento_id = ?,
-            unidade_id = ?,
-            cofre_id = ?,
-            status = 'No Cofre'
-           WHERE id = ?`,
-          [destinationDepartmentId, destinationUnitId, destinationVaultSpaceId, wId]
-        );
+        try {
+          await pool.query(
+            `UPDATE weapons SET 
+              department_id = ?,
+              unit_id = ?,
+              vault_space_id = NULL,
+              status = 'Pendente de Recibo'
+             WHERE id = ?`,
+            [destinationDepartmentId, destinationUnitId, wId]
+          );
+        } catch (_) {}
+
+        try {
+          await pool.query(
+            `UPDATE armas SET 
+              departamento_id = ?,
+              unidade_id = ?,
+              cofre_id = NULL,
+              status = 'Pendente de Recibo'
+             WHERE id = ?`,
+            [destinationDepartmentId, destinationUnitId, wId]
+          );
+        } catch (_) {}
       }
     }
 
-    // Save transfer record
+    // Save transfer record with status 'Pendente'
     await pool.query(
       `INSERT INTO transferencias_armas (
         id,
@@ -4337,8 +4382,9 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
         total_armas,
         total_carregadores,
         observacao,
+        status,
         data_criacao
-      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
       [
         transferId,
         protocolNumber,
@@ -4371,7 +4417,7 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
     await insertAuditLog(
       'Armas',
       'Transferência entre Unidades',
-      `Transferência de ${weapons.length} arma(s) (${weaponSerials}) de ${originUnitName} para ${destinationUnitName}. Protocolo: ${protocolNumber}`,
+      `Transferência de ${weapons.length} arma(s) (${weaponSerials}) de ${originUnitName} para ${destinationUnitName} iniciada com status Pendente de Recebimento. Protocolo: ${protocolNumber}`,
       actor,
       req.ip
     );
@@ -4402,12 +4448,148 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       totalWeapons: weapons.length,
       totalMagazines,
       observation: observation ? observation.trim() : '',
+      status: 'Pendente' as const,
       createdAt: nowIso
     };
 
     return res.json({ success: true, transfer: createdTransfer });
   } catch (err: any) {
     console.error('Error transferring weapons:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Confirm Receipt of Transferred Weapons at the Destination Unit
+apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { destinationVaultSpaceId, observation, actor } = req.body;
+
+    if (!actor) {
+      return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      `SELECT * FROM transferencias_armas WHERE id = ?`,
+      [id]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Registro de transferência não encontrado.' });
+    }
+
+    const transfer = rows[0];
+
+    if (transfer.status === 'Recebido') {
+      return res.status(400).json({ error: 'Esta transferência já foi recebida e confirmada no cofre da unidade.' });
+    }
+
+    // Permission check: Geral, or Armeiro / Administrador of the destination unit/dept
+    const isGeral = actor.role === 'Geral';
+    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+
+    if (!isGeral && !isDestAdmin && !isDestArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas o Armeiro, Administrador ou usuário Geral da unidade de destino podem receber e confirmar o armamento no cofre.'
+      });
+    }
+
+    const finalVaultSpaceId = destinationVaultSpaceId || transfer.destino_cofre_id;
+    if (!finalVaultSpaceId) {
+      return res.status(400).json({
+        error: 'Informe o local de guarda no cofre da unidade de destino para armazenar as armas.'
+      });
+    }
+
+    // Fetch vault code for destination cofre
+    let vaultCode = transfer.destino_cofre_codigo || 'Cofre Principal';
+    const [vaultRows]: any = await pool.query(
+      `SELECT codigo FROM cofres WHERE id = ?`,
+      [finalVaultSpaceId]
+    );
+    if (vaultRows && vaultRows.length > 0) {
+      vaultCode = vaultRows[0].codigo;
+    }
+
+    // Parse weapons in transfer
+    let weaponsList: any[] = [];
+    try {
+      weaponsList = typeof transfer.armas_json === 'string' ? JSON.parse(transfer.armas_json) : (transfer.armas_json || []);
+    } catch (e) {
+      weaponsList = [];
+    }
+
+    const weaponIds = weaponsList.map((w: any) => w.weaponId || w.id).filter(Boolean);
+
+    // Update weapons to 'No Cofre' and set their cofre_id/vault_space_id to the destination vault space
+    if (weaponIds.length > 0) {
+      try {
+        await pool.query(
+          `UPDATE weapons SET 
+            vault_space_id = ?,
+            status = 'No Cofre',
+            department_id = ?,
+            unit_id = ?
+           WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
+          [finalVaultSpaceId, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
+        );
+      } catch (_) {}
+
+      try {
+        await pool.query(
+          `UPDATE armas SET 
+            cofre_id = ?,
+            status = 'No Cofre',
+            departamento_id = ?,
+            unidade_id = ?
+           WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
+          [finalVaultSpaceId, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
+        );
+      } catch (_) {}
+    }
+
+    // Update transfer record to 'Recebido'
+    await pool.query(
+      `UPDATE transferencias_armas SET 
+        status = 'Recebido',
+        destino_cofre_id = ?,
+        destino_cofre_codigo = ?,
+        recebido_em = NOW(),
+        recebido_por_usuario_id = ?,
+        recebido_por_nome = ?,
+        recebido_por_masp = ?,
+        recebido_por_perfil = ?,
+        observacao = COALESCE(?, observacao)
+       WHERE id = ?`,
+      [
+        finalVaultSpaceId,
+        vaultCode,
+        actor.id,
+        actor.name,
+        actor.masp,
+        actor.role,
+        observation ? observation.trim() : null,
+        id
+      ]
+    );
+
+    const weaponSerials = weaponsList.map((w: any) => w.serialNumber).join(', ');
+    await insertAuditLog(
+      'Armas',
+      'Recebimento de Transferência',
+      `Recebimento confirmado de ${weaponsList.length} arma(s) (${weaponSerials}) na unidade ${transfer.destino_unidade_nome} (Espaço do Cofre: ${vaultCode}). Protocolo: ${transfer.numero_protocolo}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      message: `Armamento recebido com sucesso no cofre "${vaultCode}". As armas agora constam no mapa do cofre da unidade.`
+    });
+  } catch (err: any) {
+    console.error('Error receiving weapon transfer:', err);
     return res.status(500).json({ error: err.message });
   }
 });
