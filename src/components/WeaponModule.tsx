@@ -1653,7 +1653,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             setShowTransferModal(false);
             setTransferInitialWeapon(null);
             onRefresh();
-            setSuccessMsg(`Transferência registrada com sucesso sob protocolo ${createdTransfer.protocolNumber || createdTransfer.id}. As armas constam com status "Pendente de Recibo" até o recebimento no cofre de destino. O recibo definitivo ficará disponível para impressão após a confirmação.`);
+            setSuccessMsg(`Transferência registrada com sucesso sob protocolo ${createdTransfer.protocolNumber || createdTransfer.id}. A Guia de Trânsito / Recibo de Envio está pronta para impressão.`);
+            if (createdTransfer) {
+              setSelectedTransferForReceipt(createdTransfer);
+            }
           }}
         />
       )}

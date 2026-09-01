@@ -333,22 +333,38 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                         )}
 
                         {isPending && (
-                          <span
-                            className="text-[11px] text-slate-500 italic bg-slate-900/60 px-2.5 py-1 rounded-lg border border-slate-800 flex items-center gap-1.5"
-                            title="O recibo oficial com validação de recebimento estará disponível para impressão após a entrada no cofre de destino."
+                          <button
+                            type="button"
+                            onClick={() => onSelectTransfer(trf)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
+                            title="Gerar e imprimir Guia de Trânsito / Recibo de Envio de Armamento"
                           >
-                            <Clock className="w-3 h-3 text-amber-500/70" />
-                            <span>Recibo disponível após recebimento</span>
-                          </span>
+                            <Printer className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Imprimir Guia / Recibo</span>
+                          </button>
                         )}
 
                         {isReceived && (
                           <button
+                            type="button"
                             onClick={() => onSelectTransfer(trf)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
+                            title="Imprimir Recibo de Transferência Concluída"
                           >
-                            <Printer className="w-3.5 h-3.5 text-amber-400" />
+                            <Printer className="w-3.5 h-3.5 text-emerald-400" />
                             <span>Imprimir Recibo / PDF</span>
+                          </button>
+                        )}
+
+                        {isCancelled && (
+                          <button
+                            type="button"
+                            onClick={() => onSelectTransfer(trf)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
+                            title="Visualizar registro do cancelamento"
+                          >
+                            <Printer className="w-3.5 h-3.5 text-slate-400" />
+                            <span>Ver Registro</span>
                           </button>
                         )}
                       </div>

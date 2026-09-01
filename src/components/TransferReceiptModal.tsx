@@ -1,7 +1,7 @@
 import React from 'react';
 import { WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
-import { ShieldCheck, Printer, X, FileText, ArrowRight, Building2, CheckCircle2 } from 'lucide-react';
+import { ShieldCheck, Printer, X, FileText, ArrowRight, Building2, CheckCircle2, Clock, Ban, Truck } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 
 interface TransferReceiptModalProps {
@@ -13,6 +13,10 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
   transfer,
   onClose
 }) => {
+  const isPending = (transfer.status || (transfer.receivedAt ? 'Recebido' : 'Pendente')) === 'Pendente';
+  const isReceived = transfer.status === 'Recebido' || Boolean(transfer.receivedAt);
+  const isCancelled = transfer.status === 'Cancelado';
+
   const handlePrint = () => {
     const weaponsRowsHtml = transfer.weapons.map((w, index) => `
       <tr style="border-bottom: 1px solid #e5e7eb;">
@@ -25,6 +29,16 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         <td style="padding: 8px; text-align: center;">${w.originVaultCode || '-'}</td>
       </tr>
     `).join('');
+
+    const statusTitle = isPending
+      ? 'EM TRÂNSITO / AGUARDANDO ACEITE NO DESTINO'
+      : isCancelled
+      ? 'TRANSFERÊNCIA DESFEITA / CANCELADA'
+      : 'TRANSFERÊNCIA CONCLUÍDA E RECEBIDA NO COFRE';
+
+    const documentType = isPending
+      ? 'GUIA DE TRÂNSITO E TRANSFERÊNCIA DE ARMAMENTO'
+      : 'TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA';
 
     const html = `
       <!DOCTYPE html>
@@ -71,8 +85,8 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             text-align: right;
           }
           .status-bar {
-            background: #f3f4f6;
-            border: 1px solid #d1d5db;
+            background: ${isPending ? '#fef3c7' : isCancelled ? '#fee2e2' : '#f0fdf4'};
+            border: 1px solid ${isPending ? '#f59e0b' : isCancelled ? '#ef4444' : '#10b981'};
             padding: 8px 12px;
             border-radius: 6px;
             margin-bottom: 12px;
@@ -80,6 +94,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             justify-content: space-between;
             font-family: monospace;
             font-size: 11px;
+            color: ${isPending ? '#92400e' : isCancelled ? '#991b1b' : '#065f46'};
           }
           .grid {
             display: grid;
@@ -137,8 +152,8 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           .signatures {
             margin-top: 35px;
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 30px;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
             text-align: center;
             font-family: monospace;
             font-size: 10.5px;
@@ -163,7 +178,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • GUIA DE TRANSFERÊNCIA DE ARMAMENTO ENTRE UNIDADES</div>
+            <div class="subtitle">SISTEMA DE ARMERIA • ${documentType}</div>
           </div>
           <div class="reg-id">
             PROTOCOLO / REGISTRO<br>
@@ -172,9 +187,9 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         </div>
 
         <div class="status-bar">
-          <div><strong>SITUAÇÃO:</strong> TRANSFERÊNCIA CONCLUÍDA E RECEBIDA NO COFRE</div>
+          <div><strong>SITUAÇÃO:</strong> ${statusTitle}</div>
           <div><strong>DATA ENVIO:</strong> ${formatTimestamp(transfer.transferDate || transfer.createdAt)}</div>
-          <div><strong>DATA RECEBIMENTO:</strong> ${formatTimestamp(transfer.receivedAt || transfer.transferDate || transfer.createdAt)}</div>
+          <div><strong>DATA RECEBIMENTO:</strong> ${transfer.receivedAt ? formatTimestamp(transfer.receivedAt) : 'Aguardando aceite no destino'}</div>
         </div>
 
         <div class="grid">
@@ -190,7 +205,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.destinationDepartmentName || 'Não especificado'}</span></div>
             <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.destinationUnitName}</span></div>
             <div class="field"><span class="label">Local de Guarda no Cofre:</span> <span class="val">${transfer.destinationVaultSpaceCode || 'Cofre Principal'}</span></div>
-            ${transfer.receivedByUserName ? `<div class="field"><span class="label">Recebido por:</span> <span class="val">${transfer.receivedByUserName} (MASP: ${transfer.receivedByUserMasp}) - ${transfer.receivedByUserRole || 'Armeiro'}</span></div>` : ''}
+            ${transfer.receivedByUserName ? `<div class="field"><span class="label">Recebido por:</span> <span class="val">${transfer.receivedByUserName} (MASP: ${transfer.receivedByUserMasp}) - ${transfer.receivedByUserRole || 'Armeiro'}</span></div>` : `<div class="field"><span class="label">Status Recebimento:</span> <span class="val" style="color: #b45309;">Aguardando conferência física e aceite do armeiro</span></div>`}
           </div>
         </div>
 
@@ -205,7 +220,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         </div>
 
         <div class="box">
-          <div class="box-title">4. Relação de Armamentos Transferidos (${transfer.totalWeapons} arma(s) | ${transfer.totalMagazines} carregador(es))</div>
+          <div class="box-title">4. Relação de Armamentos Transferidos (${transfer.totalWeapons || transfer.weapons?.length || 0} arma(s) | ${transfer.totalMagazines || 0} carregador(es))</div>
           <table>
             <thead>
               <tr>
@@ -224,7 +239,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           </table>
         </div>
 
-        <div class="signatures" style="grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+        <div class="signatures">
           <div class="sig-line">
             ${transfer.transferredByUserName}<br>
             <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Remetente (MASP: ${transfer.transferredByUserMasp})</span>
@@ -234,14 +249,13 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Policial Transportador (MASP: ${transfer.receiverOrTransporterMasp})</span>
           </div>
           <div class="sig-line">
-            ${transfer.receivedByUserName || 'Armeiro / Responsável Destino'}<br>
-            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor (MASP: ${transfer.receivedByUserMasp || '___________'})</span>
+            ${transfer.receivedByUserName ? `${transfer.receivedByUserName}<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor (MASP: ${transfer.receivedByUserMasp})</span>` : `___________________________________<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor no Destino (Assinatura e MASP)</span>`}
           </div>
         </div>
 
         <div class="footer">
           Documento oficial gerado eletronicamente pelo Sistema de Armeria da Polícia Civil do Estado de Minas Gerais.<br>
-          Validação de autenticidade no sistema via protocolo nº <strong>${transfer.protocolNumber || transfer.id}</strong> em ${new Date().toLocaleString('pt-BR')}.
+          ${isPending ? 'Guia de trânsito e remessa para acompanhamento durante o transporte do armamento.' : 'Validação de autenticidade no sistema com recebimento consolidado.'} Protocolo nº <strong>${transfer.protocolNumber || transfer.id}</strong> em ${new Date().toLocaleString('pt-BR')}.
         </div>
       </body>
       </html>
@@ -258,7 +272,9 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         <div className="p-4 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2 text-amber-400">
             <FileText className="w-5 h-5" />
-            <span className="font-semibold text-white">Guia de Transferência de Armas entre Unidades</span>
+            <span className="font-semibold text-white">
+              {isPending ? 'Guia de Trânsito e Envio de Armamento' : 'Recibo Oficial de Transferência de Armas'}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -286,12 +302,20 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-5 relative overflow-hidden">
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-slate-800/80 pb-4">
               <div className="flex items-center gap-3">
-                <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
+                <div className={`p-3 rounded-xl border ${
+                  isPending 
+                    ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' 
+                    : isCancelled
+                    ? 'bg-rose-500/10 border-rose-500/20 text-rose-400'
+                    : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                }`}>
                   <ShieldCheck className="w-7 h-7" />
                 </div>
                 <div>
                   <h3 className="font-bold text-white tracking-wide text-base">POLÍCIA CIVIL DE MINAS GERAIS</h3>
-                  <p className="text-xs text-slate-400 font-mono">TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA</p>
+                  <p className="text-xs text-slate-400 font-mono">
+                    {isPending ? 'GUIA DE TRÂNSITO E REMESSA DE ARMAMENTO' : 'TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA'}
+                  </p>
                 </div>
               </div>
               <div className="text-right">
@@ -301,14 +325,39 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
               </div>
             </div>
 
-            <div className="mt-4 flex items-center justify-between bg-emerald-500/10 border border-emerald-500/20 rounded-lg px-4 py-2 text-xs">
-              <span className="flex items-center gap-1.5 font-medium text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" /> Transferência Concluída e Registrada
-              </span>
-              <span className="text-slate-300 font-mono">
-                {transfer.totalWeapons} arma(s) • {transfer.totalMagazines} carregador(es)
-              </span>
-            </div>
+            {/* Status notification bar */}
+            {isPending && (
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-4 py-2.5 text-xs text-amber-300">
+                <span className="flex items-center gap-2 font-semibold">
+                  <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Guia de Envio Emitida • Armamento em Trânsito (Pendente de Aceite no Destino)</span>
+                </span>
+                <span className="text-amber-200/80 font-mono text-[11px]">
+                  {transfer.totalWeapons || transfer.weapons?.length || 0} arma(s) • {transfer.totalMagazines || 0} carregador(es)
+                </span>
+              </div>
+            )}
+
+            {isReceived && (
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg px-4 py-2.5 text-xs text-emerald-300">
+                <span className="flex items-center gap-2 font-semibold">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>Transferência Concluída e Armamento Incorporado ao Cofre de Destino</span>
+                </span>
+                <span className="text-emerald-200/80 font-mono text-[11px]">
+                  {transfer.totalWeapons || transfer.weapons?.length || 0} arma(s) • {transfer.totalMagazines || 0} carregador(es)
+                </span>
+              </div>
+            )}
+
+            {isCancelled && (
+              <div className="mt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-rose-500/10 border border-rose-500/30 rounded-lg px-4 py-2.5 text-xs text-rose-300">
+                <span className="flex items-center gap-2 font-semibold">
+                  <Ban className="w-4 h-4 text-rose-400 shrink-0" />
+                  <span>Transferência Desfeita / Cancelada • Armamento Reincorporado à Origem</span>
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Origin and Destination Pathway */}
@@ -327,7 +376,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
                   <p className="font-semibold text-white">{transfer.originUnitName || 'Não especificada'}</p>
                 </div>
                 <div>
-                  <span className="text-slate-400">Armeiro / Responsável:</span>
+                  <span className="text-slate-400">Armeiro / Responsável pelo Despacho:</span>
                   <p className="font-semibold text-white">{transfer.transferredByUserName} (MASP: {transfer.transferredByUserMasp})</p>
                 </div>
               </div>
@@ -350,7 +399,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
                   <span className="text-slate-400">Local de Guarda no Cofre:</span>
                   <p className="font-semibold text-white">{transfer.destinationVaultSpaceCode || 'Cofre Principal'}</p>
                 </div>
-                {transfer.receivedByUserName && (
+                {transfer.receivedByUserName ? (
                   <div>
                     <span className="text-slate-400">Recebido por:</span>
                     <p className="font-semibold text-emerald-300">
@@ -358,6 +407,14 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
                     </p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
                       Data: {formatTimestamp(transfer.receivedAt || '')}
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <span className="text-slate-400">Status Recebimento:</span>
+                    <p className="font-semibold text-amber-400 flex items-center gap-1 mt-0.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Aguardando recebimento no cofre de destino</span>
                     </p>
                   </div>
                 )}
@@ -395,7 +452,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           {/* Weapons Table */}
           <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between text-xs font-bold text-slate-300 uppercase tracking-wider">
-              <span>Armamentos Transferidos ({transfer.weapons.length})</span>
+              <span>Armamentos Transferidos ({transfer.weapons?.length || 0})</span>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
@@ -411,7 +468,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800/50 font-mono text-slate-300">
-                  {transfer.weapons.map((w, idx) => (
+                  {(transfer.weapons || []).map((w, idx) => (
                     <tr key={w.weaponId || idx} className="hover:bg-slate-800/30">
                       <td className="py-2.5 px-2 text-slate-400">{idx + 1}</td>
                       <td className="py-2.5 px-2 font-bold text-amber-400">{w.serialNumber}</td>
@@ -443,9 +500,13 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             </div>
             <div className="space-y-1">
               <div className="border-t border-slate-700 pt-2 font-medium text-slate-300">
-                {transfer.receivedByUserName || 'Armeiro no Destino'}
+                {transfer.receivedByUserName || (
+                  <span className="text-slate-500 italic">Pendente de assinatura no destino</span>
+                )}
               </div>
-              <p className="text-[11px] text-slate-500">Armeiro / Recebedor (MASP: {transfer.receivedByUserMasp || '___________'})</p>
+              <p className="text-[11px] text-slate-500">
+                Armeiro / Recebedor {transfer.receivedByUserMasp ? `(MASP: ${transfer.receivedByUserMasp})` : '(No ato do recebimento)'}
+              </p>
             </div>
           </div>
 
@@ -464,7 +525,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             className="flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors shadow-lg shadow-amber-600/20"
           >
             <Printer className="w-4 h-4" />
-            <span>Imprimir Recibo em PDF</span>
+            <span>{isPending ? 'Imprimir Guia de Trânsito / Recibo' : 'Imprimir Recibo em PDF'}</span>
           </button>
         </div>
 
@@ -472,3 +533,4 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
     </div>
   );
 };
+
