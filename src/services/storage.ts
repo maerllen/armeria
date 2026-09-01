@@ -333,6 +333,10 @@ class StorageService {
   }
 
   // --- DEPARTMENTS ---
+  public getAllDepartments(): Department[] {
+    return this.state.departments || [];
+  }
+
   public getDepartments(currentUser?: User | null): Department[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
@@ -377,6 +381,10 @@ class StorageService {
   }
 
   // --- UNITS ---
+  public getAllUnits(): Unit[] {
+    return this.state.units || [];
+  }
+
   public getUnits(currentUser?: User | null): Unit[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];

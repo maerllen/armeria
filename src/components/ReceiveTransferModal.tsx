@@ -31,9 +31,13 @@ export const ReceiveTransferModal: React.FC<ReceiveTransferModalProps> = ({
   onClose,
   onSuccess
 }) => {
+  // Source all vault spaces from storage if available
+  const allVaults = (storage as any).getAllVaultSpaces ? (storage as any).getAllVaultSpaces() : vaultSpaces;
+  const sourceVaultSpaces = allVaults && allVaults.length > 0 ? allVaults : vaultSpaces;
+
   // Filter destination unit vault spaces
-  const destVaultSpaces = vaultSpaces.filter(
-    vs => vs.unitId === transfer.destinationUnitId && vs.type === 'ARMAS'
+  const destVaultSpaces = sourceVaultSpaces.filter(
+    (vs: any) => vs.unitId === transfer.destinationUnitId && vs.type === 'ARMAS'
   );
 
   const defaultVaultSpaceId = 

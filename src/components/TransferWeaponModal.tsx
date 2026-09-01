@@ -40,30 +40,49 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   onTransferSuccess,
   onSuccess
 }) => {
+  // Retrieve the full system catalog of departments and units
+  const allDepartments = useMemo(() => {
+    const fromStorage = storage.getAllDepartments();
+    return fromStorage && fromStorage.length > 0 ? fromStorage : departments;
+  }, [departments]);
+
+  const allUnits = useMemo(() => {
+    const fromStorage = storage.getAllUnits();
+    return fromStorage && fromStorage.length > 0 ? fromStorage : units;
+  }, [units]);
+
+  const allVaultSpaces = useMemo(() => {
+    const fromStorage = (storage as any).getAllVaultSpaces ? (storage as any).getAllVaultSpaces() : [];
+    return fromStorage && fromStorage.length > 0 ? fromStorage : vaultSpaces;
+  }, [vaultSpaces]);
+
   // Determine origin unit - Armeiro and Administrador are locked to their own privileged unit
   const isGeral = currentUser.role === 'Geral';
   const defaultOriginUnitId = (!isGeral && currentUser.unitId)
     ? currentUser.unitId
-    : (initialWeapon?.unitId || currentUser.unitId || (units[0]?.id || ''));
+    : (initialWeapon?.unitId || currentUser.unitId || (allUnits[0]?.id || ''));
 
   const [originUnitId, setOriginUnitId] = useState<string>(defaultOriginUnitId);
-  const originUnit = units.find(u => u.id === originUnitId);
-  const originDept = departments.find(d => d.id === (originUnit?.departmentId || initialWeapon?.departmentId || currentUser.departmentId));
+  const originUnit = allUnits.find(u => u.id === originUnitId);
+  const originDept = allDepartments.find(d => d.id === (originUnit?.departmentId || initialWeapon?.departmentId || currentUser.departmentId));
 
-  // Destination selections - can be ANY department and ANY unit
-  const [destDeptId, setDestDeptId] = useState<string>(originDept?.id || (departments[0]?.id || ''));
+  // Destination selections - can be ANY department and ANY unit across the entire police force
+  const [destDeptId, setDestDeptId] = useState<string>('');
   
   // Units filtered by destination department, excluding origin unit
   const availableDestUnits = useMemo(() => {
-    return units.filter(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== originUnitId);
-  }, [units, destDeptId, originUnitId]);
+    return allUnits.filter(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== originUnitId);
+  }, [allUnits, destDeptId, originUnitId]);
 
-  const [destUnitId, setDestUnitId] = useState<string>(availableDestUnits[0]?.id || '');
+  const [destUnitId, setDestUnitId] = useState<string>(() => {
+    const firstOther = allUnits.find(u => u.id !== defaultOriginUnitId);
+    return firstOther?.id || '';
+  });
 
   // Vault spaces filtered by destination unit
   const destVaultSpaces = useMemo(() => {
-    return vaultSpaces.filter(v => v.unitId === destUnitId);
-  }, [vaultSpaces, destUnitId]);
+    return allVaultSpaces.filter(v => v.unitId === destUnitId);
+  }, [allVaultSpaces, destUnitId]);
 
   const [destVaultSpaceId, setDestVaultSpaceId] = useState<string>(destVaultSpaces[0]?.id || '');
 
@@ -101,17 +120,21 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   // Handle department change for destination
   const handleDestDeptChange = (newDeptId: string) => {
     setDestDeptId(newDeptId);
-    const newAvailableUnits = units.filter(u => (!newDeptId || u.departmentId === newDeptId) && u.id !== originUnitId);
+    const newAvailableUnits = allUnits.filter(u => (!newDeptId || u.departmentId === newDeptId) && u.id !== originUnitId);
     const firstUnit = newAvailableUnits[0]?.id || '';
     setDestUnitId(firstUnit);
-    const firstVault = vaultSpaces.find(v => v.unitId === firstUnit)?.id || '';
+    const firstVault = allVaultSpaces.find(v => v.unitId === firstUnit)?.id || '';
     setDestVaultSpaceId(firstVault);
   };
 
   // Handle destination unit change
   const handleDestUnitChange = (newUnitId: string) => {
     setDestUnitId(newUnitId);
-    const firstVault = vaultSpaces.find(v => v.unitId === newUnitId)?.id || '';
+    const selectedUnit = allUnits.find(u => u.id === newUnitId);
+    if (selectedUnit && selectedUnit.departmentId && !destDeptId) {
+      // Optional auto-select or keep 'Todos'
+    }
+    const firstVault = allVaultSpaces.find(v => v.unitId === newUnitId)?.id || '';
     setDestVaultSpaceId(firstVault);
   };
 
@@ -120,11 +143,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     setOriginUnitId(newOriginId);
     setSelectedWeaponIds([]);
     // Update dest units
-    const newAvailableDestUnits = units.filter(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== newOriginId);
+    const newAvailableDestUnits = allUnits.filter(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== newOriginId);
     if (destUnitId === newOriginId && newAvailableDestUnits.length > 0) {
       const nextDest = newAvailableDestUnits[0].id;
       setDestUnitId(nextDest);
-      const firstVault = vaultSpaces.find(v => v.unitId === nextDest)?.id || '';
+      const firstVault = allVaultSpaces.find(v => v.unitId === nextDest)?.id || '';
       setDestVaultSpaceId(firstVault);
     }
   };
@@ -203,13 +226,13 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   const handleExecuteTransfer = async () => {
     setError(null);
 
-    const destUnitObj = units.find(u => u.id === destUnitId);
-    const destDeptObj = departments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
-    const destVaultObj = vaultSpaces.find(v => v.id === destVaultSpaceId);
+    const destUnitObj = allUnits.find(u => u.id === destUnitId);
+    const destDeptObj = allDepartments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
+    const destVaultObj = allVaultSpaces.find(v => v.id === destVaultSpaceId);
 
     const itemsToTransfer: WeaponTransferItem[] = selectedWeaponIds.map(wId => {
       const w = weapons.find(item => item.id === wId)!;
-      const v = vaultSpaces.find(vault => vault.id === w.vaultSpaceId);
+      const v = allVaultSpaces.find(vault => vault.id === w.vaultSpaceId);
       return {
         weaponId: w.id,
         serialNumber: w.serialNumber,
@@ -263,7 +286,8 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     return selectedWeaponIds.map(id => weapons.find(w => w.id === id)).filter(Boolean) as Weapon[];
   }, [selectedWeaponIds, weapons]);
 
-  const destUnitObj = units.find(u => u.id === destUnitId);
+  const destUnitObj = allUnits.find(u => u.id === destUnitId);
+  const destDeptObj = allDepartments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
 
   return (
     <div id="transfer-weapon-modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -332,7 +356,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                     onChange={e => handleOriginUnitChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
                   >
-                    {units.map(u => (
+                    {allUnits.map(u => (
                       <option key={u.id} value={u.id}>
                         {u.name}
                       </option>
@@ -356,7 +380,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               </div>
 
               <div className="space-y-2.5">
-                {departments.length > 1 && (
+                {allDepartments.length > 0 && (
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">Departamento de Destino</label>
                     <select
@@ -366,9 +390,9 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                       className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
                     >
                       <option value="">Todos os Departamentos</option>
-                      {departments.map(d => (
+                      {allDepartments.map(d => (
                         <option key={d.id} value={d.id}>
-                          {d.name}
+                          {d.name} {d.code ? `(${d.code})` : ''}
                         </option>
                       ))}
                     </select>
@@ -386,6 +410,20 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                   >
                     {availableDestUnits.length === 0 ? (
                       <option value="">Nenhuma outra unidade disponível</option>
+                    ) : !destDeptId ? (
+                      allDepartments.map(dept => {
+                        const deptUnits = availableDestUnits.filter(u => u.departmentId === dept.id);
+                        if (deptUnits.length === 0) return null;
+                        return (
+                          <optgroup key={dept.id} label={dept.name}>
+                            {deptUnits.map(u => (
+                              <option key={u.id} value={u.id}>
+                                {u.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })
                     ) : (
                       availableDestUnits.map(u => (
                         <option key={u.id} value={u.id}>
@@ -603,11 +641,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                 <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
                   <div className="flex justify-between border-b border-slate-800/80 pb-2">
                     <span className="text-slate-400">Origem:</span>
-                    <strong className="text-slate-200">{originUnit?.name}</strong>
+                    <strong className="text-slate-200">{originUnit?.name} {originDept ? `(${originDept.name})` : ''}</strong>
                   </div>
                   <div className="flex justify-between border-b border-slate-800/80 pb-2">
                     <span className="text-slate-400">Destino:</span>
-                    <strong className="text-emerald-300">{destUnitObj?.name}</strong>
+                    <strong className="text-emerald-300">{destUnitObj?.name} {destDeptObj ? `(${destDeptObj.name})` : ''}</strong>
                   </div>
                   <div className="flex justify-between border-b border-slate-800/80 pb-2">
                     <span className="text-slate-400">Policial Transportador:</span>
