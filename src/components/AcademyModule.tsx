@@ -2896,8 +2896,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* 2. Modal Box Edit/Add */}
       {showBoxModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2">
               {editingBox ? 'Editar Caixa de Armas' : 'Nova Caixa de Armas'}
             </h3>
@@ -2988,8 +2988,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* 3. Modal Replace Weapon in Box */}
       {showReplaceModal && replaceBox && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center space-x-2 text-amber-400">
               <RefreshCw className="w-5 h-5" />
               <span>Substituição de Arma na Caixa {replaceBox.name}</span>
@@ -3301,8 +3301,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* 4. Modal Class Edit/Add */}
       {showClassModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2">
               {editingClass ? `Editar Turma (${classModalCourseType})` : `Nova Turma - ${classModalCourseType}`}
             </h3>
@@ -3645,8 +3645,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* Sub-Modal: Editar Dados do Aluno */}
       {editingStudent && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[60] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
                 <Edit2 className="w-4 h-4 text-amber-400" />
@@ -3715,8 +3715,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* Sub-Modal: Transferir Aluno de Turma */}
       {transferTargetStudent && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-[60]">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[60] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <h4 className="text-sm font-bold text-slate-100 flex items-center space-x-2 text-amber-400">
                 <ArrowRightLeft className="w-4 h-4" />
@@ -4396,8 +4396,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* Modal Editar Mapa de Aula */}
       {showEditMovModal && editingMovement && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center justify-between">
               <div className="flex items-center space-x-2 text-amber-400">
                 <Edit2 className="w-5 h-5" />
@@ -4501,8 +4501,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* Modal Fechar Mapa / Devolução de Aula */}
       {showRetornoModal && retornoMovement && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 sm:p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto my-auto">
             <h3 className="text-base font-bold text-slate-100 border-b border-slate-800 pb-2 flex items-center justify-between">
               <div className="flex items-center space-x-2 text-emerald-400">
                 <CheckCircle2 className="w-5 h-5" />
@@ -4766,8 +4766,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
       {/* Gerenciar Cursos de Habilitação Modal - Moved to CourseManagementModule */}
       {false && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 my-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2 text-amber-400">
                 <GraduationCap className="w-5 h-5 shrink-0" />

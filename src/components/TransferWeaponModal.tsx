@@ -619,9 +619,9 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         {showConfirmAlert && (
           <div
             id="transfer-confirmation-alertbox"
-            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60] overflow-y-auto"
           >
-            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
               
               {/* Alert Header */}
               <div className="p-5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">

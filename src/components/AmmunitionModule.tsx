@@ -922,8 +922,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
       {/* Modal Calibres (Exibe Calibres, com opções de edição/cadastro apenas para perfil Geral) */}
       {showCaliberModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
                 <Disc className="w-5 h-5 text-amber-400" />
@@ -1275,8 +1275,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
       {/* Modal Devolução de Sobras de Munição */}
       {returnTargetMov && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
             <h3 className="text-lg font-bold text-slate-100 mb-2 pb-2 border-b border-slate-800 flex items-center space-x-2">
               <RotateCcw className="w-5 h-5 text-emerald-400" />
               <span>Devolução de Munições Não Utilizadas</span>

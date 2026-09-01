@@ -223,7 +223,7 @@ export default function App() {
         />
 
         {/* Main Workspace */}
-        <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-7xl mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
+        <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
           {/* Dashboard Summary Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
@@ -478,9 +478,9 @@ export default function App() {
 
       {/* Audit Log Modal */}
       {showAuditModal && (
-        <div className="print:hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+        <div className="print:hidden fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl my-auto">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4 shrink-0">
               <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
                 <Activity className="w-5 h-5 text-amber-400" />
                 <span>Trilha de Auditoria do Sistema</span>

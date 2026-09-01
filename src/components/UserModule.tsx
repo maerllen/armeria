@@ -1208,8 +1208,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
       {/* Promote Existing User to Teacher Modal */}
       {showPromoteTeacherModal && existingMaspUser && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <div className="flex items-center space-x-3 text-amber-400">
               <GraduationCap className="w-6 h-6 shrink-0" />
               <h3 className="text-base font-bold text-slate-100">Policial Já Cadastrado</h3>

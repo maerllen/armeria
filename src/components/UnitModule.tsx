@@ -376,8 +376,8 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
       {/* Modal Department */}
       {showDeptModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
             <h3 className="text-lg font-bold text-slate-100 mb-4">
               {editingDept ? 'Editar Departamento' : 'Novo Departamento'}
             </h3>
@@ -431,8 +431,8 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
       {/* Modal Unit */}
       {showUnitModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
             <h3 className="text-lg font-bold text-slate-100 mb-4">
               {editingUnit ? 'Editar Unidade' : 'Nova Unidade'}
             </h3>
