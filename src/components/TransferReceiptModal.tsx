@@ -9,6 +9,260 @@ interface TransferReceiptModalProps {
   onClose: () => void;
 }
 
+export function getTransferReceiptHtml(transfer: WeaponTransfer): string {
+  const isPending = (transfer.status || (transfer.receivedAt ? 'Recebido' : 'Pendente')) === 'Pendente';
+  const isReceived = transfer.status === 'Recebido' || Boolean(transfer.receivedAt);
+  const isCancelled = transfer.status === 'Cancelado';
+
+  const weaponsRowsHtml = (transfer.weapons || []).map((w, index) => `
+    <tr style="border-bottom: 1px solid #e5e7eb;">
+      <td style="padding: 8px; text-align: center; font-weight: bold;">${index + 1}</td>
+      <td style="padding: 8px; font-weight: bold; font-family: monospace;">${w.serialNumber}</td>
+      <td style="padding: 8px;">${w.type} - ${w.model}</td>
+      <td style="padding: 8px;">${w.manufacturer}</td>
+      <td style="padding: 8px;">${w.caliber}</td>
+      <td style="padding: 8px; text-align: center;">${w.magazineQuantity}</td>
+      <td style="padding: 8px; text-align: center;">${w.originVaultCode || '-'}</td>
+    </tr>
+  `).join('');
+
+  const statusTitle = isPending
+    ? 'EM TRÂNSITO / AGUARDANDO ACEITE NO DESTINO'
+    : isCancelled
+    ? 'TRANSFERÊNCIA DESFEITA / CANCELADA'
+    : 'TRANSFERÊNCIA CONCLUÍDA E RECEBIDA NO COFRE';
+
+  const documentType = isPending
+    ? 'GUIA DE TRÂNSITO E TRANSFERÊNCIA DE ARMAMENTO'
+    : 'TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA';
+
+  return `
+    <!DOCTYPE html>
+    <html lang="pt-BR">
+    <head>
+      <meta charset="UTF-8">
+      <title>Recibo de Transferência - ${transfer.protocolNumber || transfer.id} - PCMG</title>
+      <style>
+        @page { size: A4 portrait; margin: 12mm; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+          color: #111827;
+          background: #fff;
+          margin: 0;
+          padding: 16px;
+          font-size: 11px;
+          line-height: 1.4;
+        }
+        .header {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          border-bottom: 2px solid #000;
+          padding-bottom: 10px;
+          margin-bottom: 14px;
+        }
+        .title {
+          font-size: 15px;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          color: #000;
+        }
+        .subtitle {
+          font-size: 11px;
+          font-weight: 700;
+          color: #374151;
+          margin-top: 2px;
+        }
+        .reg-id {
+          font-family: monospace;
+          font-size: 11px;
+          font-weight: bold;
+          text-align: right;
+        }
+        .status-bar {
+          background: ${isPending ? '#fef3c7' : isCancelled ? '#fee2e2' : '#f0fdf4'};
+          border: 1px solid ${isPending ? '#f59e0b' : isCancelled ? '#ef4444' : '#10b981'};
+          padding: 8px 12px;
+          border-radius: 6px;
+          margin-bottom: 12px;
+          display: flex;
+          justify-content: space-between;
+          font-family: monospace;
+          font-size: 11px;
+          color: ${isPending ? '#92400e' : isCancelled ? '#991b1b' : '#065f46'};
+        }
+        .grid {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+        .box {
+          border: 1px solid #9ca3af;
+          border-radius: 6px;
+          padding: 10px;
+          font-family: monospace;
+          margin-bottom: 12px;
+        }
+        .box-title {
+          font-size: 10px;
+          font-weight: 800;
+          text-transform: uppercase;
+          margin-bottom: 6px;
+          border-bottom: 1px solid #e5e7eb;
+          padding-bottom: 4px;
+          color: #111827;
+          letter-spacing: 0.5px;
+        }
+        .field {
+          margin-bottom: 4px;
+        }
+        .label {
+          font-size: 8.5px;
+          font-weight: bold;
+          color: #4b5563;
+          text-transform: uppercase;
+          display: block;
+        }
+        .val {
+          font-size: 11px;
+          font-weight: bold;
+          color: #000;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+          font-family: monospace;
+          font-size: 10.5px;
+          margin-top: 6px;
+        }
+        th {
+          background-color: #f3f4f6;
+          border-bottom: 1.5px solid #000;
+          padding: 6px 8px;
+          text-align: left;
+          font-size: 9.5px;
+          text-transform: uppercase;
+        }
+        .signatures {
+          margin-top: 35px;
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 20px;
+          text-align: center;
+          font-family: monospace;
+          font-size: 10.5px;
+        }
+        .sig-line {
+          border-top: 1px solid #000;
+          padding-top: 6px;
+          font-weight: bold;
+        }
+        .footer {
+          margin-top: 25px;
+          text-align: center;
+          font-size: 8.5px;
+          color: #6b7280;
+          font-family: monospace;
+          border-top: 1px solid #e5e7eb;
+          padding-top: 8px;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div>
+          <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
+          <div class="subtitle">SISTEMA DE ARMERIA • ${documentType}</div>
+        </div>
+        <div class="reg-id">
+          PROTOCOLO / REGISTRO<br>
+          <span style="font-size: 14px; font-weight: 900; color: #1e3a8a;">${transfer.protocolNumber || transfer.id}</span>
+        </div>
+      </div>
+
+      <div class="status-bar">
+        <div><strong>SITUAÇÃO:</strong> ${statusTitle}</div>
+        <div><strong>DATA ENVIO:</strong> ${formatTimestamp(transfer.transferDate || transfer.createdAt)}</div>
+        <div><strong>DATA RECEBIMENTO:</strong> ${transfer.receivedAt ? formatTimestamp(transfer.receivedAt) : 'Aguardando aceite no destino'}</div>
+      </div>
+
+      <div class="grid">
+        <div class="box" style="margin-bottom: 0;">
+          <div class="box-title">1. Unidade de Origem (Remetente)</div>
+          <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.originDepartmentName || 'Não especificado'}</span></div>
+          <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.originUnitName || 'Não especificado'}</span></div>
+          <div class="field"><span class="label">Responsável pelo Envio:</span> <span class="val">${transfer.transferredByUserName} (MASP: ${transfer.transferredByUserMasp}) - ${transfer.transferredByUserRole}</span></div>
+        </div>
+
+        <div class="box" style="margin-bottom: 0;">
+          <div class="box-title">2. Unidade de Destino (Recebedora)</div>
+          <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.destinationDepartmentName || 'Não especificado'}</span></div>
+          <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.destinationUnitName}</span></div>
+          <div class="field"><span class="label">Local de Guarda no Cofre:</span> <span class="val">${transfer.destinationVaultSpaceCode || 'Cofre Principal'}</span></div>
+          ${transfer.receivedByUserName ? `<div class="field"><span class="label">Recebido por:</span> <span class="val">${transfer.receivedByUserName} (MASP: ${transfer.receivedByUserMasp}) - ${transfer.receivedByUserRole || 'Armeiro'}</span></div>` : `<div class="field"><span class="label">Status Recebimento:</span> <span class="val" style="color: #b45309;">Aguardando conferência física e aceite do armeiro</span></div>`}
+        </div>
+      </div>
+
+      <div class="box">
+        <div class="box-title">3. Policial Transportador & Justificativa</div>
+        <div class="grid" style="margin-bottom: 4px;">
+          <div class="field"><span class="label">Nome do Policial Responsável:</span> <span class="val">${transfer.receiverOrTransporterName}</span></div>
+          <div class="field"><span class="label">MASP / Cargo:</span> <span class="val">${transfer.receiverOrTransporterMasp} ${transfer.receiverOrTransporterCargo ? ' - ' + transfer.receiverOrTransporterCargo : ''}</span></div>
+        </div>
+        <div class="field"><span class="label">Motivo / Justificativa da Transferência:</span> <span class="val" style="font-weight: normal; color: #1f2937;">${transfer.reason}</span></div>
+        ${transfer.observation ? `<div class="field" style="margin-top: 4px;"><span class="label">Observações Adicionais:</span> <span class="val" style="font-weight: normal; color: #1f2937;">${transfer.observation}</span></div>` : ''}
+      </div>
+
+      <div class="box">
+        <div class="box-title">4. Relação de Armamentos Transferidos (${transfer.totalWeapons || transfer.weapons?.length || 0} arma(s) | ${transfer.totalMagazines || 0} carregador(es))</div>
+        <table>
+          <thead>
+            <tr>
+              <th style="text-align: center; width: 30px;">Item</th>
+              <th>Nº de Série</th>
+              <th>Tipo / Modelo</th>
+              <th>Fabricante</th>
+              <th>Calibre</th>
+              <th style="text-align: center;">Carregadores</th>
+              <th style="text-align: center;">Cofre Origem</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${weaponsRowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="signatures">
+        <div class="sig-line">
+          ${transfer.transferredByUserName}<br>
+          <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Remetente (MASP: ${transfer.transferredByUserMasp})</span>
+        </div>
+        <div class="sig-line">
+          ${transfer.receiverOrTransporterName}<br>
+          <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Policial Transportador (MASP: ${transfer.receiverOrTransporterMasp})</span>
+        </div>
+        <div class="sig-line">
+          ${transfer.receivedByUserName ? `${transfer.receivedByUserName}<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor (MASP: ${transfer.receivedByUserMasp})</span>` : `___________________________________<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor no Destino (Assinatura e MASP)</span>`}
+        </div>
+      </div>
+
+      <div class="footer">
+        Documento oficial gerado eletronicamente pelo Sistema de Armeria da Polícia Civil do Estado de Minas Gerais.<br>
+        ${isPending ? 'Guia de trânsito e remessa para acompanhamento durante o transporte do armamento.' : 'Validação de autenticidade no sistema com recebimento consolidado.'} Protocolo nº <strong>${transfer.protocolNumber || transfer.id}</strong> em ${new Date().toLocaleString('pt-BR')}.
+      </div>
+    </body>
+    </html>
+  `;
+}
+
+export function printTransferReceipt(transfer: WeaponTransfer): void {
+  const html = getTransferReceiptHtml(transfer);
+  printDocumentInPage(html);
+}
+
 export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
   transfer,
   onClose
@@ -18,250 +272,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
   const isCancelled = transfer.status === 'Cancelado';
 
   const handlePrint = () => {
-    const weaponsRowsHtml = transfer.weapons.map((w, index) => `
-      <tr style="border-bottom: 1px solid #e5e7eb;">
-        <td style="padding: 8px; text-align: center; font-weight: bold;">${index + 1}</td>
-        <td style="padding: 8px; font-weight: bold; font-family: monospace;">${w.serialNumber}</td>
-        <td style="padding: 8px;">${w.type} - ${w.model}</td>
-        <td style="padding: 8px;">${w.manufacturer}</td>
-        <td style="padding: 8px;">${w.caliber}</td>
-        <td style="padding: 8px; text-align: center;">${w.magazineQuantity}</td>
-        <td style="padding: 8px; text-align: center;">${w.originVaultCode || '-'}</td>
-      </tr>
-    `).join('');
-
-    const statusTitle = isPending
-      ? 'EM TRÂNSITO / AGUARDANDO ACEITE NO DESTINO'
-      : isCancelled
-      ? 'TRANSFERÊNCIA DESFEITA / CANCELADA'
-      : 'TRANSFERÊNCIA CONCLUÍDA E RECEBIDA NO COFRE';
-
-    const documentType = isPending
-      ? 'GUIA DE TRÂNSITO E TRANSFERÊNCIA DE ARMAMENTO'
-      : 'TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA';
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8">
-        <title>Recibo de Transferência - ${transfer.protocolNumber || transfer.id} - PCMG</title>
-        <style>
-          @page { size: A4 portrait; margin: 12mm; }
-          body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-            color: #111827;
-            background: #fff;
-            margin: 0;
-            padding: 16px;
-            font-size: 11px;
-            line-height: 1.4;
-          }
-          .header {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            border-bottom: 2px solid #000;
-            padding-bottom: 10px;
-            margin-bottom: 14px;
-          }
-          .title {
-            font-size: 15px;
-            font-weight: 900;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-            color: #000;
-          }
-          .subtitle {
-            font-size: 11px;
-            font-weight: 700;
-            color: #374151;
-            margin-top: 2px;
-          }
-          .reg-id {
-            font-family: monospace;
-            font-size: 11px;
-            font-weight: bold;
-            text-align: right;
-          }
-          .status-bar {
-            background: ${isPending ? '#fef3c7' : isCancelled ? '#fee2e2' : '#f0fdf4'};
-            border: 1px solid ${isPending ? '#f59e0b' : isCancelled ? '#ef4444' : '#10b981'};
-            padding: 8px 12px;
-            border-radius: 6px;
-            margin-bottom: 12px;
-            display: flex;
-            justify-content: space-between;
-            font-family: monospace;
-            font-size: 11px;
-            color: ${isPending ? '#92400e' : isCancelled ? '#991b1b' : '#065f46'};
-          }
-          .grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 12px;
-            margin-bottom: 12px;
-          }
-          .box {
-            border: 1px solid #9ca3af;
-            border-radius: 6px;
-            padding: 10px;
-            font-family: monospace;
-            margin-bottom: 12px;
-          }
-          .box-title {
-            font-size: 10px;
-            font-weight: 800;
-            text-transform: uppercase;
-            margin-bottom: 6px;
-            border-bottom: 1px solid #e5e7eb;
-            padding-bottom: 4px;
-            color: #111827;
-            letter-spacing: 0.5px;
-          }
-          .field {
-            margin-bottom: 4px;
-          }
-          .label {
-            font-size: 8.5px;
-            font-weight: bold;
-            color: #4b5563;
-            text-transform: uppercase;
-            display: block;
-          }
-          .val {
-            font-size: 11px;
-            font-weight: bold;
-            color: #000;
-          }
-          table {
-            width: 100%;
-            border-collapse: collapse;
-            font-family: monospace;
-            font-size: 10.5px;
-            margin-top: 6px;
-          }
-          th {
-            background-color: #f3f4f6;
-            border-bottom: 1.5px solid #000;
-            padding: 6px 8px;
-            text-align: left;
-            font-size: 9.5px;
-            text-transform: uppercase;
-          }
-          .signatures {
-            margin-top: 35px;
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 20px;
-            text-align: center;
-            font-family: monospace;
-            font-size: 10.5px;
-          }
-          .sig-line {
-            border-top: 1px solid #000;
-            padding-top: 6px;
-            font-weight: bold;
-          }
-          .footer {
-            margin-top: 25px;
-            text-align: center;
-            font-size: 8.5px;
-            color: #6b7280;
-            font-family: monospace;
-            border-top: 1px solid #e5e7eb;
-            padding-top: 8px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div>
-            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • ${documentType}</div>
-          </div>
-          <div class="reg-id">
-            PROTOCOLO / REGISTRO<br>
-            <span style="font-size: 14px; font-weight: 900; color: #1e3a8a;">${transfer.protocolNumber || transfer.id}</span>
-          </div>
-        </div>
-
-        <div class="status-bar">
-          <div><strong>SITUAÇÃO:</strong> ${statusTitle}</div>
-          <div><strong>DATA ENVIO:</strong> ${formatTimestamp(transfer.transferDate || transfer.createdAt)}</div>
-          <div><strong>DATA RECEBIMENTO:</strong> ${transfer.receivedAt ? formatTimestamp(transfer.receivedAt) : 'Aguardando aceite no destino'}</div>
-        </div>
-
-        <div class="grid">
-          <div class="box" style="margin-bottom: 0;">
-            <div class="box-title">1. Unidade de Origem (Remetente)</div>
-            <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.originDepartmentName || 'Não especificado'}</span></div>
-            <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.originUnitName || 'Não especificado'}</span></div>
-            <div class="field"><span class="label">Responsável pelo Envio:</span> <span class="val">${transfer.transferredByUserName} (MASP: ${transfer.transferredByUserMasp}) - ${transfer.transferredByUserRole}</span></div>
-          </div>
-
-          <div class="box" style="margin-bottom: 0;">
-            <div class="box-title">2. Unidade de Destino (Recebedora)</div>
-            <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.destinationDepartmentName || 'Não especificado'}</span></div>
-            <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.destinationUnitName}</span></div>
-            <div class="field"><span class="label">Local de Guarda no Cofre:</span> <span class="val">${transfer.destinationVaultSpaceCode || 'Cofre Principal'}</span></div>
-            ${transfer.receivedByUserName ? `<div class="field"><span class="label">Recebido por:</span> <span class="val">${transfer.receivedByUserName} (MASP: ${transfer.receivedByUserMasp}) - ${transfer.receivedByUserRole || 'Armeiro'}</span></div>` : `<div class="field"><span class="label">Status Recebimento:</span> <span class="val" style="color: #b45309;">Aguardando conferência física e aceite do armeiro</span></div>`}
-          </div>
-        </div>
-
-        <div class="box">
-          <div class="box-title">3. Policial Transportador & Justificativa</div>
-          <div class="grid" style="margin-bottom: 4px;">
-            <div class="field"><span class="label">Nome do Policial Responsável:</span> <span class="val">${transfer.receiverOrTransporterName}</span></div>
-            <div class="field"><span class="label">MASP / Cargo:</span> <span class="val">${transfer.receiverOrTransporterMasp} ${transfer.receiverOrTransporterCargo ? ' - ' + transfer.receiverOrTransporterCargo : ''}</span></div>
-          </div>
-          <div class="field"><span class="label">Motivo / Justificativa da Transferência:</span> <span class="val" style="font-weight: normal; color: #1f2937;">${transfer.reason}</span></div>
-          ${transfer.observation ? `<div class="field" style="margin-top: 4px;"><span class="label">Observações Adicionais:</span> <span class="val" style="font-weight: normal; color: #1f2937;">${transfer.observation}</span></div>` : ''}
-        </div>
-
-        <div class="box">
-          <div class="box-title">4. Relação de Armamentos Transferidos (${transfer.totalWeapons || transfer.weapons?.length || 0} arma(s) | ${transfer.totalMagazines || 0} carregador(es))</div>
-          <table>
-            <thead>
-              <tr>
-                <th style="text-align: center; width: 30px;">Item</th>
-                <th>Nº de Série</th>
-                <th>Tipo / Modelo</th>
-                <th>Fabricante</th>
-                <th>Calibre</th>
-                <th style="text-align: center;">Carregadores</th>
-                <th style="text-align: center;">Cofre Origem</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${weaponsRowsHtml}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="signatures">
-          <div class="sig-line">
-            ${transfer.transferredByUserName}<br>
-            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Remetente (MASP: ${transfer.transferredByUserMasp})</span>
-          </div>
-          <div class="sig-line">
-            ${transfer.receiverOrTransporterName}<br>
-            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Policial Transportador (MASP: ${transfer.receiverOrTransporterMasp})</span>
-          </div>
-          <div class="sig-line">
-            ${transfer.receivedByUserName ? `${transfer.receivedByUserName}<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor (MASP: ${transfer.receivedByUserMasp})</span>` : `___________________________________<br><span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor no Destino (Assinatura e MASP)</span>`}
-          </div>
-        </div>
-
-        <div class="footer">
-          Documento oficial gerado eletronicamente pelo Sistema de Armeria da Polícia Civil do Estado de Minas Gerais.<br>
-          ${isPending ? 'Guia de trânsito e remessa para acompanhamento durante o transporte do armamento.' : 'Validação de autenticidade no sistema com recebimento consolidado.'} Protocolo nº <strong>${transfer.protocolNumber || transfer.id}</strong> em ${new Date().toLocaleString('pt-BR')}.
-        </div>
-      </body>
-      </html>
-    `;
-
-    printDocumentInPage(html);
+    printTransferReceipt(transfer);
   };
 
   return (

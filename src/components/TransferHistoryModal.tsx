@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { WeaponTransfer, User } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
+import { printTransferReceipt } from './TransferReceiptModal';
 import {
   ArrowRightLeft,
   Search,
@@ -19,7 +20,8 @@ import {
   RotateCcw,
   AlertTriangle,
   Loader2,
-  Ban
+  Ban,
+  Eye
 } from 'lucide-react';
 
 interface TransferHistoryModalProps {
@@ -332,26 +334,33 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                           </button>
                         )}
 
+                        {/* Direct PDF / Print Button */}
                         {isPending && (
                           <button
                             type="button"
-                            onClick={() => onSelectTransfer(trf)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
-                            title="Gerar e imprimir Guia de Trânsito / Recibo de Envio de Armamento"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              printTransferReceipt(trf);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-semibold transition-colors w-fit shadow-md shadow-amber-950/40"
+                            title="Abrir diretamente o PDF / Impressão da Guia de Trânsito no navegador"
                           >
-                            <Printer className="w-3.5 h-3.5 text-amber-400" />
-                            <span>Imprimir Guia / Recibo</span>
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir Guia / PDF</span>
                           </button>
                         )}
 
                         {isReceived && (
                           <button
                             type="button"
-                            onClick={() => onSelectTransfer(trf)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 hover:border-emerald-500/50 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
-                            title="Imprimir Recibo de Transferência Concluída"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              printTransferReceipt(trf);
+                            }}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-semibold transition-colors w-fit shadow-md shadow-emerald-950/40"
+                            title="Abrir diretamente o PDF / Impressão do Recibo no navegador"
                           >
-                            <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                            <Printer className="w-3.5 h-3.5" />
                             <span>Imprimir Recibo / PDF</span>
                           </button>
                         )}
@@ -359,14 +368,31 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                         {isCancelled && (
                           <button
                             type="button"
-                            onClick={() => onSelectTransfer(trf)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              printTransferReceipt(trf);
+                            }}
                             className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-xs font-semibold transition-colors w-fit shadow-sm"
-                            title="Visualizar registro do cancelamento"
+                            title="Abrir diretamente o PDF do registro de cancelamento no navegador"
                           >
                             <Printer className="w-3.5 h-3.5 text-slate-400" />
-                            <span>Ver Registro</span>
+                            <span>Imprimir Registro</span>
                           </button>
                         )}
+
+                        {/* View in Modal button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectTransfer(trf);
+                          }}
+                          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-800/80 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-700/80 rounded-lg text-xs font-medium transition-colors"
+                          title="Visualizar detalhes na tela"
+                        >
+                          <Eye className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Detalhes</span>
+                        </button>
                       </div>
                     </div>
 
