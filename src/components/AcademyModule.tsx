@@ -126,8 +126,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
+  const isProfessorAcadepol = Boolean(
+    currentUser?.isTeacher ||
+    currentUser?.teacherSubject ||
+    currentUser?.professorSigla ||
+    currentUser?.professor_sigla ||
+    currentUser.role === 'Geral' ||
+    (isAcademiaDept && (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro'))
+  );
   const canManageCourses = currentUser.role === 'Geral' || 
-    ((currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') && isAcademiaDept);
+    ((currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') && isAcademiaDept) ||
+    isProfessorAcadepol;
 
   if (!canManageCourses) {
     return (
@@ -137,7 +146,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
         <h2 className="text-xl font-bold text-slate-100">Acesso Restrito - Gestão de Cursos</h2>
         <p className="text-xs text-slate-400 leading-relaxed">
-          Apenas usuários do perfil <strong className="text-amber-400">Geral</strong> e usuários <strong className="text-amber-400">Administradores e Armeiros</strong> vinculados ao departamento <strong className="text-slate-200">ACADEMIA DE POLICIA</strong> têm permissão para gerenciar cursos da Academia.
+          Apenas usuários do perfil <strong className="text-amber-400">Geral</strong>, <strong className="text-amber-400">Professores da Acadepol</strong> e usuários <strong className="text-amber-400">Administradores e Armeiros</strong> vinculados ao departamento <strong className="text-slate-200">ACADEMIA DE POLICIA</strong> têm permissão para gerenciar cursos da Academia.
         </p>
       </div>
     );

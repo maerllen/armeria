@@ -41,18 +41,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const userRole = currentUser?.role || 'Policial';
   const isGeral = userRole === 'Geral';
+  const userDept = departments.find(d => d.id === currentUser?.departmentId);
+  const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
   const isProfessorAcadepol = Boolean(
     currentUser?.isTeacher ||
     currentUser?.teacherSubject ||
     currentUser?.professorSigla ||
     currentUser?.professor_sigla ||
-    isGeral
+    isGeral ||
+    (isAcademiaDept && (userRole === 'Administrador' || userRole === 'Armeiro'))
   );
-
-  const userDept = departments.find(d => d.id === currentUser?.departmentId);
-  const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
   const canManageCourses = userRole === 'Geral' || 
-    ((userRole === 'Administrador' || userRole === 'Armeiro') && isAcademiaDept);
+    ((userRole === 'Administrador' || userRole === 'Armeiro') && isAcademiaDept) ||
+    isProfessorAcadepol;
 
   const navItems: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; visible: boolean; badge?: number }[] = [
     {
