@@ -21,7 +21,7 @@ interface ReceiveTransferModalProps {
   vaultSpaces: VaultSpace[];
   currentUser: User;
   onClose: () => void;
-  onSuccess: () => void;
+  onSuccess: (receivedTransfer?: WeaponTransfer | null) => void;
 }
 
 export const ReceiveTransferModal: React.FC<ReceiveTransferModalProps> = ({
@@ -56,12 +56,12 @@ export const ReceiveTransferModal: React.FC<ReceiveTransferModalProps> = ({
 
     setLoading(true);
     try {
-      await storage.receiveWeaponTransfer(
+      const updatedTransfer = await storage.receiveWeaponTransfer(
         transfer.id,
         selectedVaultSpaceId,
         observation.trim()
       );
-      onSuccess();
+      onSuccess(updatedTransfer);
     } catch (err: any) {
       setError(err.message || 'Erro ao confirmar o recebimento da transferência.');
     } finally {

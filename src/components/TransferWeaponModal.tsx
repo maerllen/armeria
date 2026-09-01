@@ -7,12 +7,14 @@ import {
   Shield,
   UserCheck,
   AlertCircle,
+  AlertTriangle,
   Plus,
   Trash2,
   X,
   Loader2,
   Info,
-  Check
+  Check,
+  RotateCcw
 } from 'lucide-react';
 
 interface TransferWeaponModalProps {
@@ -38,7 +40,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   onTransferSuccess,
   onSuccess
 }) => {
-  // Determine origin unit - Armeiro and Administrador are locked to their own unit
+  // Determine origin unit - Armeiro and Administrador are locked to their own privileged unit
   const isGeral = currentUser.role === 'Geral';
   const defaultOriginUnitId = (!isGeral && currentUser.unitId)
     ? currentUser.unitId
@@ -48,7 +50,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   const originUnit = units.find(u => u.id === originUnitId);
   const originDept = departments.find(d => d.id === (originUnit?.departmentId || initialWeapon?.departmentId || currentUser.departmentId));
 
-  // Destination selections
+  // Destination selections - can be ANY department and ANY unit
   const [destDeptId, setDestDeptId] = useState<string>(originDept?.id || (departments[0]?.id || ''));
   
   // Units filtered by destination department, excluding origin unit
@@ -65,7 +67,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
 
   const [destVaultSpaceId, setDestVaultSpaceId] = useState<string>(destVaultSpaces[0]?.id || '');
 
-  // Selected weapons to transfer (must belong to originUnitId)
+  // Selected weapons to transfer (must belong strictly to originUnitId)
   const [selectedWeaponIds, setSelectedWeaponIds] = useState<string[]>(() => {
     if (initialWeapon && initialWeapon.unitId === defaultOriginUnitId && initialWeapon.status !== 'Em Trânsito' && initialWeapon.status !== 'Em Aula' && initialWeapon.status !== 'Pendente de Recibo') {
       return [initialWeapon.id];
@@ -80,15 +82,18 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   const [reason, setReason] = useState('');
   const [observation, setObservation] = useState('');
 
+  // Confirmation Alert Dialog State
+  const [showConfirmAlert, setShowConfirmAlert] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Available weapons at the origin unit that can be transferred (status 'No Cofre' or 'Disponível')
+  // Armeiros and Administradores only see weapons from their privileged unit
   const availableOriginWeapons = useMemo(() => {
     return weapons.filter(w => {
       if (w.unitId !== originUnitId) return false;
-      // Cannot transfer if in transit or in class
-      if (w.status === 'Em Trânsito' || w.status === 'Em Aula') return false;
+      // Cannot transfer if in transit, in class or already pending receipt
+      if (w.status === 'Em Trânsito' || w.status === 'Em Aula' || w.status === 'Pendente de Recibo') return false;
       return true;
     });
   }, [weapons, originUnitId]);
@@ -110,7 +115,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     setDestVaultSpaceId(firstVault);
   };
 
-  // Handle origin unit change
+  // Handle origin unit change (Geral only)
   const handleOriginUnitChange = (newOriginId: string) => {
     setOriginUnitId(newOriginId);
     setSelectedWeaponIds([]);
@@ -140,7 +145,8 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Pre-submit validation and trigger confirmation alert box
+  const handlePreSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -156,11 +162,6 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
 
     if (originUnitId === destUnitId) {
       setError('A unidade de destino deve ser diferente da unidade de origem.');
-      return;
-    }
-
-    if (!destVaultSpaceId) {
-      setError('A unidade de destino não possui cofre/local de guarda cadastrado. Cadastre um cofre primeiro na aba Cofre.');
       return;
     }
 
@@ -193,6 +194,14 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
       setError('Informe o motivo/justificativa da transferência.');
       return;
     }
+
+    // Open confirmation alert dialog
+    setShowConfirmAlert(true);
+  };
+
+  // Confirmed execution of weapon transfer
+  const handleExecuteTransfer = async () => {
+    setError(null);
 
     const destUnitObj = units.find(u => u.id === destUnitId);
     const destDeptObj = departments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
@@ -234,6 +243,8 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         observation: observation.trim()
       });
 
+      setShowConfirmAlert(false);
+
       if (typeof onTransferSuccess === 'function') {
         onTransferSuccess(createdTransfer);
       }
@@ -241,17 +252,22 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         onSuccess(createdTransfer);
       }
     } catch (err: any) {
+      setShowConfirmAlert(false);
       setError(err.message || 'Erro ao realizar a transferência de armas.');
     } finally {
       setLoading(false);
     }
   };
 
-  const isGeralOrAdmin = currentUser.role === 'Geral' || currentUser.role === 'Administrador';
+  const selectedWeaponsList = useMemo(() => {
+    return selectedWeaponIds.map(id => weapons.find(w => w.id === id)).filter(Boolean) as Weapon[];
+  }, [selectedWeaponIds, weapons]);
+
+  const destUnitObj = units.find(u => u.id === destUnitId);
 
   return (
     <div id="transfer-weapon-modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl shadow-2xl my-8 overflow-hidden">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl shadow-2xl my-8 overflow-hidden relative">
         
         {/* Header */}
         <div className="p-5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
@@ -260,9 +276,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               <ArrowRightLeft className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-white">Transferir Armas entre Unidades</h2>
+              <h2 className="text-lg font-bold text-white">Transferência de Armas entre Unidades</h2>
               <p className="text-xs text-slate-400">
-                Geração automática de guia/recibo em PDF com protocolo oficial
+                {!isGeral 
+                  ? `Armeiro / Administrador vinculado à unidade: ${originUnit?.name || 'Sua Unidade'}`
+                  : 'Transferência e remanejamento de acervo bélico'}
               </p>
             </div>
           </div>
@@ -275,47 +293,39 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
           </button>
         </div>
 
-        {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
-          
+        {/* Form Body */}
+        <form onSubmit={handlePreSubmit} className="p-6 space-y-6 max-h-[80vh] overflow-y-auto">
           {error && (
-            <div className="p-3.5 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-start gap-3 text-xs text-rose-300">
-              <AlertCircle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
+            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
               <span>{error}</span>
             </div>
           )}
 
-          {/* Section 1: Origin & Destination */}
+          {/* Section 1: Origin and Destination Units */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             
             {/* Origin Unit Card */}
             <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-                  <Building2 className="w-4 h-4" /> 1. Unidade de Origem
-                </div>
-                {!isGeral && (
-                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-                    <Shield className="w-3 h-3" /> Unidade Fixa
-                  </span>
-                )}
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                <Building2 className="w-4 h-4" /> 1. Unidade de Origem (Remetente)
               </div>
 
-              {!isGeral && currentUser.unitId ? (
-                <div className="space-y-1.5 text-xs bg-slate-900/60 p-3 rounded-lg border border-slate-800">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-400 font-medium">Unidade do seu perfil:</span>
-                    <span className="text-[10px] font-bold text-amber-400 uppercase">{currentUser.role}</span>
+              {!isGeral ? (
+                <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg space-y-1">
+                  <div className="text-xs font-semibold text-white">
+                    {originUnit?.name || 'Unidade não identificada'}
                   </div>
-                  <p className="font-bold text-white text-sm">{originUnit?.name || 'Sua Unidade'}</p>
-                  <p className="text-[11px] text-slate-400">{originDept?.name || 'Departamento'}</p>
-                  <p className="text-[10px] text-slate-500 italic pt-1 border-t border-slate-800/60">
-                    * Armeiros e Administradores só podem transferir armamento pertencente à sua própria unidade.
-                  </p>
+                  <div className="text-[11px] text-slate-400">
+                    {originDept?.name || 'Departamento'}
+                  </div>
+                  <div className="text-[10px] text-amber-400/90 font-mono mt-1">
+                    * Você só possui privilégios para transferir armas desta unidade.
+                  </div>
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Selecionar Unidade de Origem (Acesso Geral)</label>
+                  <label className="block text-xs text-slate-400 mb-1">Selecione a Unidade de Origem</label>
                   <select
                     id="transfer-origin-unit-select"
                     value={originUnitId}
@@ -332,7 +342,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               )}
 
               <div className="pt-2 border-t border-slate-800/60 text-xs text-slate-400 flex items-center justify-between">
-                <span>Armas disponíveis no cofre:</span>
+                <span>Armas disponíveis no cofre da sua unidade:</span>
                 <span className="font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                   {availableOriginWeapons.length} arma(s)
                 </span>
@@ -342,7 +352,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
             {/* Destination Unit Card */}
             <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-2 text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                <Building2 className="w-4 h-4" /> 2. Unidade de Destino
+                <Building2 className="w-4 h-4" /> 2. Unidade de Destino (Recebedora)
               </div>
 
               <div className="space-y-2.5">
@@ -385,43 +395,29 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                     )}
                   </select>
                 </div>
+              </div>
 
-                <div>
-                  <label className="block text-xs text-slate-400 mb-1">Local de Guarda no Cofre Destino *</label>
-                  <select
-                    id="transfer-dest-vault-select"
-                    value={destVaultSpaceId}
-                    onChange={e => setDestVaultSpaceId(e.target.value)}
-                    required
-                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
-                  >
-                    {destVaultSpaces.length === 0 ? (
-                      <option value="">Sem cofre cadastrado nesta unidade</option>
-                    ) : (
-                      destVaultSpaces.map(v => (
-                        <option key={v.id} value={v.id}>
-                          {v.code} ({v.type || 'Espaço de Guarda'})
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
+              <div className="pt-2 border-t border-slate-800/60 text-[11px] text-slate-400 flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                <span>O armeiro do destino alocará o espaço no cofre ao receber.</span>
               </div>
             </div>
 
           </div>
 
-          {/* Section 2: Weapons Selection Table */}
+          {/* Section 2: Weapons Selection */}
           <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4 space-y-3">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
-                <Shield className="w-4 h-4 text-amber-400" /> 3. Seleção de Armamento ({selectedWeaponIds.length} selecionada(s))
+              <div className="flex items-center gap-2 text-xs font-bold text-slate-200 uppercase tracking-wider">
+                <Shield className="w-4 h-4 text-amber-400" />
+                <span>3. Seleção de Armamento ({selectedWeaponIds.length} selecionada(s))</span>
               </div>
+
               {availableOriginWeapons.length > 0 && (
                 <button
                   type="button"
                   onClick={handleSelectAllAvailable}
-                  className="text-xs text-amber-400 hover:text-amber-300 transition-colors underline cursor-pointer"
+                  className="text-xs text-amber-400 hover:text-amber-300 font-medium transition-colors"
                 >
                   {selectedWeaponIds.length === availableOriginWeapons.length ? 'Desmarcar Todas' : 'Selecionar Todas'}
                 </button>
@@ -429,67 +425,71 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
             </div>
 
             {availableOriginWeapons.length === 0 ? (
-              <div className="p-4 bg-slate-900/60 rounded-lg text-center text-xs text-slate-400">
-                Não há armas com status &quot;No Cofre&quot; disponíveis para transferência nesta unidade de origem.
+              <div className="p-6 text-center text-xs text-slate-400 bg-slate-900/60 rounded-lg border border-slate-800">
+                Nenhuma arma disponível no cofre desta unidade para transferência no momento.
               </div>
             ) : (
-              <div className="max-h-48 overflow-y-auto border border-slate-800 rounded-lg">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-900/80 sticky top-0 text-slate-400 border-b border-slate-800">
-                    <tr>
-                      <th className="p-2 w-10 text-center">Sel.</th>
-                      <th className="p-2">Nº Série</th>
-                      <th className="p-2">Tipo / Modelo</th>
-                      <th className="p-2">Calibre</th>
-                      <th className="p-2 text-center">Carregadores</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/50">
-                    {availableOriginWeapons.map(w => {
-                      const isSelected = selectedWeaponIds.includes(w.id);
-                      return (
-                        <tr
-                          key={w.id}
-                          onClick={() => toggleSelectWeapon(w.id)}
-                          className={`cursor-pointer transition-colors ${
-                            isSelected ? 'bg-amber-500/15 text-white' : 'hover:bg-slate-800/40 text-slate-300'
-                          }`}
-                        >
-                          <td className="p-2 text-center">
-                            <div className={`w-4 h-4 mx-auto rounded flex items-center justify-center border ${
-                              isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-600'
-                            }`}>
-                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
-                          </td>
-                          <td className="p-2 font-mono font-bold text-amber-400">{w.serialNumber}</td>
-                          <td className="p-2">{w.type} {w.model} ({w.manufacturer})</td>
-                          <td className="p-2 font-mono">{w.caliber}</td>
-                          <td className="p-2 text-center font-mono">{w.magazineQuantity || 0}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto p-1">
+                {availableOriginWeapons.map(w => {
+                  const isSelected = selectedWeaponIds.includes(w.id);
+                  const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+
+                  return (
+                    <div
+                      key={w.id}
+                      onClick={() => toggleSelectWeapon(w.id)}
+                      className={`cursor-pointer p-3 rounded-lg border text-xs transition-all flex items-start justify-between ${
+                        isSelected
+                          ? 'bg-amber-500/10 border-amber-500/40 text-white shadow-sm'
+                          : 'bg-slate-900/60 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-mono font-bold text-amber-400 text-xs">
+                            {w.serialNumber}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                            {w.type}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 font-medium">
+                          {w.manufacturer} {w.model} ({w.caliber})
+                        </p>
+                        <div className="text-[10px] text-slate-400 flex items-center gap-2">
+                          <span>Carregadores: {w.magazineQuantity || 0}</span>
+                          {vault && <span>Local: {vault.code}</span>}
+                        </div>
+                      </div>
+
+                      <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 mt-0.5 ${
+                        isSelected ? 'bg-amber-500 text-slate-950 font-bold' : 'border border-slate-700 bg-slate-950'
+                      }`}>
+                        {isSelected && <Check className="w-3.5 h-3.5" />}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
 
-          {/* Section 3: Transporter & Reason */}
+          {/* Section 3: Transporter & Justification */}
           <div className="bg-slate-950/40 border border-slate-800/80 rounded-xl p-4 space-y-4">
-            <div className="flex items-center gap-2 text-xs font-bold text-slate-300 uppercase tracking-wider">
-              <UserCheck className="w-4 h-4 text-amber-400" /> 4. Policial Transportador / Recebedor & Justificativa
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-200 uppercase tracking-wider">
+              <UserCheck className="w-4 h-4 text-amber-400" />
+              <span>4. Policial Transportador / Responsável & Motivo</span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Nome do Policial Responsável *</label>
+                <label className="block text-xs text-slate-400 mb-1">Nome do Policial Transportador *</label>
                 <input
-                  id="transporter-name-input"
+                  id="transfer-transporter-name-input"
                   type="text"
                   value={transporterName}
                   onChange={e => setTransporterName(e.target.value)}
-                  placeholder="Ex: Carlos Eduardo Silva"
+                  placeholder="Nome completo do policial"
                   required
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
                 />
@@ -498,11 +498,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               <div>
                 <label className="block text-xs text-slate-400 mb-1">MASP do Policial *</label>
                 <input
-                  id="transporter-masp-input"
+                  id="transfer-transporter-masp-input"
                   type="text"
                   value={transporterMasp}
                   onChange={e => setTransporterMasp(e.target.value)}
-                  placeholder="Ex: 123456-7"
+                  placeholder="Ex: 1234567-8"
                   required
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
                 />
@@ -511,7 +511,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               <div>
                 <label className="block text-xs text-slate-400 mb-1">Cargo / Função</label>
                 <input
-                  id="transporter-cargo-input"
+                  id="transfer-transporter-cargo-input"
                   type="text"
                   value={transporterCargo}
                   onChange={e => setTransporterCargo(e.target.value)}
@@ -551,7 +551,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
             <div className="flex items-center gap-1.5 text-xs text-slate-400">
               <Info className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>Ao confirmar, o status das armas será transferido e a guia oficial será gerada.</span>
+              <span>A transferência pode ser desfeita até que a unidade de destino receba no cofre.</span>
             </div>
 
             <div className="flex gap-3">
@@ -569,22 +569,124 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                 disabled={loading || selectedWeaponIds.length === 0 || !destUnitId}
                 className="flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors shadow-lg shadow-amber-600/20"
               >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Processando...</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowRightLeft className="w-4 h-4" />
-                    <span>Confirmar Transferência</span>
-                  </>
-                )}
+                <ArrowRightLeft className="w-4 h-4" />
+                <span>Confirmar Transferência</span>
               </button>
             </div>
           </div>
 
         </form>
+
+        {/* CONFIRMATION ALERTBOX MODAL */}
+        {showConfirmAlert && (
+          <div
+            id="transfer-confirmation-alertbox"
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
+          >
+            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+              
+              {/* Alert Header */}
+              <div className="p-5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
+                <div className="p-2 bg-amber-500 text-slate-950 rounded-xl shrink-0">
+                  <AlertTriangle className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Confirmar Transferência de Armas?</h3>
+                  <p className="text-xs text-amber-200/90">
+                    Confirme os dados antes de despachar o armamento
+                  </p>
+                </div>
+              </div>
+
+              {/* Alert Body */}
+              <div className="p-6 space-y-4 text-xs text-slate-300">
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                  <div className="flex justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-slate-400">Origem:</span>
+                    <strong className="text-slate-200">{originUnit?.name}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-slate-400">Destino:</span>
+                    <strong className="text-emerald-300">{destUnitObj?.name}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-slate-400">Policial Transportador:</span>
+                    <strong className="text-slate-200">{transporterName} (MASP: {transporterMasp})</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-800/80 pb-2">
+                    <span className="text-slate-400">Motivo:</span>
+                    <span className="text-slate-300">{reason}</span>
+                  </div>
+                  <div className="flex justify-between items-center pt-1">
+                    <span className="text-slate-400">Total de Armas:</span>
+                    <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/30 text-amber-300 font-bold">
+                      {selectedWeaponsList.length} arma(s)
+                    </span>
+                  </div>
+                </div>
+
+                {/* Weapons List summary */}
+                <div className="space-y-1.5">
+                  <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                    Armas a serem transferidas:
+                  </span>
+                  <div className="max-h-32 overflow-y-auto space-y-1 bg-slate-950/50 p-2 rounded-lg border border-slate-800">
+                    {selectedWeaponsList.map((w, idx) => (
+                      <div key={w.id} className="flex items-center justify-between text-[11px] py-0.5 border-b border-slate-900 last:border-none">
+                        <span className="font-mono font-bold text-amber-400">{idx + 1}. {w.serialNumber}</span>
+                        <span className="text-slate-300">{w.type} {w.model} ({w.caliber})</span>
+                        <span className="text-slate-500 font-mono text-[10px]">{w.magazineQuantity || 0} carreg.</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Undo notice */}
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-[11px] space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-300">
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Regra de Trânsito & Cancelamento:</span>
+                  </div>
+                  <p>
+                    As armas entrarão no status <strong>"Pendente de Recibo"</strong>. A transferência poderá ser <strong>desfeita a qualquer momento</strong> até que o armamento seja recebido e conferido no cofre da unidade de destino.
+                  </p>
+                </div>
+
+              </div>
+
+              {/* Alert Actions */}
+              <div className="p-4 bg-slate-950 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmAlert(false)}
+                  disabled={loading}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  Voltar e Revisar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteTransfer}
+                  disabled={loading}
+                  className="flex items-center gap-2 px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-xs font-bold transition-colors shadow-lg shadow-amber-600/30"
+                >
+                  {loading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Despachando...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Sim, Confirmar e Despachar</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
       </div>
     </div>

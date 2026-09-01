@@ -172,8 +172,9 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
         </div>
 
         <div class="status-bar">
-          <div><strong>SITUAÇÃO:</strong> TRANSFERÊNCIA CONCLUÍDA</div>
-          <div><strong>DATA / HORA:</strong> ${formatTimestamp(transfer.transferDate || transfer.createdAt)}</div>
+          <div><strong>SITUAÇÃO:</strong> TRANSFERÊNCIA CONCLUÍDA E RECEBIDA NO COFRE</div>
+          <div><strong>DATA ENVIO:</strong> ${formatTimestamp(transfer.transferDate || transfer.createdAt)}</div>
+          <div><strong>DATA RECEBIMENTO:</strong> ${formatTimestamp(transfer.receivedAt || transfer.transferDate || transfer.createdAt)}</div>
         </div>
 
         <div class="grid">
@@ -188,12 +189,13 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             <div class="box-title">2. Unidade de Destino (Recebedora)</div>
             <div class="field"><span class="label">Departamento:</span> <span class="val">${transfer.destinationDepartmentName || 'Não especificado'}</span></div>
             <div class="field"><span class="label">Unidade / Delegacia:</span> <span class="val">${transfer.destinationUnitName}</span></div>
-            <div class="field"><span class="label">Local no Cofre Destino:</span> <span class="val">${transfer.destinationVaultSpaceCode || 'Cofre Principal'}</span></div>
+            <div class="field"><span class="label">Local de Guarda no Cofre:</span> <span class="val">${transfer.destinationVaultSpaceCode || 'Cofre Principal'}</span></div>
+            ${transfer.receivedByUserName ? `<div class="field"><span class="label">Recebido por:</span> <span class="val">${transfer.receivedByUserName} (MASP: ${transfer.receivedByUserMasp}) - ${transfer.receivedByUserRole || 'Armeiro'}</span></div>` : ''}
           </div>
         </div>
 
         <div class="box">
-          <div class="box-title">3. Policial Transportador / Recebedor & Justificativa</div>
+          <div class="box-title">3. Policial Transportador & Justificativa</div>
           <div class="grid" style="margin-bottom: 4px;">
             <div class="field"><span class="label">Nome do Policial Responsável:</span> <span class="val">${transfer.receiverOrTransporterName}</span></div>
             <div class="field"><span class="label">MASP / Cargo:</span> <span class="val">${transfer.receiverOrTransporterMasp} ${transfer.receiverOrTransporterCargo ? ' - ' + transfer.receiverOrTransporterCargo : ''}</span></div>
@@ -222,14 +224,18 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           </table>
         </div>
 
-        <div class="signatures">
+        <div class="signatures" style="grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
           <div class="sig-line">
             ${transfer.transferredByUserName}<br>
-            <span style="font-weight: normal; font-size: 8.5px; color: #4b5563;">Armeiro / Responsável pelo Envio (MASP: ${transfer.transferredByUserMasp})</span>
+            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Remetente (MASP: ${transfer.transferredByUserMasp})</span>
           </div>
           <div class="sig-line">
             ${transfer.receiverOrTransporterName}<br>
-            <span style="font-weight: normal; font-size: 8.5px; color: #4b5563;">Policial Transportador / Recebedor (MASP: ${transfer.receiverOrTransporterMasp})</span>
+            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Policial Transportador (MASP: ${transfer.receiverOrTransporterMasp})</span>
+          </div>
+          <div class="sig-line">
+            ${transfer.receivedByUserName || 'Armeiro / Responsável Destino'}<br>
+            <span style="font-weight: normal; font-size: 8px; color: #4b5563;">Armeiro / Recebedor (MASP: ${transfer.receivedByUserMasp || '___________'})</span>
           </div>
         </div>
 
@@ -344,6 +350,17 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
                   <span className="text-slate-400">Local de Guarda no Cofre:</span>
                   <p className="font-semibold text-white">{transfer.destinationVaultSpaceCode || 'Cofre Principal'}</p>
                 </div>
+                {transfer.receivedByUserName && (
+                  <div>
+                    <span className="text-slate-400">Recebido por:</span>
+                    <p className="font-semibold text-emerald-300">
+                      {transfer.receivedByUserName} (MASP: {transfer.receivedByUserMasp}) - {transfer.receivedByUserRole || 'Armeiro'}
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Data: {formatTimestamp(transfer.receivedAt || '')}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -355,7 +372,7 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
               <div>
-                <span className="text-slate-400">Policial Transportador / Recebedor:</span>
+                <span className="text-slate-400">Policial Transportador:</span>
                 <p className="font-semibold text-white">{transfer.receiverOrTransporterName}</p>
               </div>
               <div>
@@ -411,18 +428,24 @@ export const TransferReceiptModal: React.FC<TransferReceiptModalProps> = ({
           </div>
 
           {/* Signatures Preview */}
-          <div className="pt-6 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-8 text-center text-xs">
+          <div className="pt-6 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
             <div className="space-y-1">
               <div className="border-t border-slate-700 pt-2 font-medium text-slate-300">
                 {transfer.transferredByUserName}
               </div>
-              <p className="text-[11px] text-slate-500">Armeiro / Responsável Envio (MASP: {transfer.transferredByUserMasp})</p>
+              <p className="text-[11px] text-slate-500">Armeiro / Remetente (MASP: {transfer.transferredByUserMasp})</p>
             </div>
             <div className="space-y-1">
               <div className="border-t border-slate-700 pt-2 font-medium text-slate-300">
                 {transfer.receiverOrTransporterName}
               </div>
-              <p className="text-[11px] text-slate-500">Policial Transportador / Recebedor (MASP: {transfer.receiverOrTransporterMasp})</p>
+              <p className="text-[11px] text-slate-500">Policial Transportador (MASP: {transfer.receiverOrTransporterMasp})</p>
+            </div>
+            <div className="space-y-1">
+              <div className="border-t border-slate-700 pt-2 font-medium text-slate-300">
+                {transfer.receivedByUserName || 'Armeiro no Destino'}
+              </div>
+              <p className="text-[11px] text-slate-500">Armeiro / Recebedor (MASP: {transfer.receivedByUserMasp || '___________'})</p>
             </div>
           </div>
 

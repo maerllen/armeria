@@ -536,10 +536,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               </div>
               <div>
                 <h3 className="text-sm font-bold text-amber-300">
-                  {pendingTransfers.length} Transferência(s) com Destino à sua Unidade Pendente(s) de Recebimento
+                  {isGeral
+                    ? `${pendingTransfers.length} Transferência(s) Pendente(s) de Recebimento no Sistema`
+                    : `${pendingTransfers.length} Transferência(s) com Destino à sua Unidade Pendente(s) de Recebimento`}
                 </h3>
                 <p className="text-xs text-amber-200/80">
-                  O armamento já saiu da unidade de origem e aguarda confirmação de entrada no cofre de destino.
+                  O armamento foi despachado e aguarda confirmação de entrada no cofre para liberação do recibo de recebimento.
                 </p>
               </div>
             </div>
@@ -579,13 +581,6 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </div>
 
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTransferForReceipt(ptrf)}
-                    className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-semibold transition"
-                  >
-                    Ver Guia
-                  </button>
                   <button
                     type="button"
                     onClick={() => setTransferToReceive(ptrf)}
@@ -1658,8 +1653,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             setShowTransferModal(false);
             setTransferInitialWeapon(null);
             onRefresh();
-            setSelectedTransferForReceipt(createdTransfer);
-            setSuccessMsg(`Transferência ${createdTransfer.protocolNumber} realizada com sucesso.`);
+            setSuccessMsg(`Transferência registrada com sucesso sob protocolo ${createdTransfer.protocolNumber || createdTransfer.id}. As armas constam com status "Pendente de Recibo" até o recebimento no cofre de destino. O recibo definitivo ficará disponível para impressão após a confirmação.`);
           }}
         />
       )}
@@ -1680,6 +1674,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           onClose={() => setShowTransferHistoryModal(false)}
           onSelectTransfer={(trf) => setSelectedTransferForReceipt(trf)}
           onReceiveTransfer={(trf) => setTransferToReceive(trf)}
+          onRefresh={onRefresh}
           onOpenNewTransfer={() => {
             setTransferInitialWeapon(null);
             setShowTransferModal(true);
@@ -1694,10 +1689,13 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           vaultSpaces={vaultSpaces}
           currentUser={currentUser}
           onClose={() => setTransferToReceive(null)}
-          onSuccess={() => {
+          onSuccess={(receivedTransfer) => {
             setTransferToReceive(null);
             onRefresh();
-            setSuccessMsg('Transferência recebida com sucesso! O armamento foi incorporado ao cofre da unidade de destino.');
+            setSuccessMsg('Transferência recebida com sucesso! O armamento foi incorporado ao cofre da unidade de destino e o recibo está disponível para impressão.');
+            if (receivedTransfer) {
+              setSelectedTransferForReceipt(receivedTransfer);
+            }
           }}
         />
       )}

@@ -895,7 +895,7 @@ class StorageService {
     transferId: string,
     destinationVaultSpaceId: string,
     observation?: string
-  ): Promise<boolean> {
+  ): Promise<WeaponTransfer | null> {
     const res = await fetch(`/api/weapon-transfers/${transferId}/receive`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -908,7 +908,46 @@ class StorageService {
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Erro ao receber armamento.');
     await this.refreshFromServer();
+    return result.transfer || (this.state.weaponTransfers.find(t => t.id === transferId) || null);
+  }
+
+  public async undoWeaponTransfer(
+    transferId: string,
+    reason?: string
+  ): Promise<boolean> {
+    const res = await fetch(`/api/weapon-transfers/${transferId}/undo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        reason,
+        actor: this.state.currentUser
+      })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao desfazer transferência.');
+    await this.refreshFromServer();
     return true;
+  }
+
+  public getPendingOutgoingTransfers(currentUser?: User | null): WeaponTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const transfers = this.getWeaponTransfers(actor);
+    return transfers.filter(t => {
+      if (t.status !== 'Pendente') return false;
+      if (actor.role === 'Geral') return true;
+      if (t.transferredByUserId === actor.id) return true;
+      if (actor.role === 'Administrador') {
+        return t.originDepartmentId === actor.departmentId || !actor.departmentId;
+      }
+      if (actor.role === 'Armeiro') {
+        if (actor.managementScope !== 'unit') {
+          return t.originDepartmentId === actor.departmentId;
+        }
+        return t.originUnitId === actor.unitId;
+      }
+      return t.originUnitId === actor.unitId;
+    });
   }
 
   // --- WEAPON MOVEMENTS (CAUTELAS) ---

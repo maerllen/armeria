@@ -4496,21 +4496,31 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
       });
     }
 
-    const finalVaultSpaceId = destinationVaultSpaceId || transfer.destino_cofre_id;
+    let finalVaultSpaceId = destinationVaultSpaceId || transfer.destino_cofre_id;
     if (!finalVaultSpaceId) {
-      return res.status(400).json({
-        error: 'Informe o local de guarda no cofre da unidade de destino para armazenar as armas.'
-      });
+      try {
+        const [destVaults]: any = await pool.query(
+          `SELECT id, codigo FROM cofres WHERE unidade_id = ? AND tipo = 'ARMAS' LIMIT 1`,
+          [transfer.destino_unidade_id]
+        );
+        if (destVaults && destVaults.length > 0) {
+          finalVaultSpaceId = destVaults[0].id;
+        }
+      } catch (_) {}
     }
 
     // Fetch vault code for destination cofre
     let vaultCode = transfer.destino_cofre_codigo || 'Cofre Principal';
-    const [vaultRows]: any = await pool.query(
-      `SELECT codigo FROM cofres WHERE id = ?`,
-      [finalVaultSpaceId]
-    );
-    if (vaultRows && vaultRows.length > 0) {
-      vaultCode = vaultRows[0].codigo;
+    if (finalVaultSpaceId) {
+      try {
+        const [vaultRows]: any = await pool.query(
+          `SELECT codigo FROM cofres WHERE id = ?`,
+          [finalVaultSpaceId]
+        );
+        if (vaultRows && vaultRows.length > 0) {
+          vaultCode = vaultRows[0].codigo;
+        }
+      } catch (_) {}
     }
 
     // Parse weapons in transfer
@@ -4533,7 +4543,7 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
             department_id = ?,
             unit_id = ?
            WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
-          [finalVaultSpaceId, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
+          [finalVaultSpaceId || null, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
         );
       } catch (_) {}
 
@@ -4545,7 +4555,7 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
             departamento_id = ?,
             unidade_id = ?
            WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
-          [finalVaultSpaceId, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
+          [finalVaultSpaceId || null, transfer.destino_departamento_id, transfer.destino_unidade_id, ...weaponIds]
         );
       } catch (_) {}
     }
@@ -4564,7 +4574,7 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
         observacao = COALESCE(?, observacao)
        WHERE id = ?`,
       [
-        finalVaultSpaceId,
+        finalVaultSpaceId || null,
         vaultCode,
         actor.id,
         actor.name,
@@ -4584,8 +4594,61 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
       req.ip
     );
 
+    // Fetch updated transfer object for immediate receipt printing
+    let updatedTransfer: any = null;
+    try {
+      const [updatedRows]: any = await pool.query(
+        `SELECT * FROM weapon_transfers WHERE id = ?`,
+        [id]
+      );
+      if (updatedRows && updatedRows.length > 0) {
+        const r = updatedRows[0];
+        let weapons = [];
+        try {
+          weapons = typeof r.weapons_json === 'string' ? JSON.parse(r.weapons_json) : (r.weapons_json || weaponsList);
+        } catch (e) {
+          weapons = weaponsList;
+        }
+        updatedTransfer = {
+          id: r.id,
+          protocolNumber: r.protocol_number,
+          transferDate: r.transfer_date,
+          originDepartmentId: r.origin_department_id,
+          originDepartmentName: r.origin_department_name,
+          originUnitId: r.origin_unit_id,
+          originUnitName: r.origin_unit_name,
+          destinationDepartmentId: r.destination_department_id,
+          destinationDepartmentName: r.destination_department_name,
+          destinationUnitId: r.destination_unit_id,
+          destinationUnitName: r.destination_unit_name,
+          destinationVaultSpaceId: r.destination_vault_space_id,
+          destinationVaultSpaceCode: r.destination_vault_space_code,
+          transferredByUserId: r.transferred_by_user_id,
+          transferredByUserName: r.transferred_by_user_name,
+          transferredByUserMasp: r.transferred_by_user_masp,
+          transferredByUserRole: r.transferred_by_user_role,
+          receiverOrTransporterName: r.receiver_or_transporter_name,
+          receiverOrTransporterMasp: r.receiver_or_transporter_masp,
+          receiverOrTransporterCargo: r.receiver_or_transporter_cargo,
+          reason: r.reason,
+          weapons,
+          totalWeapons: r.total_weapons || (weapons ? weapons.length : 1),
+          totalMagazines: r.total_magazines || 0,
+          observation: r.observation,
+          status: 'Recebido',
+          receivedAt: r.received_at,
+          receivedByUserId: r.received_by_user_id,
+          receivedByUserName: r.received_by_user_name,
+          receivedByUserMasp: r.received_by_user_masp,
+          receivedByUserRole: r.received_by_user_role,
+          createdAt: r.created_at
+        };
+      }
+    } catch (_) {}
+
     return res.json({
       success: true,
+      transfer: updatedTransfer,
       message: `Armamento recebido com sucesso no cofre "${vaultCode}". As armas agora constam no mapa do cofre da unidade.`
     });
   } catch (err: any) {
@@ -4593,6 +4656,139 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
     return res.status(500).json({ error: err.message });
   }
 });
+
+// POST /api/weapon-transfers/:id/undo - Desfazer / Cancelar transferência pendente
+apiRouter.post('/weapon-transfers/:id/undo', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { reason, actor } = req.body;
+
+    if (!actor) {
+      return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      `SELECT * FROM transferencias_armas WHERE id = ?`,
+      [id]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Transferência não encontrada.' });
+    }
+
+    const transfer = rows[0];
+
+    if (transfer.status === 'Recebido') {
+      return res.status(400).json({
+        error: 'Não é possível desfazer esta transferência porque o armamento já foi confirmado e recebido no cofre da unidade de destino.'
+      });
+    }
+
+    if (transfer.status === 'Cancelado') {
+      return res.status(400).json({
+        error: 'Esta transferência já se encontra desfeita/cancelada.'
+      });
+    }
+
+    // Permission check: Geral, criador da transferência, Armeiro ou Administrador da unidade/departamento de origem ou destino
+    const isGeral = actor.role === 'Geral';
+    const isCreator = actor.id === transfer.responsavel_id;
+    const isOriginAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.origem_departamento_id || !actor.departmentId);
+    const isOriginArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.origem_unidade_id || actor.departmentId === transfer.origem_departamento_id);
+    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+
+    if (!isGeral && !isCreator && !isOriginAdmin && !isOriginArmeiro && !isDestAdmin && !isDestArmeiro) {
+      return res.status(403).json({
+        error: 'Você não possui permissão para desfazer esta transferência.'
+      });
+    }
+
+    // Parse weapons in transfer
+    let weaponsList: any[] = [];
+    try {
+      weaponsList = typeof transfer.armas_json === 'string' ? JSON.parse(transfer.armas_json) : (transfer.armas_json || []);
+    } catch (e) {
+      weaponsList = [];
+    }
+
+    const weaponIds = weaponsList.map((w: any) => w.weaponId || w.id).filter(Boolean);
+
+    // Find vault space in origin unit to restore weapons to cofre
+    let originVaultId: string | null = null;
+    try {
+      const [originVaults]: any = await pool.query(
+        `SELECT id, codigo FROM cofres WHERE unidade_id = ? AND tipo = 'ARMAS' LIMIT 1`,
+        [transfer.origem_unidade_id]
+      );
+      if (originVaults && originVaults.length > 0) {
+        originVaultId = originVaults[0].id;
+      }
+    } catch (_) {}
+
+    // Restore weapons back to origin unit and department with status 'No Cofre'
+    if (weaponIds.length > 0) {
+      try {
+        await pool.query(
+          `UPDATE weapons SET 
+            department_id = ?,
+            unit_id = ?,
+            vault_space_id = COALESCE(?, vault_space_id),
+            status = 'No Cofre'
+           WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
+          [transfer.origem_departamento_id, transfer.origem_unidade_id, originVaultId, ...weaponIds]
+        );
+      } catch (_) {}
+
+      try {
+        await pool.query(
+          `UPDATE armas SET 
+            departamento_id = ?,
+            unidade_id = ?,
+            cofre_id = COALESCE(?, cofre_id),
+            status = 'No Cofre'
+           WHERE id IN (${weaponIds.map(() => '?').join(',')})`,
+          [transfer.origem_departamento_id, transfer.origem_unidade_id, originVaultId, ...weaponIds]
+        );
+      } catch (_) {}
+    }
+
+    // Update transfer status to 'Cancelado'
+    const cancellationNote = `[Transferência desfeita por ${actor.name} (${actor.masp || actor.role}) em ${new Date().toLocaleString('pt-BR')}${reason ? ' - Motivo: ' + reason.trim() : ''}]`;
+    
+    await pool.query(
+      `UPDATE transferencias_armas SET 
+        status = 'Cancelado',
+        observacao = CONCAT(COALESCE(observacao, ''), CASE WHEN observacao IS NULL OR observacao = '' THEN '' ELSE '\n' END, ?)
+       WHERE id = ?`,
+      [cancellationNote, id]
+    );
+
+    const weaponSerials = weaponsList.map((w: any) => w.serialNumber).join(', ');
+    await insertAuditLog(
+      'Armas',
+      'Desfazer Transferência',
+      `Transferência protocolo ${transfer.numero_protocolo || transfer.id} (${weaponsList.length} arma(s): ${weaponSerials}) desfeita por ${actor.name} (${actor.masp}). O armamento retornou ao cofre da unidade de origem (${transfer.origem_unidade_nome}).`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      message: `Transferência desfeita com sucesso! As armas retornaram à unidade de origem (${transfer.origem_unidade_nome}) com status "No Cofre".`
+    });
+  } catch (err: any) {
+    console.error('Error undoing weapon transfer:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Alias for cancel
+apiRouter.post('/weapon-transfers/:id/cancel', async (req: Request, res: Response) => {
+  return (apiRouter as any).handle(Object.assign(req, { url: `/weapon-transfers/${req.params.id}/undo` }), res);
+});
+
 
 
 
