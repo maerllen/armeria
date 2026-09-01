@@ -1,8 +1,9 @@
 import React from 'react';
-import { ModuleType } from '../types';
+import { ModuleType, User as UserType } from '../types';
 import { User, Crosshair, Disc, ArrowRightLeft, Smartphone, Menu } from 'lucide-react';
 
 interface MobileBottomNavProps {
+  currentUser?: UserType | null;
   activeModule: ModuleType;
   onSelectModule: (module: ModuleType) => void;
   onOpenMobileMenu: () => void;
@@ -10,43 +11,53 @@ interface MobileBottomNavProps {
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
+  currentUser,
   activeModule,
   onSelectModule,
   onOpenMobileMenu,
   pendingMovementsCount = 0
 }) => {
-  const quickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }[] = [
+  const isGeral = currentUser?.role === 'Geral';
+
+  const quickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number; visible?: boolean }[] = [
     {
       id: 'meu-perfil',
       label: 'Perfil',
-      icon: User
+      icon: User,
+      visible: true
     },
     {
       id: 'armas',
       label: 'Armas',
-      icon: Crosshair
+      icon: Crosshair,
+      visible: true
     },
     {
       id: 'municoes',
       label: 'Munições',
-      icon: Disc
+      icon: Disc,
+      visible: true
     },
     {
       id: 'movimentacoes',
       label: 'Movimentações',
       icon: ArrowRightLeft,
+      visible: true,
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
     },
     {
       id: 'iniciar-aula-mobile',
       label: 'Aula',
-      icon: Smartphone
+      icon: Smartphone,
+      visible: isGeral
     }
   ];
 
+  const visibleTabs = quickTabs.filter(tab => tab.visible !== false);
+
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around shadow-2xl print:hidden">
-      {quickTabs.map((tab) => {
+      {visibleTabs.map((tab) => {
         const Icon = tab.icon;
         const isActive = activeModule === tab.id;
         return (

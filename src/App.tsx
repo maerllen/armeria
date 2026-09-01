@@ -89,11 +89,32 @@ export default function App() {
   });
 
   useEffect(() => {
-    if (isMobileUrlMode) {
+    if (isMobileUrlMode && currentUser?.role === 'Geral') {
       setActiveModule('iniciar-aula-mobile');
     }
     refreshData();
   }, [isMobileUrlMode]);
+
+  // Security guard: ensure active module is accessible by current user
+  useEffect(() => {
+    if (!currentUser) return;
+    const isUserGeral = currentUser.role === 'Geral';
+    const isUserProfessor = Boolean(
+      currentUser.isTeacher ||
+      currentUser.teacherSubject ||
+      currentUser.professorSigla ||
+      currentUser.professor_sigla ||
+      isUserGeral
+    );
+
+    if (activeModule === 'iniciar-aula-mobile' && !isUserGeral) {
+      setActiveModule('meu-perfil');
+    } else if (activeModule === 'certificados' && !isUserGeral) {
+      setActiveModule('meu-perfil');
+    } else if (activeModule === 'calendario' && !isUserProfessor) {
+      setActiveModule('meu-perfil');
+    }
+  }, [currentUser, activeModule]);
 
   const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
     setLoginError('');
@@ -373,19 +394,19 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'calendario' && (
+          {activeModule === 'calendario' && (currentUser?.isTeacher || currentUser?.teacherSubject || currentUser?.professorSigla || currentUser?.professor_sigla || currentUser?.role === 'Geral') && (
             <CalendarModule
               currentUser={currentUser}
             />
           )}
 
-          {activeModule === 'certificados' && (
+          {activeModule === 'certificados' && currentUser?.role === 'Geral' && (
             <CertificateVerificationModule
               currentUser={currentUser}
             />
           )}
 
-          {activeModule === 'iniciar-aula-mobile' && (
+          {activeModule === 'iniciar-aula-mobile' && currentUser?.role === 'Geral' && (
             <MobileClassModule
               currentUser={currentUser}
               onRefresh={refreshData}
@@ -427,6 +448,7 @@ export default function App() {
       {/* Mobile Bottom Navigation Bar */}
       {deviceInfo.isMobile && (
         <MobileBottomNav
+          currentUser={currentUser}
           activeModule={activeModule}
           onSelectModule={(mod) => {
             setActiveModule(mod);

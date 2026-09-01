@@ -40,6 +40,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile
 }) => {
   const userRole = currentUser?.role || 'Policial';
+  const isGeral = userRole === 'Geral';
+  const isProfessorAcadepol = Boolean(
+    currentUser?.isTeacher ||
+    currentUser?.teacherSubject ||
+    currentUser?.professorSigla ||
+    currentUser?.professor_sigla ||
+    isGeral
+  );
 
   const userDept = departments.find(d => d.id === currentUser?.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
@@ -94,7 +102,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'iniciar-aula-mobile',
       label: 'Iniciar Aula (Modo Celular)',
       icon: Smartphone,
-      visible: true
+      visible: isGeral
     },
     {
       id: 'cursos',
@@ -118,13 +126,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'calendario',
       label: 'Calendário Curso de Formação',
       icon: Calendar,
-      visible: true
+      visible: isProfessorAcadepol
     },
     {
       id: 'certificados',
       label: 'Verificar Certificados',
       icon: ShieldCheck,
-      visible: true
+      visible: isGeral
     },
     {
       id: 'relatorio',
