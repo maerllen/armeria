@@ -25,7 +25,10 @@ import {
   AuxiliarTabelaEquipe,
   Certificado,
   WeaponTransfer,
-  WeaponTransferItem
+  WeaponTransferItem,
+  TipoMaterial,
+  Material,
+  CautelaMaterial
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -54,6 +57,9 @@ export interface AppState {
   equipesCalendario: EquipeCalendario[];
   auxiliarTabelaEquipe?: AuxiliarTabelaEquipe[];
   certificados: Certificado[];
+  tiposMateriais: TipoMaterial[];
+  materiais: Material[];
+  cautelasMateriais: CautelaMaterial[];
 }
 
 class StorageService {
@@ -81,7 +87,10 @@ class StorageService {
     calendarRecords: [],
     equipesCalendario: [],
     auxiliarTabelaEquipe: [],
-    certificados: []
+    certificados: [],
+    tiposMateriais: [],
+    materiais: [],
+    cautelasMateriais: []
   };
 
   constructor() {
@@ -122,7 +131,10 @@ class StorageService {
         equipesCalendarioRes,
         auxiliarTabelaEquipeRes,
         certificadosRes,
-        weaponTransfersRes
+        weaponTransfersRes,
+        tiposMateriaisRes,
+        materiaisRes,
+        cautelasMateriaisRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -146,7 +158,10 @@ class StorageService {
         fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : []),
         fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : []),
         fetch('/api/certificados').then(r => r.ok ? r.json() : []),
-        fetch('/api/weapon-transfers').then(r => r.ok ? r.json() : [])
+        fetch('/api/weapon-transfers').then(r => r.ok ? r.json() : []),
+        fetch('/api/tipos-materiais').then(r => r.ok ? r.json() : []),
+        fetch('/api/materiais').then(r => r.ok ? r.json() : []),
+        fetch('/api/cautelas-materiais').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -172,6 +187,9 @@ class StorageService {
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
+      this.state.tiposMateriais = tiposMateriaisRes || [];
+      this.state.materiais = materiaisRes || [];
+      this.state.cautelasMateriais = cautelasMateriaisRes || [];
 
 
       // Refresh current user reference if logged in
@@ -1642,6 +1660,222 @@ class StorageService {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // =================================================================
+  // MÉTODOS DO MÓDULO DE MATERIAIS
+  // =================================================================
+
+  public getTiposMateriais(): TipoMaterial[] {
+    return this.state.tiposMateriais || [];
+  }
+
+  public async saveTipoMaterial(tipo: Partial<TipoMaterial>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/tipos-materiais', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(tipo)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteTipoMaterial(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/tipos-materiais/${id}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getMateriais(user?: User | null): Material[] {
+    const list = this.state.materiais || [];
+    const currentUser = user || this.state.currentUser;
+    if (!currentUser || currentUser.role === 'Geral') {
+      return list;
+    }
+
+    if (currentUser.managementScope === 'unit' && currentUser.unitId) {
+      return list.filter(m => m.unidadeId === currentUser.unitId);
+    }
+
+    if (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') {
+      if (currentUser.departmentId) {
+        return list.filter(m => m.departamentoId === currentUser.departmentId);
+      }
+    }
+
+    if (currentUser.unitId) {
+      return list.filter(m => m.unidadeId === currentUser.unitId);
+    }
+
+    return list;
+  }
+
+  public async saveMaterial(material: Partial<Material>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const isEdit = Boolean(material.id && this.state.materiais.some(m => m.id === material.id));
+      const url = isEdit ? `/api/materiais/${material.id}` : '/api/materiais';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const actor = this.state.currentUser;
+      const payload = {
+        ...material,
+        criadoPorUsuarioId: actor?.id,
+        criadoPorNome: actor?.name,
+        updatedByUserId: actor?.id,
+        updatedByName: actor?.name
+      };
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id || material.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteMaterial(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const params = new URLSearchParams({
+        deletedByUserId: actor?.id || '',
+        deletedByName: actor?.name || ''
+      });
+      const res = await fetch(`/api/materiais/${id}?${params.toString()}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getCautelasMateriais(user?: User | null): CautelaMaterial[] {
+    const list = this.state.cautelasMateriais || [];
+    const currentUser = user || this.state.currentUser;
+    if (!currentUser || currentUser.role === 'Geral') {
+      return list;
+    }
+
+    if (currentUser.managementScope === 'unit' && currentUser.unitId) {
+      return list.filter(c => c.unidadeId === currentUser.unitId);
+    }
+
+    if (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') {
+      if (currentUser.departmentId) {
+        return list.filter(c => c.departamentoId === currentUser.departmentId);
+      }
+    }
+
+    if (currentUser.role === 'Policial') {
+      return list.filter(c => c.usuarioInternoId === currentUser.id || c.unidadeId === currentUser.unitId);
+    }
+
+    return list;
+  }
+
+  public async saveCautelaMaterial(cautela: Partial<CautelaMaterial>): Promise<{ success: boolean; id?: string; protocolo?: string; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const payload = {
+        ...cautela,
+        responsavelEntregaId: actor?.id || 'sistema',
+        responsavelEntregaNome: actor?.name || 'Armeiro',
+        responsavelEntregaMasp: actor?.masp || ''
+      };
+
+      const res = await fetch('/api/cautelas-materiais', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id, protocolo: data.protocolo };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async returnCautelaMaterial(
+    id: string,
+    params: {
+      status: 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia';
+      foiConsumido?: boolean;
+      relatoUsoAnomalias?: string;
+      dataDevolucao?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const payload = {
+        ...params,
+        responsavelRecebimentoId: actor?.id || 'sistema',
+        responsavelRecebimentoNome: actor?.name || 'Armeiro',
+        responsavelRecebimentoMasp: actor?.masp || ''
+      };
+
+      const res = await fetch(`/api/cautelas-materiais/${id}/devolucao`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCautelaMaterial(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const params = new URLSearchParams({
+        deletedByUserId: actor?.id || '',
+        deletedByName: actor?.name || ''
+      });
+      const res = await fetch(`/api/cautelas-materiais/${id}?${params.toString()}`, {
+        method: 'DELETE'
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };

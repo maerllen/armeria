@@ -117,6 +117,10 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       canMoveWeapons: Boolean(dbUser.can_move_weapons),
       hasSystemAccess: Boolean(dbUser.has_system_access),
       mustChangePassword: Boolean(dbUser.must_change_password),
+      isTeacher: Boolean(dbUser.is_teacher),
+      teacherSubject: dbUser.teacher_subject || undefined,
+      professorSigla: dbUser.professor_sigla || '',
+      professor_sigla: dbUser.professor_sigla || '',
       courses: (courses || []).map((c: any) => ({
         courseId: c.courseId,
         completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
@@ -4788,6 +4792,653 @@ apiRouter.post('/weapon-transfers/:id/undo', async (req: Request, res: Response)
 apiRouter.post('/weapon-transfers/:id/cancel', async (req: Request, res: Response) => {
   return (apiRouter as any).handle(Object.assign(req, { url: `/weapon-transfers/${req.params.id}/undo` }), res);
 });
+
+// ===================================================================
+// ROTAS DO MÓDULO DE MATERIAIS
+// ===================================================================
+
+// --- 1. TIPOS DE MATERIAIS ---
+apiRouter.get('/tipos-materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM tipos_materiais ORDER BY nome ASC');
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      nome: r.nome,
+      descricao: r.descricao,
+      categoria: r.categoria || 'Geral',
+      ehConsumivel: Boolean(r.eh_consumivel),
+      createdAt: r.data_criacao
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    console.error('Error fetching tipos_materiais:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/tipos-materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id, nome, descricao, categoria, ehConsumivel } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome do tipo de material é obrigatório.' });
+    }
+    const newId = id || `tipo-mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO tipos_materiais (id, nome, descricao, categoria, eh_consumivel, data_criacao)
+       VALUES (?, ?, ?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE descricao = VALUES(descricao), categoria = VALUES(categoria), eh_consumivel = VALUES(eh_consumivel)`,
+      [newId, nome.trim(), descricao || null, categoria || 'Geral', ehConsumivel ? 1 : 0]
+    );
+    return res.json({ success: true, id: newId });
+  } catch (err: any) {
+    console.error('Error saving tipo_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/tipos-materiais/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    // Check if any material is using this type
+    const [used]: any = await pool.query('SELECT COUNT(*) as count FROM materiais WHERE tipo_material_id = ?', [id]);
+    if (used[0]?.count > 0) {
+      return res.status(400).json({ error: 'Não é possível excluir este tipo pois existem materiais cadastrados vinculados a ele.' });
+    }
+    await pool.query('DELETE FROM tipos_materiais WHERE id = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting tipo_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 2. MATERIAIS ---
+apiRouter.get('/materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { departamentoId, unidadeId } = req.query;
+    let query = 'SELECT * FROM materiais WHERE 1=1';
+    const params: any[] = [];
+
+    if (departamentoId) {
+      query += ' AND departamento_id = ?';
+      params.push(departamentoId);
+    }
+    if (unidadeId) {
+      query += ' AND unidade_id = ?';
+      params.push(unidadeId);
+    }
+
+    query += ' ORDER BY nome ASC';
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      tipoMaterialId: r.tipo_material_id,
+      tipoMaterialNome: r.tipo_material_nome,
+      nome: r.nome,
+      quantidade: Number(r.quantidade || 0),
+      quantidadeDisponivel: Number(r.quantidade_disponivel ?? r.quantidade ?? 0),
+      quantidadeEmUso: Number(r.quantidade_em_uso || 0),
+      quantidadeConsumida: Number(r.quantidade_consumida || 0),
+      departamentoId: r.departamento_id,
+      departamentoNome: r.departamento_nome,
+      unidadeId: r.unidade_id,
+      unidadeNome: r.unidade_nome,
+      validade: r.validade ? (r.validade instanceof Date ? r.validade.toISOString().split('T')[0] : String(r.validade).substring(0, 10)) : null,
+      localGuarda: r.local_guarda,
+      numeroSerie: r.numero_serie,
+      observacoes: r.observacoes,
+      criadoPorUsuarioId: r.criado_por_usuario_id,
+      criadoPorNome: r.criado_por_nome,
+      createdAt: r.data_criacao,
+      updatedAt: r.data_atualizacao
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    console.error('Error fetching materiais:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const {
+      id,
+      tipoMaterialId,
+      tipoMaterialNome,
+      nome,
+      quantidade,
+      departamentoId,
+      departamentoNome,
+      unidadeId,
+      unidadeNome,
+      validade,
+      localGuarda,
+      numeroSerie,
+      observacoes,
+      criadoPorUsuarioId,
+      criadoPorNome
+    } = req.body;
+
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do material é obrigatório.' });
+    }
+    if (!tipoMaterialId) {
+      return res.status(400).json({ error: 'O tipo do material é obrigatório.' });
+    }
+    if (!departamentoId || !unidadeId) {
+      return res.status(400).json({ error: 'Departamento e Unidade são obrigatórios.' });
+    }
+    if (!localGuarda || !localGuarda.trim()) {
+      return res.status(400).json({ error: 'O local de guarda é obrigatório.' });
+    }
+
+    const qty = Math.max(1, parseInt(quantidade || '1', 10));
+    const newId = id || `mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    await pool.query(
+      `INSERT INTO materiais 
+        (id, tipo_material_id, tipo_material_nome, nome, quantidade, quantidade_disponivel, quantidade_em_uso, quantidade_consumida, departamento_id, departamento_nome, unidade_id, unidade_nome, validade, local_guarda, numero_serie, observacoes, criado_por_usuario_id, criado_por_nome, data_criacao, data_atualizacao)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        newId,
+        tipoMaterialId,
+        tipoMaterialNome || 'Material',
+        nome.trim(),
+        qty,
+        qty, // initially all available
+        departamentoId,
+        departamentoNome || null,
+        unidadeId,
+        unidadeNome || null,
+        validade ? validade : null,
+        localGuarda.trim(),
+        numeroSerie ? numeroSerie.trim() : null,
+        observacoes || null,
+        criadoPorUsuarioId || null,
+        criadoPorNome || null
+      ]
+    );
+
+    await insertAuditLog(
+      'Materiais',
+      'Cadastro de Material',
+      `Novo material cadastrado: "${nome}" (Qtd: ${qty}, Local: ${localGuarda}, Tipo: ${tipoMaterialNome}) na unidade ${unidadeNome || unidadeId}.`,
+      { id: criadoPorUsuarioId, name: criadoPorNome },
+      req.ip
+    );
+
+    return res.json({ success: true, id: newId });
+  } catch (err: any) {
+    console.error('Error creating material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const {
+      tipoMaterialId,
+      tipoMaterialNome,
+      nome,
+      quantidade,
+      departamentoId,
+      departamentoNome,
+      unidadeId,
+      unidadeNome,
+      validade,
+      localGuarda,
+      numeroSerie,
+      observacoes,
+      updatedByUserId,
+      updatedByName
+    } = req.body;
+
+    const [existingRows]: any = await pool.query('SELECT * FROM materiais WHERE id = ?', [id]);
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+    const current = existingRows[0];
+
+    const newTotal = quantidade !== undefined ? Math.max(0, parseInt(quantidade, 10)) : current.quantidade;
+    const inUse = Number(current.quantidade_em_uso || 0);
+    const consumed = Number(current.quantidade_consumida || 0);
+    const newDisponivel = Math.max(0, newTotal - inUse);
+
+    await pool.query(
+      `UPDATE materiais SET
+        tipo_material_id = COALESCE(?, tipo_material_id),
+        tipo_material_nome = COALESCE(?, tipo_material_nome),
+        nome = COALESCE(?, nome),
+        quantidade = ?,
+        quantidade_disponivel = ?,
+        departamento_id = COALESCE(?, departamento_id),
+        departamento_nome = COALESCE(?, departamento_nome),
+        unidade_id = COALESCE(?, unidade_id),
+        unidade_nome = COALESCE(?, unidade_nome),
+        validade = ?,
+        local_guarda = COALESCE(?, local_guarda),
+        numero_serie = ?,
+        observacoes = ?,
+        data_atualizacao = NOW()
+       WHERE id = ?`,
+      [
+        tipoMaterialId || null,
+        tipoMaterialNome || null,
+        nome ? nome.trim() : null,
+        newTotal,
+        newDisponivel,
+        departamentoId || null,
+        departamentoNome || null,
+        unidadeId || null,
+        unidadeNome || null,
+        validade ? validade : null,
+        localGuarda ? localGuarda.trim() : null,
+        numeroSerie ? numeroSerie.trim() : null,
+        observacoes !== undefined ? observacoes : null,
+        id
+      ]
+    );
+
+    await insertAuditLog(
+      'Materiais',
+      'Edição de Material',
+      `Material "${nome || current.nome}" atualizado (Qtd Total: ${newTotal}, Disponível: ${newDisponivel}, Em Uso: ${inUse}).`,
+      { id: updatedByUserId, name: updatedByName },
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/materiais/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const { deletedByUserId, deletedByName } = req.query as any;
+
+    const [matRows]: any = await pool.query('SELECT * FROM materiais WHERE id = ?', [id]);
+    if (!matRows || matRows.length === 0) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+    const mat = matRows[0];
+
+    if (mat.quantidade_em_uso > 0) {
+      return res.status(400).json({ error: `Não é possível excluir o material pois existem ${mat.quantidade_em_uso} unidade(s) em uso/acautelada(s).` });
+    }
+
+    await pool.query('DELETE FROM materiais WHERE id = ?', [id]);
+
+    await insertAuditLog(
+      'Materiais',
+      'Exclusão de Material',
+      `Material "${mat.nome}" (ID: ${id}) excluído do sistema.`,
+      { id: deletedByUserId, name: deletedByName },
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 3. CAUTELAS E MOVIMENTAÇÕES DE MATERIAIS ---
+apiRouter.get('/cautelas-materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { departamentoId, unidadeId, status } = req.query;
+    let query = 'SELECT * FROM cautelas_materiais WHERE 1=1';
+    const params: any[] = [];
+
+    if (departamentoId) {
+      query += ' AND departamento_id = ?';
+      params.push(departamentoId);
+    }
+    if (unidadeId) {
+      query += ' AND unidade_id = ?';
+      params.push(unidadeId);
+    }
+    if (status) {
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY data_retirada DESC';
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      protocolo: r.protocolo,
+      materialId: r.material_id,
+      materialNome: r.material_nome,
+      tipoMaterialNome: r.tipo_material_nome,
+      quantidade: Number(r.quantidade || 1),
+      tipoDestinatario: r.tipo_destinatario,
+      usuarioInternoId: r.usuario_interno_id,
+      usuarioInternoNome: r.usuario_interno_nome,
+      usuarioInternoMasp: r.usuario_interno_masp,
+      usuarioInternoCargo: r.usuario_interno_cargo,
+      usuarioExternoNome: r.usuario_externo_nome,
+      usuarioExternoDocumento: r.usuario_externo_documento,
+      usuarioExternoOrgao: r.usuario_externo_orgao,
+      usuarioExternoTelefone: r.usuario_externo_telefone,
+      dataRetirada: r.data_retirada,
+      dataPrevistaDevolucao: r.data_prevista_devolucao ? (r.data_prevista_devolucao instanceof Date ? r.data_prevista_devolucao.toISOString().split('T')[0] : String(r.data_prevista_devolucao).substring(0, 10)) : undefined,
+      dataDevolucao: r.data_devolucao,
+      finalidade: r.finalidade,
+      status: r.status,
+      foiConsumido: Boolean(r.foi_consumido),
+      relatoUsoAnomalias: r.relato_uso_anomalias,
+      responsavelEntregaId: r.responsavel_entrega_id,
+      responsavelEntregaNome: r.responsavel_entrega_nome,
+      responsavelEntregaMasp: r.responsavel_entrega_masp,
+      responsavelRecebimentoId: r.responsavel_recebimento_id,
+      responsavelRecebimentoNome: r.responsavel_recebimento_nome,
+      responsavelRecebimentoMasp: r.responsavel_recebimento_masp,
+      departamentoId: r.departamento_id,
+      unidadeId: r.unidade_id,
+      createdAt: r.data_criacao,
+      updatedAt: r.data_atualizacao
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    console.error('Error fetching cautelas_materiais:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const {
+      id,
+      protocolo,
+      materialId,
+      materialNome,
+      tipoMaterialNome,
+      quantidade,
+      tipoDestinatario,
+      usuarioInternoId,
+      usuarioInternoNome,
+      usuarioInternoMasp,
+      usuarioInternoCargo,
+      usuarioExternoNome,
+      usuarioExternoDocumento,
+      usuarioExternoOrgao,
+      usuarioExternoTelefone,
+      dataRetirada,
+      dataPrevistaDevolucao,
+      finalidade,
+      responsavelEntregaId,
+      responsavelEntregaNome,
+      responsavelEntregaMasp,
+      departamentoId,
+      unidadeId
+    } = req.body;
+
+    if (!materialId) {
+      return res.status(400).json({ error: 'Material é obrigatório.' });
+    }
+    const qty = Math.max(1, parseInt(quantidade || '1', 10));
+
+    // Verify stock availability
+    const [matRows]: any = await pool.query('SELECT * FROM materiais WHERE id = ?', [materialId]);
+    if (!matRows || matRows.length === 0) {
+      return res.status(404).json({ error: 'Material não encontrado no estoque.' });
+    }
+    const mat = matRows[0];
+    if (mat.quantidade_disponivel < qty) {
+      return res.status(400).json({
+        error: `Estoque insuficiente para cautela. Disponível: ${mat.quantidade_disponivel}, Solicitado: ${qty}.`
+      });
+    }
+
+    if (tipoDestinatario === 'interno') {
+      if (!usuarioInternoId || !usuarioInternoNome) {
+        return res.status(400).json({ error: 'Usuário interno (policial) é obrigatório.' });
+      }
+    } else {
+      if (!usuarioExternoNome || !usuarioExternoNome.trim()) {
+        return res.status(400).json({ error: 'Nome do usuário externo é obrigatório.' });
+      }
+    }
+
+    if (!finalidade || !finalidade.trim()) {
+      return res.status(400).json({ error: 'Finalidade / Motivo da retirada é obrigatório.' });
+    }
+
+    const newId = id || `caut-mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const proto = protocolo || `CM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const effectiveRetirada = dataRetirada ? new Date(dataRetirada) : new Date();
+
+    // Insert cautela
+    await pool.query(
+      `INSERT INTO cautelas_materiais (
+        id, protocolo, material_id, material_nome, tipo_material_nome, quantidade,
+        tipo_destinatario, usuario_interno_id, usuario_interno_nome, usuario_interno_masp, usuario_interno_cargo,
+        usuario_externo_nome, usuario_externo_documento, usuario_externo_orgao, usuario_externo_telefone,
+        data_retirada, data_prevista_devolucao, finalidade, status, foi_consumido,
+        responsavel_entrega_id, responsavel_entrega_nome, responsavel_entrega_masp,
+        departamento_id, unidade_id, data_criacao, data_atualizacao
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Uso', 0, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      [
+        newId,
+        proto,
+        materialId,
+        materialNome || mat.nome,
+        tipoMaterialNome || mat.tipo_material_nome,
+        qty,
+        tipoDestinatario || 'interno',
+        usuarioInternoId || null,
+        usuarioInternoNome || null,
+        usuarioInternoMasp || null,
+        usuarioInternoCargo || null,
+        usuarioExternoNome ? usuarioExternoNome.trim() : null,
+        usuarioExternoDocumento ? usuarioExternoDocumento.trim() : null,
+        usuarioExternoOrgao ? usuarioExternoOrgao.trim() : null,
+        usuarioExternoTelefone ? usuarioExternoTelefone.trim() : null,
+        effectiveRetirada,
+        dataPrevistaDevolucao || null,
+        finalidade.trim(),
+        responsavelEntregaId || 'sistema',
+        responsavelEntregaNome || 'Armeiro',
+        responsavelEntregaMasp || null,
+        departamentoId || mat.departamento_id,
+        unidadeId || mat.unidade_id
+      ]
+    );
+
+    // Update material quantities: reduce available, increase in_use
+    await pool.query(
+      `UPDATE materiais SET 
+        quantidade_disponivel = quantidade_disponivel - ?,
+        quantidade_em_uso = quantidade_em_uso + ?,
+        data_atualizacao = NOW()
+       WHERE id = ?`,
+      [qty, qty, materialId]
+    );
+
+    const recipientDesc = tipoDestinatario === 'interno'
+      ? `${usuarioInternoNome} (MASP: ${usuarioInternoMasp || 'N/D'})`
+      : `${usuarioExternoNome} (Externo - ${usuarioExternoOrgao || 'Sem órgão informado'})`;
+
+    await insertAuditLog(
+      'Materiais',
+      'Cautela de Material',
+      `Cautela realizada (${proto}): ${qty}x "${mat.nome}" entregue para ${recipientDesc}. Finalidade: ${finalidade}.`,
+      { id: responsavelEntregaId, name: responsavelEntregaNome, masp: responsavelEntregaMasp },
+      req.ip
+    );
+
+    return res.json({ success: true, id: newId, protocolo: proto });
+  } catch (err: any) {
+    console.error('Error creating cautela_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Registrar Devolução / Comunicação de Uso ou Anomalias / Material que se perca
+apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const {
+      status, // 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia'
+      foiConsumido, // Se foi utilizado e não retornará mais
+      relatoUsoAnomalias, // Comunicação de uso ou anomalias
+      dataDevolucao,
+      responsavelRecebimentoId,
+      responsavelRecebimentoNome,
+      responsavelRecebimentoMasp
+    } = req.body;
+
+    const [cautRows]: any = await pool.query('SELECT * FROM cautelas_materiais WHERE id = ?', [id]);
+    if (!cautRows || cautRows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de material não encontrada.' });
+    }
+    const caut = cautRows[0];
+    if (caut.status !== 'Em Uso') {
+      return res.status(400).json({ error: `Esta cautela já se encontra finalizada com status "${caut.status}".` });
+    }
+
+    const qty = Number(caut.quantidade || 1);
+    const isConsumed = Boolean(foiConsumido || status === 'Consumido');
+    const finalStatus = isConsumed
+      ? 'Consumido'
+      : (status === 'Devolvido com Anomalia' ? 'Devolvido com Anomalia' : 'Devolvido');
+    const returnDate = dataDevolucao ? new Date(dataDevolucao) : new Date();
+
+    // 1. Update cautela record
+    await pool.query(
+      `UPDATE cautelas_materiais SET
+        status = ?,
+        foi_consumido = ?,
+        relato_uso_anomalias = ?,
+        data_devolucao = ?,
+        responsavel_recebimento_id = ?,
+        responsavel_recebimento_nome = ?,
+        responsavel_recebimento_masp = ?,
+        data_atualizacao = NOW()
+       WHERE id = ?`,
+      [
+        finalStatus,
+        isConsumed ? 1 : 0,
+        relatoUsoAnomalias || null,
+        returnDate,
+        responsavelRecebimentoId || null,
+        responsavelRecebimentoNome || null,
+        responsavelRecebimentoMasp || null,
+        id
+      ]
+    );
+
+    // 2. Update material inventory
+    if (isConsumed) {
+      // Material foi utilizado e não retornará mais ao estoque!
+      // Reduz estoque total, zera quantidade em uso desta cautela, incrementa consumido
+      await pool.query(
+        `UPDATE materiais SET
+          quantidade = GREATEST(0, quantidade - ?),
+          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
+          quantidade_consumida = quantidade_consumida + ?,
+          data_atualizacao = NOW()
+         WHERE id = ?`,
+        [qty, qty, qty, caut.material_id]
+      );
+    } else {
+      // Retorna ao estoque disponível
+      await pool.query(
+        `UPDATE materiais SET
+          quantidade_disponivel = quantidade_disponivel + ?,
+          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
+          data_atualizacao = NOW()
+         WHERE id = ?`,
+        [qty, qty, caut.material_id]
+      );
+    }
+
+    const actor = {
+      id: responsavelRecebimentoId,
+      name: responsavelRecebimentoNome,
+      masp: responsavelRecebimentoMasp
+    };
+
+    let detailsMsg = `Devolução/Baixa de material (${caut.protocolo || caut.id}): ${qty}x "${caut.material_nome}" finalizada com status "${finalStatus}".`;
+    if (isConsumed) {
+      detailsMsg += ` Material declarado como CONSUMIDO/UTILIZADO EM OPERAÇÃO (baixa permanente no estoque).`;
+    }
+    if (relatoUsoAnomalias) {
+      detailsMsg += ` Relato/Anomalias: "${relatoUsoAnomalias}".`;
+    }
+
+    await insertAuditLog(
+      'Materiais',
+      isConsumed ? 'Baixa de Material (Consumo)' : 'Devolução de Material',
+      detailsMsg,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, status: finalStatus, isConsumed });
+  } catch (err: any) {
+    console.error('Error updating cautela_material devolucao:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const { deletedByUserId, deletedByName } = req.query as any;
+
+    const [cautRows]: any = await pool.query('SELECT * FROM cautelas_materiais WHERE id = ?', [id]);
+    if (!cautRows || cautRows.length === 0) {
+      return res.status(404).json({ error: 'Cautela não encontrada.' });
+    }
+    const caut = cautRows[0];
+
+    // If deleting an active loan, restore available stock
+    if (caut.status === 'Em Uso') {
+      const qty = Number(caut.quantidade || 1);
+      await pool.query(
+        `UPDATE materiais SET
+          quantidade_disponivel = quantidade_disponivel + ?,
+          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
+          data_atualizacao = NOW()
+         WHERE id = ?`,
+        [qty, qty, caut.material_id]
+      );
+    }
+
+    await pool.query('DELETE FROM cautelas_materiais WHERE id = ?', [id]);
+
+    await insertAuditLog(
+      'Materiais',
+      'Exclusão de Cautela de Material',
+      `Cautela protocolo ${caut.protocolo || caut.id} de ${caut.quantidade}x "${caut.material_nome}" excluída por ${deletedByName || 'Usuário'}.`,
+      { id: deletedByUserId, name: deletedByName },
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting cautela_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 

@@ -15,6 +15,7 @@ import { AmmunitionModule } from './components/AmmunitionModule';
 import { WeaponModule } from './components/WeaponModule';
 import { MovementModule } from './components/MovementModule';
 import { ReportModule } from './components/ReportModule';
+import { MaterialModule } from './components/MaterialModule';
 import { AcademyModule } from './components/AcademyModule';
 import { CourseManagementModule } from './components/CourseManagementModule';
 import { MobileClassModule } from './components/MobileClassModule';
@@ -351,6 +352,16 @@ export default function App() {
               weapons={weapons}
               vaultSpaces={vaultSpaces}
               courses={courses}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'materiais' && (
+            <MaterialModule
+              currentUser={currentUser}
+              departments={departments}
+              units={units}
+              allUsers={allUsers}
               onRefresh={refreshData}
             />
           )}

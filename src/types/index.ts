@@ -7,6 +7,7 @@ export type ModuleType =
   | 'cofre' 
   | 'municoes' 
   | 'armas' 
+  | 'materiais'
   | 'movimentacoes' 
   | 'relatorio'
   | 'manual'
@@ -585,6 +586,89 @@ export interface WeaponTransfer {
   receivedByUserMasp?: string;
   receivedByUserRole?: UserRole;
   createdAt: string;
+}
+
+// -------------------------------------------------------------------
+// MÓDULO DE MATERIAIS
+// -------------------------------------------------------------------
+export interface TipoMaterial {
+  id: string;
+  nome: string;
+  descricao?: string;
+  categoria?: string;
+  ehConsumivel?: boolean; // Se o material costuma ser consumido/descartável/que se perde
+  createdAt: string;
+}
+
+export interface Material {
+  id: string;
+  tipoMaterialId: string;
+  tipoMaterialNome: string;
+  nome: string;
+  quantidade: number;
+  quantidadeDisponivel: number;
+  quantidadeEmUso: number;
+  quantidadeConsumida: number;
+  departamentoId: string;
+  departamentoNome?: string;
+  unidadeId: string;
+  unidadeNome?: string;
+  validade?: string | null; // YYYY-MM-DD ou null
+  localGuarda: string; // Ex: Armário 01, Gaveta 3, Prateleira B, Sala de Armas
+  numeroSerie?: string; // Número de série ou patrimônio
+  observacoes?: string;
+  criadoPorUsuarioId?: string;
+  criadoPorNome?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export type DestinatarioMaterialTipo = 'interno' | 'externo';
+export type CautelaMaterialStatus = 'Em Uso' | 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia';
+
+export interface CautelaMaterial {
+  id: string;
+  protocolo?: string;
+  materialId: string;
+  materialNome: string;
+  tipoMaterialNome?: string;
+  quantidade: number;
+  tipoDestinatario: DestinatarioMaterialTipo;
+  
+  // Destinatário Interno (Policial do sistema)
+  usuarioInternoId?: string;
+  usuarioInternoNome?: string;
+  usuarioInternoMasp?: string;
+  usuarioInternoCargo?: string;
+  
+  // Destinatário Externo
+  usuarioExternoNome?: string;
+  usuarioExternoDocumento?: string; // CPF, RG ou Matrícula
+  usuarioExternoOrgao?: string; // Instituição, Delegacia Externa, Polícia Militar, etc.
+  usuarioExternoTelefone?: string;
+  
+  dataRetirada: string;
+  dataPrevistaDevolucao?: string;
+  dataDevolucao?: string;
+  finalidade: string;
+  status: CautelaMaterialStatus;
+  
+  // Consumo / Perda / Anomalias
+  foiConsumido?: boolean; // Material utilizado que se perdeu e não retornará mais
+  relatoUsoAnomalias?: string; // Campo para comunicar uso ou anomalias
+  
+  responsavelEntregaId: string;
+  responsavelEntregaNome: string;
+  responsavelEntregaMasp?: string;
+  
+  responsavelRecebimentoId?: string;
+  responsavelRecebimentoNome?: string;
+  responsavelRecebimentoMasp?: string;
+  
+  departamentoId: string;
+  unidadeId: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 

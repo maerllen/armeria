@@ -16,7 +16,8 @@ import {
   Calendar,
   X,
   Shield,
-  ShieldCheck
+  ShieldCheck,
+  Package
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 
@@ -98,6 +99,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       icon: ArrowRightLeft,
       visible: true,
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
+    },
+    {
+      id: 'materiais',
+      label: 'Materiais',
+      icon: Package,
+      visible: true
     },
     {
       id: 'iniciar-aula-mobile',
