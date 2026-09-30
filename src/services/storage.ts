@@ -685,7 +685,7 @@ class StorageService {
     if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.ammoMovements.filter(m => m.departmentId === actor.departmentId);
     }
-    return this.state.ammoMovements.filter(m => m.unitId === actor.unitId);
+    return this.state.ammoMovements.filter(m => m.unitId === actor.unitId || (!m.unitId && m.departmentId === actor.departmentId));
   }
 
   public async addAmmoMovement(data: {
@@ -738,26 +738,30 @@ class StorageService {
     return true;
   }
 
-  public async deleteAmmoStock(id: string): Promise<boolean> {
+  public async deleteAmmoStock(id: string, actorUser?: User): Promise<boolean> {
+    const actor = actorUser || this.state.currentUser;
     const res = await fetch(`/api/ammo-stocks/${id}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actor: this.state.currentUser })
+      body: JSON.stringify({ actor })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir registro de estoque.');
+    this.state.ammoStocks = this.state.ammoStocks.filter(s => s.id !== id);
     await this.refreshFromServer();
     return true;
   }
 
-  public async deleteAmmoMovement(id: string): Promise<boolean> {
+  public async deleteAmmoMovement(id: string, actorUser?: User): Promise<boolean> {
+    const actor = actorUser || this.state.currentUser;
     const res = await fetch(`/api/ammo-movements/${id}`, {
       method: 'DELETE',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ actor: this.state.currentUser })
+      body: JSON.stringify({ actor })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Erro ao excluir movimentação de munição.');
+    if (!res.ok) throw new Error(data.error || 'Erro ao excluir lançamento de movimentação de munição.');
+    this.state.ammoMovements = this.state.ammoMovements.filter(m => m.id !== id);
     await this.refreshFromServer();
     return true;
   }

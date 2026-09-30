@@ -892,11 +892,16 @@ apiRouter.get('/ammo-stocks', async (req: Request, res: Response) => {
 apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const actor = req.body.actor;
+    const actor = req.body?.actor;
     const pool = getPool();
 
+    // Check permissions: Geral, Armeiro or Administrador can delete
+    if (actor && actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role)) {
+      return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e administradores podem excluir registros de estoque de munição.' });
+    }
+
     await pool.query('DELETE FROM ammo_stocks WHERE id = ?', [id]);
-    await insertAuditLog('Munições', 'Excluir', `Excluído registro de estoque de munição`, actor, req.ip);
+    await insertAuditLog('Munições', 'Excluir', `Excluído registro de estoque de munição ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1064,11 +1069,59 @@ apiRouter.post('/ammo-movements/:id/return', async (req: Request, res: Response)
 apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const actor = req.body.actor;
+    const actor = req.body?.actor;
     const pool = getPool();
 
-    await pool.query('DELETE FROM ammo_movements WHERE id = ?', [id]);
-    await insertAuditLog('Munições', 'Excluir', `Excluído histórico de movimentação de munição`, actor, req.ip);
+    // Verify permissions: Geral, Armeiro or Administrador can delete
+    if (actor && actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !actor.canMoveAmmunition) {
+      return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e usuários Gerais podem excluir lançamentos de munições.' });
+    }
+
+    // Retrieve movement to reconcile inventory stocks before deletion
+    const [rows]: any = await pool.query('SELECT * FROM ammo_movements WHERE id = ?', [id]);
+    if (rows && rows.length > 0) {
+      const mov = rows[0];
+
+      // If Saída is being deleted: restore the net consumed ammunition back into the vault stock
+      if (mov.type === 'Saída') {
+        const netConsumed = Math.max(0, mov.quantity - (mov.returned_quantity || 0));
+        if (netConsumed > 0 && mov.vault_space_id && mov.caliber_id) {
+          const [stocks]: any = await pool.query(
+            'SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?',
+            [mov.vault_space_id, mov.caliber_id]
+          );
+          if (stocks && stocks.length > 0) {
+            const newQty = stocks[0].quantity + netConsumed;
+            await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+          } else {
+            const stockId = `stock-${Date.now()}`;
+            await pool.query(
+              'INSERT INTO ammo_stocks (id, caliber_id, quantity, department_id, unit_id, vault_space_id) VALUES (?, ?, ?, ?, ?, ?)',
+              [stockId, mov.caliber_id, netConsumed, mov.department_id, mov.unit_id, mov.vault_space_id]
+            );
+          }
+        }
+      }
+      // If Entrada is being deleted: decrease the added stock from the vault
+      else if (mov.type === 'Entrada') {
+        if (mov.quantity > 0 && mov.vault_space_id && mov.caliber_id) {
+          const [stocks]: any = await pool.query(
+            'SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?',
+            [mov.vault_space_id, mov.caliber_id]
+          );
+          if (stocks && stocks.length > 0) {
+            const newQty = Math.max(0, stocks[0].quantity - mov.quantity);
+            await pool.query('UPDATE ammo_stocks SET quantity = ? WHERE id = ?', [newQty, stocks[0].id]);
+          }
+        }
+      }
+
+      await pool.query('DELETE FROM ammo_movements WHERE id = ?', [id]);
+      await insertAuditLog('Munições', 'Excluir', `Excluído lançamento de movimentação de munição ${mov.type} (${mov.quantity} un) - ${mov.recipient_or_reason || ''}`, actor, req.ip);
+    } else {
+      await pool.query('DELETE FROM ammo_movements WHERE id = ?', [id]);
+    }
+
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

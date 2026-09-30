@@ -150,11 +150,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   };
 
   const handleDeleteStock = (st: AmmunitionStock) => {
-    setDeleteTargetAmmo({ type: 'stock', id: st.id, label: `o registro de estoque` });
+    const cal = calibers.find(c => c.id === st.caliberId);
+    setDeleteTargetAmmo({ 
+      type: 'stock', 
+      id: st.id, 
+      label: `o registro de estoque de ${st.quantity} un (${cal?.name || 'Calibre'})` 
+    });
   };
 
   const handleDeleteAmmoMovement = (m: AmmunitionMovement) => {
-    setDeleteTargetAmmo({ type: 'movement', id: m.id, label: `o histórico de movimentação de munição` });
+    const cal = calibers.find(c => c.id === m.caliberId);
+    setDeleteTargetAmmo({ 
+      type: 'movement', 
+      id: m.id, 
+      label: `o lançamento de movimentação (${m.type} de ${m.quantity} un de ${cal?.name || m.caliberId})` 
+    });
   };
 
   const confirmExecuteDeleteAmmo = async () => {
@@ -166,11 +176,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         await storage.deleteCaliber(deleteTargetAmmo.id);
         setSuccessMsg(`Calibre excluído com sucesso.`);
       } else if (deleteTargetAmmo.type === 'stock') {
-        await storage.deleteAmmoStock(deleteTargetAmmo.id);
+        await storage.deleteAmmoStock(deleteTargetAmmo.id, currentUser);
         setSuccessMsg(`Registro de estoque excluído com sucesso.`);
       } else if (deleteTargetAmmo.type === 'movement') {
-        await storage.deleteAmmoMovement(deleteTargetAmmo.id);
-        setSuccessMsg(`Histórico de movimentação excluído com sucesso.`);
+        await storage.deleteAmmoMovement(deleteTargetAmmo.id, currentUser);
+        setSuccessMsg(`Lançamento de munição excluído com sucesso.`);
       }
       onRefresh();
     } catch (err: any) {
@@ -387,8 +397,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     // Global dropdown filters
     if (filterCaliberId && m.caliberId !== filterCaliberId) return false;
     const vault = vaultSpaces.find(v => v.id === m.vaultSpaceId);
-    if (filterDepartmentId && vault && vault.departmentId !== filterDepartmentId) return false;
-    if (filterUnitId && vault && vault.unitId !== filterUnitId) return false;
+    const movDeptId = m.departmentId || vault?.departmentId;
+    const movUnitId = m.unitId || vault?.unitId;
+    if (filterDepartmentId && movDeptId && movDeptId !== filterDepartmentId) return false;
+    if (filterUnitId && movUnitId && movUnitId !== filterUnitId) return false;
 
     // Column text/dropdown filters
     if (colFilterData && !formatTimestamp(m.createdAt).toLowerCase().includes(colFilterData.toLowerCase())) return false;
@@ -652,11 +664,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                 <span className="text-base font-mono font-black text-emerald-400">
                                   {st.quantity} un
                                 </span>
-                                {isGeral && (
+                                {(isGeral || isArmeiro || isAdmin) && (
                                   <button
                                     onClick={() => handleDeleteStock(st)}
                                     className="p-1 text-slate-500 hover:text-red-400 rounded transition"
-                                    title="Excluir Estoque"
+                                    title="Excluir Lançamento de Estoque"
                                   >
                                     <Trash2 className="w-3.5 h-3.5" />
                                   </button>
@@ -905,7 +917,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                           <button
                             onClick={() => handleDeleteAmmoMovement(m)}
                             className="p-1.5 text-slate-500 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                            title="Excluir Registro de Movimentação"
+                            title="Excluir Lançamento de Munição"
                           >
                             <Trash2 className="w-4 h-4" />
                           </button>
