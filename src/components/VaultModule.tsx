@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { User, VaultSpace, VaultSpaceType, Department, Unit } from '../types';
 import { storage } from '../services/storage';
-import { Vault, Plus, Trash2, Edit2, AlertCircle, Check, Crosshair, Disc, Search, ChevronDown, ChevronUp, Building, Eye, Printer, X } from 'lucide-react';
+import { 
+  Vault, Plus, Trash2, Edit2, AlertCircle, Check, Crosshair, Disc, 
+  Search, ChevronDown, ChevronUp, Building, Eye, Printer, X, Filter,
+  Shield, Layers, Package
+} from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -21,6 +25,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   onRefresh
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'ARMAS' | 'MUNIÇÕES'>('ALL');
+  const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL');
   const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
   const [selectedVaultForDetails, setSelectedVaultForDetails] = useState<VaultSpace | null>(null);
 
@@ -40,21 +46,55 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const isPolicial = currentUser.role === 'Policial';
   const canManageVault = isGeral || isAdminOrArmeiro;
 
+  // Visible departments based on user scope
+  const visibleDepts = useMemo(() => {
+    return isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
+  }, [isGeral, departments, currentUser.departmentId]);
+
+  // Scoped vault spaces for user
+  const userScopedVaults = useMemo(() => {
+    if (isGeral) return vaultSpaces;
+    if (currentUser.role === 'Administrador' || (currentUser.role === 'Armeiro' && currentUser.managementScope !== 'unit')) {
+      return vaultSpaces.filter(v => v.departmentId === currentUser.departmentId);
+    }
+    return vaultSpaces.filter(v => v.unitId === currentUser.unitId);
+  }, [vaultSpaces, isGeral, currentUser]);
+
+  // Global counts for filter badges
+  const totalArmas = useMemo(() => userScopedVaults.filter(v => v.type === 'ARMAS').length, [userScopedVaults]);
+  const totalMunicoes = useMemo(() => userScopedVaults.filter(v => v.type === 'MUNIÇÕES').length, [userScopedVaults]);
+  const totalAll = userScopedVaults.length;
+
   // Available departments & units for modal
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
   const availableUnitsForModal = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
 
-  const toggleDeptExpand = (deptId: string) => {
+  // Available units for quick filter dropdown
+  const filterUnits = useMemo(() => {
+    if (isGeral) return units;
+    return units.filter(u => u.departmentId === currentUser.departmentId);
+  }, [isGeral, units, currentUser.departmentId]);
+
+  const toggleDeptExpand = (id: string) => {
     setExpandedDeptIds(prev =>
-      prev.includes(deptId) ? prev.filter(id => id !== deptId) : [...prev, deptId]
+      prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]
     );
   };
 
-  const handleOpenModal = () => {
+  const handleOpenModal = (presetType?: VaultSpaceType) => {
     setErrorMsg('');
     setEditingVault(null);
     setCode('');
-    setType('ARMAS');
+    
+    // Default to the preset, or the current active filter, or ARMAS
+    if (presetType) {
+      setType(presetType);
+    } else if (typeFilter === 'MUNIÇÕES') {
+      setType('MUNIÇÕES');
+    } else {
+      setType('ARMAS');
+    }
+
     const initialDept = isGeral ? (departments[0]?.id || '') : currentUser.departmentId;
     setDeptId(initialDept);
     const initialUnits = units.filter(u => u.departmentId === initialDept);
@@ -78,7 +118,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setSuccessMsg('');
 
     if (!code.trim()) {
-      setErrorMsg('Informe a identificação/código do local.');
+      setErrorMsg('Informe a identificação/código do local do cofre.');
       return;
     }
     if (!unitId) {
@@ -94,7 +134,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
           departmentId: deptId,
           unitId
         });
-        setSuccessMsg(`Local de guarda "${code.toUpperCase()}" atualizado com sucesso.`);
+        setSuccessMsg(`Local de cofre "${code.toUpperCase()}" (${type === 'ARMAS' ? 'Cofre para Armas' : 'Cofre para Munições'}) atualizado com sucesso.`);
       } else {
         await storage.addVaultSpace({
           code: code.trim().toUpperCase(),
@@ -102,7 +142,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
           departmentId: deptId,
           unitId
         });
-        setSuccessMsg(`Local de guarda "${code.toUpperCase()}" cadastrado com sucesso.`);
+        setSuccessMsg(`Novo local "${code.toUpperCase()}" (${type === 'ARMAS' ? 'Cofre para Armas' : 'Cofre para Munições'}) cadastrado com sucesso.`);
       }
       setShowModal(false);
       onRefresh();
@@ -170,6 +210,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       }
     }
 
+    const typeLabel = vault.type === 'ARMAS' ? 'COFRE PARA ARMAS' : 'COFRE PARA MUNIÇÕES';
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
@@ -208,12 +250,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         <div class="meta-box">
           <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
           <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
-          <div class="meta-item"><label>Tipo de Guarda:</label> <span>${vault.type}</span></div>
+          <div class="meta-item"><label>Tipo de Cofre:</label> <span>${typeLabel}</span></div>
           <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
         </div>
 
         <h3 style="font-size: 12px; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #111827; padding-bottom: 4px;">
-          CONTEÚDO ATUAL ARMAZENADO NO ESPAÇO (${vault.type})
+          CONTEÚDO ATUAL ARMAZENADO NO ESPAÇO (${typeLabel})
         </h3>
 
         <table>
@@ -261,9 +303,119 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     printDocumentInPage(html);
   };
 
-  // Filtered Departments
-  const visibleDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
   const term = searchTerm.toLowerCase().trim();
+
+  // Helper to render an individual vault space card
+  const renderVaultCard = (v: VaultSpace) => {
+    const unit = units.find(u => u.id === v.unitId);
+    const dept = departments.find(d => d.id === v.departmentId);
+    const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
+    const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
+    const isArmas = v.type === 'ARMAS';
+
+    return (
+      <div
+        key={v.id}
+        className={`bg-slate-900 border rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm transition hover:border-slate-600 ${
+          isArmas 
+            ? 'border-amber-900/30 hover:border-amber-500/50' 
+            : 'border-cyan-900/30 hover:border-cyan-500/50'
+        }`}
+      >
+        <div>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-lg font-black text-slate-100 font-mono tracking-wider">
+                  {v.code}
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center space-x-1 ${
+                    isArmas
+                      ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
+                      : 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+                  }`}
+                >
+                  {isArmas ? <Crosshair className="w-3 h-3 text-amber-400" /> : <Disc className="w-3 h-3 text-cyan-400" />}
+                  <span>{isArmas ? 'Cofre para Armas' : 'Cofre para Munições'}</span>
+                </span>
+              </div>
+              <div className="mt-1 text-xs text-slate-300">
+                <p className="font-semibold text-slate-200">{unit ? unit.name : 'Unidade N/A'}</p>
+                <p className="text-[11px] text-slate-400">{dept ? dept.name : ''}</p>
+              </div>
+            </div>
+
+            {canManageVault && (
+              <div className="flex items-center space-x-1 shrink-0">
+                <button
+                  onClick={() => handleOpenEditModal(v)}
+                  className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                  title="Editar Local do Cofre"
+                >
+                  <Edit2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(v)}
+                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                  title="Excluir Local"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Quick status preview inside card */}
+          <div className="mt-4 pt-3 border-t border-slate-800/80">
+            {isArmas ? (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Shield className="w-3.5 h-3.5 text-amber-400" />
+                  Armamentos no espaço:
+                </span>
+                <span className={`font-mono font-bold ${storedWeapons.length > 0 ? 'text-amber-400' : 'text-slate-500'}`}>
+                  {storedWeapons.length > 0 ? `${storedWeapons.length} arma(s)` : 'Livre / Vazio'}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-cyan-400" />
+                  Munições armazenadas:
+                </span>
+                <span className={`font-mono font-bold ${storedAmmo.length > 0 ? 'text-cyan-400' : 'text-slate-500'}`}>
+                  {storedAmmo.length > 0 
+                    ? `${storedAmmo.reduce((acc, s) => acc + s.quantity, 0)} un (${storedAmmo.length} lote/cal)`
+                    : 'Sem munições'
+                  }
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Card Actions: View Details and Print PDF */}
+        <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+          <button
+            onClick={() => setSelectedVaultForDetails(v)}
+            className="w-full bg-slate-800/90 hover:bg-slate-800 text-slate-100 hover:text-amber-400 font-bold text-xs py-2 px-3 rounded-xl border border-slate-700/80 flex items-center justify-center space-x-1.5 transition shadow-sm"
+          >
+            <Eye className="w-4 h-4" />
+            <span>Ver Detalhes</span>
+          </button>
+
+          <button
+            onClick={() => handlePrintVaultContent(v)}
+            className="p-2 bg-slate-800/90 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl border border-slate-700/80 transition"
+            title="Imprimir Relatório do Cofre em PDF"
+          >
+            <Printer className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -275,63 +427,164 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             <Vault className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-100">Gestão de Locais e Cofres por Departamento</h1>
+            <h1 className="text-xl font-bold text-slate-100">Gestão de Locais no Cofre</h1>
             <p className="text-xs text-slate-400">
-              Mapeamento físico do cofre por departamento e unidade. Clique para ver os cofres e seus detalhes.
+              Separação física e controle de locais para armamentos e munições por departamento e unidade.
             </p>
           </div>
         </div>
 
-        {!isPolicial && (
-          <button
-            onClick={handleOpenModal}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Novo Espaço no Cofre</span>
-          </button>
+        {canManageVault && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => handleOpenModal('ARMAS')}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Novo Cofre de Armas</span>
+            </button>
+            <button
+              onClick={() => handleOpenModal('MUNIÇÕES')}
+              className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Novo Cofre de Munições</span>
+            </button>
+          </div>
         )}
       </div>
 
       {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400" />
+        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
+          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{successMsg}</span>
         </div>
       )}
 
       {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400" />
+        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
+          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
           <span>{errorMsg}</span>
         </div>
       )}
 
-      {/* Search Input Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex items-center space-x-3">
-        <Search className="w-5 h-5 text-slate-400 shrink-0 ml-1" />
-        <input
-          type="text"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          placeholder="Pesquisar por código do cofre, departamento, unidade, modelo, nº de série ou calibre..."
-          className="w-full bg-transparent text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
-        />
-        {searchTerm && (
-          <button
-            onClick={() => setSearchTerm('')}
-            className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 bg-slate-800 rounded-lg"
-          >
-            Limpar
-          </button>
-        )}
+      {/* Filter and Search Bar */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
+        
+        {/* Type Filter Tabs (Separated by Type & Filterable Visualization) */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center space-x-1 bg-slate-950 p-1 rounded-xl border border-slate-800 self-start sm:self-auto overflow-x-auto max-w-full">
+            
+            {/* Filter: Todos */}
+            <button
+              type="button"
+              onClick={() => setTypeFilter('ALL')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                typeFilter === 'ALL'
+                  ? 'bg-slate-800 text-slate-100 shadow-sm border border-slate-700'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>Todos os Locais</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                typeFilter === 'ALL' ? 'bg-slate-700 text-slate-200' : 'bg-slate-900 text-slate-500'
+              }`}>
+                {totalAll}
+              </span>
+            </button>
+
+            {/* Filter: Cofre para Armas */}
+            <button
+              type="button"
+              onClick={() => setTypeFilter('ARMAS')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                typeFilter === 'ARMAS'
+                  ? 'bg-amber-950/90 text-amber-300 border border-amber-800 shadow-sm'
+                  : 'text-slate-400 hover:text-amber-300 hover:bg-slate-900'
+              }`}
+            >
+              <Crosshair className="w-3.5 h-3.5 text-amber-400" />
+              <span>Cofre para Armas</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                typeFilter === 'ARMAS' ? 'bg-amber-900/80 text-amber-200' : 'bg-slate-900 text-slate-500'
+              }`}>
+                {totalArmas}
+              </span>
+            </button>
+
+            {/* Filter: Cofre para Munições */}
+            <button
+              type="button"
+              onClick={() => setTypeFilter('MUNIÇÕES')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                typeFilter === 'MUNIÇÕES'
+                  ? 'bg-cyan-950/90 text-cyan-300 border border-cyan-800 shadow-sm'
+                  : 'text-slate-400 hover:text-cyan-300 hover:bg-slate-900'
+              }`}
+            >
+              <Disc className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Cofre para Munições</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                typeFilter === 'MUNIÇÕES' ? 'bg-cyan-900/80 text-cyan-200' : 'bg-slate-900 text-slate-500'
+              }`}>
+                {totalMunicoes}
+              </span>
+            </button>
+
+          </div>
+
+          {/* Quick Unit Filter (Optional dropdown) */}
+          <div className="flex items-center space-x-2">
+            <span className="text-[11px] text-slate-400 hidden md:inline">Filtrar por Unidade:</span>
+            <select
+              value={selectedUnitFilter}
+              onChange={(e) => setSelectedUnitFilter(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-slate-700"
+            >
+              <option value="ALL">Todas as Unidades</option>
+              {filterUnits.map(u => (
+                <option key={u.id} value={u.id}>{u.name}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Search Input Bar */}
+        <div className="flex items-center space-x-3 bg-slate-950 rounded-xl px-3 py-2 border border-slate-800">
+          <Search className="w-4 h-4 text-slate-400 shrink-0" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            placeholder="Pesquisar por código do cofre, departamento, unidade, modelo, nº de série ou calibre..."
+            className="w-full bg-transparent text-xs sm:text-sm text-slate-100 placeholder-slate-500 focus:outline-none"
+          />
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="text-xs text-slate-400 hover:text-slate-200 px-2 py-1 bg-slate-800 rounded-lg"
+            >
+              Limpar
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Departments Accordion for Vault Spaces */}
       <div className="space-y-4">
         {visibleDepts.map((dept) => {
+          // Filter vaults for this department matching active filters and search term
           const deptVaults = vaultSpaces.filter(v => {
             if (v.departmentId !== dept.id) return false;
+
+            // Type filter
+            if (typeFilter !== 'ALL' && v.type !== typeFilter) return false;
+
+            // Unit filter
+            if (selectedUnitFilter !== 'ALL' && v.unitId !== selectedUnitFilter) return false;
+
+            // Search query filter
             if (!term) return true;
 
             const unit = units.find(u => u.id === v.unitId);
@@ -339,6 +592,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
 
             const matchesBasic = v.code.toLowerCase().includes(term) ||
+              v.type.toLowerCase().includes(term) ||
               dept.name.toLowerCase().includes(term) ||
               dept.code.toLowerCase().includes(term) ||
               (unit && unit.name.toLowerCase().includes(term));
@@ -357,11 +611,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             return matchesBasic || matchesWeapons || matchesAmmo;
           });
 
+          // Separate by type within this department
+          const armasVaults = deptVaults.filter(v => v.type === 'ARMAS');
+          const municoesVaults = deptVaults.filter(v => v.type === 'MUNIÇÕES');
+
           // Auto expand if searching or explicitly toggled
           const isExpanded = term !== '' || expandedDeptIds.includes(dept.id);
 
-          // Hide department if searching and no vaults match
-          if (term !== '' && deptVaults.length === 0) return null;
+          // Hide department if filtering/searching and no vaults match
+          if ((term !== '' || typeFilter !== 'ALL' || selectedUnitFilter !== 'ALL') && deptVaults.length === 0) {
+            return null;
+          }
 
           return (
             <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
@@ -383,105 +643,133 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
                     </div>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      {deptVaults.length} espaço(s) de cofre cadastrado(s)
+                      {deptVaults.length} espaço(s) exibido(s) neste departamento
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-3">
-                  <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
-                    {deptVaults.length} Espaço(s)
+                  {/* Categorized badges in department header */}
+                  <div className="hidden sm:flex items-center space-x-2">
+                    <span className="text-xs bg-amber-950/60 text-amber-300 border border-amber-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
+                      <Crosshair className="w-3 h-3 text-amber-400" />
+                      <span>{armasVaults.length} Armas</span>
+                    </span>
+                    <span className="text-xs bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
+                      <Disc className="w-3 h-3 text-cyan-400" />
+                      <span>{municoesVaults.length} Munições</span>
+                    </span>
+                  </div>
+
+                  <span className="text-xs bg-slate-950 text-slate-200 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
+                    {deptVaults.length} Total
                   </span>
+
                   <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
                     {isExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5" />}
                   </div>
                 </div>
               </div>
 
-              {/* Vault Cards for this Department (Shown when Expanded) */}
+              {/* Vault Cards for this Department (Separated by Type) */}
               {isExpanded && (
-                <div className="p-6 bg-slate-950/40 border-t border-slate-800/60">
+                <div className="p-6 bg-slate-950/40 border-t border-slate-800/60 space-y-8">
                   {deptVaults.length === 0 ? (
-                    <p className="text-xs text-slate-500 italic py-2">
-                      Nenhum local do cofre cadastrado neste departamento.
-                    </p>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {deptVaults.map((v) => {
-                        const unit = units.find(u => u.id === v.unitId);
-
-                        return (
-                          <div
-                            key={v.id}
-                            className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm hover:border-slate-700 transition"
-                          >
-                            <div>
-                              <div className="flex items-start justify-between">
-                                <div className="flex items-center space-x-2">
-                                  <span className="text-lg font-black text-amber-400 font-mono tracking-wider">
-                                    {v.code}
-                                  </span>
-                                  <span
-                                    className={`text-[10px] font-bold px-2 py-0.5 rounded border flex items-center space-x-1 ${
-                                      v.type === 'ARMAS'
-                                        ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                                        : 'bg-cyan-950/80 text-cyan-300 border-cyan-800'
-                                    }`}
-                                  >
-                                    {v.type === 'ARMAS' ? <Crosshair className="w-3 h-3" /> : <Disc className="w-3 h-3" />}
-                                    <span>{v.type}</span>
-                                  </span>
-                                </div>
-
-                                {canManageVault && (
-                                  <div className="flex items-center space-x-1">
-                                    <button
-                                      onClick={() => handleOpenEditModal(v)}
-                                      className="p-1 text-slate-500 hover:text-amber-400 rounded transition"
-                                      title="Editar Local do Cofre"
-                                    >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                    <button
-                                      onClick={() => handleDelete(v)}
-                                      className="p-1 text-slate-500 hover:text-red-400 rounded transition"
-                                      title="Excluir Local"
-                                    >
-                                      <Trash2 className="w-4 h-4" />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-
-                              <div className="mt-2 text-xs text-slate-300 space-y-0.5">
-                                <p className="font-semibold text-slate-200">{unit ? unit.name : 'Unidade N/A'}</p>
-                                <p className="text-[11px] text-slate-400">{dept ? dept.name : ''}</p>
-                              </div>
-                            </div>
-
-                            {/* Actions: View Details and Print PDF */}
-                            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                              <button
-                                onClick={() => setSelectedVaultForDetails(v)}
-                                className="w-full bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs py-2 px-3 rounded-xl border border-slate-700 flex items-center justify-center space-x-1.5 transition shadow-sm"
-                              >
-                                <Eye className="w-4 h-4" />
-                                <span>Ver Detalhes</span>
-                              </button>
-
-                              <button
-                                onClick={() => handlePrintVaultContent(v)}
-                                className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl border border-slate-700 transition"
-                                title="Imprimir Relatório do Cofre em PDF"
-                              >
-                                <Printer className="w-4 h-4" />
-                              </button>
-                            </div>
-
-                          </div>
-                        );
-                      })}
+                    <div className="text-center py-8">
+                      <p className="text-xs text-slate-500 italic">
+                        Nenhum local de cofre cadastrado neste departamento atendendo aos filtros selecionados.
+                      </p>
                     </div>
+                  ) : (
+                    <>
+                      {/* SECTION 1: COFRES PARA ARMAS */}
+                      {(typeFilter === 'ALL' || typeFilter === 'ARMAS') && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between pb-2 border-b border-amber-900/30">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="p-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg">
+                                <Crosshair className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-amber-300 uppercase tracking-wide">
+                                  Cofres para Armas
+                                </h3>
+                                <p className="text-[11px] text-slate-400">
+                                  Locais e armários destinados à custódia de armamentos
+                                </p>
+                              </div>
+                            </div>
+
+                            <span className="text-xs font-mono font-bold bg-amber-950 text-amber-300 border border-amber-800 px-2.5 py-0.5 rounded-full">
+                              {armasVaults.length} {armasVaults.length === 1 ? 'espaço' : 'espaços'}
+                            </span>
+                          </div>
+
+                          {armasVaults.length === 0 ? (
+                            <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                              Nenhum cofre para armas cadastrado neste departamento.
+                              {canManageVault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenModal('ARMAS')}
+                                  className="mt-2 block mx-auto text-amber-400 hover:text-amber-300 font-bold underline"
+                                >
+                                  + Cadastrar cofre para armas
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {armasVaults.map(renderVaultCard)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* SECTION 2: COFRES PARA MUNIÇÕES */}
+                      {(typeFilter === 'ALL' || typeFilter === 'MUNIÇÕES') && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between pb-2 border-b border-cyan-900/30">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="p-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-lg">
+                                <Disc className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-cyan-300 uppercase tracking-wide">
+                                  Cofres para Munições
+                                </h3>
+                                <p className="text-[11px] text-slate-400">
+                                  Locais e prateleiras destinados à estocagem de munições e cartuchos
+                                </p>
+                              </div>
+                            </div>
+
+                            <span className="text-xs font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800 px-2.5 py-0.5 rounded-full">
+                              {municoesVaults.length} {municoesVaults.length === 1 ? 'espaço' : 'espaços'}
+                            </span>
+                          </div>
+
+                          {municoesVaults.length === 0 ? (
+                            <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                              Nenhum cofre para munições cadastrado neste departamento.
+                              {canManageVault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenModal('MUNIÇÕES')}
+                                  className="mt-2 block mx-auto text-cyan-400 hover:text-cyan-300 font-bold underline"
+                                >
+                                  + Cadastrar cofre para munições
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {municoesVaults.map(renderVaultCard)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -498,6 +786,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         const unit = units.find(u => u.id === v.unitId);
         const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
         const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
+        const isArmas = v.type === 'ARMAS';
 
         return (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
@@ -506,21 +795,25 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-4">
                 <div className="flex items-center space-x-3">
-                  <div className="p-3 bg-amber-500/10 text-amber-400 border border-amber-500/20 rounded-xl">
+                  <div className={`p-3 rounded-xl border ${
+                    isArmas 
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                      : 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                  }`}>
                     <Vault className="w-6 h-6" />
                   </div>
                   <div>
                     <div className="flex items-center space-x-2">
-                      <span className="text-xl font-black text-amber-400 font-mono tracking-wider">{v.code}</span>
+                      <span className="text-xl font-black text-slate-100 font-mono tracking-wider">{v.code}</span>
                       <span
-                        className={`text-xs font-bold px-2 py-0.5 rounded border flex items-center space-x-1 ${
-                          v.type === 'ARMAS'
+                        className={`text-xs font-bold px-2 py-0.5 rounded-lg border flex items-center space-x-1 ${
+                          isArmas
                             ? 'bg-amber-950/80 text-amber-300 border-amber-800'
                             : 'bg-cyan-950/80 text-cyan-300 border-cyan-800'
                         }`}
                       >
-                        {v.type === 'ARMAS' ? <Crosshair className="w-3 h-3" /> : <Disc className="w-3 h-3" />}
-                        <span>{v.type}</span>
+                        {isArmas ? <Crosshair className="w-3 h-3" /> : <Disc className="w-3 h-3" />}
+                        <span>{isArmas ? 'Cofre para Armas' : 'Cofre para Munições'}</span>
                       </span>
                     </div>
                     <p className="text-xs text-slate-400 mt-0.5">
@@ -541,17 +834,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Conteúdo Armazenado no Espaço ({v.type})
+                    Conteúdo Armazenado no Espaço ({isArmas ? 'Armas' : 'Munições'})
                   </h4>
-                  <span className="text-xs font-mono font-bold text-amber-400">
-                    {v.type === 'ARMAS' ? `${storedWeapons.length} Armas` : `${storedAmmo.length} Lotes/Calibres`}
+                  <span className={`text-xs font-mono font-bold ${isArmas ? 'text-amber-400' : 'text-cyan-400'}`}>
+                    {isArmas ? `${storedWeapons.length} Armas Cadastradas` : `${storedAmmo.length} Lote(s) / Calibre(s)`}
                   </span>
                 </div>
 
-                {v.type === 'ARMAS' ? (
+                {isArmas ? (
                   storedWeapons.length === 0 ? (
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
-                      Este espaço de cofre está atualmente livre / sem armas armazenadas.
+                      Este cofre de armas está atualmente livre / sem armas armazenadas.
                     </div>
                   ) : (
                     <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
@@ -580,7 +873,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 ) : (
                   storedAmmo.length === 0 ? (
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
-                      Este espaço de cofre está atualmente sem munições cadastradas.
+                      Este cofre de munições está atualmente sem munições cadastradas.
                     </div>
                   ) : (
                     <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
@@ -635,7 +928,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         );
       })()}
 
-      {/* Add Vault Space Modal */}
+      {/* Add / Edit Vault Space Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
@@ -653,23 +946,53 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
                   placeholder="Ex: A1-G1"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono focus:border-amber-500 focus:outline-none"
                   required
                 />
               </div>
 
+              {/* Type Selection as interactive cards */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Tipo de Armazenamento
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+                  Tipo de Local / Cofre
                 </label>
-                <select
-                  value={type}
-                  onChange={(e) => setType(e.target.value as VaultSpaceType)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                >
-                  <option value="ARMAS">ARMAS</option>
-                  <option value="MUNIÇÕES">MUNIÇÕES</option>
-                </select>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setType('ARMAS')}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                      type === 'ARMAS'
+                        ? 'bg-amber-950/70 border-amber-500 text-amber-200 shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 mb-1.5">
+                      <Crosshair className={`w-4 h-4 ${type === 'ARMAS' ? 'text-amber-400' : 'text-slate-500'}`} />
+                      <span className="text-xs font-bold text-slate-100">Cofre de Armas</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      Para custódia de pistolas, fuzis e espingardas
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setType('MUNIÇÕES')}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                      type === 'MUNIÇÕES'
+                        ? 'bg-cyan-950/70 border-cyan-500 text-cyan-200 shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 mb-1.5">
+                      <Disc className={`w-4 h-4 ${type === 'MUNIÇÕES' ? 'text-cyan-400' : 'text-slate-500'}`} />
+                      <span className="text-xs font-bold text-slate-100">Cofre de Munições</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      Para estocagem de cartuchos e lotes de munição
+                    </span>
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -687,7 +1010,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
                     !isGeral
                       ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
-                      : 'bg-slate-950 border-slate-700 text-slate-100'
+                      : 'bg-slate-950 border-slate-700 text-slate-100 focus:border-amber-500'
                   }`}
                 >
                   {availableDepts.map((d) => (
@@ -705,7 +1028,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <select
                   value={unitId}
                   onChange={(e) => setUnitId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-amber-500"
                 >
                   {availableUnitsForModal.map((u) => (
                     <option key={u.id} value={u.id}>
