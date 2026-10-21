@@ -20,6 +20,7 @@ import {
   Package
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
+import { ThemeToggle } from './ThemeToggle';
 
 interface SidebarProps {
   currentUser: UserType | null;
@@ -221,10 +222,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Footer Info */}
-      <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-500 space-y-1">
-        <p className="font-semibold text-slate-400 font-mono">Armeria v2.0 • Polícia Civil</p>
-        <p className="text-[10px] text-slate-500">Gestão Tática de Armamento</p>
+      {/* Footer Info & Palette Switcher */}
+      <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Paleta:</span>
+          <ThemeToggle compact={false} />
+        </div>
+        <div className="text-[11px] text-slate-500 space-y-0.5">
+          <p className="font-semibold text-slate-400 font-mono">Armeria v2.0 • Polícia Civil</p>
+          <p className="text-[10px] text-slate-500">Gestão Tática de Armamento</p>
+        </div>
       </div>
     </div>
   );

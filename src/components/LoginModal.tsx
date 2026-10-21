@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
 import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 
 interface LoginModalProps {
   onLoginSuccess: (maspDigits: string, passwordDigits: string) => void;
@@ -58,6 +59,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
   return (
     <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-md max-h-[85vh] sm:max-h-[90vh] overflow-y-auto my-auto relative">
+        {/* Quick Palette Switcher */}
+        <div className="absolute top-4 right-4 z-10">
+          <ThemeToggle compact={true} />
+        </div>
         
         {/* Header Branding */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-6 border-b border-slate-800 text-center relative">

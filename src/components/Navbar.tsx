@@ -3,6 +3,7 @@ import { User } from '../types';
 import { formatMasp } from '../utils/masks';
 import { Shield, LogOut, KeyRound, Smartphone, Monitor, Menu, X, ChevronDown } from 'lucide-react';
 import { DeviceInfo, DeviceMode } from '../utils/deviceDetection';
+import { ThemeToggle } from './ThemeToggle';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -160,6 +161,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 )}
               </div>
             )}
+
+            {/* Theme / Palette Switcher (Escura / Clara - Windows) */}
+            <ThemeToggle showDropdown={true} />
 
             {/* Current User Badge */}
             <div className="hidden sm:flex items-center space-x-2.5 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800/80">

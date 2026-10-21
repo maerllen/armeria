@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { User, UserCargo, Department, Unit, Course } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
-import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound } from 'lucide-react';
+import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 
 interface ProfileModuleProps {
   currentUser?: User | null;
@@ -290,6 +291,25 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
                   <span className={`font-bold px-2 py-0.5 rounded ${activeUser.canMoveWeapons ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 'bg-slate-800 text-slate-500'}`}>
                     {activeUser.canMoveWeapons ? 'SIM' : 'NÃO'}
                   </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Visual Palette Preference */}
+            <div className="pt-4 border-t border-slate-800">
+              <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
+                <Palette className="w-3.5 h-3.5 text-amber-400" />
+                <span>Aparência e Paleta do Sistema</span>
+              </span>
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div>
+                  <span className="text-slate-200 font-semibold block">Paleta de Cores do Template</span>
+                  <span className="text-slate-400 text-[11px] block mt-0.5">
+                    Alterne entre a paleta escura (padrão tático) e a paleta clara com visual de sistemas desktops Windows.
+                  </span>
+                </div>
+                <div className="shrink-0 self-start sm:self-auto">
+                  <ThemeToggle showDropdown={true} />
                 </div>
               </div>
             </div>

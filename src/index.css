@@ -15,6 +15,87 @@
   }
 }
 
+/* =========================================================================
+   LIGHT THEME (WINDOWS DESKTOP AESTHETICS) OVERRIDES
+   Emulates modern clean Windows Desktop / Fluent UI business software
+   ========================================================================= */
+html.theme-light,
+body.theme-light,
+.theme-light {
+  /* Slate color scale inverted for Windows Desktop light environment */
+  --color-slate-950: #f0f3f8;  /* Window/Desktop Canvas Background (Slate 100) */
+  --color-slate-900: #ffffff;  /* Card, Dialog, Table, Panel Background (Pure White) */
+  --color-slate-850: #f8fafc;  /* Subtle section background (Slate 50) */
+  --color-slate-800: #e2e8f0;  /* Standard Windows Card/Panel Borders (Slate 200) */
+  --color-slate-700: #cbd5e1;  /* Dividers, control borders, search borders (Slate 300) */
+  --color-slate-600: #94a3b8;  /* Muted badges, secondary icons */
+  --color-slate-500: #64748b;  /* Captions, timestamps, secondary labels */
+  --color-slate-400: #475569;  /* Form labels, descriptions, subheadings */
+  --color-slate-300: #334155;  /* Body text, table cells */
+  --color-slate-200: #1e293b;  /* Bold labels, table headers */
+  --color-slate-100: #0f172a;  /* Primary headers, main titles, high contrast */
+  --color-slate-50: #020617;   /* Deepest black contrast text */
+
+  /* Amber & gold accents tuned for light backgrounds */
+  --color-amber-950: #fef3c7;  /* Light warm amber background for badges */
+  --color-amber-900: #fde68a;  /* Hover tint */
+  --color-amber-800: #fcd34d;  /* Amber border */
+  --color-amber-700: #b45309;  /* Dark amber */
+  --color-amber-600: #d97706;  /* Primary amber button */
+  --color-amber-500: #d97706;  /* Deep rich amber accent */
+  --color-amber-400: #b45309;  /* High contrast readable amber text */
+  --color-amber-300: #92400e;  /* Deep amber */
+
+  /* Cyan & blue accents tuned for light backgrounds */
+  --color-cyan-950: #e0f2fe;   /* Light cyan background */
+  --color-cyan-900: #bae6fd;
+  --color-cyan-800: #7dd3fc;
+  --color-cyan-600: #0284c7;
+  --color-cyan-500: #0284c7;
+  --color-cyan-400: #0369a1;   /* High contrast readable cyan text */
+  --color-cyan-300: #075985;
+
+  /* Purple accents tuned for light backgrounds */
+  --color-purple-950: #f3e8ff;
+  --color-purple-900: #e9d5ff;
+  --color-purple-600: #9333ea;
+  --color-purple-500: #8b5cf6;
+  --color-purple-400: #7e22ce; /* High contrast readable purple text */
+  --color-purple-300: #6b21a8;
+
+  /* Emerald accents tuned for light backgrounds */
+  --color-emerald-950: #dcfce7;
+  --color-emerald-900: #bbf7d0;
+  --color-emerald-600: #16a34a;
+  --color-emerald-500: #10b981;
+  --color-emerald-400: #15803d; /* High contrast readable emerald text */
+  --color-emerald-300: #166534;
+
+  /* Red & rose accents tuned for light backgrounds */
+  --color-red-950: #fee2e2;
+  --color-red-900: #fecaca;
+  --color-red-600: #dc2626;
+  --color-red-500: #ef4444;
+  --color-red-400: #b91c1c;    /* High contrast red text */
+  --color-red-300: #991b1b;
+
+  --color-rose-950: #ffe4e6;
+  --color-rose-900: #fecdd3;
+  --color-rose-600: #e11d48;
+  --color-rose-500: #f43f5e;
+  --color-rose-400: #be123c;
+}
+
+body.theme-light,
+html.theme-light body {
+  background-color: #f0f3f8;
+  color: #0f172a;
+  background-image: 
+    linear-gradient(to right, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px;
+}
+
 /* Ensure all elements fit within viewport and tables scroll gracefully */
 html, body {
   overflow-x: hidden;
@@ -86,7 +167,88 @@ input, select, textarea, button {
   box-shadow: 0 0 15px rgba(168, 85, 247, 0.12);
 }
 
-/* Tactical scrollbar */
+/* Light Theme Windows-Desktop Specific Overrides */
+.theme-light .glass {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.theme-light .glass-card {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.02);
+}
+
+.theme-light .glass-input {
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: #0f172a;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.03);
+}
+
+.theme-light .glass-input:focus {
+  border-color: #0284c7;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+  outline: none;
+}
+
+.theme-light .neon-border {
+  border: 1px solid #cbd5e1;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
+.theme-light .neon-border-cyan {
+  border: 1px solid #7dd3fc;
+  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.1);
+}
+
+.theme-light .neon-border-emerald {
+  border: 1px solid #86efac;
+  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.1);
+}
+
+.theme-light .neon-border-purple {
+  border: 1px solid #d8b4fe;
+  box-shadow: 0 1px 4px rgba(147, 51, 234, 0.1);
+}
+
+/* Windows Desktop Modal Overlays & Dialogs */
+.theme-light .fixed.inset-0.bg-slate-950\/80,
+.theme-light .fixed.inset-0.bg-slate-950\/85,
+.theme-light .fixed.inset-0.bg-black\/80,
+.theme-light .fixed.inset-0.bg-black\/85 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+  backdrop-filter: blur(4px);
+}
+
+/* Form inputs & options in Windows Desktop Light Mode */
+.theme-light input,
+.theme-light select,
+.theme-light textarea {
+  color-scheme: light;
+}
+
+.theme-light select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+.theme-light input::placeholder,
+.theme-light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Prevent accidental text-white on white cards when not on colored buttons */
+.theme-light .text-white:not(button):not(button *):not(.bg-amber-600 *):not(.bg-amber-500 *):not(.bg-blue-600 *):not(.bg-emerald-600 *):not(.bg-red-600 *):not(.bg-rose-600 *):not(.bg-indigo-600 *):not(.bg-cyan-600 *) {
+  color: #0f172a;
+}
+
+/* Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -103,6 +265,24 @@ input, select, textarea, button {
 
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(245, 158, 11, 0.5);
+}
+
+.theme-light ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.theme-light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+.theme-light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+.theme-light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
 }
 
 /* Animations */
