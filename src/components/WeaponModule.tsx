@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { TransferWeaponModal } from './TransferWeaponModal';
 import { TransferReceiptModal } from './TransferReceiptModal';
@@ -40,8 +40,21 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const availableUnits = units.filter(u => u.departmentId === selectedDeptId);
   const [selectedUnitId, setSelectedUnitId] = useState<string>('');
 
+  // Automatically select first unit if none selected and units available
+  useEffect(() => {
+    if (!selectedUnitId && availableUnits.length > 0) {
+      setSelectedUnitId(availableUnits[0].id);
+    }
+  }, [selectedDeptId, availableUnits, selectedUnitId]);
+
   // Status Filter: All, No Cofre, Em Trânsito, Em Aula, Em Manutenção
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
+
+  // Granular Weapon Filters: Type, Manufacturer, Model, Caliber
+  const [filterType, setFilterType] = useState<string>('TODOS');
+  const [filterManufacturer, setFilterManufacturer] = useState<string>('TODOS');
+  const [filterModel, setFilterModel] = useState<string>('TODOS');
+  const [filterCaliber, setFilterCaliber] = useState<string>('TODOS');
 
   // Search input
   const [searchTerm, setSearchTerm] = useState('');
@@ -399,7 +412,79 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     }
   };
 
-  // Filtered Weapons logic based on Department, Unit, Status, and Search query
+  // Weapons in the selected department / unit before attribute filtering (for dynamic option generation & counters)
+  const baseWeaponsForOptions = useMemo(() => {
+    return weapons.filter(w => {
+      if (selectedUnitId && w.unitId !== selectedUnitId) return false;
+      if (!selectedUnitId && selectedDeptId && w.departmentId !== selectedDeptId) return false;
+      return true;
+    });
+  }, [weapons, selectedUnitId, selectedDeptId]);
+
+  // Options for Tipo
+  const availableTypes = useMemo(() => {
+    const set = new Set<string>();
+    availableWeaponTypes.forEach(t => { if (t.name) set.add(t.name.trim()); });
+    baseWeaponsForOptions.forEach(w => { if (w.type) set.add(w.type.trim()); });
+    if (set.size === 0) {
+      weapons.forEach(w => { if (w.type) set.add(w.type.trim()); });
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [availableWeaponTypes, baseWeaponsForOptions, weapons]);
+
+  // Options for Fabricante
+  const availableManufacturers = useMemo(() => {
+    const set = new Set<string>();
+    baseWeaponsForOptions.forEach(w => { if (w.manufacturer) set.add(w.manufacturer.trim()); });
+    if (set.size === 0) {
+      weapons.forEach(w => { if (w.manufacturer) set.add(w.manufacturer.trim()); });
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [baseWeaponsForOptions, weapons]);
+
+  // Options for Modelo (optionally refined by current type / manufacturer if selected)
+  const availableModels = useMemo(() => {
+    const set = new Set<string>();
+    baseWeaponsForOptions.forEach(w => {
+      if (filterType !== 'TODOS' && filterType && (w.type || '').toLowerCase() !== filterType.toLowerCase()) return;
+      if (filterManufacturer !== 'TODOS' && filterManufacturer && (w.manufacturer || '').toLowerCase() !== filterManufacturer.toLowerCase()) return;
+      if (w.model) set.add(w.model.trim());
+    });
+    if (filterType !== 'TODOS' && filterType) {
+      const awt = availableWeaponTypes.find(t => t.name.toLowerCase() === filterType.toLowerCase());
+      awt?.models?.forEach(m => { if (m) set.add(m.trim()); });
+    }
+    // Fallback if none matched
+    if (set.size === 0) {
+      baseWeaponsForOptions.forEach(w => { if (w.model) set.add(w.model.trim()); });
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [baseWeaponsForOptions, filterType, filterManufacturer, availableWeaponTypes]);
+
+  // Options for Calibre
+  const availableCalibers = useMemo(() => {
+    const set = new Set<string>();
+    calibers.forEach(c => { if (c.name) set.add(c.name.trim()); });
+    baseWeaponsForOptions.forEach(w => { if (w.caliber) set.add(w.caliber.trim()); });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [calibers, baseWeaponsForOptions]);
+
+  const hasActiveAttributeFilters =
+    filterType !== 'TODOS' ||
+    filterManufacturer !== 'TODOS' ||
+    filterModel !== 'TODOS' ||
+    filterCaliber !== 'TODOS';
+
+  const clearAllFilters = () => {
+    setFilterType('TODOS');
+    setFilterManufacturer('TODOS');
+    setFilterModel('TODOS');
+    setFilterCaliber('TODOS');
+    setStatusFilter('TODOS');
+    setSearchTerm('');
+  };
+
+  // Filtered Weapons logic based on Department, Unit, Status, Type, Manufacturer, Model, Caliber, and Search query
   const unitWeapons = weapons.filter(w => {
     // Must belong to selected unit (if unit is selected)
     if (selectedUnitId && w.unitId !== selectedUnitId) return false;
@@ -413,6 +498,26 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       if (statusFilter === 'EM_AULA' && w.status !== 'Em Aula') return false;
       if (statusFilter === 'EM_MANUTENCAO' && w.status !== 'Em Manutenção') return false;
       if (statusFilter === 'PENDENTE_RECIBO' && w.status !== 'Pendente de Recibo') return false;
+    }
+
+    // Type Filter
+    if (filterType !== 'TODOS' && filterType.trim()) {
+      if ((w.type || '').trim().toLowerCase() !== filterType.trim().toLowerCase()) return false;
+    }
+
+    // Manufacturer Filter
+    if (filterManufacturer !== 'TODOS' && filterManufacturer.trim()) {
+      if ((w.manufacturer || '').trim().toLowerCase() !== filterManufacturer.trim().toLowerCase()) return false;
+    }
+
+    // Model Filter
+    if (filterModel !== 'TODOS' && filterModel.trim()) {
+      if ((w.model || '').trim().toLowerCase() !== filterModel.trim().toLowerCase()) return false;
+    }
+
+    // Caliber Filter
+    if (filterCaliber !== 'TODOS' && filterCaliber.trim()) {
+      if ((w.caliber || '').trim().toLowerCase() !== filterCaliber.trim().toLowerCase()) return false;
     }
 
     // Search term matching (Modelo, Fabricante, Número de série, Calibre, Tipo, Unidade, Cofre)
@@ -649,6 +754,21 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setSelectedUnitId('')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
+                selectedUnitId === ''
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+              }`}
+            >
+              <span>Todas as Unidades</span>
+              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                selectedUnitId === '' ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
+              }`}>
+                {weapons.filter(w => w.departmentId === selectedDeptId).length}
+              </span>
+            </button>
             {availableUnits.map((u) => {
               const isSelected = u.id === selectedUnitId;
               const unitWeaponCount = weapons.filter(w => w.unitId === u.id).length;
@@ -676,12 +796,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         </div>
       )}
 
-      {/* STEP 3: Weapon List & Filters for Selected Unit */}
-      {selectedUnitId ? (
+      {/* STEP 3: Weapon List & Filters for Selected Unit / Department */}
+      {selectedDeptId ? (
         <div className="space-y-4">
           
-          {/* Status Quick Filters & Search Bar */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+          {/* Status Quick Filters, Granular Filters & Search Bar */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5">
             
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
               
@@ -779,13 +899,193 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               />
             </div>
 
+            {/* Granular Filters: Tipo, Fabricante, Modelo, Calibre */}
+            <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Filtros do Acervo (Tipo, Fabricante, Modelo, Calibre):</span>
+                </span>
+
+                {(hasActiveAttributeFilters || statusFilter !== 'TODOS' || searchTerm) && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1 transition hover:underline"
+                    title="Limpar todos os filtros aplicados"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Limpar Filtros</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {/* 1. Tipo */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Tipo de Arma:
+                  </label>
+                  <select
+                    value={filterType}
+                    onChange={(e) => {
+                      setFilterType(e.target.value);
+                      setFilterModel('TODOS');
+                    }}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterType !== 'TODOS'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="TODOS" className="bg-slate-900 text-slate-200">
+                      Todos os Tipos ({baseWeaponsForOptions.length})
+                    </option>
+                    {availableTypes.map((t) => {
+                      const count = baseWeaponsForOptions.filter(w => (w.type || '').toLowerCase() === t.toLowerCase()).length;
+                      return (
+                        <option key={t} value={t} className="bg-slate-900 text-slate-200">
+                          {t} {count > 0 ? `(${count})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* 2. Fabricante */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Fabricante:
+                  </label>
+                  <select
+                    value={filterManufacturer}
+                    onChange={(e) => {
+                      setFilterManufacturer(e.target.value);
+                      setFilterModel('TODOS');
+                    }}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterManufacturer !== 'TODOS'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="TODOS" className="bg-slate-900 text-slate-200">
+                      Todos os Fabricantes
+                    </option>
+                    {availableManufacturers.map((m) => {
+                      const count = baseWeaponsForOptions.filter(w => (w.manufacturer || '').toLowerCase() === m.toLowerCase()).length;
+                      return (
+                        <option key={m} value={m} className="bg-slate-900 text-slate-200">
+                          {m} {count > 0 ? `(${count})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* 3. Modelo */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Modelo:
+                  </label>
+                  <select
+                    value={filterModel}
+                    onChange={(e) => setFilterModel(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterModel !== 'TODOS'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="TODOS" className="bg-slate-900 text-slate-200">
+                      Todos os Modelos
+                    </option>
+                    {availableModels.map((m) => {
+                      const count = baseWeaponsForOptions.filter(w => (w.model || '').toLowerCase() === m.toLowerCase()).length;
+                      return (
+                        <option key={m} value={m} className="bg-slate-900 text-slate-200">
+                          {m} {count > 0 ? `(${count})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                {/* 4. Calibre */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Calibre:
+                  </label>
+                  <select
+                    value={filterCaliber}
+                    onChange={(e) => setFilterCaliber(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterCaliber !== 'TODOS'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="TODOS" className="bg-slate-900 text-slate-200">
+                      Todos os Calibres
+                    </option>
+                    {availableCalibers.map((c) => {
+                      const count = baseWeaponsForOptions.filter(w => (w.caliber || '').toLowerCase() === c.toLowerCase()).length;
+                      return (
+                        <option key={c} value={c} className="bg-slate-900 text-slate-200">
+                          {c} {count > 0 ? `(${count})` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {/* Active Filter Badges */}
+              {hasActiveAttributeFilters && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1.5">
+                  <span className="text-[10px] text-slate-400 font-semibold">Filtros ativos:</span>
+                  {filterType !== 'TODOS' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Tipo: {filterType}</span>
+                      <button onClick={() => setFilterType('TODOS')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterManufacturer !== 'TODOS' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Fabricante: {filterManufacturer}</span>
+                      <button onClick={() => setFilterManufacturer('TODOS')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterModel !== 'TODOS' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Modelo: {filterModel}</span>
+                      <button onClick={() => setFilterModel('TODOS')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterCaliber !== 'TODOS' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Calibre: {filterCaliber}</span>
+                      <button onClick={() => setFilterCaliber('TODOS')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
 
           {/* Weapons Cards List */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {unitWeapons.length === 0 ? (
               <div className="col-span-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs italic">
-                Nenhuma arma encontrada na unidade <strong className="text-slate-300">{selectedUnitObj?.name}</strong> para os critérios selecionados.
+                Nenhuma arma encontrada {selectedUnitObj ? `na unidade ${selectedUnitObj.name}` : `no departamento ${selectedDepartmentObj?.name || ''}`} para os critérios selecionados.
               </div>
             ) : (
               unitWeapons.map((w) => {
@@ -852,7 +1152,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         </div>
       ) : (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400 text-xs italic">
-          Por favor, selecione um Departamento e em seguida uma Unidade para visualizar o acervo de armas.
+          Por favor, selecione um Departamento para visualizar o acervo de armas.
         </div>
       )}
 
