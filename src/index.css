@@ -16,83 +16,92 @@
 }
 
 /* =========================================================================
-   LIGHT THEME (WINDOWS DESKTOP AESTHETICS) OVERRIDES
-   Emulates modern clean Windows Desktop / Fluent UI business software
+   LIGHT THEME (TEMA CLARO) OVERRIDES
+   Tons confortáveis e menos estourados (Desktop Windows) com cores vivas
    ========================================================================= */
 html.theme-light,
 body.theme-light,
 .theme-light {
-  /* Slate color scale inverted for Windows Desktop light environment */
-  --color-slate-950: #f0f3f8;  /* Window/Desktop Canvas Background (Slate 100) */
-  --color-slate-900: #ffffff;  /* Card, Dialog, Table, Panel Background (Pure White) */
-  --color-slate-850: #f8fafc;  /* Subtle section background (Slate 50) */
-  --color-slate-800: #e2e8f0;  /* Standard Windows Card/Panel Borders (Slate 200) */
-  --color-slate-700: #cbd5e1;  /* Dividers, control borders, search borders (Slate 300) */
-  --color-slate-600: #94a3b8;  /* Muted badges, secondary icons */
-  --color-slate-500: #64748b;  /* Captions, timestamps, secondary labels */
-  --color-slate-400: #475569;  /* Form labels, descriptions, subheadings */
-  --color-slate-300: #334155;  /* Body text, table cells */
-  --color-slate-200: #1e293b;  /* Bold labels, table headers */
-  --color-slate-100: #0f172a;  /* Primary headers, main titles, high contrast */
-  --color-slate-50: #020617;   /* Deepest black contrast text */
+  /* Slate color scale: tons suaves, equilibrados e menos estourados */
+  --color-slate-950: #e6ebf2;  /* Fundo da tela / Canvas desktop (cinza-ardósia suave e repousante) */
+  --color-slate-900: #ffffff;  /* Superfície dos cards, diálogos e painéis (branco nítido) */
+  --color-slate-850: #f1f5f9;  /* Seções internas e cabeçalhos de tabela */
+  --color-slate-800: #cbd5e1;  /* Bordas nítidas e divisores de painéis */
+  --color-slate-700: #94a3b8;  /* Divisores secundários e controles */
+  --color-slate-600: #64748b;  /* Ícones e badges de apoio */
+  --color-slate-500: #475569;  /* Legendas e carimbos de data/hora */
+  --color-slate-400: #334155;  /* Rótulos e textos explicativos (alto contraste) */
+  --color-slate-300: #1e293b;  /* Textos de corpo e células de tabela */
+  --color-slate-200: #0f172a;  /* Títulos em negrito e subtítulos */
+  --color-slate-100: #020617;  /* Títulos principais e elementos de máximo destaque */
+  --color-slate-50: #000000;   /* Preto absoluto para ênfase total */
 
-  /* Amber & gold accents tuned for light backgrounds */
-  --color-amber-950: #fef3c7;  /* Light warm amber background for badges */
-  --color-amber-900: #fde68a;  /* Hover tint */
-  --color-amber-800: #fcd34d;  /* Amber border */
-  --color-amber-700: #b45309;  /* Dark amber */
-  --color-amber-600: #d97706;  /* Primary amber button */
-  --color-amber-500: #d97706;  /* Deep rich amber accent */
-  --color-amber-400: #b45309;  /* High contrast readable amber text */
-  --color-amber-300: #92400e;  /* Deep amber */
+  /* Cores vivas e vibrantes (Amber / Dourado Tático) */
+  --color-amber-950: #fef3c7;  /* Fundo de badge amarelo luminoso */
+  --color-amber-900: #fde68a;  /* Hover suave */
+  --color-amber-800: #f59e0b;  /* Borda amarela viva */
+  --color-amber-700: #d97706;  /* Dourado escuro */
+  --color-amber-600: #d97706;  /* Botão âmbar primário */
+  --color-amber-500: #f59e0b;  /* Âmbar puro e vívido */
+  --color-amber-400: #d97706;  /* Texto âmbar saturado e de alta legibilidade */
+  --color-amber-300: #b45309;
 
-  /* Cyan & blue accents tuned for light backgrounds */
-  --color-cyan-950: #e0f2fe;   /* Light cyan background */
+  /* Cores vivas (Azul / Ciano Policial) */
+  --color-cyan-950: #e0f2fe;   /* Fundo azul-celeste */
   --color-cyan-900: #bae6fd;
-  --color-cyan-800: #7dd3fc;
+  --color-cyan-800: #38bdf8;
   --color-cyan-600: #0284c7;
-  --color-cyan-500: #0284c7;
-  --color-cyan-400: #0369a1;   /* High contrast readable cyan text */
+  --color-cyan-500: #0284c7;   /* Azul ciano vívido */
+  --color-cyan-400: #0369a1;   /* Texto ciano com contraste nítido */
   --color-cyan-300: #075985;
 
-  /* Purple accents tuned for light backgrounds */
-  --color-purple-950: #f3e8ff;
-  --color-purple-900: #e9d5ff;
-  --color-purple-600: #9333ea;
-  --color-purple-500: #8b5cf6;
-  --color-purple-400: #7e22ce; /* High contrast readable purple text */
-  --color-purple-300: #6b21a8;
+  --color-blue-950: #dbeafe;
+  --color-blue-900: #bfdbfe;
+  --color-blue-600: #1d4ed8;
+  --color-blue-500: #2563eb;   /* Azul cobalto vívido */
+  --color-blue-400: #1d4ed8;
 
-  /* Emerald accents tuned for light backgrounds */
-  --color-emerald-950: #dcfce7;
-  --color-emerald-900: #bbf7d0;
-  --color-emerald-600: #16a34a;
-  --color-emerald-500: #10b981;
-  --color-emerald-400: #15803d; /* High contrast readable emerald text */
-  --color-emerald-300: #166534;
+  /* Cores vivas (Roxo / Violeta) */
+  --color-purple-950: #ede9fe;
+  --color-purple-900: #ddd6fe;
+  --color-purple-800: #c084fc;
+  --color-purple-600: #7c3aed;
+  --color-purple-500: #8b5cf6; /* Violeta elétrico vívido */
+  --color-purple-400: #6d28d9; /* Texto violeta com contraste */
+  --color-purple-300: #5b21b6;
 
-  /* Red & rose accents tuned for light backgrounds */
-  --color-red-950: #fee2e2;
+  /* Cores vivas (Esmeralda / Verde de Sucesso e Autorização) */
+  --color-emerald-950: #d1fae5; /* Fundo menta nítido */
+  --color-emerald-900: #a7f3d0;
+  --color-emerald-800: #34d399;
+  --color-emerald-600: #059669;
+  --color-emerald-500: #10b981; /* Verde esmeralda vibrante */
+  --color-emerald-400: #047857; /* Texto verde vívido e legível */
+  --color-emerald-300: #065f46;
+
+  /* Cores vivas (Vermelho / Alerta e Expirado) */
+  --color-red-950: #fee2e2;    /* Fundo vermelho suave */
   --color-red-900: #fecaca;
+  --color-red-800: #f87171;
   --color-red-600: #dc2626;
-  --color-red-500: #ef4444;
-  --color-red-400: #b91c1c;    /* High contrast red text */
+  --color-red-500: #ef4444;    /* Vermelho carmim vívido */
+  --color-red-400: #b91c1c;    /* Texto vermelho vívido com alto contraste */
   --color-red-300: #991b1b;
 
   --color-rose-950: #ffe4e6;
   --color-rose-900: #fecdd3;
   --color-rose-600: #e11d48;
-  --color-rose-500: #f43f5e;
+  --color-rose-500: #f43f5e;   /* Rosa vívido */
   --color-rose-400: #be123c;
 }
 
 body.theme-light,
 html.theme-light body {
-  background-color: #f0f3f8;
+  background-color: #e6ebf2;
   color: #0f172a;
   background-image: 
-    linear-gradient(to right, rgba(0, 0, 0, 0.035) 1px, transparent 1px),
-    linear-gradient(to bottom, rgba(0, 0, 0, 0.035) 1px, transparent 1px);
+    linear-gradient(to right, rgba(15, 23, 42, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.04) 1px, transparent 1px);
   background-size: 24px 24px, 24px 24px;
 }
 
@@ -169,11 +178,11 @@ input, select, textarea, button {
 
 /* Light Theme Windows-Desktop Specific Overrides */
 .theme-light .glass {
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.98);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   border: 1px solid #cbd5e1;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 4px 16px -2px rgba(15, 23, 42, 0.08);
 }
 
 .theme-light .glass-card {
@@ -181,7 +190,7 @@ input, select, textarea, button {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
   border: 1px solid #cbd5e1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 2px 8px rgba(0, 0, 0, 0.02);
+  box-shadow: 0 2px 8px -1px rgba(15, 23, 42, 0.05);
 }
 
 .theme-light .glass-input {
@@ -192,29 +201,29 @@ input, select, textarea, button {
 }
 
 .theme-light .glass-input:focus {
-  border-color: #0284c7;
-  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.25);
   outline: none;
 }
 
 .theme-light .neon-border {
-  border: 1px solid #cbd5e1;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  border: 1px solid #f59e0b;
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.18);
 }
 
 .theme-light .neon-border-cyan {
-  border: 1px solid #7dd3fc;
-  box-shadow: 0 1px 4px rgba(2, 132, 199, 0.1);
+  border: 1px solid #0284c7;
+  box-shadow: 0 2px 10px rgba(2, 132, 199, 0.18);
 }
 
 .theme-light .neon-border-emerald {
-  border: 1px solid #86efac;
-  box-shadow: 0 1px 4px rgba(22, 163, 74, 0.1);
+  border: 1px solid #10b981;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.18);
 }
 
 .theme-light .neon-border-purple {
-  border: 1px solid #d8b4fe;
-  box-shadow: 0 1px 4px rgba(147, 51, 234, 0.1);
+  border: 1px solid #8b5cf6;
+  box-shadow: 0 2px 10px rgba(139, 92, 246, 0.18);
 }
 
 /* Windows Desktop Modal Overlays & Dialogs */

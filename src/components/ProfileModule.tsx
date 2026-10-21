@@ -295,17 +295,17 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
               </div>
             </div>
 
-            {/* Visual Palette Preference */}
+            {/* Visual Theme Preference */}
             <div className="pt-4 border-t border-slate-800">
               <span className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center space-x-1.5">
                 <Palette className="w-3.5 h-3.5 text-amber-400" />
-                <span>Aparência e Paleta do Sistema</span>
+                <span>Aparência e Tema do Sistema</span>
               </span>
               <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
                 <div>
-                  <span className="text-slate-200 font-semibold block">Paleta de Cores do Template</span>
+                  <span className="text-slate-200 font-semibold block">Tema do Sistema</span>
                   <span className="text-slate-400 text-[11px] block mt-0.5">
-                    Alterne entre a paleta escura (padrão tático) e a paleta clara com visual de sistemas desktops Windows.
+                    Alterne entre o tema Claro (padrão) e o tema Escuro.
                   </span>
                 </div>
                 <div className="shrink-0 self-start sm:self-auto">

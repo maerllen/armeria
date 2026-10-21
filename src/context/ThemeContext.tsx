@@ -15,7 +15,7 @@ const THEME_STORAGE_KEY = 'armeria_theme';
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [theme, setThemeState] = useState<AppTheme>(() => {
-    if (typeof window === 'undefined') return 'dark';
+    if (typeof window === 'undefined') return 'light';
     try {
       const saved = localStorage.getItem(THEME_STORAGE_KEY);
       if (saved === 'light' || saved === 'dark') {
@@ -24,8 +24,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     } catch {
       // Fallback to default
     }
-    // Default is dark (a atual deve ser a escura)
-    return 'dark';
+    // Default is light (tema claro padrão)
+    return 'light';
   });
 
   const applyThemeToDOM = (newTheme: AppTheme) => {

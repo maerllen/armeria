@@ -222,10 +222,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* Footer Info & Palette Switcher */}
+      {/* Footer Info & Theme Switcher */}
       <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Paleta:</span>
+          <span className="text-[10px] font-mono uppercase text-slate-400 font-bold">Tema:</span>
           <ThemeToggle compact={false} />
         </div>
         <div className="text-[11px] text-slate-500 space-y-0.5">
