@@ -1135,13 +1135,24 @@ apiRouter.get('/weapons', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const [rows]: any = await pool.query(`
-      SELECT id, type, serial_number as serialNumber, manufacturer, model, caliber, magazine_quantity as magazineQuantity, status, department_id as departmentId, unit_id as unitId, vault_space_id as vaultSpaceId, last_maintenance_date as lastMaintenanceDate, last_maintenance_responsible as lastMaintenanceResponsible, created_at as createdAt
+      SELECT 
+        id, type, serial_number as serialNumber, manufacturer, model, caliber, 
+        magazine_quantity as magazineQuantity, status, department_id as departmentId, 
+        unit_id as unitId, vault_space_id as vaultSpaceId, 
+        last_maintenance_date as lastMaintenanceDate, 
+        last_maintenance_responsible as lastMaintenanceResponsible,
+        maintenance_location_type as maintenanceLocationType,
+        local_manutencao as maintenanceLocation,
+        motivo_manutencao as maintenanceReason,
+        data_envio_manutencao as maintenanceSentDate,
+        created_at as createdAt
       FROM weapons ORDER BY created_at ASC
     `);
 
     const mapped = (rows || []).map((w: any) => ({
       ...w,
-      lastMaintenanceDate: w.lastMaintenanceDate ? new Date(w.lastMaintenanceDate).toISOString().split('T')[0] : null
+      lastMaintenanceDate: w.lastMaintenanceDate ? new Date(w.lastMaintenanceDate).toISOString().split('T')[0] : null,
+      maintenanceSentDate: w.maintenanceSentDate ? new Date(w.maintenanceSentDate).toISOString().split('T')[0] : null
     }));
 
     return res.json(mapped);
@@ -1213,35 +1224,43 @@ apiRouter.put('/weapons/:id', async (req: Request, res: Response) => {
     const pool = getPool();
     await pool.query(
       `UPDATE weapons SET
-        type = COALESCE(?, type),
-        manufacturer = COALESCE(?, manufacturer),
-        model = COALESCE(?, model),
-        caliber = COALESCE(?, caliber),
-        magazine_quantity = COALESCE(?, magazine_quantity),
-        status = COALESCE(?, status),
-        department_id = COALESCE(?, department_id),
-        unit_id = COALESCE(?, unit_id),
-        vault_space_id = COALESCE(?, vault_space_id),
-        last_maintenance_date = COALESCE(?, last_maintenance_date),
-        last_maintenance_responsible = COALESCE(?, last_maintenance_responsible)
+        type = IF(?, ?, type),
+        manufacturer = IF(?, ?, manufacturer),
+        model = IF(?, ?, model),
+        caliber = IF(?, ?, caliber),
+        magazine_quantity = IF(?, ?, magazine_quantity),
+        status = IF(?, ?, status),
+        department_id = IF(?, ?, department_id),
+        unit_id = IF(?, ?, unit_id),
+        vault_space_id = IF(?, ?, vault_space_id),
+        last_maintenance_date = IF(?, ?, last_maintenance_date),
+        last_maintenance_responsible = IF(?, ?, last_maintenance_responsible),
+        maintenance_location_type = IF(?, ?, maintenance_location_type),
+        local_manutencao = IF(?, ?, local_manutencao),
+        motivo_manutencao = IF(?, ?, motivo_manutencao),
+        data_envio_manutencao = IF(?, ?, data_envio_manutencao)
        WHERE id = ?`,
       [
-        updates.type ?? null,
-        updates.manufacturer ?? null,
-        updates.model ?? null,
-        updates.caliber ?? null,
-        updates.magazineQuantity ?? null,
-        updates.status ?? null,
-        updates.departmentId ?? null,
-        updates.unitId ?? null,
-        updates.vaultSpaceId ?? null,
-        updates.lastMaintenanceDate ?? null,
-        updates.lastMaintenanceResponsible ?? null,
+        updates.type !== undefined ? 1 : 0, updates.type || null,
+        updates.manufacturer !== undefined ? 1 : 0, updates.manufacturer || null,
+        updates.model !== undefined ? 1 : 0, updates.model || null,
+        updates.caliber !== undefined ? 1 : 0, updates.caliber || null,
+        updates.magazineQuantity !== undefined ? 1 : 0, updates.magazineQuantity || 1,
+        updates.status !== undefined ? 1 : 0, updates.status || null,
+        updates.departmentId !== undefined ? 1 : 0, updates.departmentId || null,
+        updates.unitId !== undefined ? 1 : 0, updates.unitId || null,
+        updates.vaultSpaceId !== undefined ? 1 : 0, updates.vaultSpaceId || null,
+        updates.lastMaintenanceDate !== undefined ? 1 : 0, updates.lastMaintenanceDate || null,
+        updates.lastMaintenanceResponsible !== undefined ? 1 : 0, updates.lastMaintenanceResponsible || null,
+        updates.maintenanceLocationType !== undefined ? 1 : 0, updates.maintenanceLocationType || null,
+        updates.maintenanceLocation !== undefined ? 1 : 0, updates.maintenanceLocation || null,
+        updates.maintenanceReason !== undefined ? 1 : 0, updates.maintenanceReason || null,
+        updates.maintenanceSentDate !== undefined ? 1 : 0, updates.maintenanceSentDate || null,
         id
       ]
     );
 
-    await insertAuditLog('Armas', 'Editar', `Atualizados dados da arma ID ${id}`, actor, req.ip);
+    await insertAuditLog('Armas', 'Editar', `Atualizados dados da arma ID ${id} (Status: ${updates.status || 'mantido'})`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

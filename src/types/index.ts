@@ -139,7 +139,7 @@ export interface AmmunitionMovement {
   createdAt: string;
 }
 
-export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo';
+export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Em Aula';
 
 export interface Weapon {
   id: string;
@@ -155,6 +155,10 @@ export interface Weapon {
   status: WeaponStatus;
   lastMaintenanceDate?: string;
   lastMaintenanceResponsible?: string;
+  maintenanceLocationType?: 'UNIDADE' | 'FORA_DA_UNIDADE';
+  maintenanceLocation?: string;
+  maintenanceReason?: string;
+  maintenanceSentDate?: string;
   currentMovementId?: string;
   createdAt: string;
 }

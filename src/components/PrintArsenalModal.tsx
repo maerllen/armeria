@@ -132,7 +132,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       // Status filter
       if (statusFilter === 'DISPONIVEL' && w.status !== 'No Cofre') return false;
       if (statusFilter === 'TRANSITO' && w.status !== 'Em Trânsito') return false;
-      if (statusFilter === 'MANUTENCAO' && w.status !== 'Em Manutenção') return false;
+      if (statusFilter === 'MANUTENCAO' && w.status !== 'EM MANUTENÇÃO' && w.status !== 'Em Manutenção' && w.status !== 'Manutenção') return false;
 
       // Type filter
       if (filterType !== 'TODOS' && (w.type || '').trim().toLowerCase() !== filterType.trim().toLowerCase()) {
