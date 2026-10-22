@@ -731,23 +731,6 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_por_perfil\` VARCHAR(64) DEFAULT NULL;`);
     } catch (_) {}
 
-    // Migrations for maintenance status & external maintenance columns on 'armas'
-    try {
-      await connection.query(`ALTER TABLE \`armas\` MODIFY COLUMN \`status\` VARCHAR(64) NOT NULL DEFAULT 'No Cofre';`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`armas\` ADD COLUMN \`tipo_manutencao\` VARCHAR(32) DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`armas\` ADD COLUMN \`local_manutencao\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`armas\` ADD COLUMN \`motivo_manutencao\` TEXT DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`armas\` ADD COLUMN \`data_envio_manutencao\` DATE DEFAULT NULL;`);
-    } catch (_) {}
-
     // Create Backwards Compatible SQL Views for legacy English code queries
     try {
       await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);
@@ -756,7 +739,62 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       await connection.query(`CREATE OR REPLACE VIEW \`calibers\` AS SELECT id, nome AS name, data_criacao AS created_at FROM \`calibres\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`available_weapon_types\` AS SELECT id, nome AS name, modelos AS models, data_criacao AS created_at FROM \`tipos_armas\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`vault_spaces\` AS SELECT id, codigo AS code, tipo AS type, departamento_id AS department_id, unidade_id AS unit_id, data_criacao AS created_at FROM \`cofres\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`weapons\` AS SELECT id, tipo AS type, numero_serie AS serial_number, fabricante AS manufacturer, modelo AS model, calibre, quantidade_carregadores AS magazine_quantity, status, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, observacao_localizacao AS location_note, data_ultima_manutencao AS last_maintenance_date, responsavel_ultima_manutencao AS last_maintenance_responsible, tipo_manutencao AS maintenance_location_type, local_manutencao AS maintenance_location, motivo_manutencao AS maintenance_reason, data_envio_manutencao AS maintenance_sent_date, data_criacao AS created_at FROM \`armas\`;`);
+      // Safe schema alignment for weapons table (supports both English and Portuguese columns):
+      try {
+        await connection.query('ALTER TABLE `weapons` CHANGE COLUMN ` observacao_localizacao` `observacao_localizacao` VARCHAR(255) DEFAULT NULL;');
+      } catch (_) {}
+
+      const alterColumns = [
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `type` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `serial_number` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `manufacturer` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `model` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `caliber` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `magazine_quantity` INT DEFAULT 1;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `department_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `unit_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `vault_space_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `location_note` VARCHAR(255) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `observacao_localizacao` VARCHAR(255) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `last_maintenance_date` DATE DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `last_maintenance_responsible` VARCHAR(255) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `tipo` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `numero_serie` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `fabricante` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `modelo` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `calibre` VARCHAR(128) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `quantidade_carregadores` INT DEFAULT 1;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `departamento_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `unidade_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `cofre_id` VARCHAR(64) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `data_ultima_manutencao` DATE DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `responsavel_ultima_manutencao` VARCHAR(255) DEFAULT NULL;',
+        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `data_criacao` DATETIME DEFAULT CURRENT_TIMESTAMP;'
+      ];
+      for (const q of alterColumns) {
+        try { await connection.query(q); } catch (_) {}
+      }
+
+      try {
+        await connection.query(`
+          UPDATE \`weapons\` SET
+            \`type\` = COALESCE(\`type\`, \`tipo\`),
+            \`serial_number\` = COALESCE(\`serial_number\`, \`numero_serie\`),
+            \`manufacturer\` = COALESCE(\`manufacturer\`, \`fabricante\`),
+            \`model\` = COALESCE(\`model\`, \`modelo\`),
+            \`caliber\` = COALESCE(\`caliber\`, \`calibre\`),
+            \`magazine_quantity\` = COALESCE(\`magazine_quantity\`, \`quantidade_carregadores\`, 1),
+            \`department_id\` = COALESCE(\`department_id\`, \`departamento_id\`),
+            \`unit_id\` = COALESCE(\`unit_id\`, \`unidade_id\`),
+            \`vault_space_id\` = COALESCE(\`vault_space_id\`, \`cofre_id\`),
+            \`location_note\` = COALESCE(\`location_note\`, \`observacao_localizacao\`),
+            \`last_maintenance_date\` = COALESCE(\`last_maintenance_date\`, \`data_ultima_manutencao\`),
+            \`last_maintenance_responsible\` = COALESCE(\`last_maintenance_responsible\`, \`responsavel_ultima_manutencao\`),
+            \`created_at\` = COALESCE(\`created_at\`, \`data_criacao\`)
+        `);
+      } catch (_) {}
+
       await connection.query(`CREATE OR REPLACE VIEW \`weapon_transfers\` AS SELECT id, numero_protocolo AS protocol_number, data_transferencia AS transfer_date, origem_departamento_id AS origin_department_id, origem_departamento_nome AS origin_department_name, origem_unidade_id AS origin_unit_id, origem_unidade_nome AS origin_unit_name, destino_departamento_id AS destination_department_id, destino_departamento_nome AS destination_department_name, destino_unidade_id AS destination_unit_id, destino_unidade_nome AS destination_unit_name, destino_cofre_id AS destination_vault_space_id, destino_cofre_codigo AS destination_vault_space_code, responsavel_id AS transferred_by_user_id, responsavel_nome AS transferred_by_user_name, responsavel_masp AS transferred_by_user_masp, responsavel_perfil AS transferred_by_user_role, transportador_nome AS receiver_or_transporter_name, transportador_masp AS receiver_or_transporter_masp, transportador_cargo AS receiver_or_transporter_cargo, motivo AS reason, armas_json AS weapons_json, total_armas AS total_weapons, total_carregadores AS total_magazines, observacao AS observation, status, recebido_em AS received_at, recebido_por_usuario_id AS received_by_user_id, recebido_por_nome AS received_by_user_name, recebido_por_masp AS received_by_user_masp, recebido_por_perfil AS received_by_user_role, data_criacao AS created_at FROM \`transferencias_armas\`;`);
       await connection.query(`CREATE OR REPLACE VIEW \`ammo_stocks\` AS SELECT id, calibre_id, quantidade AS quantity, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, data_atualizacao AS updated_at FROM \`estoque_municoes\`;`);
 

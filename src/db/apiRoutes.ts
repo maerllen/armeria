@@ -1136,23 +1136,28 @@ apiRouter.get('/weapons', async (req: Request, res: Response) => {
     const pool = getPool();
     const [rows]: any = await pool.query(`
       SELECT 
-        id, type, serial_number as serialNumber, manufacturer, model, caliber, 
-        magazine_quantity as magazineQuantity, status, department_id as departmentId, 
-        unit_id as unitId, vault_space_id as vaultSpaceId, 
-        last_maintenance_date as lastMaintenanceDate, 
-        last_maintenance_responsible as lastMaintenanceResponsible,
-        maintenance_location_type as maintenanceLocationType,
-        local_manutencao as maintenanceLocation,
-        motivo_manutencao as maintenanceReason,
-        data_envio_manutencao as maintenanceSentDate,
-        created_at as createdAt
-      FROM weapons ORDER BY created_at ASC
+        id, 
+        COALESCE(type, tipo) as type, 
+        COALESCE(serial_number, numero_serie) as serialNumber, 
+        COALESCE(manufacturer, fabricante) as manufacturer, 
+        COALESCE(model, modelo) as model, 
+        COALESCE(caliber, calibre) as caliber, 
+        COALESCE(magazine_quantity, quantidade_carregadores, 1) as magazineQuantity, 
+        status, 
+        COALESCE(department_id, departamento_id) as departmentId, 
+        COALESCE(unit_id, unidade_id) as unitId, 
+        COALESCE(vault_space_id, cofre_id) as vaultSpaceId, 
+        COALESCE(location_note, observacao_localizacao) as locationNote,
+        COALESCE(last_maintenance_date, data_ultima_manutencao) as lastMaintenanceDate, 
+        COALESCE(last_maintenance_responsible, responsavel_ultima_manutencao) as lastMaintenanceResponsible, 
+        COALESCE(created_at, data_criacao) as createdAt
+      FROM weapons 
+      ORDER BY COALESCE(created_at, data_criacao) ASC
     `);
 
     const mapped = (rows || []).map((w: any) => ({
       ...w,
-      lastMaintenanceDate: w.lastMaintenanceDate ? new Date(w.lastMaintenanceDate).toISOString().split('T')[0] : null,
-      maintenanceSentDate: w.maintenanceSentDate ? new Date(w.maintenanceSentDate).toISOString().split('T')[0] : null
+      lastMaintenanceDate: w.lastMaintenanceDate ? new Date(w.lastMaintenanceDate).toISOString().split('T')[0] : null
     }));
 
     return res.json(mapped);
@@ -1167,30 +1172,34 @@ apiRouter.post('/weapons', async (req: Request, res: Response) => {
     const cleanSerial = (serialNumber || '').toUpperCase().trim();
 
     const pool = getPool();
-    const [existing]: any = await pool.query('SELECT id FROM weapons WHERE UPPER(serial_number) = ?', [cleanSerial]);
+    const [existing]: any = await pool.query(
+      'SELECT id FROM weapons WHERE UPPER(COALESCE(serial_number, numero_serie)) = ?',
+      [cleanSerial]
+    );
     if (existing && existing.length > 0) {
       return res.status(400).json({ error: `Já existe uma arma cadastrada com o nº de série ${cleanSerial}` });
     }
 
     const id = `weap-${Date.now()}`;
     await pool.query(
-      `INSERT INTO weapons (id, type, serial_number, manufacturer, model, caliber, magazine_quantity, status, department_id, unit_id, vault_space_id, last_maintenance_date, last_maintenance_responsible, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'No Cofre', ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO weapons (
+        id, type, serial_number, manufacturer, model, caliber, magazine_quantity, status, department_id, unit_id, vault_space_id, last_maintenance_date, last_maintenance_responsible, created_at,
+        tipo, numero_serie, fabricante, modelo, calibre, quantidade_carregadores, departamento_id, unidade_id, cofre_id, data_ultima_manutencao, responsavel_ultima_manutencao, data_criacao
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'No Cofre', ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
-        id,
-        type,
-        cleanSerial,
-        manufacturer,
-        model,
-        caliber,
-        magazineQuantity || 1,
-        departmentId || null,
-        unitId || null,
-        vaultSpaceId || null,
-        lastMaintenanceDate || null,
-        lastMaintenanceResponsible || null
+        id, type, cleanSerial, manufacturer, model, caliber, magazineQuantity || 1, departmentId || null, unitId || null, vaultSpaceId || null, lastMaintenanceDate || null, lastMaintenanceResponsible || null,
+        type, cleanSerial, manufacturer, model, caliber, magazineQuantity || 1, departmentId || null, unitId || null, vaultSpaceId || null, lastMaintenanceDate || null, lastMaintenanceResponsible || null
       ]
     );
+
+    try {
+      await pool.query(
+        `INSERT INTO armas (
+          id, tipo, numero_serie, fabricante, modelo, calibre, quantidade_carregadores, status, departamento_id, unidade_id, cofre_id, data_ultima_manutencao, responsavel_ultima_manutencao, data_criacao
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'No Cofre', ?, ?, ?, ?, ?, NOW())`,
+        [id, type, cleanSerial, manufacturer, model, caliber, magazineQuantity || 1, departmentId || null, unitId || null, vaultSpaceId || null, lastMaintenanceDate || null, lastMaintenanceResponsible || null]
+      );
+    } catch (_) {}
 
     await insertAuditLog('Armas', 'Criar', `Cadastrada arma ${type} modelo ${model} (Série: ${cleanSerial})`, actor, req.ip);
 
@@ -1224,43 +1233,87 @@ apiRouter.put('/weapons/:id', async (req: Request, res: Response) => {
     const pool = getPool();
     await pool.query(
       `UPDATE weapons SET
-        type = IF(?, ?, type),
-        manufacturer = IF(?, ?, manufacturer),
-        model = IF(?, ?, model),
-        caliber = IF(?, ?, caliber),
-        magazine_quantity = IF(?, ?, magazine_quantity),
-        status = IF(?, ?, status),
-        department_id = IF(?, ?, department_id),
-        unit_id = IF(?, ?, unit_id),
-        vault_space_id = IF(?, ?, vault_space_id),
-        last_maintenance_date = IF(?, ?, last_maintenance_date),
-        last_maintenance_responsible = IF(?, ?, last_maintenance_responsible),
-        maintenance_location_type = IF(?, ?, maintenance_location_type),
-        local_manutencao = IF(?, ?, local_manutencao),
-        motivo_manutencao = IF(?, ?, motivo_manutencao),
-        data_envio_manutencao = IF(?, ?, data_envio_manutencao)
+        type = COALESCE(?, type),
+        tipo = COALESCE(?, tipo),
+        manufacturer = COALESCE(?, manufacturer),
+        fabricante = COALESCE(?, fabricante),
+        model = COALESCE(?, model),
+        modelo = COALESCE(?, modelo),
+        caliber = COALESCE(?, caliber),
+        calibre = COALESCE(?, calibre),
+        magazine_quantity = COALESCE(?, magazine_quantity),
+        quantidade_carregadores = COALESCE(?, quantidade_carregadores),
+        status = COALESCE(?, status),
+        department_id = COALESCE(?, department_id),
+        departamento_id = COALESCE(?, departamento_id),
+        unit_id = COALESCE(?, unit_id),
+        unidade_id = COALESCE(?, unidade_id),
+        vault_space_id = COALESCE(?, vault_space_id),
+        cofre_id = COALESCE(?, cofre_id),
+        last_maintenance_date = COALESCE(?, last_maintenance_date),
+        data_ultima_manutencao = COALESCE(?, data_ultima_manutencao),
+        last_maintenance_responsible = COALESCE(?, last_maintenance_responsible),
+        responsavel_ultima_manutencao = COALESCE(?, responsavel_ultima_manutencao)
        WHERE id = ?`,
       [
-        updates.type !== undefined ? 1 : 0, updates.type || null,
-        updates.manufacturer !== undefined ? 1 : 0, updates.manufacturer || null,
-        updates.model !== undefined ? 1 : 0, updates.model || null,
-        updates.caliber !== undefined ? 1 : 0, updates.caliber || null,
-        updates.magazineQuantity !== undefined ? 1 : 0, updates.magazineQuantity || 1,
-        updates.status !== undefined ? 1 : 0, updates.status || null,
-        updates.departmentId !== undefined ? 1 : 0, updates.departmentId || null,
-        updates.unitId !== undefined ? 1 : 0, updates.unitId || null,
-        updates.vaultSpaceId !== undefined ? 1 : 0, updates.vaultSpaceId || null,
-        updates.lastMaintenanceDate !== undefined ? 1 : 0, updates.lastMaintenanceDate || null,
-        updates.lastMaintenanceResponsible !== undefined ? 1 : 0, updates.lastMaintenanceResponsible || null,
-        updates.maintenanceLocationType !== undefined ? 1 : 0, updates.maintenanceLocationType || null,
-        updates.maintenanceLocation !== undefined ? 1 : 0, updates.maintenanceLocation || null,
-        updates.maintenanceReason !== undefined ? 1 : 0, updates.maintenanceReason || null,
-        updates.maintenanceSentDate !== undefined ? 1 : 0, updates.maintenanceSentDate || null,
+        updates.type ?? null,
+        updates.type ?? null,
+        updates.manufacturer ?? null,
+        updates.manufacturer ?? null,
+        updates.model ?? null,
+        updates.model ?? null,
+        updates.caliber ?? null,
+        updates.caliber ?? null,
+        updates.magazineQuantity ?? null,
+        updates.magazineQuantity ?? null,
+        updates.status ?? null,
+        updates.departmentId ?? null,
+        updates.departmentId ?? null,
+        updates.unitId ?? null,
+        updates.unitId ?? null,
+        updates.vaultSpaceId ?? null,
+        updates.vaultSpaceId ?? null,
+        updates.lastMaintenanceDate ?? null,
+        updates.lastMaintenanceDate ?? null,
+        updates.lastMaintenanceResponsible ?? null,
+        updates.lastMaintenanceResponsible ?? null,
         id
       ]
     );
 
-    await insertAuditLog('Armas', 'Editar', `Atualizados dados da arma ID ${id} (Status: ${updates.status || 'mantido'})`, actor, req.ip);
+    try {
+      await pool.query(
+        `UPDATE armas SET
+          tipo = COALESCE(?, tipo),
+          fabricante = COALESCE(?, fabricante),
+          modelo = COALESCE(?, modelo),
+          calibre = COALESCE(?, calibre),
+          quantidade_carregadores = COALESCE(?, quantidade_carregadores),
+          status = COALESCE(?, status),
+          departamento_id = COALESCE(?, departamento_id),
+          unidade_id = COALESCE(?, unidade_id),
+          cofre_id = COALESCE(?, cofre_id),
+          data_ultima_manutencao = COALESCE(?, data_ultima_manutencao),
+          responsavel_ultima_manutencao = COALESCE(?, responsavel_ultima_manutencao)
+         WHERE id = ?`,
+        [
+          updates.type ?? null,
+          updates.manufacturer ?? null,
+          updates.model ?? null,
+          updates.caliber ?? null,
+          updates.magazineQuantity ?? null,
+          updates.status ?? null,
+          updates.departmentId ?? null,
+          updates.unitId ?? null,
+          updates.vaultSpaceId ?? null,
+          updates.lastMaintenanceDate ?? null,
+          updates.lastMaintenanceResponsible ?? null,
+          id
+        ]
+      );
+    } catch (_) {}
+
+    await insertAuditLog('Armas', 'Editar', `Atualizados dados da arma ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1278,10 +1331,16 @@ apiRouter.delete('/weapons/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Arma não encontrada' });
     }
 
+    const serial = weaps[0].serial_number || weaps[0].numero_serie || '';
+    const model = weaps[0].model || weaps[0].modelo || '';
+
     await pool.query('DELETE FROM weapon_movements WHERE weapon_id = ?', [id]);
     await pool.query('DELETE FROM weapons WHERE id = ?', [id]);
+    try {
+      await pool.query('DELETE FROM armas WHERE id = ?', [id]);
+    } catch (_) {}
 
-    await insertAuditLog('Armas', 'Excluir', `Excluída arma ${weaps[0].model} (Série: ${weaps[0].serial_number})`, actor, req.ip);
+    await insertAuditLog('Armas', 'Excluir', `Excluída arma ${model} (Série: ${serial})`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1335,22 +1394,22 @@ apiRouter.post('/movements/request-withdrawal', async (req: Request, res: Respon
       [
         movId,
         weapon.id,
-        weapon.serial_number,
-        weapon.model,
-        weapon.type,
-        weapon.caliber,
-        weapon.department_id,
-        weapon.unit_id,
+        weapon.serial_number || weapon.numero_serie || '',
+        weapon.model || weapon.modelo || '',
+        weapon.type || weapon.tipo || '',
+        weapon.caliber || weapon.calibre || '',
+        weapon.department_id || weapon.departamento_id || null,
+        weapon.unit_id || weapon.unidade_id || null,
         actor.id,
         actor.name,
         actor.masp,
-        weapon.vault_space_id,
+        weapon.vault_space_id || weapon.cofre_id || null,
         ammunitionCount || 0,
         magazineCount || 0
       ]
     );
 
-    await insertAuditLog('Movimentações', 'Solicitar', `Solicitada retirada da arma ${weapon.model} (${weapon.serial_number}) por ${actor.name}`, actor, req.ip);
+    await insertAuditLog('Movimentações', 'Solicitar', `Solicitada retirada da arma ${weapon.model || weapon.modelo} (${weapon.serial_number || weapon.numero_serie}) por ${actor.name}`, actor, req.ip);
 
     return res.json({ success: true, movementId: movId });
   } catch (err: any) {
@@ -1375,6 +1434,7 @@ apiRouter.post('/movements/:id/approve', async (req: Request, res: Response) => 
     );
 
     await pool.query("UPDATE weapons SET status = 'Em Trânsito' WHERE id = ?", [movement.weapon_id]);
+    try { await pool.query("UPDATE armas SET status = 'Em Trânsito' WHERE id = ?", [movement.weapon_id]); } catch (_) {}
 
     await insertAuditLog('Movimentações', 'Aprovar', `Aprovada retirada da arma (${movement.weapon_serial_number}) para o policial ${movement.requester_name}`, actor, req.ip);
     return res.json({ success: true });
@@ -1407,6 +1467,7 @@ apiRouter.post('/movements/:id/request-return', async (req: Request, res: Respon
     );
 
     await pool.query("UPDATE weapons SET status = 'Pendente de Recibo' WHERE id = ?", [movement.weapon_id]);
+    try { await pool.query("UPDATE armas SET status = 'Pendente de Recibo' WHERE id = ?", [movement.weapon_id]); } catch (_) {}
 
     await insertAuditLog('Movimentações', 'Devolver', `Solicitada devolução da arma (${movement.weapon_serial_number}) por ${actor.name}`, actor, req.ip);
     return res.json({ success: true });
@@ -1432,7 +1493,8 @@ apiRouter.post('/movements/:id/confirm-receipt', async (req: Request, res: Respo
     );
 
     const vaultToSet = movement.return_vault_space_id || movement.withdrawal_vault_space_id;
-    await pool.query("UPDATE weapons SET status = 'No Cofre', vault_space_id = ? WHERE id = ?", [vaultToSet, movement.weapon_id]);
+    await pool.query("UPDATE weapons SET status = 'No Cofre', vault_space_id = ?, cofre_id = ? WHERE id = ?", [vaultToSet, vaultToSet, movement.weapon_id]);
+    try { await pool.query("UPDATE armas SET status = 'No Cofre', cofre_id = ? WHERE id = ?", [vaultToSet, movement.weapon_id]); } catch (_) {}
 
     await insertAuditLog('Movimentações', 'Confirmar Recibo', `Confirmado recibo de devolução da arma (${movement.weapon_serial_number}) por ${actor.name}`, actor, req.ip);
     return res.json({ success: true });
@@ -1450,6 +1512,7 @@ apiRouter.delete('/movements/:id', async (req: Request, res: Response) => {
     const [movs]: any = await pool.query('SELECT * FROM weapon_movements WHERE id = ?', [id]);
     if (movs && movs.length > 0) {
       await pool.query("UPDATE weapons SET status = 'No Cofre' WHERE id = ?", [movs[0].weapon_id]);
+      try { await pool.query("UPDATE armas SET status = 'No Cofre' WHERE id = ?", [movs[0].weapon_id]); } catch (_) {}
     }
 
     await pool.query('DELETE FROM weapon_movements WHERE id = ?', [id]);

@@ -109,16 +109,6 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   // Maintenance form states
   const [maintDate, setMaintDate] = useState('');
   const [maintResponsible, setMaintResponsible] = useState('');
-  const [maintLocationType, setMaintLocationType] = useState<'UNIDADE' | 'FORA_DA_UNIDADE'>('UNIDADE');
-  const [externalShop, setExternalShop] = useState('');
-  const [maintDescription, setMaintDescription] = useState('');
-
-  // Receive weapon from maintenance modal states
-  const [showReceiveModal, setShowReceiveModal] = useState(false);
-  const [weaponToReceive, setWeaponToReceive] = useState<Weapon | null>(null);
-  const [receiveDate, setReceiveDate] = useState('');
-  const [receiverName, setReceiverName] = useState('');
-  const [receiveNotes, setReceiveNotes] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -393,11 +383,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   // Open Maintenance Modal
   const handleOpenMaintenance = (weap: Weapon) => {
     setSelectedWeapon(weap);
-    setMaintDate(new Date().toISOString().split('T')[0]);
-    setMaintResponsible(currentUser.name);
-    setMaintLocationType(weap.maintenanceLocationType || 'UNIDADE');
-    setExternalShop(weap.maintenanceLocation || '');
-    setMaintDescription(weap.maintenanceReason || '');
+    setMaintDate(weap.lastMaintenanceDate || new Date().toISOString().split('T')[0]);
+    setMaintResponsible(weap.lastMaintenanceResponsible || currentUser.name);
     setShowMaintenanceModal(true);
   };
 
@@ -406,73 +393,15 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     if (!selectedWeapon) return;
 
     try {
-      if (maintLocationType === 'FORA_DA_UNIDADE') {
-        // Envio para armeiro externo: o status da arma passa a constar "EM MANUTENÇÃO"
-        // Ela continua no cofre de origem (vaultSpaceId mantido) e só volta com "Receber o armamento"
-        await storage.updateWeapon(selectedWeapon.id, {
-          status: 'EM MANUTENÇÃO',
-          lastMaintenanceDate: maintDate,
-          lastMaintenanceResponsible: maintResponsible.trim(),
-          maintenanceLocationType: 'FORA_DA_UNIDADE',
-          maintenanceLocation: externalShop.trim() || 'Armeiro Externo',
-          maintenanceReason: maintDescription.trim(),
-          maintenanceSentDate: maintDate
-        });
-        setSuccessMsg(`Arma ${selectedWeapon.manufacturer} ${selectedWeapon.model} (Série: ${selectedWeapon.serialNumber}) colocada EM MANUTENÇÃO fora da unidade. O armamento permanece vinculado ao cofre de origem e voltará a ficar disponível após clicar em "Receber o armamento".`);
-      } else {
-        // Manutenção na unidade: mantém o status ou atualiza registro de manutenção
-        await storage.updateWeapon(selectedWeapon.id, {
-          lastMaintenanceDate: maintDate,
-          lastMaintenanceResponsible: maintResponsible.trim(),
-          maintenanceLocationType: 'UNIDADE',
-          maintenanceLocation: 'Na Unidade',
-          maintenanceReason: maintDescription.trim()
-        });
-        setSuccessMsg(`Manutenção na unidade registrada com sucesso para a arma ${selectedWeapon.serialNumber}.`);
-      }
-      setShowMaintenanceModal(false);
-      if (selectedWeaponDetail && selectedWeaponDetail.id === selectedWeapon.id) {
-        setSelectedWeaponDetail(null);
-      }
-      onRefresh();
-    } catch (err: any) {
-      alert(err.message || 'Erro ao registrar manutenção.');
-    }
-  };
-
-  // Open Receive Weapon from Maintenance Modal
-  const handleOpenReceiveFromMaintenance = (weap: Weapon) => {
-    setWeaponToReceive(weap);
-    setReceiveDate(new Date().toISOString().split('T')[0]);
-    setReceiverName(currentUser.name);
-    setReceiveNotes('');
-    setShowReceiveModal(true);
-  };
-
-  // Submit Receive Weapon (Retorna para o cofre de origem com status "No Cofre")
-  const handleSaveReceiveFromMaintenance = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!weaponToReceive) return;
-
-    try {
-      await storage.updateWeapon(weaponToReceive.id, {
-        status: 'No Cofre',
-        lastMaintenanceDate: receiveDate,
-        lastMaintenanceResponsible: receiverName.trim(),
-        maintenanceLocationType: undefined,
-        maintenanceLocation: undefined,
-        maintenanceReason: receiveNotes.trim() ? `Retorno: ${receiveNotes.trim()}` : undefined,
-        maintenanceSentDate: undefined
+      await storage.updateWeapon(selectedWeapon.id, {
+        lastMaintenanceDate: maintDate,
+        lastMaintenanceResponsible: maintResponsible.trim()
       });
-      setSuccessMsg(`Armamento ${weaponToReceive.manufacturer} ${weaponToReceive.model} (Série: ${weaponToReceive.serialNumber}) recebido de volta ao cofre de origem com sucesso! Status atualizado para "No Cofre".`);
-      setShowReceiveModal(false);
-      setWeaponToReceive(null);
-      if (selectedWeaponDetail && selectedWeaponDetail.id === weaponToReceive.id) {
-        setSelectedWeaponDetail(null);
-      }
+      setSuccessMsg(`Manutenção registrada com sucesso para a arma ${selectedWeapon.serialNumber}.`);
+      setShowMaintenanceModal(false);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Erro ao receber armamento.');
+      alert(err.message || 'Erro ao atualizar manutenção.');
     }
   };
 
@@ -579,10 +508,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     // Status filter
     if (statusFilter !== 'TODOS') {
       if (statusFilter === 'NO_COFRE' && w.status !== 'No Cofre') return false;
-      if (statusFilter === 'EM_MOVIMENTO' && w.status !== 'Em Trânsito') return false;
-      if (statusFilter === 'EM_AULA' && w.status !== 'Em Aula') return false;
-      if (statusFilter === 'EM_MANUTENCAO' && w.status !== 'EM MANUTENÇÃO' && w.status !== 'Em Manutenção' && w.status !== 'Manutenção') return false;
-      if (statusFilter === 'PENDENTE_RECIBO' && w.status !== 'Pendente de Recibo') return false;
+      if (statusFilter === 'EM_MOVIMENTO' && w.status !== 'Em Trânsito' && w.status !== 'Em Transito') return false;
+      if (statusFilter === 'EM_AULA' && w.status !== 'Em Aula' && w.status !== 'Em Sala de Aula') return false;
+      if (statusFilter === 'EM_MANUTENCAO' && w.status !== 'Em Manutenção' && w.status !== 'Manutenção') return false;
+      if (statusFilter === 'PENDENTE_RECIBO' && w.status !== 'Pendente de Recibo' && w.status !== 'Pendente Recibo') return false;
     }
 
     // Type Filter
