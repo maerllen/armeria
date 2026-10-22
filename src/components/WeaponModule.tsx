@@ -2,12 +2,13 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { TransferWeaponModal } from './TransferWeaponModal';
 import { TransferReceiptModal } from './TransferReceiptModal';
 import { TransferHistoryModal } from './TransferHistoryModal';
 import { ReceiveTransferModal } from './ReceiveTransferModal';
+import { PrintArsenalModal } from './PrintArsenalModal';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -67,6 +68,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [showMaintenanceModal, setShowMaintenanceModal] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showTransitDetailModal, setShowTransitDetailModal] = useState(false);
+  const [showPrintArsenalModal, setShowPrintArsenalModal] = useState(false);
 
   // Transfer Modals state (Exclusive to Geral, Admin, and Armeiro)
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -605,6 +607,17 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             </>
           )}
 
+          {/* Print Arsenal Button */}
+          <button
+            id="open-print-arsenal-btn"
+            onClick={() => setShowPrintArsenalModal(true)}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            title="Imprimir relatório e inventário das armas disponíveis na unidade"
+          >
+            <Printer className="w-4 h-4 text-amber-400" />
+            <span>Imprimir Arsenal</span>
+          </button>
+
           {canAddEditWeapon && (
             <button
               onClick={() => handleOpenWeaponModal()}
@@ -880,10 +893,22 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </button>
               </div>
 
-              {/* Counter */}
-              <span className="text-xs text-slate-400 font-medium">
-                Exibindo <strong className="text-amber-400 font-mono">{unitWeapons.length}</strong> arma(s)
-              </span>
+              {/* Counter & Print Arsenal Action */}
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowPrintArsenalModal(true)}
+                  className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 hover:text-amber-200 border border-amber-500/40 text-xs font-bold px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 shadow-sm"
+                  title="Abrir painel para filtrar, selecionar e imprimir armas disponíveis na unidade"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir Armas ({unitWeapons.length})</span>
+                </button>
+
+                <span className="text-xs text-slate-400 font-medium">
+                  Exibindo <strong className="text-amber-400 font-mono">{unitWeapons.length}</strong> arma(s)
+                </span>
+              </div>
 
             </div>
 
@@ -2011,6 +2036,20 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         onConfirm={confirmExecuteDeleteWeapon}
         onCancel={() => setDeleteTargetWeapon(null)}
       />
+
+      {/* Print Arsenal Modal */}
+      {showPrintArsenalModal && (
+        <PrintArsenalModal
+          currentUser={currentUser}
+          weapons={weapons}
+          departments={departments}
+          units={units}
+          vaultSpaces={vaultSpaces}
+          initialUnitId={selectedUnitId}
+          initialDeptId={selectedDeptId}
+          onClose={() => setShowPrintArsenalModal(false)}
+        />
+      )}
 
     </div>
   );
