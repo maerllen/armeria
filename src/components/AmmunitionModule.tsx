@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ConfirmDeleteModal';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -86,6 +86,68 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   // Available vault spaces for ammo: MUST BE TYPE MUNIÇÕES
   const ammoVaultSpaces = vaultSpaces.filter(v => v.type === 'MUNIÇÕES');
 
+  // Locations available for ammo exit: ONLY locations that possess stock of selectedCaliberId (> 0)
+  // Formatted with observation instead of unit: ( L1 C1 - 5,56X45MM - SAT )
+  const availableLocationsForExit = useMemo(() => {
+    if (movementType !== 'Saída' || !selectedCaliberId) return [];
+
+    const matchingStocks = stocks.filter(s => s.caliberId === selectedCaliberId && s.quantity > 0);
+
+    return matchingStocks.map(st => {
+      const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+      const unit = units.find(u => u.id === st.unitId);
+      const dept = departments.find(d => d.id === st.departmentId);
+
+      // Find movement observation for this caliber and vault space
+      const stockMovs = movements.filter(m => m.vaultSpaceId === st.vaultSpaceId && m.caliberId === st.caliberId);
+      const entryMov = stockMovs.find(m => m.type === 'Entrada' && (m.observation || m.recipientOrReason)) ||
+                       stockMovs.find(m => m.observation || m.recipientOrReason) ||
+                       stockMovs[0];
+
+      const rawObs = entryMov?.observation
+        ? entryMov.observation.trim()
+        : (entryMov?.recipientOrReason ? entryMov.recipientOrReason.trim() : 'SAT');
+      const obs = rawObs.toUpperCase();
+
+      const calObj = calibers.find(c => c.id === st.caliberId);
+      const calName = (calObj ? calObj.name : '').toUpperCase();
+      const vCode = (vault ? vault.code : 'COFRE').toUpperCase();
+
+      // Formatted label as requested: ( L1 C1 - 5,56X45MM - SAT )
+      const formattedLabel = `( ${vCode} - ${calName} - ${obs} ) - Saldo: ${st.quantity} un.`;
+
+      return {
+        vaultSpaceId: st.vaultSpaceId,
+        stockId: st.id,
+        quantity: st.quantity,
+        vCode,
+        calName,
+        obs,
+        formattedLabel,
+        unitName: unit ? unit.name : '',
+        deptCode: dept ? dept.code : ''
+      };
+    });
+  }, [movementType, selectedCaliberId, stocks, vaultSpaces, units, departments, movements, calibers]);
+
+  // Selected stock object for the currently chosen vault when performing Saída
+  const selectedExitStock = useMemo(() => {
+    if (movementType !== 'Saída') return null;
+    return availableLocationsForExit.find(loc => loc.vaultSpaceId === selectedVaultId) || null;
+  }, [movementType, availableLocationsForExit, selectedVaultId]);
+
+  // Ensure selectedVaultId stays valid when selectedCaliberId or movementType changes
+  useEffect(() => {
+    if (movementType === 'Saída') {
+      const exists = availableLocationsForExit.some(loc => loc.vaultSpaceId === selectedVaultId);
+      if (!exists && availableLocationsForExit.length > 0) {
+        setSelectedVaultId(availableLocationsForExit[0].vaultSpaceId);
+      } else if (availableLocationsForExit.length === 0) {
+        setSelectedVaultId('');
+      }
+    }
+  }, [selectedCaliberId, movementType, availableLocationsForExit, selectedVaultId]);
+
   const toggleDeptExpand = (deptId: string) => {
     setExpandedDeptIds(prev =>
       prev.includes(deptId) ? prev.filter(id => id !== deptId) : [...prev, deptId]
@@ -96,7 +158,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const handleOpenMovementModal = (type: AmmoMovementType, initialDeptId?: string, initialUnitId?: string) => {
     setErrorMsg('');
     setMovementType(type);
-    setSelectedCaliberId(calibers[0]?.id || '');
+    const initialCalId = calibers[0]?.id || '';
+    setSelectedCaliberId(initialCalId);
     setQuantity(100);
 
     let matchingVaults = ammoVaultSpaces;
@@ -106,7 +169,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       matchingVaults = ammoVaultSpaces.filter(v => v.departmentId === initialDeptId);
     }
 
-    setSelectedVaultId(matchingVaults[0]?.id || ammoVaultSpaces[0]?.id || '');
+    if (type === 'Saída') {
+      const exitStocks = stocks.filter(s => s.caliberId === initialCalId && s.quantity > 0);
+      if (initialUnitId) {
+        const uStocks = exitStocks.filter(s => s.unitId === initialUnitId);
+        setSelectedVaultId(uStocks[0]?.vaultSpaceId || exitStocks[0]?.vaultSpaceId || '');
+      } else if (initialDeptId) {
+        const dStocks = exitStocks.filter(s => s.departmentId === initialDeptId);
+        setSelectedVaultId(dStocks[0]?.vaultSpaceId || exitStocks[0]?.vaultSpaceId || '');
+      } else {
+        setSelectedVaultId(exitStocks[0]?.vaultSpaceId || '');
+      }
+    } else {
+      setSelectedVaultId(matchingVaults[0]?.id || ammoVaultSpaces[0]?.id || '');
+    }
+
     setRecipientOrReason(type === 'Entrada' ? 'Abastecimento do Cofre' : 'Curso ou Teste');
     
     setResponsibleType('SISTEMA');
@@ -207,6 +284,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     if (quantity <= 0) {
       setErrorMsg('Informe uma quantidade válida maior que zero.');
       return;
+    }
+
+    if (movementType === 'Saída') {
+      const stock = stocks.find(s => s.vaultSpaceId === selectedVaultId && s.caliberId === selectedCaliberId);
+      const availableQty = stock ? stock.quantity : 0;
+      if (availableQty <= 0) {
+        setErrorMsg('O local selecionado não possui estoque disponível para este calibre.');
+        return;
+      }
+      if (quantity > availableQty) {
+        setErrorMsg(`Quantidade solicitada (${quantity} un.) é superior ao saldo disponível no cofre (${availableQty} un.).`);
+        return;
+      }
     }
 
     let respName = '';
@@ -639,6 +729,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                         const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
                         const unit = units.find(u => u.id === st.unitId);
 
+                        // Movements associated with this stock item
+                        const stockMovs = movements.filter(m => m.caliberId === st.caliberId && m.vaultSpaceId === st.vaultSpaceId);
+                        const lastEntry = stockMovs.find(m => m.type === 'Entrada' && m.observation) ||
+                                         stockMovs.find(m => m.type === 'Entrada') ||
+                                         stockMovs.find(m => m.observation) ||
+                                         stockMovs[0];
+                        const lastMov = stockMovs[0];
+                        const ammoObs = lastEntry?.observation?.trim() || '';
+
                         return (
                           <div
                             key={st.id}
@@ -656,6 +755,29 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                               <p className="text-[11px] text-slate-400 mt-1">
                                 Unidade: <strong className="text-slate-200">{unit ? unit.name : ''}</strong>
                               </p>
+
+                              {/* Detalhes da Munição abaixo da informação da Unidade: apenas a Observação completa */}
+                              <div className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-1.5 text-[11px]">
+                                <div className="flex items-center justify-between text-[10px] font-mono">
+                                  <span className="font-bold text-amber-400 uppercase tracking-wider">
+                                    Detalhes da Munição
+                                  </span>
+                                  {lastMov?.createdAt && (
+                                    <span className="text-slate-500">
+                                      {formatTimestamp(lastMov.createdAt).split(' ')[0]}
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/90 text-[11px] font-mono">
+                                  <div className="flex flex-col space-y-1">
+                                    <span className="text-slate-400 font-sans text-[10px] font-medium">Observação:</span>
+                                    <p className="font-medium text-amber-300 break-words whitespace-pre-wrap leading-relaxed text-xs">
+                                      {ammoObs ? ammoObs : <span className="font-normal text-slate-500 italic font-sans text-xs">Padrão / Sem observação</span>}
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
                             </div>
 
                             <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
@@ -1114,15 +1236,24 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Quantidade (unidades)
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Quantidade (unidades)
+                    </label>
+                    {movementType === 'Saída' && selectedExitStock && (
+                      <span className="text-[11px] font-mono font-bold text-amber-400">
+                        Disponível: {selectedExitStock.quantity} un.
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     min="1"
+                    max={movementType === 'Saída' && selectedExitStock ? selectedExitStock.quantity : undefined}
                     value={quantity}
                     onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                    disabled={movementType === 'Saída' && availableLocationsForExit.length === 0}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono disabled:opacity-50"
                     required
                   />
                 </div>
@@ -1131,24 +1262,51 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               {/* Vault Location */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Localização no Cofre (Apenas cofres de MUNIÇÕES)
+                  {movementType === 'Saída'
+                    ? 'Localização do Estoque (Cofre - Calibre - Observação)'
+                    : 'Localização no Cofre (Apenas cofres de MUNIÇÕES)'}
                 </label>
-                <select
-                  value={selectedVaultId}
-                  onChange={(e) => setSelectedVaultId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                  required
-                >
-                  {ammoVaultSpaces.map((v) => {
-                    const u = units.find(unit => unit.id === v.unitId);
-                    const d = departments.find(dep => dep.id === v.departmentId);
-                    return (
-                      <option key={v.id} value={v.id}>
-                        {v.code} - {u ? u.name : 'Unidade'} ({d ? d.code : ''})
-                      </option>
-                    );
-                  })}
-                </select>
+                {movementType === 'Saída' ? (
+                  availableLocationsForExit.length === 0 ? (
+                    <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-xl text-red-300 text-xs flex items-center space-x-2.5">
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                      <div>
+                        <strong className="block font-semibold">Sem estoque disponível</strong>
+                        <span>Nenhum cofre possui estoque disponível para o calibre selecionado ({calibers.find(c => c.id === selectedCaliberId)?.name || 'calibre'}).</span>
+                      </div>
+                    </div>
+                  ) : (
+                    <select
+                      value={selectedVaultId}
+                      onChange={(e) => setSelectedVaultId(e.target.value)}
+                      className="w-full bg-slate-950 border border-amber-600/70 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-mono font-semibold"
+                      required
+                    >
+                      {availableLocationsForExit.map((loc) => (
+                        <option key={loc.vaultSpaceId} value={loc.vaultSpaceId}>
+                          {loc.formattedLabel}
+                        </option>
+                      ))}
+                    </select>
+                  )
+                ) : (
+                  <select
+                    value={selectedVaultId}
+                    onChange={(e) => setSelectedVaultId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                    required
+                  >
+                    {ammoVaultSpaces.map((v) => {
+                      const u = units.find(unit => unit.id === v.unitId);
+                      const d = departments.find(dep => dep.id === v.departmentId);
+                      return (
+                        <option key={v.id} value={v.id}>
+                          {v.code} - {u ? u.name : 'Unidade'} ({d ? d.code : ''})
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
               </div>
 
               {/* Reason */}
@@ -1274,7 +1432,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5"
+                  disabled={movementType === 'Saída' && availableLocationsForExit.length === 0}
+                  className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5"
                 >
                   <Check className="w-4 h-4" />
                   <span>Confirmar Movimentação</span>
