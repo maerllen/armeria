@@ -38,15 +38,27 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
   const [selectedDeptId, setSelectedDeptId] = useState<string>(availableDepts[0]?.id || '');
 
-  const availableUnits = units.filter(u => u.departmentId === selectedDeptId);
-  const [selectedUnitId, setSelectedUnitId] = useState<string>('');
+  const availableUnits = useMemo(() => {
+    if (selectedDeptId === 'ALL') {
+      return isGeral ? units : units.filter(u => u.departmentId === currentUser.departmentId);
+    }
+    return units.filter(u => u.departmentId === selectedDeptId);
+  }, [units, selectedDeptId, isGeral, currentUser.departmentId]);
 
-  // Automatically select first unit if none selected and units available
+  // Permission to select all units: Geral, Admin, or Armeiro (and any user with multi-unit management scope)
+  const canSelectAllUnits = isGeral || isAdmin || isArmeiro || currentUser.managementScope !== 'unit' || availableUnits.length > 1;
+
+  // Selected Unit ID: 'ALL' represents "Todas as Unidades", otherwise a specific unit ID
+  const [selectedUnitId, setSelectedUnitId] = useState<string>(() => {
+    return canSelectAllUnits ? 'ALL' : (availableUnits[0]?.id || '');
+  });
+
+  // Automatically select 'ALL' if permitted and empty, or first unit if restricted
   useEffect(() => {
     if (!selectedUnitId && availableUnits.length > 0) {
-      setSelectedUnitId(availableUnits[0].id);
+      setSelectedUnitId(canSelectAllUnits ? 'ALL' : availableUnits[0].id);
     }
-  }, [selectedDeptId, availableUnits, selectedUnitId]);
+  }, [selectedDeptId, availableUnits, selectedUnitId, canSelectAllUnits]);
 
   // Status Filter: All, No Cofre, Em Trânsito, Em Aula, Em Manutenção
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
@@ -206,7 +218,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   };
 
   const canAddEditWeapon = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
-  const canDeleteWeapon = isGeral;
+  const canDeleteWeapon = isGeral || isArmeiro || isAdmin;
   const canManageMaintenance = isGeral || isArmeiro;
   const canTransferWeapons = isGeral || isAdmin || isArmeiro;
 
@@ -417,8 +429,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   // Weapons in the selected department / unit before attribute filtering (for dynamic option generation & counters)
   const baseWeaponsForOptions = useMemo(() => {
     return weapons.filter(w => {
-      if (selectedUnitId && w.unitId !== selectedUnitId) return false;
-      if (!selectedUnitId && selectedDeptId && w.departmentId !== selectedDeptId) return false;
+      if (selectedUnitId && selectedUnitId !== 'ALL' && w.unitId !== selectedUnitId) return false;
+      if ((!selectedUnitId || selectedUnitId === 'ALL') && selectedDeptId && selectedDeptId !== 'ALL' && w.departmentId !== selectedDeptId) return false;
       return true;
     });
   }, [weapons, selectedUnitId, selectedDeptId]);
@@ -488,10 +500,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   // Filtered Weapons logic based on Department, Unit, Status, Type, Manufacturer, Model, Caliber, and Search query
   const unitWeapons = weapons.filter(w => {
-    // Must belong to selected unit (if unit is selected)
-    if (selectedUnitId && w.unitId !== selectedUnitId) return false;
-    // If unit is not explicitly selected, filter by selected department
-    if (!selectedUnitId && selectedDeptId && w.departmentId !== selectedDeptId) return false;
+    // Must belong to selected unit (if a specific unit is selected)
+    if (selectedUnitId && selectedUnitId !== 'ALL' && w.unitId !== selectedUnitId) return false;
+    // If all units, filter by selected department (if not ALL departments)
+    if ((!selectedUnitId || selectedUnitId === 'ALL') && selectedDeptId && selectedDeptId !== 'ALL' && w.departmentId !== selectedDeptId) return false;
 
     // Status filter
     if (statusFilter !== 'TODOS') {
@@ -542,8 +554,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     return true;
   });
 
-  const selectedDepartmentObj = departments.find(d => d.id === selectedDeptId);
-  const selectedUnitObj = units.find(u => u.id === selectedUnitId);
+  const selectedDepartmentObj = selectedDeptId === 'ALL' ? null : departments.find(d => d.id === selectedDeptId);
+  const selectedUnitObj = selectedUnitId === 'ALL' || !selectedUnitId ? null : units.find(u => u.id === selectedUnitId);
 
   return (
     <div className="space-y-6">
@@ -722,6 +734,28 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+          {isGeral && (
+            <button
+              onClick={() => {
+                setSelectedDeptId('ALL');
+                setSelectedUnitId('ALL');
+              }}
+              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                selectedDeptId === 'ALL'
+                  ? 'bg-amber-500/10 border-amber-500/50 text-slate-100 ring-1 ring-amber-500/30'
+                  : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300'
+              }`}
+            >
+              <div>
+                <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">ESTADO</span>
+                <span className="text-xs font-bold block truncate" title="Todos os Departamentos da Polícia Civil">Todos os Departamentos</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono block">
+                {weapons.length} arma(s)
+              </span>
+            </button>
+          )}
+
           {availableDepts.map((d) => {
             const isSelected = d.id === selectedDeptId;
             const deptWeaponCount = weapons.filter(w => w.departmentId === d.id).length;
@@ -732,7 +766,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 onClick={() => {
                   setSelectedDeptId(d.id);
                   const firstUnit = units.find(u => u.departmentId === d.id);
-                  setSelectedUnitId(firstUnit ? firstUnit.id : '');
+                  setSelectedUnitId(canSelectAllUnits ? 'ALL' : (firstUnit ? firstUnit.id : ''));
                 }}
                 className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
                   isSelected
@@ -759,7 +793,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
               <ChevronRight className="w-4 h-4" />
-              <span>2. Selecione a Unidade em <strong className="text-slate-100">{selectedDepartmentObj?.name}</strong></span>
+              <span>2. Selecione a Unidade em <strong className="text-slate-100">{selectedDeptId === 'ALL' ? 'Todos os Departamentos' : (selectedDepartmentObj?.name || 'Departamento')}</strong></span>
             </div>
             <span className="text-xs text-slate-400 font-mono">
               {availableUnits.length} unidade(s) encontrada(s)
@@ -767,21 +801,26 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setSelectedUnitId('')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
-                selectedUnitId === ''
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
-                  : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-              }`}
-            >
-              <span>Todas as Unidades</span>
-              <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
-                selectedUnitId === '' ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
-              }`}>
-                {weapons.filter(w => w.departmentId === selectedDeptId).length}
-              </span>
-            </button>
+            {canSelectAllUnits && (
+              <button
+                id="select-all-units-btn"
+                onClick={() => setSelectedUnitId('ALL')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
+                  selectedUnitId === 'ALL' || selectedUnitId === ''
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>Todas as Unidades</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                  selectedUnitId === 'ALL' || selectedUnitId === '' ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
+                }`}>
+                  {weapons.filter(w => selectedDeptId === 'ALL' || !selectedDeptId ? true : w.departmentId === selectedDeptId).length}
+                </span>
+              </button>
+            )}
+
             {availableUnits.map((u) => {
               const isSelected = u.id === selectedUnitId;
               const unitWeaponCount = weapons.filter(w => w.unitId === u.id).length;
@@ -797,7 +836,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   }`}
                 >
                   <span>{u.name}</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded ${
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                     isSelected ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
                   }`}>
                     {unitWeaponCount}
@@ -1110,11 +1149,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {unitWeapons.length === 0 ? (
               <div className="col-span-full bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs italic">
-                Nenhuma arma encontrada {selectedUnitObj ? `na unidade ${selectedUnitObj.name}` : `no departamento ${selectedDepartmentObj?.name || ''}`} para os critérios selecionados.
+                Nenhuma arma encontrada {selectedUnitObj ? `na unidade ${selectedUnitObj.name}` : (selectedDeptId === 'ALL' ? 'no acervo geral de armas' : `no departamento ${selectedDepartmentObj?.name || ''}`)} para os critérios selecionados.
               </div>
             ) : (
               unitWeapons.map((w) => {
                 const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+                const weaponUnit = units.find(u => u.id === w.unitId);
 
                 return (
                   <div
@@ -1152,6 +1192,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       </p>
 
                       <div className="text-[11px] text-slate-400 mt-2 space-y-0.5 font-mono">
+                        {(selectedUnitId === 'ALL' || !selectedUnitId) && (
+                          <p className="text-slate-300 font-semibold truncate flex items-center space-x-1">
+                            <Building className="w-3 h-3 text-amber-400 shrink-0" />
+                            <span>{weaponUnit?.name || 'Unidade'}</span>
+                          </p>
+                        )}
                         <p>Calibre: <strong className="text-slate-200">{w.caliber}</strong></p>
                         <p>
                           Cofre: <strong className="text-slate-200">

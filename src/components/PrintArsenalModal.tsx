@@ -61,7 +61,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
   const accessibleUnits = useMemo(() => {
     let list = units;
     if (!isGeral) {
-      if (isAdmin || (isArmeiro && currentUser.managementScope !== 'unit')) {
+      if (isAdmin || isArmeiro || currentUser.managementScope !== 'unit') {
         list = list.filter(u => u.departmentId === currentUser.departmentId);
       } else {
         // Restricted to unit
@@ -722,14 +722,14 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
                 <select
                   value={selectedUnitId}
                   onChange={(e) => setSelectedUnitId(e.target.value)}
-                  disabled={!isGeral && !isAdmin && currentUser.managementScope === 'unit'}
+                  disabled={!isGeral && !isAdmin && !isArmeiro && currentUser.managementScope === 'unit'}
                   className={`w-full rounded-xl px-3 py-2 text-xs transition ${
                     selectedUnitId !== 'ALL'
                       ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
                       : 'bg-slate-900 border-slate-700 text-slate-100'
-                  } border focus:outline-none focus:border-amber-500 ${(!isGeral && !isAdmin && currentUser.managementScope === 'unit') ? 'cursor-not-allowed opacity-80' : ''}`}
+                  } border focus:outline-none focus:border-amber-500 ${(!isGeral && !isAdmin && !isArmeiro && currentUser.managementScope === 'unit') ? 'cursor-not-allowed opacity-80' : ''}`}
                 >
-                  {(isGeral || isAdmin) && (
+                  {(isGeral || isAdmin || isArmeiro) && (
                     <option value="ALL">Todas as Unidades do Departamento ({scopedWeapons.length})</option>
                   )}
                   {accessibleUnits.map(u => {
