@@ -12,7 +12,7 @@ import {
   LessonPlanItem
 } from '../types';
 import { storage } from '../services/storage';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import {
   GraduationCap,
   Box,

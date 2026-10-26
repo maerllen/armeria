@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Certificado } from '../types';
 import { storage } from '../services/storage';
 import { stampPdfWithQrCode, printPdfFromBase64, generateQrCodeDataUrl } from '../utils/certificateStamper';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import {
   FileCheck,
   QrCode,

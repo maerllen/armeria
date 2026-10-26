@@ -4,8 +4,8 @@ import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
 import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2, FileText, Printer } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-import { MovementReceiptModal } from './MovementReceiptModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { MovementReceiptModal } from './ModalReciboMovimentacao';
 
 interface MovementModuleProps {
   currentUser: User;

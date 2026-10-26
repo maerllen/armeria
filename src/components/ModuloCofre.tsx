@@ -6,7 +6,7 @@ import {
   Search, ChevronDown, ChevronUp, Building, Eye, Printer, X, Filter,
   Shield, Layers, Package
 } from 'lucide-react';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
 
 interface VaultModuleProps {

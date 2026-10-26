@@ -3,12 +3,12 @@ import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTr
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer } from 'lucide-react';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-import { TransferWeaponModal } from './TransferWeaponModal';
-import { TransferReceiptModal } from './TransferReceiptModal';
-import { TransferHistoryModal } from './TransferHistoryModal';
-import { ReceiveTransferModal } from './ReceiveTransferModal';
-import { PrintArsenalModal } from './PrintArsenalModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TransferWeaponModal } from './ModalTransferirArmas';
+import { TransferReceiptModal } from './ModalReciboTransferencia';
+import { TransferHistoryModal } from './ModalHistoricoTransferencias';
+import { ReceiveTransferModal } from './ModalReceberTransferencia';
+import { PrintArsenalModal } from './ModalImprimirArsenal';
 
 interface WeaponModuleProps {
   currentUser: User;

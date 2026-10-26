@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, Department, Unit } from '../types';
 import { storage } from '../services/storage';
 import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building } from 'lucide-react';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 
 interface UnitModuleProps {
   currentUser: User;

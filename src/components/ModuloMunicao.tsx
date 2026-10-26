@@ -3,7 +3,7 @@ import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Departm
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X } from 'lucide-react';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
 
 interface AmmunitionModuleProps {

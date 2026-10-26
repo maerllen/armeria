@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
 import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
+import { ThemeToggle } from './AlternadorTema';
 
 interface LoginModalProps {
   onLoginSuccess: (maspDigits: string, passwordDigits: string) => void;

@@ -44,9 +44,9 @@ import {
   Smartphone
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
-import { ConfirmDeleteModal } from './ConfirmDeleteModal';
-import { AcademyReceiptModal } from './AcademyReceiptModal';
-import { formatTurmaCode } from './CalendarModule';
+import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { AcademyReceiptModal } from './ModalReciboAcademia';
+import { formatTurmaCode } from './ModuloCalendario';
 
 export const parseTurmaCalendarCode = (rawCode: string) => {
   const formatted = formatTurmaCode(rawCode);

@@ -1,5 +1,6 @@
 import mysql from 'mysql2/promise';
 
+// Configuração de conexão com o banco de dados MariaDB / MySQL
 const rawHost = process.env.DB_HOST || 'srv888.hstgr.io';
 const effectiveHost = (rawHost === 'localhost' || rawHost === '127.0.0.1') ? 'srv888.hstgr.io' : rawHost;
 
@@ -17,6 +18,7 @@ export const dbConfig = {
 
 let pool: mysql.Pool | null = null;
 
+// Obtém o pool de conexões persistente
 export function getPool(): mysql.Pool {
   if (!pool) {
     pool = mysql.createPool(dbConfig);
@@ -24,793 +26,701 @@ export function getPool(): mysql.Pool {
   return pool;
 }
 
+// Testa a conectividade ativa com o banco de dados
 export async function testConnection(): Promise<{ success: boolean; message: string; details?: any }> {
   try {
     const currentPool = getPool();
     const connection = await currentPool.getConnection();
-    const [rows]: any = await connection.query('SELECT 1 as connected, NOW() as server_time, VERSION() as version');
+    const [rows]: any = await connection.query('SELECT 1 as conectado, NOW() as horario_servidor, VERSION() as versao');
     connection.release();
     return {
       success: true,
-      message: 'Conexão com o banco de dados MySQL realizada com sucesso!',
+      message: 'Conexão com o banco de dados MariaDB / MySQL realizada com sucesso!',
       details: rows[0],
     };
   } catch (error: any) {
-    console.error('[MySQL Error]', error.message);
+    console.error('[Erro MySQL]', error.message);
     return {
       success: false,
-      message: `Erro ao conectar com o banco de dados MySQL (${error.code || 'UNKNOWN'}): ${error.message}`,
+      message: `Erro ao conectar com o banco de dados (${error.code || 'UNKNOWN'}): ${error.message}`,
     };
   }
 }
 
+// Inicializa a estrutura completa das 30 tabelas em Português com colunas identificadas
 export async function initializeDatabaseSchema(): Promise<{ success: boolean; message: string; log?: string[] }> {
   const logs: string[] = [];
   try {
     const currentPool = getPool();
     const connection = await currentPool.getConnection();
-    logs.push('Conectado ao servidor MySQL.');
+    logs.push('Conectado ao servidor MariaDB / MySQL.');
 
-    // Ensure database exists
+    // Garante que o banco de dados existe e seleciona
     await connection.query(`CREATE DATABASE IF NOT EXISTS \`${dbConfig.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
     await connection.query(`USE \`${dbConfig.database}\`;`);
     logs.push(`Banco de dados '${dbConfig.database}' selecionado.`);
 
-    // Disable FK checks during initialization
+    // Desativa verificação de chaves estrangeiras temporariamente
     await connection.query('SET FOREIGN_KEY_CHECKS = 0;');
 
-    // 1. Departamentos
+    // 1. DEPARTAMENTOS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`departamentos\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`codigo\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`DEPARTAMENTOS\` (
+        \`ID_DEPARTAMENTOS\` VARCHAR(64) NOT NULL,
+        \`NOME_DEPARTAMENTOS\` VARCHAR(255) NOT NULL,
+        \`CODIGO_DEPARTAMENTOS\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_DEPARTAMENTOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_DEPARTAMENTOS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 2. Unidades
+    // 2. UNIDADES
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`unidades\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_unidades_dept\` (\`departamento_id\`)
+      CREATE TABLE IF NOT EXISTS \`UNIDADES\` (
+        \`ID_UNIDADES\` VARCHAR(64) NOT NULL,
+        \`DEPARTAMENTO_ID_UNIDADES\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_UNIDADES\` VARCHAR(255) NOT NULL,
+        \`DATA_CRIACAO_UNIDADES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_UNIDADES\`),
+        KEY \`idx_unidades_dept\` (\`DEPARTAMENTO_ID_UNIDADES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 3. Usuários
+    // 3. USUARIOS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`usuarios\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`masp\` VARCHAR(32) NOT NULL,
-        \`senha\` VARCHAR(255) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`telefone\` VARCHAR(32) DEFAULT NULL,
-        \`cargo\` VARCHAR(64) NOT NULL,
-        \`perfil\` ENUM('Policial', 'Armeiro', 'Administrador', 'Geral') NOT NULL DEFAULT 'Policial',
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`pode_mover_municao\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`pode_mover_armas\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`tem_acesso_sistema\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`eh_professor\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`disciplina_professor\` VARCHAR(32) DEFAULT NULL,
-        \`professor_sigla\` VARCHAR(64) DEFAULT NULL,
-        \`deve_alterar_senha\` TINYINT(1) NOT NULL DEFAULT 1,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_usuarios_masp\` (\`masp\`)
+      CREATE TABLE IF NOT EXISTS \`USUARIOS\` (
+        \`ID_USUARIOS\` VARCHAR(64) NOT NULL,
+        \`MASP_USUARIOS\` VARCHAR(32) NOT NULL,
+        \`SENHA_USUARIOS\` VARCHAR(255) NOT NULL,
+        \`NOME_USUARIOS\` VARCHAR(255) NOT NULL,
+        \`TELEFONE_USUARIOS\` VARCHAR(32) DEFAULT NULL,
+        \`CARGO_USUARIOS\` VARCHAR(64) NOT NULL,
+        \`PERFIL_USUARIOS\` ENUM('Policial', 'Armeiro', 'Administrador', 'Geral') NOT NULL DEFAULT 'Policial',
+        \`DEPARTAMENTO_ID_USUARIOS\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_USUARIOS\` VARCHAR(64) DEFAULT NULL,
+        \`PODE_MOVER_MUNICAO_USUARIOS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`PODE_MOVER_ARMAS_USUARIOS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`TEM_ACESSO_SISTEMA_USUARIOS\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`EH_PROFESSOR_USUARIOS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DISCIPLINA_PROFESSOR_USUARIOS\` VARCHAR(32) DEFAULT NULL,
+        \`SIGLA_PROFESSOR_USUARIOS\` VARCHAR(64) DEFAULT NULL,
+        \`DEVE_ALTERAR_SENHA_USUARIOS\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`DATA_CRIACAO_USUARIOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_USUARIOS\`),
+        UNIQUE KEY \`uk_usuarios_masp\` (\`MASP_USUARIOS\`),
+        KEY \`idx_usuarios_dept\` (\`DEPARTAMENTO_ID_USUARIOS\`),
+        KEY \`idx_usuarios_unidade\` (\`UNIDADE_ID_USUARIOS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 4. Calibres
+    // 4. CALIBRES
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`calibres\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(128) NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_calibres_nome\` (\`nome\`)
+      CREATE TABLE IF NOT EXISTS \`CALIBRES\` (
+        \`ID_CALIBRES\` VARCHAR(64) NOT NULL,
+        \`NOME_CALIBRES\` VARCHAR(128) NOT NULL,
+        \`DATA_CRIACAO_CALIBRES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CALIBRES\`),
+        UNIQUE KEY \`uk_calibres_nome\` (\`NOME_CALIBRES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 5. Cursos
+    // 5. COFRES
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`cursos\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`modelos_permitidos\` JSON NOT NULL,
-        \`calibres_permitidos\` JSON NOT NULL,
-        \`tipos_armas_permitidos\` JSON DEFAULT NULL,
-        \`tiros_por_aluno\` INT DEFAULT 0,
-        \`tiros_por_tipo_arma\` JSON DEFAULT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`COFRES\` (
+        \`ID_COFRES\` VARCHAR(64) NOT NULL,
+        \`CODIGO_COFRES\` VARCHAR(64) NOT NULL,
+        \`TIPO_COFRES\` ENUM('ARMAS', 'MUNIÇÕES') NOT NULL,
+        \`DEPARTAMENTO_ID_COFRES\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_COFRES\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_COFRES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_COFRES\`),
+        KEY \`idx_cofres_dept\` (\`DEPARTAMENTO_ID_COFRES\`),
+        KEY \`idx_cofres_unidade\` (\`UNIDADE_ID_COFRES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 6. Tipos de Armas
+    // 6. ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`tipos_armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(100) NOT NULL,
-        \`modelos\` JSON NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`ARMAS\` (
+        \`ID_ARMAS\` VARCHAR(64) NOT NULL,
+        \`TIPO_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NUMERO_SERIE_ARMAS\` VARCHAR(128) NOT NULL,
+        \`FABRICANTE_ARMAS\` VARCHAR(128) NOT NULL,
+        \`MODELO_ARMAS\` VARCHAR(128) NOT NULL,
+        \`CALIBRE_ARMAS\` VARCHAR(128) NOT NULL,
+        \`QUANTIDADE_CARREGADORES_ARMAS\` INT NOT NULL DEFAULT 1,
+        \`STATUS_ARMAS\` ENUM('No Cofre', 'Em Trânsito', 'Manutenção', 'Pendente de Recibo', 'Em Sala de Aula') NOT NULL DEFAULT 'No Cofre',
+        \`DEPARTAMENTO_ID_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`COFRE_ID_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`OBSERVACAO_LOCALIZACAO_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_ULTIMA_MANUTENCAO_ARMAS\` DATE DEFAULT NULL,
+        \`RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_ARMAS\`),
+        UNIQUE KEY \`uk_armas_serie\` (\`NUMERO_SERIE_ARMAS\`),
+        KEY \`idx_armas_dept\` (\`DEPARTAMENTO_ID_ARMAS\`),
+        KEY \`idx_armas_unidade\` (\`UNIDADE_ID_ARMAS\`),
+        KEY \`idx_armas_cofre\` (\`COFRE_ID_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 7. Cursos do Usuário
+    // 7. ESTOQUE_MUNICOES
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`usuario_cursos\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`usuario_id\` VARCHAR(64) NOT NULL,
-        \`curso_id\` VARCHAR(64) NOT NULL,
-        \`data_conclusao\` DATE DEFAULT NULL,
-        \`data_validade\` DATE DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`ESTOQUE_MUNICOES\` (
+        \`ID_ESTOQUE_MUNICOES\` VARCHAR(64) NOT NULL,
+        \`CALIBRE_ID_ESTOQUE_MUNICOES\` VARCHAR(64) NOT NULL,
+        \`QUANTIDADE_ESTOQUE_MUNICOES\` INT NOT NULL DEFAULT 0,
+        \`DEPARTAMENTO_ID_ESTOQUE_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_ESTOQUE_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`COFRE_ID_ESTOQUE_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_ATUALIZACAO_ESTOQUE_MUNICOES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_ESTOQUE_MUNICOES\`),
+        KEY \`idx_est_calibre\` (\`CALIBRE_ID_ESTOQUE_MUNICOES\`),
+        KEY \`idx_est_cofre\` (\`COFRE_ID_ESTOQUE_MUNICOES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 8. Cofres
+    // 8. MOVIMENTACOES_MUNICOES
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`cofres\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`codigo\` VARCHAR(64) NOT NULL,
-        \`tipo\` ENUM('ARMAS', 'MUNIÇÕES') NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`MOVIMENTACOES_MUNICOES\` (
+        \`ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) NOT NULL,
+        \`TIPO_MOVIMENTACOES_MUNICOES\` ENUM('Entrada', 'Saída') NOT NULL,
+        \`CALIBRE_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) NOT NULL,
+        \`QUANTIDADE_MOVIMENTACOES_MUNICOES\` INT NOT NULL,
+        \`DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`COFRE_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES\` VARCHAR(255) NOT NULL,
+        \`TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES\` VARCHAR(32) DEFAULT 'SISTEMA',
+        \`RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES\` VARCHAR(255) DEFAULT NULL,
+        \`RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`OBSERVACAO_MOVIMENTACOES_MUNICOES\` VARCHAR(500) DEFAULT NULL,
+        \`QUANTIDADE_DEVOLVIDA_MOVIMENTACOES_MUNICOES\` INT DEFAULT 0,
+        \`DATA_DEVOLUCAO_MOVIMENTACOES_MUNICOES\` DATETIME DEFAULT NULL,
+        \`DEVOLVIDO_POR_NOME_MOVIMENTACOES_MUNICOES\` VARCHAR(255) DEFAULT NULL,
+        \`USUARIO_ID_MOVIMENTACOES_MUNICOES\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_USUARIO_MOVIMENTACOES_MUNICOES\` VARCHAR(255) NOT NULL,
+        \`DATA_CRIACAO_MOVIMENTACOES_MUNICOES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_MOVIMENTACOES_MUNICOES\`),
+        KEY \`idx_movmun_calibre\` (\`CALIBRE_ID_MOVIMENTACOES_MUNICOES\`),
+        KEY \`idx_movmun_cofre\` (\`COFRE_ID_MOVIMENTACOES_MUNICOES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 9. Armas
+    // 9. MOVIMENTACOES_ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`tipo\` VARCHAR(64) NOT NULL,
-        \`numero_serie\` VARCHAR(128) NOT NULL,
-        \`fabricante\` VARCHAR(128) NOT NULL,
-        \`modelo\` VARCHAR(128) NOT NULL,
-        \`calibre\` VARCHAR(128) NOT NULL,
-        \`quantidade_carregadores\` INT NOT NULL DEFAULT 1,
-        \`status\` ENUM('No Cofre', 'Em Trânsito', 'Manutenção', 'Pendente de Recibo') NOT NULL DEFAULT 'No Cofre',
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
-        \`observacao_localizacao\` VARCHAR(255) DEFAULT NULL,
-        \`data_ultima_manutencao\` DATE DEFAULT NULL,
-        \`responsavel_ultima_manutencao\` VARCHAR(255) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_armas_serie\` (\`numero_serie\`)
+      CREATE TABLE IF NOT EXISTS \`MOVIMENTACOES_ARMAS\` (
+        \`ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) NOT NULL,
+        \`ARMA_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NUMERO_SERIE_ARMA_MOVIMENTACOES_ARMAS\` VARCHAR(128) NOT NULL,
+        \`MODELO_ARMA_MOVIMENTACOES_ARMAS\` VARCHAR(128) NOT NULL,
+        \`TIPO_ARMA_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`CALIBRE_MOVIMENTACOES_ARMAS\` VARCHAR(128) DEFAULT NULL,
+        \`DEPARTAMENTO_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`REQUERENTE_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NOME_REQUERENTE_MOVIMENTACOES_ARMAS\` VARCHAR(255) NOT NULL,
+        \`MASP_REQUERENTE_MOVIMENTACOES_ARMAS\` VARCHAR(32) NOT NULL,
+        \`COFRE_RETIRADA_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`COFRE_DEVOLUCAO_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`QUANTIDADE_MUNICAO_MOVIMENTACOES_ARMAS\` INT NOT NULL DEFAULT 0,
+        \`QUANTIDADE_CARREGADORES_MOVIMENTACOES_ARMAS\` INT NOT NULL DEFAULT 0,
+        \`QUANTIDADE_MUNICAO_DEVOLUCAO_MOVIMENTACOES_ARMAS\` INT NOT NULL DEFAULT 0,
+        \`QUANTIDADE_CARREGADORES_DEVOLUCAO_MOVIMENTACOES_ARMAS\` INT NOT NULL DEFAULT 0,
+        \`STATUS_MOVIMENTACOES_ARMAS\` VARCHAR(64) NOT NULL,
+        \`APROVADO_POR_USUARIO_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`APROVADO_POR_NOME_MOVIMENTACOES_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_APROVACAO_MOVIMENTACOES_ARMAS\` DATETIME DEFAULT NULL,
+        \`RECIBO_CONFIRMADO_POR_USUARIO_ID_MOVIMENTACOES_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`RECIBO_CONFIRMADO_POR_NOME_MOVIMENTACOES_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_RECIBO_MOVIMENTACOES_ARMAS\` DATETIME DEFAULT NULL,
+        \`POSSUI_DIVERGENCIA_MOVIMENTACOES_ARMAS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`JUSTIFICATIVA_DIVERGENCIA_MOVIMENTACOES_ARMAS\` TEXT DEFAULT NULL,
+        \`DATA_CRIACAO_MOVIMENTACOES_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_MOVIMENTACOES_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_MOVIMENTACOES_ARMAS\`),
+        KEY \`idx_movarmas_arma\` (\`ARMA_ID_MOVIMENTACOES_ARMAS\`),
+        KEY \`idx_movarmas_req\` (\`REQUERENTE_ID_MOVIMENTACOES_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 10. Estoque de Munições
+    // 10. LOGS_AUDITORIA
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`estoque_municoes\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`calibre_id\` VARCHAR(64) NOT NULL,
-        \`quantidade\` INT NOT NULL DEFAULT 0,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`LOGS_AUDITORIA\` (
+        \`ID_LOGS_AUDITORIA\` VARCHAR(64) NOT NULL,
+        \`MODULO_LOGS_AUDITORIA\` VARCHAR(64) NOT NULL,
+        \`ACAO_LOGS_AUDITORIA\` VARCHAR(64) NOT NULL,
+        \`DETALHES_LOGS_AUDITORIA\` TEXT NOT NULL,
+        \`USUARIO_ID_LOGS_AUDITORIA\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_USUARIO_LOGS_AUDITORIA\` VARCHAR(255) NOT NULL,
+        \`MASP_USUARIO_LOGS_AUDITORIA\` VARCHAR(32) NOT NULL,
+        \`PERFIL_USUARIO_LOGS_AUDITORIA\` VARCHAR(32) NOT NULL,
+        \`ENDERECO_IP_LOGS_AUDITORIA\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_HORA_LOGS_AUDITORIA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_LOGS_AUDITORIA\`),
+        KEY \`idx_audit_usuario\` (\`USUARIO_ID_LOGS_AUDITORIA\`),
+        KEY \`idx_audit_modulo\` (\`MODULO_LOGS_AUDITORIA\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 11. Movimentações de Armas
+    // 11. TIPOS_ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`movimentacoes_armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`arma_id\` VARCHAR(64) NOT NULL,
-        \`numero_serie_arma\` VARCHAR(128) NOT NULL,
-        \`modelo_arma\` VARCHAR(128) NOT NULL,
-        \`tipo_arma\` VARCHAR(64) DEFAULT NULL,
-        \`calibre\` VARCHAR(128) DEFAULT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`requerente_id\` VARCHAR(64) NOT NULL,
-        \`nome_requerente\` VARCHAR(255) NOT NULL,
-        \`masp_requerente\` VARCHAR(32) NOT NULL,
-        \`cofre_retirada_id\` VARCHAR(64) DEFAULT NULL,
-        \`cofre_devolucao_id\` VARCHAR(64) DEFAULT NULL,
-        \`quantidade_municao\` INT NOT NULL DEFAULT 0,
-        \`quantidade_carregadores\` INT NOT NULL DEFAULT 0,
-        \`quantidade_municao_devolucao\` INT NOT NULL DEFAULT 0,
-        \`quantidade_carregadores_devolucao\` INT NOT NULL DEFAULT 0,
-        \`status\` VARCHAR(64) NOT NULL,
-        \`aprovado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`aprovado_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`data_aprovacao\` DATETIME DEFAULT NULL,
-        \`recibo_confirmado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`recibo_confirmado_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`data_recibo\` DATETIME DEFAULT NULL,
-        \`possui_divergencia\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`justificativa_divergencia\` TEXT DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`TIPOS_ARMAS\` (
+        \`ID_TIPOS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NOME_TIPOS_ARMAS\` VARCHAR(100) NOT NULL,
+        \`MODELOS_TIPOS_ARMAS\` JSON NOT NULL,
+        \`DATA_CRIACAO_TIPOS_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_TIPOS_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 12. Movimentações de Munições
+    // 12. CURSOS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`movimentacoes_municoes\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`tipo\` ENUM('Entrada', 'Saída') NOT NULL,
-        \`calibre_id\` VARCHAR(64) NOT NULL,
-        \`quantidade\` INT NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
-        \`destinatario_ou_motivo\` VARCHAR(255) NOT NULL,
-        \`tipo_responsavel\` VARCHAR(32) DEFAULT 'SISTEMA',
-        \`responsavel_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`responsavel_nome\` VARCHAR(255) DEFAULT NULL,
-        \`responsavel_masp\` VARCHAR(64) DEFAULT NULL,
-        \`observacao\` VARCHAR(500) DEFAULT NULL,
-        \`quantidade_devolvida\` INT DEFAULT 0,
-        \`data_devolucao\` DATETIME DEFAULT NULL,
-        \`devolvido_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_usuario\` VARCHAR(255) NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`CURSOS\` (
+        \`ID_CURSOS\` VARCHAR(64) NOT NULL,
+        \`NOME_CURSOS\` VARCHAR(255) NOT NULL,
+        \`MODELOS_PERMITIDOS_CURSOS\` JSON NOT NULL,
+        \`CALIBRES_PERMITIDOS_CURSOS\` JSON NOT NULL,
+        \`TIPOS_ARMAS_PERMITIDOS_CURSOS\` JSON DEFAULT NULL,
+        \`TIROS_POR_ALUNO_CURSOS\` INT DEFAULT 0,
+        \`TIROS_POR_TIPO_ARMA_CURSOS\` JSON DEFAULT NULL,
+        \`DEPARTAMENTO_ID_CURSOS\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_CURSOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CURSOS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 13. Logs de Auditoria
+    // 13. USUARIO_CURSOS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`logs_auditoria\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`modulo\` VARCHAR(64) NOT NULL,
-        \`acao\` VARCHAR(64) NOT NULL,
-        \`detalhes\` TEXT NOT NULL,
-        \`usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_usuario\` VARCHAR(255) NOT NULL,
-        \`masp_usuario\` VARCHAR(32) NOT NULL,
-        \`perfil_usuario\` VARCHAR(32) NOT NULL,
-        \`endereco_ip\` VARCHAR(64) DEFAULT NULL,
-        \`data_hora\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`USUARIO_CURSOS\` (
+        \`ID_USUARIO_CURSOS\` VARCHAR(64) NOT NULL,
+        \`USUARIO_ID_USUARIO_CURSOS\` VARCHAR(64) NOT NULL,
+        \`CURSO_ID_USUARIO_CURSOS\` VARCHAR(64) NOT NULL,
+        \`DATA_CONCLUSAO_USUARIO_CURSOS\` DATE DEFAULT NULL,
+        \`DATA_VALIDADE_USUARIO_CURSOS\` DATE DEFAULT NULL,
+        \`DATA_CRIACAO_USUARIO_CURSOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_USUARIO_CURSOS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 14. Cursos Academia
+    // 14. TRANSFERENCIAS_ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`cursos_academia\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`tipo\` ENUM('Formação', 'Ensino Continuado') NOT NULL,
-        \`carreira\` VARCHAR(64) DEFAULT NULL,
-        \`codigo\` VARCHAR(64) DEFAULT NULL,
-        \`datas\` JSON DEFAULT NULL,
-        \`nome_departamento\` VARCHAR(255) DEFAULT NULL,
-        \`data_inicio\` DATE DEFAULT NULL,
-        \`numero_modulo\` INT DEFAULT NULL,
-        \`quantidade_aulas\` INT NOT NULL DEFAULT 1,
-        \`dados_aulas\` JSON NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`TRANSFERENCIAS_ARMAS\` (
+        \`ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NUMERO_PROTOCOLO_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_TRANSFERENCIA_TRANSFERENCIAS_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) NOT NULL,
+        \`RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS\` VARCHAR(32) NOT NULL,
+        \`RESPONSAVEL_PERFIL_TRANSFERENCIAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) NOT NULL,
+        \`TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS\` VARCHAR(32) NOT NULL,
+        \`TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`MOTIVO_TRANSFERENCIAS_ARMAS\` TEXT NOT NULL,
+        \`ARMAS_JSON_TRANSFERENCIAS_ARMAS\` JSON NOT NULL,
+        \`TOTAL_ARMAS_TRANSFERENCIAS_ARMAS\` INT NOT NULL DEFAULT 1,
+        \`TOTAL_CARREGADORES_TRANSFERENCIAS_ARMAS\` INT NOT NULL DEFAULT 0,
+        \`OBSERVACAO_TRANSFERENCIAS_ARMAS\` TEXT DEFAULT NULL,
+        \`STATUS_TRANSFERENCIAS_ARMAS\` VARCHAR(64) NOT NULL DEFAULT 'Pendente',
+        \`RECEBIDO_EM_TRANSFERENCIAS_ARMAS\` DATETIME DEFAULT NULL,
+        \`RECEBIDO_POR_USUARIO_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`RECEBIDO_POR_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`RECEBIDO_POR_MASP_TRANSFERENCIAS_ARMAS\` VARCHAR(32) DEFAULT NULL,
+        \`RECEBIDO_POR_PERFIL_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_TRANSFERENCIAS_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_TRANSFERENCIAS_ARMAS\`),
+        KEY \`idx_trf_origem\` (\`ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS\`),
+        KEY \`idx_trf_destino\` (\`DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 15. Caixas de Armas
+    // 15. CAIXAS_ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`caixas_armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`tipo_curso\` VARCHAR(64) NOT NULL,
-        \`quantidade_armas\` INT NOT NULL,
-        \`ids_armas\` JSON NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`CAIXAS_ARMAS\` (
+        \`ID_CAIXAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NOME_CAIXAS_ARMAS\` VARCHAR(255) NOT NULL,
+        \`TIPO_CURSO_CAIXAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`QUANTIDADE_ARMAS_CAIXAS_ARMAS\` INT NOT NULL,
+        \`IDS_ARMAS_CAIXAS_ARMAS\` JSON NOT NULL,
+        \`DEPARTAMENTO_ID_CAIXAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_CAIXAS_ARMAS\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_CAIXAS_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CAIXAS_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 16. Substituições Caixa de Armas
+    // 16. SUBSTITUICOES_CAIXA_ARMAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`substituicoes_caixa_armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`caixa_id\` VARCHAR(64) NOT NULL,
-        \`nome_caixa\` VARCHAR(255) NOT NULL,
-        \`arma_antiga_id\` VARCHAR(64) NOT NULL,
-        \`descricao_arma_antiga\` VARCHAR(255) NOT NULL,
-        \`arma_nova_id\` VARCHAR(64) NOT NULL,
-        \`descricao_arma_nova\` VARCHAR(255) NOT NULL,
-        \`motivo\` VARCHAR(500) NOT NULL,
-        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
-        \`nome_responsavel\` VARCHAR(255) NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`SUBSTITUICOES_CAIXA_ARMAS\` (
+        \`ID_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(64) NOT NULL,
+        \`CAIXA_ID_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(64) NOT NULL,
+        \`NOME_CAIXA_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(255) NOT NULL,
+        \`ARMA_ANTIGA_ID_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(64) NOT NULL,
+        \`DESCRICAO_ARMA_ANTIGA_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(255) NOT NULL,
+        \`ARMA_NOVA_ID_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(64) NOT NULL,
+        \`DESCRICAO_ARMA_NOVA_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(255) NOT NULL,
+        \`MOTIVO_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(500) NOT NULL,
+        \`NOME_PROFESSOR_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(255) DEFAULT NULL,
+        \`NOME_RESPONSAVEL_SUBSTITUICOES_CAIXA_ARMAS\` VARCHAR(255) NOT NULL,
+        \`DATA_CRIACAO_SUBSTITUICOES_CAIXA_ARMAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_SUBSTITUICOES_CAIXA_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 17. Turmas do Curso
+    // 17. CURSOS_ACADEMIA
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`turmas_curso\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`curso_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_curso\` VARCHAR(255) NOT NULL,
-        \`disciplina\` ENUM('MEAF', 'TAP', 'DP') NOT NULL,
-        \`carreira\` VARCHAR(64) NOT NULL,
-        \`sigla_carreira\` VARCHAR(16) NOT NULL,
-        \`numero_turma\` VARCHAR(32) NOT NULL,
-        \`codigo\` VARCHAR(64) NOT NULL,
-        \`quantidade_alunos\` INT NOT NULL DEFAULT 1,
-        \`ids_professores\` JSON NOT NULL,
-        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`primeira_data_aula\` VARCHAR(32) DEFAULT NULL,
-        \`ultima_data_aula\` VARCHAR(32) DEFAULT NULL,
-        \`turma_calendario\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`CURSOS_ACADEMIA\` (
+        \`ID_CURSOS_ACADEMIA\` VARCHAR(64) NOT NULL,
+        \`NOME_CURSOS_ACADEMIA\` VARCHAR(255) NOT NULL,
+        \`TIPO_CURSOS_ACADEMIA\` VARCHAR(64) NOT NULL,
+        \`CARREIRA_CURSOS_ACADEMIA\` VARCHAR(64) DEFAULT NULL,
+        \`CODIGO_CURSOS_ACADEMIA\` VARCHAR(64) DEFAULT NULL,
+        \`DATAS_CURSOS_ACADEMIA\` JSON DEFAULT NULL,
+        \`NOME_DEPARTAMENTO_CURSOS_ACADEMIA\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_INICIO_CURSOS_ACADEMIA\` DATE DEFAULT NULL,
+        \`NUMERO_MODULO_CURSOS_ACADEMIA\` INT DEFAULT NULL,
+        \`QUANTIDADE_AULAS_CURSOS_ACADEMIA\` INT NOT NULL DEFAULT 1,
+        \`DADOS_AULAS_CURSOS_ACADEMIA\` JSON NOT NULL,
+        \`DEPARTAMENTO_ID_CURSOS_ACADEMIA\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_CURSOS_ACADEMIA\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_CURSOS_ACADEMIA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CURSOS_ACADEMIA\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 18. Planos de Aula
+    // 18. TURMAS_CURSO
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`planos_aula\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`carreira\` VARCHAR(64) NOT NULL,
-        \`ano\` INT NOT NULL,
-        \`tipo\` VARCHAR(64) NOT NULL,
-        \`codigo_turma\` VARCHAR(64) DEFAULT NULL,
-        \`quantidade_aulas\` INT NOT NULL DEFAULT 1,
-        \`dados_aulas\` JSON NOT NULL,
-        \`departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`TURMAS_CURSO\` (
+        \`ID_TURMAS_CURSO\` VARCHAR(64) NOT NULL,
+        \`CURSO_ID_TURMAS_CURSO\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_CURSO_TURMAS_CURSO\` VARCHAR(255) NOT NULL,
+        \`DISCIPLINA_TURMAS_CURSO\` VARCHAR(32) NOT NULL,
+        \`CARREIRA_TURMAS_CURSO\` VARCHAR(64) NOT NULL,
+        \`SIGLA_CARREIRA_TURMAS_CURSO\` VARCHAR(16) NOT NULL,
+        \`NUMERO_TURMA_TURMAS_CURSO\` VARCHAR(32) NOT NULL,
+        \`CODIGO_TURMAS_CURSO\` VARCHAR(64) NOT NULL,
+        \`QUANTIDADE_ALUNOS_TURMAS_CURSO\` INT NOT NULL DEFAULT 1,
+        \`IDS_PROFESSORES_TURMAS_CURSO\` JSON NOT NULL,
+        \`NOME_PROFESSOR_TURMAS_CURSO\` VARCHAR(255) DEFAULT NULL,
+        \`DEPARTAMENTO_ID_TURMAS_CURSO\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_TURMAS_CURSO\` VARCHAR(64) DEFAULT NULL,
+        \`PRIMEIRA_DATA_AULA_TURMAS_CURSO\` VARCHAR(32) DEFAULT NULL,
+        \`ULTIMA_DATA_AULA_TURMAS_CURSO\` VARCHAR(32) DEFAULT NULL,
+        \`TURMA_CALENDARIO_TURMAS_CURSO\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_TURMAS_CURSO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_TURMAS_CURSO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 19. Movimentações da Turma
+    // 19. PLANOS_AULA
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`movimentacoes_turma\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`curso_id\` VARCHAR(64) DEFAULT NULL,
-        \`turma_id\` VARCHAR(64) DEFAULT NULL,
-        \`codigo_turma\` VARCHAR(64) DEFAULT NULL,
-        \`plano_aula_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_plano_aula\` VARCHAR(255) DEFAULT NULL,
-        \`numero_aula\` INT NOT NULL DEFAULT 1,
-        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
-        \`caixa_armas_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_caixa_armas\` VARCHAR(255) DEFAULT NULL,
-        \`ids_armas\` JSON DEFAULT NULL,
-        \`calibre_id\` VARCHAR(64) DEFAULT NULL,
-        \`cofre_id\` VARCHAR(64) DEFAULT NULL,
-        \`municao_fornecida\` INT DEFAULT 0,
-        \`quantidade_alunos\` INT DEFAULT 0,
-        \`tiros_por_aluno\` INT DEFAULT 0,
-        \`tiros_instrutor\` INT DEFAULT 0,
-        \`municao_usada\` INT DEFAULT 0,
-        \`municao_devolvida\` INT DEFAULT 0,
-        \`carregadores_extras\` INT DEFAULT 0,
-        \`status\` ENUM('Em Aula', 'Finalizada') NOT NULL DEFAULT 'Em Aula',
-        \`emitido_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`devolvido_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`materiais_devolvidos\` TEXT DEFAULT NULL,
-        \`observacoes\` TEXT DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_devolucao\` DATETIME DEFAULT NULL,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`PLANOS_AULA\` (
+        \`ID_PLANOS_AULA\` VARCHAR(64) NOT NULL,
+        \`NOME_PLANOS_AULA\` VARCHAR(255) NOT NULL,
+        \`CARREIRA_PLANOS_AULA\` VARCHAR(64) NOT NULL,
+        \`ANO_PLANOS_AULA\` INT NOT NULL,
+        \`TIPO_PLANOS_AULA\` VARCHAR(64) NOT NULL,
+        \`CODIGO_TURMA_PLANOS_AULA\` VARCHAR(64) DEFAULT NULL,
+        \`QUANTIDADE_AULAS_PLANOS_AULA\` INT NOT NULL DEFAULT 1,
+        \`DADOS_AULAS_PLANOS_AULA\` JSON NOT NULL,
+        \`DEPARTAMENTO_ID_PLANOS_AULA\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID_PLANOS_AULA\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_PLANOS_AULA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_PLANOS_AULA\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 20. Aluno Turma
+    // 20. MOVIMENTACOES_TURMA
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`aluno_turma\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`turma_id\` VARCHAR(64) DEFAULT NULL,
-        \`turma_aluno\` VARCHAR(64) NOT NULL,
-        \`modulo_aluno\` VARCHAR(64) DEFAULT NULL,
-        \`professor_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`instrutor1_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`instrutor2_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`instrutor3_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`instrutor4_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`masp_aluno\` VARCHAR(64) DEFAULT NULL,
-        \`nome_aluno\` VARCHAR(255) NOT NULL,
-        \`situacao_aluno\` VARCHAR(64) NOT NULL DEFAULT 'Ativo',
-        \`departamento_aluno\` VARCHAR(255) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_aluno_turma_id\` (\`turma_id\`),
-        KEY \`idx_aluno_turma_code\` (\`turma_aluno\`)
+      CREATE TABLE IF NOT EXISTS \`MOVIMENTACOES_TURMA\` (
+        \`ID_MOVIMENTACOES_TURMA\` VARCHAR(64) NOT NULL,
+        \`CURSO_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`TURMA_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`CODIGO_TURMA_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`PLANO_AULA_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_PLANO_AULA_MOVIMENTACOES_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`NUMERO_AULA_MOVIMENTACOES_TURMA\` INT NOT NULL DEFAULT 1,
+        \`NOME_PROFESSOR_MOVIMENTACOES_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`CAIXA_ARMAS_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_CAIXA_ARMAS_MOVIMENTACOES_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`IDS_ARMAS_MOVIMENTACOES_TURMA\` JSON DEFAULT NULL,
+        \`CALIBRE_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`COFRE_ID_MOVIMENTACOES_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`QUANTIDADE_ALUNOS_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`TIROS_POR_ALUNO_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`TIROS_INSTRUTOR_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`MUNICAO_USADA_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`MUNICAO_DEVOLVIDA_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`CARREGADORES_EXTRAS_MOVIMENTACOES_TURMA\` INT DEFAULT 0,
+        \`STATUS_MOVIMENTACOES_TURMA\` VARCHAR(32) NOT NULL DEFAULT 'Em Aula',
+        \`EMITIDO_POR_NOME_MOVIMENTACOES_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`DEVOLVIDO_POR_NOME_MOVIMENTACOES_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`MATERIAIS_DEVOLVIDOS_MOVIMENTACOES_TURMA\` TEXT DEFAULT NULL,
+        \`OBSERVACOES_MOVIMENTACOES_TURMA\` TEXT DEFAULT NULL,
+        \`DATA_CRIACAO_MOVIMENTACOES_TURMA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_DEVOLUCAO_MOVIMENTACOES_TURMA\` DATETIME DEFAULT NULL,
+        PRIMARY KEY (\`ID_MOVIMENTACOES_TURMA\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 21. Aluno Aulas
+    // 21. ALUNO_TURMA
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`aluno_aulas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`aluno_id\` VARCHAR(64) NOT NULL,
-        \`aula_nome_aluno\` VARCHAR(255) NOT NULL,
-        \`aula_numero_aluno\` INT NOT NULL DEFAULT 1,
-        \`aula_data_aluno\` DATE DEFAULT NULL,
-        \`aula_hora_aluno\` VARCHAR(32) DEFAULT NULL,
-        \`aula_conteudo_aluno\` VARCHAR(500) DEFAULT NULL,
-        \`observacao_aluno\` TEXT DEFAULT NULL,
-        \`nota_aluno\` VARCHAR(32) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_aluno_aulas_aluno\` (\`aluno_id\`)
+      CREATE TABLE IF NOT EXISTS \`ALUNO_TURMA\` (
+        \`ID_ALUNO_TURMA\` VARCHAR(64) NOT NULL,
+        \`TURMA_ID_ALUNO_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`TURMA_ALUNO_ALUNO_TURMA\` VARCHAR(64) NOT NULL,
+        \`MODULO_ALUNO_ALUNO_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`PROFESSOR_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`INSTRUTOR1_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`INSTRUTOR2_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`INSTRUTOR3_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`INSTRUTOR4_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`MASP_ALUNO_ALUNO_TURMA\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_ALUNO_ALUNO_TURMA\` VARCHAR(255) NOT NULL,
+        \`SITUACAO_ALUNO_ALUNO_TURMA\` VARCHAR(64) NOT NULL DEFAULT 'Ativo',
+        \`DEPARTAMENTO_ALUNO_ALUNO_TURMA\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO_ALUNO_TURMA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_ALUNO_TURMA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_ALUNO_TURMA\`),
+        KEY \`idx_alturma_turma\` (\`TURMA_ALUNO_ALUNO_TURMA\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 22. Calendario Aulas
+    // 22. ALUNO_AULAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`calendario_aulas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`data_calendario\` DATE NOT NULL,
-        \`horario_calendario\` VARCHAR(64) NOT NULL,
-        \`turma_calendario\` VARCHAR(64) NOT NULL,
-        \`sigla_calendario\` VARCHAR(64) NOT NULL,
-        \`disciplina_calendario\` VARCHAR(255) DEFAULT NULL,
-        \`sala_calendario\` VARCHAR(100) DEFAULT NULL,
-        \`curso_calendario\` VARCHAR(255) DEFAULT NULL,
-        \`modulo_calendario\` VARCHAR(100) DEFAULT NULL,
-        \`ano_calendario\` VARCHAR(64) DEFAULT NULL,
-        \`numero_aula_calendario\` VARCHAR(64) DEFAULT NULL,
-        \`equipe_calendario\` VARCHAR(100) DEFAULT NULL,
-        \`observacao_calendario\` TEXT DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`ALUNO_AULAS\` (
+        \`ID_ALUNO_AULAS\` VARCHAR(64) NOT NULL,
+        \`ALUNO_ID_ALUNO_AULAS\` VARCHAR(64) NOT NULL,
+        \`AULA_NOME_ALUNO_ALUNO_AULAS\` VARCHAR(255) NOT NULL,
+        \`AULA_NUMERO_ALUNO_ALUNO_AULAS\` INT NOT NULL DEFAULT 1,
+        \`AULA_DATA_ALUNO_ALUNO_AULAS\` DATE DEFAULT NULL,
+        \`AULA_HORA_ALUNO_ALUNO_AULAS\` VARCHAR(32) DEFAULT NULL,
+        \`AULA_CONTEUDO_ALUNO_ALUNO_AULAS\` VARCHAR(500) DEFAULT NULL,
+        \`OBSERVACAO_ALUNO_ALUNO_AULAS\` TEXT DEFAULT NULL,
+        \`NOTA_ALUNO_ALUNO_AULAS\` VARCHAR(32) DEFAULT NULL,
+        \`DATA_CRIACAO_ALUNO_AULAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_ALUNO_AULAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_ALUNO_AULAS\`),
+        KEY \`idx_alaulas_aluno\` (\`ALUNO_ID_ALUNO_AULAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 23. Equipe Calendario
+    // 23. CALENDARIO_AULAS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`equipe_calendario\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome_da_equipe\` VARCHAR(100) NOT NULL,
-        \`materia\` VARCHAR(100) NOT NULL,
-        \`tipo_curso\` VARCHAR(100) NOT NULL DEFAULT 'Curso de Formação',
-        \`nome_do_curso\` VARCHAR(255) NOT NULL,
-        \`codigo_curso\` VARCHAR(100) DEFAULT NULL,
-        \`dates_curso\` TEXT DEFAULT NULL,
-        \`modulo\` VARCHAR(100) NOT NULL,
-        \`ano\` VARCHAR(10) DEFAULT NULL,
-        \`data\` DATE DEFAULT NULL,
-        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
-        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
-        \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
-        \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
+      CREATE TABLE IF NOT EXISTS \`CALENDARIO_AULAS\` (
+        \`ID_CALENDARIO_AULAS\` VARCHAR(64) NOT NULL,
+        \`DATA_CALENDARIO_AULAS\` DATE NOT NULL,
+        \`HORARIO_CALENDARIO_AULAS\` VARCHAR(64) NOT NULL,
+        \`TURMA_CALENDARIO_AULAS\` VARCHAR(64) NOT NULL,
+        \`SIGLA_CALENDARIO_AULAS\` VARCHAR(64) NOT NULL,
+        \`DISCIPLINA_CALENDARIO_AULAS\` VARCHAR(255) DEFAULT NULL,
+        \`SALA_CALENDARIO_AULAS\` VARCHAR(100) DEFAULT NULL,
+        \`CURSO_CALENDARIO_AULAS\` VARCHAR(255) DEFAULT NULL,
+        \`MODULO_CALENDARIO_AULAS\` VARCHAR(100) DEFAULT NULL,
+        \`ANO_CALENDARIO_AULAS\` VARCHAR(64) DEFAULT NULL,
+        \`NUMERO_AULA_CALENDARIO_AULAS\` VARCHAR(64) DEFAULT NULL,
+        \`EQUIPE_CALENDARIO_AULAS\` VARCHAR(100) DEFAULT NULL,
+        \`OBSERVACAO_CALENDARIO_AULAS\` TEXT DEFAULT NULL,
+        \`DATA_CRIACAO_CALENDARIO_AULAS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CALENDARIO_AULAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 24. Professores Equipe
+    // 24. EQUIPE_CALENDARIO
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`professores_equipe\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`equipe_id\` VARCHAR(64) NOT NULL,
-        \`nome_professor\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
-        \`titular\` VARCHAR(10) DEFAULT 'Não',
-        \`instrutor\` VARCHAR(10) DEFAULT NULL,
-        \`tipo_funcao\` VARCHAR(50) DEFAULT 'INSTRUTOR',
-        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
-        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
-        \`instrutor_id\` VARCHAR(64) DEFAULT NULL,
-        \`instrutor_nome\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_instrutor\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_prof_eq_id\` (\`equipe_id\`)
+      CREATE TABLE IF NOT EXISTS \`EQUIPE_CALENDARIO\` (
+        \`ID_EQUIPE_CALENDARIO\` VARCHAR(64) NOT NULL,
+        \`NOME_DA_EQUIPE_EQUIPE_CALENDARIO\` VARCHAR(100) NOT NULL,
+        \`MATERIA_EQUIPE_CALENDARIO\` VARCHAR(100) NOT NULL,
+        \`TIPO_CURSO_EQUIPE_CALENDARIO\` VARCHAR(100) NOT NULL DEFAULT 'Curso de Formação',
+        \`NOME_DO_CURSO_EQUIPE_CALENDARIO\` VARCHAR(255) NOT NULL,
+        \`CODIGO_CURSO_EQUIPE_CALENDARIO\` VARCHAR(100) DEFAULT NULL,
+        \`DATES_CURSO_EQUIPE_CALENDARIO\` TEXT DEFAULT NULL,
+        \`MODULO_EQUIPE_CALENDARIO\` VARCHAR(100) NOT NULL,
+        \`ANO_EQUIPE_CALENDARIO\` VARCHAR(10) DEFAULT NULL,
+        \`DATA_EQUIPE_CALENDARIO\` DATE DEFAULT NULL,
+        \`PROFESSOR_TITULAR_ID_EQUIPE_CALENDARIO\` VARCHAR(64) DEFAULT NULL,
+        \`PROFESSOR_TITULAR_NOME_EQUIPE_CALENDARIO\` VARCHAR(255) DEFAULT NULL,
+        \`SIGLA_PROFESSOR_EQUIPE_CALENDARIO\` VARCHAR(64) DEFAULT NULL,
+        \`INSTRUTOR_ID_EQUIPE_CALENDARIO\` VARCHAR(64) DEFAULT NULL,
+        \`INSTRUTOR_NOME_EQUIPE_CALENDARIO\` VARCHAR(255) DEFAULT NULL,
+        \`SIGLA_INSTRUTOR_EQUIPE_CALENDARIO\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_EQUIPE_CALENDARIO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_EQUIPE_CALENDARIO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 25. Auxiliar Tabela Equipe
+    // 25. PROFESSORES_EQUIPE
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`auxiliar_tabela_equipe\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`equipe_id\` VARCHAR(64) DEFAULT NULL,
-        \`nome_da_equipe\` VARCHAR(100) NOT NULL,
-        \`turma_id\` VARCHAR(64) DEFAULT NULL,
-        \`codigo_turma\` VARCHAR(64) NOT NULL,
-        \`materia\` VARCHAR(100) NOT NULL,
-        \`professor_titular_id\` VARCHAR(64) DEFAULT NULL,
-        \`professor_titular_nome\` VARCHAR(255) DEFAULT NULL,
-        \`sigla_professor\` VARCHAR(64) DEFAULT NULL,
-        \`professores\` JSON DEFAULT NULL,
-        \`data_inicio\` DATE NOT NULL,
-        \`data_fim\` DATE NOT NULL,
-        \`observacao\` TEXT DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_aux_eq_equipe\` (\`equipe_id\`),
-        KEY \`idx_aux_eq_turma\` (\`codigo_turma\`),
-        KEY \`idx_aux_eq_periodo\` (\`data_inicio\`, \`data_fim\`)
+      CREATE TABLE IF NOT EXISTS \`PROFESSORES_EQUIPE\` (
+        \`ID_PROFESSORES_EQUIPE\` VARCHAR(64) NOT NULL,
+        \`EQUIPE_ID_PROFESSORES_EQUIPE\` VARCHAR(64) NOT NULL,
+        \`NOME_PROFESSOR_PROFESSORES_EQUIPE\` VARCHAR(255) DEFAULT NULL,
+        \`SIGLA_PROFESSOR_PROFESSORES_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`TITULAR_PROFESSORES_EQUIPE\` VARCHAR(10) DEFAULT 'Não',
+        \`INSTRUTOR_PROFESSORES_EQUIPE\` VARCHAR(10) DEFAULT NULL,
+        \`TIPO_FUNCAO_PROFESSORES_EQUIPE\` VARCHAR(50) DEFAULT 'INSTRUTOR',
+        \`PROFESSOR_TITULAR_ID_PROFESSORES_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`PROFESSOR_TITULAR_NOME_PROFESSORES_EQUIPE\` VARCHAR(255) DEFAULT NULL,
+        \`INSTRUTOR_ID_PROFESSORES_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`INSTRUTOR_NOME_PROFESSORES_EQUIPE\` VARCHAR(255) DEFAULT NULL,
+        \`SIGLA_INSTRUTOR_PROFESSORES_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO_PROFESSORES_EQUIPE\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_PROFESSORES_EQUIPE\`),
+        KEY \`idx_profeq_equipe\` (\`EQUIPE_ID_PROFESSORES_EQUIPE\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 26. Certificados
+    // 26. AUXILIAR_TABELA_EQUIPE
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`certificados\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`codigo_autenticacao\` VARCHAR(128) NOT NULL,
-        \`titulo\` VARCHAR(255) NOT NULL,
-        \`nome_aluno\` VARCHAR(255) NOT NULL,
-        \`cpf_masp\` VARCHAR(64) DEFAULT NULL,
-        \`descricao\` TEXT DEFAULT NULL,
-        \`nome_arquivo\` VARCHAR(255) NOT NULL,
-        \`pdf_base64\` LONGTEXT NOT NULL,
-        \`pdf_stamped_base64\` LONGTEXT DEFAULT NULL,
-        \`tamanho_bytes\` INT DEFAULT NULL,
-        \`tipo_mime\` VARCHAR(64) DEFAULT 'application/pdf',
-        \`data_emissao\` DATE DEFAULT NULL,
-        \`criado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`criado_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`status\` ENUM('Valido', 'Revogado') NOT NULL DEFAULT 'Valido',
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_codigo_autenticacao\` (\`codigo_autenticacao\`),
-        KEY \`idx_cert_nome_aluno\` (\`nome_aluno\`),
-        KEY \`idx_cert_cpf_masp\` (\`cpf_masp\`),
-        KEY \`idx_cert_data_emissao\` (\`data_emissao\`),
-        KEY \`idx_cert_status\` (\`status\`)
+      CREATE TABLE IF NOT EXISTS \`AUXILIAR_TABELA_EQUIPE\` (
+        \`ID_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) NOT NULL,
+        \`EQUIPE_ID_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`NOME_DA_EQUIPE_AUXILIAR_TABELA_EQUIPE\` VARCHAR(100) NOT NULL,
+        \`TURMA_ID_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`CODIGO_TURMA_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) NOT NULL,
+        \`MATERIA_AUXILIAR_TABELA_EQUIPE\` VARCHAR(100) NOT NULL,
+        \`PROFESSOR_TITULAR_ID_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`PROFESSOR_TITULAR_NOME_AUXILIAR_TABELA_EQUIPE\` VARCHAR(255) DEFAULT NULL,
+        \`SIGLA_PROFESSOR_AUXILIAR_TABELA_EQUIPE\` VARCHAR(64) DEFAULT NULL,
+        \`PROFESSORES_AUXILIAR_TABELA_EQUIPE\` JSON DEFAULT NULL,
+        \`DATA_INICIO_AUXILIAR_TABELA_EQUIPE\` DATE NOT NULL,
+        \`DATA_FIM_AUXILIAR_TABELA_EQUIPE\` DATE NOT NULL,
+        \`OBSERVACAO_AUXILIAR_TABELA_EQUIPE\` TEXT DEFAULT NULL,
+        \`DATA_CRIACAO_AUXILIAR_TABELA_EQUIPE\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_AUXILIAR_TABELA_EQUIPE\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_AUXILIAR_TABELA_EQUIPE\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 27. Transferências de Armas entre Unidades
+    // 27. CERTIFICADOS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`transferencias_armas\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`numero_protocolo\` VARCHAR(64) DEFAULT NULL,
-        \`data_transferencia\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`origem_departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`origem_departamento_nome\` VARCHAR(255) DEFAULT NULL,
-        \`origem_unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`origem_unidade_nome\` VARCHAR(255) DEFAULT NULL,
-        \`destino_departamento_id\` VARCHAR(64) DEFAULT NULL,
-        \`destino_departamento_nome\` VARCHAR(255) DEFAULT NULL,
-        \`destino_unidade_id\` VARCHAR(64) DEFAULT NULL,
-        \`destino_unidade_nome\` VARCHAR(255) DEFAULT NULL,
-        \`destino_cofre_id\` VARCHAR(64) DEFAULT NULL,
-        \`destino_cofre_codigo\` VARCHAR(64) DEFAULT NULL,
-        \`responsavel_id\` VARCHAR(64) NOT NULL,
-        \`responsavel_nome\` VARCHAR(255) NOT NULL,
-        \`responsavel_masp\` VARCHAR(32) NOT NULL,
-        \`responsavel_perfil\` VARCHAR(64) NOT NULL,
-        \`transportador_nome\` VARCHAR(255) NOT NULL,
-        \`transportador_masp\` VARCHAR(32) NOT NULL,
-        \`transportador_cargo\` VARCHAR(64) DEFAULT NULL,
-        \`motivo\` TEXT NOT NULL,
-        \`armas_json\` JSON NOT NULL,
-        \`total_armas\` INT NOT NULL DEFAULT 1,
-        \`total_carregadores\` INT NOT NULL DEFAULT 0,
-        \`observacao\` TEXT DEFAULT NULL,
-        \`status\` ENUM('Pendente', 'Recebido', 'Cancelado') NOT NULL DEFAULT 'Pendente',
-        \`recebido_em\` DATETIME DEFAULT NULL,
-        \`recebido_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`recebido_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`recebido_por_masp\` VARCHAR(32) DEFAULT NULL,
-        \`recebido_por_perfil\` VARCHAR(64) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_trf_origem\` (\`origem_unidade_id\`),
-        KEY \`idx_trf_destino\` (\`destino_unidade_id\`),
-        KEY \`idx_trf_status\` (\`status\`),
-        KEY \`idx_trf_data\` (\`data_transferencia\`)
+      CREATE TABLE IF NOT EXISTS \`CERTIFICADOS\` (
+        \`ID_CERTIFICADOS\` VARCHAR(64) NOT NULL,
+        \`CODIGO_AUTENTICACAO_CERTIFICADOS\` VARCHAR(128) NOT NULL,
+        \`TITULO_CERTIFICADOS\` VARCHAR(255) NOT NULL,
+        \`NOME_ALUNO_CERTIFICADOS\` VARCHAR(255) NOT NULL,
+        \`CPF_MASP_CERTIFICADOS\` VARCHAR(64) DEFAULT NULL,
+        \`DESCRICAO_CERTIFICADOS\` TEXT DEFAULT NULL,
+        \`NOME_ARQUIVO_CERTIFICADOS\` VARCHAR(255) NOT NULL,
+        \`PDF_BASE64_CERTIFICADOS\` LONGTEXT NOT NULL,
+        \`PDF_STAMPED_BASE64_CERTIFICADOS\` LONGTEXT DEFAULT NULL,
+        \`TAMANHO_BYTES_CERTIFICADOS\` INT DEFAULT NULL,
+        \`TIPO_MIME_CERTIFICADOS\` VARCHAR(64) DEFAULT 'application/pdf',
+        \`DATA_EMISSAO_CERTIFICADOS\` DATE DEFAULT NULL,
+        \`CRIADO_POR_USUARIO_ID_CERTIFICADOS\` VARCHAR(64) DEFAULT NULL,
+        \`CRIADO_POR_NOME_CERTIFICADOS\` VARCHAR(255) DEFAULT NULL,
+        \`STATUS_CERTIFICADOS\` ENUM('Valido', 'Revogado') NOT NULL DEFAULT 'Valido',
+        \`DATA_CRIACAO_CERTIFICADOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_CERTIFICADOS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CERTIFICADOS\`),
+        UNIQUE KEY \`uk_cert_codigo\` (\`CODIGO_AUTENTICACAO_CERTIFICADOS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 28. Tipos de Materiais
+    // 28. TIPOS_MATERIAIS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`tipos_materiais\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`nome\` VARCHAR(128) NOT NULL,
-        \`descricao\` TEXT DEFAULT NULL,
-        \`categoria\` VARCHAR(100) DEFAULT 'Geral',
-        \`eh_consumivel\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        UNIQUE KEY \`uk_tipos_materiais_nome\` (\`nome\`)
+      CREATE TABLE IF NOT EXISTS \`TIPOS_MATERIAIS\` (
+        \`ID_TIPOS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`NOME_TIPOS_MATERIAIS\` VARCHAR(128) NOT NULL,
+        \`DESCRICAO_TIPOS_MATERIAIS\` TEXT DEFAULT NULL,
+        \`CATEGORIA_TIPOS_MATERIAIS\` VARCHAR(100) DEFAULT 'Geral',
+        \`EH_CONSUMIVEL_TIPOS_MATERIAIS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DATA_CRIACAO_TIPOS_MATERIAIS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_TIPOS_MATERIAIS\`),
+        UNIQUE KEY \`uk_tipomat_nome\` (\`NOME_TIPOS_MATERIAIS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 29. Materiais (Estoque de Equipamentos e Materiais)
+    // 29. MATERIAIS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`materiais\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`tipo_material_id\` VARCHAR(64) NOT NULL,
-        \`tipo_material_nome\` VARCHAR(128) NOT NULL,
-        \`nome\` VARCHAR(255) NOT NULL,
-        \`quantidade\` INT NOT NULL DEFAULT 1,
-        \`quantidade_disponivel\` INT NOT NULL DEFAULT 1,
-        \`quantidade_em_uso\` INT NOT NULL DEFAULT 0,
-        \`quantidade_consumida\` INT NOT NULL DEFAULT 0,
-        \`departamento_id\` VARCHAR(64) NOT NULL,
-        \`departamento_nome\` VARCHAR(255) DEFAULT NULL,
-        \`unidade_id\` VARCHAR(64) NOT NULL,
-        \`unidade_nome\` VARCHAR(255) DEFAULT NULL,
-        \`validade\` DATE DEFAULT NULL,
-        \`local_guarda\` VARCHAR(255) NOT NULL,
-        \`numero_serie\` VARCHAR(128) DEFAULT NULL,
-        \`observacoes\` TEXT DEFAULT NULL,
-        \`criado_por_usuario_id\` VARCHAR(64) DEFAULT NULL,
-        \`criado_por_nome\` VARCHAR(255) DEFAULT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_materiais_tipo\` (\`tipo_material_id\`),
-        KEY \`idx_materiais_dept\` (\`departamento_id\`),
-        KEY \`idx_materiais_unidade\` (\`unidade_id\`),
-        KEY \`idx_materiais_validade\` (\`validade\`)
+      CREATE TABLE IF NOT EXISTS \`MATERIAIS\` (
+        \`ID_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`TIPO_MATERIAL_ID_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`TIPO_MATERIAL_NOME_MATERIAIS\` VARCHAR(128) NOT NULL,
+        \`NOME_MATERIAIS\` VARCHAR(255) NOT NULL,
+        \`QUANTIDADE_MATERIAIS\` INT NOT NULL DEFAULT 1,
+        \`QUANTIDADE_DISPONIVEL_MATERIAIS\` INT NOT NULL DEFAULT 1,
+        \`QUANTIDADE_EM_USO_MATERIAIS\` INT NOT NULL DEFAULT 0,
+        \`QUANTIDADE_CONSUMIDA_MATERIAIS\` INT NOT NULL DEFAULT 0,
+        \`DEPARTAMENTO_ID_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`DEPARTAMENTO_NOME_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`UNIDADE_ID_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`UNIDADE_NOME_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`VALIDADE_MATERIAIS\` DATE DEFAULT NULL,
+        \`LOCAL_GUARDA_MATERIAIS\` VARCHAR(255) NOT NULL,
+        \`NUMERO_SERIE_MATERIAIS\` VARCHAR(128) DEFAULT NULL,
+        \`OBSERVACOES_MATERIAIS\` TEXT DEFAULT NULL,
+        \`CRIADO_POR_USUARIO_ID_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`CRIADO_POR_NOME_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO_MATERIAIS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO_MATERIAIS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_MATERIAIS\`),
+        KEY \`idx_mat_tipo\` (\`TIPO_MATERIAL_ID_MATERIAIS\`),
+        KEY \`idx_mat_unidade\` (\`UNIDADE_ID_MATERIAIS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // 30. Cautelas e Movimentações de Materiais
+    // 30. CAUTELAS_MATERIAIS
     await connection.query(`
-      CREATE TABLE IF NOT EXISTS \`cautelas_materiais\` (
-        \`id\` VARCHAR(64) NOT NULL,
-        \`protocolo\` VARCHAR(64) DEFAULT NULL,
-        \`material_id\` VARCHAR(64) NOT NULL,
-        \`material_nome\` VARCHAR(255) NOT NULL,
-        \`tipo_material_nome\` VARCHAR(128) DEFAULT NULL,
-        \`quantidade\` INT NOT NULL DEFAULT 1,
-        \`tipo_destinatario\` ENUM('interno', 'externo') NOT NULL DEFAULT 'interno',
-        \`usuario_interno_id\` VARCHAR(64) DEFAULT NULL,
-        \`usuario_interno_nome\` VARCHAR(255) DEFAULT NULL,
-        \`usuario_interno_masp\` VARCHAR(32) DEFAULT NULL,
-        \`usuario_interno_cargo\` VARCHAR(64) DEFAULT NULL,
-        \`usuario_externo_nome\` VARCHAR(255) DEFAULT NULL,
-        \`usuario_externo_documento\` VARCHAR(64) DEFAULT NULL,
-        \`usuario_externo_orgao\` VARCHAR(255) DEFAULT NULL,
-        \`usuario_externo_telefone\` VARCHAR(32) DEFAULT NULL,
-        \`data_retirada\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_prevista_devolucao\` DATE DEFAULT NULL,
-        \`data_devolucao\` DATETIME DEFAULT NULL,
-        \`finalidade\` TEXT NOT NULL,
-        \`status\` ENUM('Em Uso', 'Devolvido', 'Consumido', 'Devolvido com Anomalia') NOT NULL DEFAULT 'Em Uso',
-        \`foi_consumido\` TINYINT(1) NOT NULL DEFAULT 0,
-        \`relato_uso_anomalias\` TEXT DEFAULT NULL,
-        \`responsavel_entrega_id\` VARCHAR(64) NOT NULL,
-        \`responsavel_entrega_nome\` VARCHAR(255) NOT NULL,
-        \`responsavel_entrega_masp\` VARCHAR(32) DEFAULT NULL,
-        \`responsavel_recebimento_id\` VARCHAR(64) DEFAULT NULL,
-        \`responsavel_recebimento_nome\` VARCHAR(255) DEFAULT NULL,
-        \`responsavel_recebimento_masp\` VARCHAR(32) DEFAULT NULL,
-        \`departamento_id\` VARCHAR(64) NOT NULL,
-        \`unidade_id\` VARCHAR(64) NOT NULL,
-        \`data_criacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        \`data_atualizacao\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        KEY \`idx_cautelas_material\` (\`material_id\`),
-        KEY \`idx_cautelas_status\` (\`status\`),
-        KEY \`idx_cautelas_usr_int\` (\`usuario_interno_id\`),
-        KEY \`idx_cautelas_dept\` (\`departamento_id\`),
-        KEY \`idx_cautelas_unidade\` (\`unidade_id\`)
+      CREATE TABLE IF NOT EXISTS \`CAUTELAS_MATERIAIS\` (
+        \`ID_CAUTELAS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`PROTOCOLO_CAUTELAS_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`MATERIAL_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`MATERIAL_NOME_CAUTELAS_MATERIAIS\` VARCHAR(255) NOT NULL,
+        \`TIPO_MATERIAL_NOME_CAUTELAS_MATERIAIS\` VARCHAR(128) DEFAULT NULL,
+        \`QUANTIDADE_CAUTELAS_MATERIAIS\` INT NOT NULL DEFAULT 1,
+        \`TIPO_DESTINATARIO_CAUTELAS_MATERIAIS\` ENUM('interno', 'externo') NOT NULL DEFAULT 'interno',
+        \`USUARIO_INTERNO_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS\` VARCHAR(32) DEFAULT NULL,
+        \`USUARIO_INTERNO_CARGO_CAUTELAS_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`USUARIO_EXTERNO_DOCUMENTO_CAUTELAS_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`USUARIO_EXTERNO_ORGAO_CAUTELAS_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`USUARIO_EXTERNO_TELEFONE_CAUTELAS_MATERIAIS\` VARCHAR(32) DEFAULT NULL,
+        \`DATA_RETIRADA_CAUTELAS_MATERIAIS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_PREVISTA_DEVOLUCAO_CAUTELAS_MATERIAIS\` DATE DEFAULT NULL,
+        \`DATA_DEVOLUCAO_CAUTELAS_MATERIAIS\` DATETIME DEFAULT NULL,
+        \`FINALIDADE_CAUTELAS_MATERIAIS\` TEXT NOT NULL,
+        \`STATUS_CAUTELAS_MATERIAIS\` ENUM('Em Uso', 'Devolvido', 'Consumido', 'Devolvido com Anomalia') NOT NULL DEFAULT 'Em Uso',
+        \`FOI_CONSUMIDO_CAUTELAS_MATERIAIS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS\` TEXT DEFAULT NULL,
+        \`RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS\` VARCHAR(255) NOT NULL,
+        \`RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS\` VARCHAR(32) DEFAULT NULL,
+        \`RESPONSAVEL_RECEBIMENTO_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) DEFAULT NULL,
+        \`RESPONSAVEL_RECEBIMENTO_NOME_CAUTELAS_MATERIAIS\` VARCHAR(255) DEFAULT NULL,
+        \`RESPONSAVEL_RECEBIMENTO_MASP_CAUTELAS_MATERIAIS\` VARCHAR(32) DEFAULT NULL,
+        \`DEPARTAMENTO_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`UNIDADE_ID_CAUTELAS_MATERIAIS\` VARCHAR(64) NOT NULL,
+        \`DATA_CRIACAO_CAUTELAS_MATERIAIS\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_CAUTELAS_MATERIAIS\`),
+        KEY \`idx_caut_mat\` (\`MATERIAL_ID_CAUTELAS_MATERIAIS\`),
+        KEY \`idx_caut_user\` (\`USUARIO_INTERNO_ID_CAUTELAS_MATERIAIS\`),
+        KEY \`idx_caut_unidade\` (\`UNIDADE_ID_CAUTELAS_MATERIAIS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
-    // Migrations for existing transferencias_armas tables
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`status\` ENUM('Pendente', 'Recebido', 'Cancelado') NOT NULL DEFAULT 'Pendente';`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_em\` DATETIME DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_por_usuario_id\` VARCHAR(64) DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_por_nome\` VARCHAR(255) DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_por_masp\` VARCHAR(32) DEFAULT NULL;`);
-    } catch (_) {}
-    try {
-      await connection.query(`ALTER TABLE \`transferencias_armas\` ADD COLUMN \`recebido_por_perfil\` VARCHAR(64) DEFAULT NULL;`);
-    } catch (_) {}
-
-    // Create Backwards Compatible SQL Views for legacy English code queries
-    try {
-      await connection.query(`CREATE OR REPLACE VIEW \`departments\` AS SELECT id, nome AS name, codigo AS code, data_criacao AS created_at FROM \`departamentos\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`units\` AS SELECT id, departamento_id AS department_id, nome AS name, data_criacao AS created_at FROM \`unidades\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`users\` AS SELECT id, masp, senha AS password, nome AS name, telefone AS phone, cargo, perfil AS role, departamento_id AS department_id, unidade_id AS unit_id, pode_mover_municao AS can_move_ammo, pode_mover_armas AS can_move_weapons, tem_acesso_sistema AS has_system_access, eh_professor AS is_teacher, disciplina_professor AS teacher_subject, professor_sigla, deve_alterar_senha AS must_change_password, data_criacao AS created_at FROM \`usuarios\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`calibers\` AS SELECT id, nome AS name, data_criacao AS created_at FROM \`calibres\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`available_weapon_types\` AS SELECT id, nome AS name, modelos AS models, data_criacao AS created_at FROM \`tipos_armas\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`vault_spaces\` AS SELECT id, codigo AS code, tipo AS type, departamento_id AS department_id, unidade_id AS unit_id, data_criacao AS created_at FROM \`cofres\`;`);
-      // Safe schema alignment for weapons table (supports both English and Portuguese columns):
-      try {
-        await connection.query('ALTER TABLE `weapons` CHANGE COLUMN ` observacao_localizacao` `observacao_localizacao` VARCHAR(255) DEFAULT NULL;');
-      } catch (_) {}
-
-      const alterColumns = [
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `type` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `serial_number` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `manufacturer` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `model` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `caliber` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `magazine_quantity` INT DEFAULT 1;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `department_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `unit_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `vault_space_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `location_note` VARCHAR(255) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `observacao_localizacao` VARCHAR(255) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `last_maintenance_date` DATE DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `last_maintenance_responsible` VARCHAR(255) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `tipo` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `numero_serie` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `fabricante` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `modelo` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `calibre` VARCHAR(128) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `quantidade_carregadores` INT DEFAULT 1;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `departamento_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `unidade_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `cofre_id` VARCHAR(64) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `data_ultima_manutencao` DATE DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `responsavel_ultima_manutencao` VARCHAR(255) DEFAULT NULL;',
-        'ALTER TABLE `weapons` ADD COLUMN IF NOT EXISTS `data_criacao` DATETIME DEFAULT CURRENT_TIMESTAMP;'
-      ];
-      for (const q of alterColumns) {
-        try { await connection.query(q); } catch (_) {}
-      }
-
-      try {
-        await connection.query(`
-          UPDATE \`weapons\` SET
-            \`type\` = COALESCE(\`type\`, \`tipo\`),
-            \`serial_number\` = COALESCE(\`serial_number\`, \`numero_serie\`),
-            \`manufacturer\` = COALESCE(\`manufacturer\`, \`fabricante\`),
-            \`model\` = COALESCE(\`model\`, \`modelo\`),
-            \`caliber\` = COALESCE(\`caliber\`, \`calibre\`),
-            \`magazine_quantity\` = COALESCE(\`magazine_quantity\`, \`quantidade_carregadores\`, 1),
-            \`department_id\` = COALESCE(\`department_id\`, \`departamento_id\`),
-            \`unit_id\` = COALESCE(\`unit_id\`, \`unidade_id\`),
-            \`vault_space_id\` = COALESCE(\`vault_space_id\`, \`cofre_id\`),
-            \`location_note\` = COALESCE(\`location_note\`, \`observacao_localizacao\`),
-            \`last_maintenance_date\` = COALESCE(\`last_maintenance_date\`, \`data_ultima_manutencao\`),
-            \`last_maintenance_responsible\` = COALESCE(\`last_maintenance_responsible\`, \`responsavel_ultima_manutencao\`),
-            \`created_at\` = COALESCE(\`created_at\`, \`data_criacao\`)
-        `);
-      } catch (_) {}
-
-      await connection.query(`CREATE OR REPLACE VIEW \`weapon_transfers\` AS SELECT id, numero_protocolo AS protocol_number, data_transferencia AS transfer_date, origem_departamento_id AS origin_department_id, origem_departamento_nome AS origin_department_name, origem_unidade_id AS origin_unit_id, origem_unidade_nome AS origin_unit_name, destino_departamento_id AS destination_department_id, destino_departamento_nome AS destination_department_name, destino_unidade_id AS destination_unit_id, destino_unidade_nome AS destination_unit_name, destino_cofre_id AS destination_vault_space_id, destino_cofre_codigo AS destination_vault_space_code, responsavel_id AS transferred_by_user_id, responsavel_nome AS transferred_by_user_name, responsavel_masp AS transferred_by_user_masp, responsavel_perfil AS transferred_by_user_role, transportador_nome AS receiver_or_transporter_name, transportador_masp AS receiver_or_transporter_masp, transportador_cargo AS receiver_or_transporter_cargo, motivo AS reason, armas_json AS weapons_json, total_armas AS total_weapons, total_carregadores AS total_magazines, observacao AS observation, status, recebido_em AS received_at, recebido_por_usuario_id AS received_by_user_id, recebido_por_nome AS received_by_user_name, recebido_por_masp AS received_by_user_masp, recebido_por_perfil AS received_by_user_role, data_criacao AS created_at FROM \`transferencias_armas\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`ammo_stocks\` AS SELECT id, calibre_id, quantidade AS quantity, departamento_id AS department_id, unidade_id AS unit_id, cofre_id AS vault_space_id, data_atualizacao AS updated_at FROM \`estoque_municoes\`;`);
-
-      await connection.query(`CREATE OR REPLACE VIEW \`courses\` AS SELECT id, nome AS name, modelos_permitidos AS allowed_models, calibres_permitidos AS allowed_calibers, tipos_armas_permitidos AS allowed_weapon_types, tiros_por_aluno AS shots_per_student, tiros_por_tipo_arma AS shots_per_weapon_type, departamento_id AS department_id, data_criacao AS created_at FROM \`cursos\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`user_courses\` AS SELECT id, usuario_id AS user_id, curso_id, data_conclusao AS completion_date, data_validade AS expiration_date, data_criacao AS created_at FROM \`usuario_cursos\`;`);
-      await connection.query(`CREATE OR REPLACE VIEW \`audit_logs\` AS SELECT id, modulo AS module, acao AS action, detalhes AS details, usuario_id AS user_id, nome_usuario AS user_name, masp_usuario AS user_masp, perfil_usuario AS user_role, endereco_ip AS ip_address, data_hora AS timestamp FROM \`logs_auditoria\`;`);
-    } catch (e) {
-      console.warn('Views backwards compatibility warning:', e);
-    }
-
-    // --- SEED INITIAL DATA IN PORTUGUESE TABLES IF EMPTY ---
-    const [deptRows]: any = await connection.query('SELECT COUNT(*) as count FROM departamentos');
-    if (deptRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'departamentos'...");
+    // Inserção de dados iniciais caso as tabelas estejam vazias
+    const [deptRows]: any = await connection.query('SELECT COUNT(*) as total FROM DEPARTAMENTOS');
+    if (deptRows[0].total === 0) {
+      logs.push("Inserindo dados iniciais em 'DEPARTAMENTOS'...");
       await connection.query(`
-        INSERT INTO departamentos (id, nome, codigo) VALUES
+        INSERT INTO DEPARTAMENTOS (ID_DEPARTAMENTOS, NOME_DEPARTAMENTOS, CODIGO_DEPARTAMENTOS) VALUES
         ('dept-acad', 'ACADEMIA DE POLICIA', 'ACADEPOL'),
         ('dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'DOE-COE'),
         ('dept-dhpp', 'DEPARTAMENTO DE HOMICÍDIOS E PROTEÇÃO À PESSOA (DHPP)', 'DHPP'),
@@ -818,11 +728,11 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [unitRows]: any = await connection.query('SELECT COUNT(*) as count FROM unidades');
-    if (unitRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'unidades'...");
+    const [unitRows]: any = await connection.query('SELECT COUNT(*) as total FROM UNIDADES');
+    if (unitRows[0].total === 0) {
+      logs.push("Inserindo dados iniciais em 'UNIDADES'...");
       await connection.query(`
-        INSERT INTO unidades (id, departamento_id, nome) VALUES
+        INSERT INTO UNIDADES (ID_UNIDADES, DEPARTAMENTO_ID_UNIDADES, NOME_UNIDADES) VALUES
         ('unit-acad-meaf', 'dept-acad', 'MEAF - Módulo de Ensino de Armamento e Tiro'),
         ('unit-coe-insp', 'dept-coe', 'INSPETORIA COE'),
         ('unit-coe-grt', 'dept-coe', 'GRUPO DE RESGATE TÁTICO (GRT)'),
@@ -831,25 +741,11 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [wtRows]: any = await connection.query('SELECT COUNT(*) as count FROM tipos_armas');
-    if (wtRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'tipos_armas'...");
+    const [caliberRows]: any = await connection.query('SELECT COUNT(*) as total FROM CALIBRES');
+    if (caliberRows[0].total === 0) {
+      logs.push("Inserindo dados iniciais em 'CALIBRES'...");
       await connection.query(`
-        INSERT INTO tipos_armas (id, nome, modelos) VALUES
-        ('wt-pistola', 'Pistola', '["PT100", "PT24/7", "TS9", "Glock G22", "Glock G17", "Glock G19", "PT840", "PT92", "M&P9", "APX"]'),
-        ('wt-fuzil', 'Fuzil', '["T4", "IA2", "MD97", "FAL 7.62", "M4A1", "AR-15", "HK416"]'),
-        ('wt-submet', 'Submetralhadora', '["SMT40", "MT12", "MP5", "UMP40", "SAF 9mm"]'),
-        ('wt-espingarda', 'Espingarda', '["Calibre 12 CBC 586", "Calibre 12 Benelli M4", "Calibre 12 Mossberg 500", "Calibre 12 Boito"]'),
-        ('wt-revolver', 'Revólver', '["RT 889", "RT 85", "RT 82", "RT 357"]'),
-        ('wt-carabina', 'Carabina', '["CT40", "CT9", "CCT9"]');
-      `);
-    }
-
-    const [caliberRows]: any = await connection.query('SELECT COUNT(*) as count FROM calibres');
-    if (caliberRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'calibres'...");
-      await connection.query(`
-        INSERT INTO calibres (id, nome) VALUES
+        INSERT INTO CALIBRES (ID_CALIBRES, NOME_CALIBRES) VALUES
         ('cal-556', '5,56x45mm'),
         ('cal-40', '.40 S&W'),
         ('cal-9mm', '9x19mm'),
@@ -858,141 +754,16 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
-    const [courseRows]: any = await connection.query('SELECT COUNT(*) as count FROM cursos');
-    if (courseRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'cursos'...");
-      await connection.query(`
-        INSERT INTO cursos (id, nome, modelos_permitidos, calibres_permitidos, departamento_id) VALUES
-        ('course-fuzil', 'Operador de fuzil', '["T4", "IA2", "M4A1"]', '["5,56x45mm"]', 'dept-coe'),
-        ('course-pistola', 'Operador de Pistola', '["PT92", "Glock G22", "TH40", "PT840"]', '[".40 S&W", "9x19mm"]', 'dept-coe'),
-        ('course-12', 'Operador de Espingarda C12', '["CBC 586-P", "Benelli M4"]', '["12 GA"]', 'dept-coe');
-      `);
-    }
-
-    const [vaultRows]: any = await connection.query('SELECT COUNT(*) as count FROM cofres');
-    if (vaultRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'cofres'...");
-      await connection.query(`
-        INSERT INTO cofres (id, codigo, tipo, departamento_id, unidade_id) VALUES
-        ('vault-acad-1', 'COFRE-MEAF-01', 'ARMAS', 'dept-acad', 'unit-acad-meaf'),
-        ('vault-acad-2', 'COFRE-MEAF-02', 'MUNIÇÕES', 'dept-acad', 'unit-acad-meaf'),
-        ('vault-coe-1', 'A1-G1', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
-        ('vault-coe-2', 'A1-G2', 'ARMAS', 'dept-coe', 'unit-coe-insp'),
-        ('vault-coe-3', 'C1-L1', 'MUNIÇÕES', 'dept-coe', 'unit-coe-insp'),
-        ('vault-coe-4', 'C1-L2', 'MUNIÇÕES', 'dept-coe', 'unit-coe-insp'),
-        ('vault-dhpp-1', 'B1-G1', 'ARMAS', 'dept-dhpp', 'unit-dhpp-1'),
-        ('vault-dhpp-2', 'M1-L1', 'MUNIÇÕES', 'dept-dhpp', 'unit-dhpp-1');
-      `);
-    }
-
-    const [userRows]: any = await connection.query('SELECT COUNT(*) as count FROM usuarios');
-    if (userRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'usuarios'...");
-      await connection.query(`
-        INSERT INTO usuarios (id, masp, senha, nome, telefone, cargo, perfil, departamento_id, unidade_id, pode_mover_municao, pode_mover_armas, tem_acesso_sistema, deve_alterar_senha) VALUES
-        ('usr-master-geral', '1255748', '1255748', 'Administrador Geral Master', '31999998888', 'Delegado', 'Geral', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 1),
-        ('usr-admin-coe', '2222222', '2222222', 'Dr. Roberto Silva (Admin DOE)', '31988887777', 'Delegado', 'Administrador', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 0),
-        ('usr-armeiro-coe', '3333333', '3333333', 'Agente Carlos Andrade (Armeiro COE)', '31977776666', 'Investigador', 'Armeiro', 'dept-coe', 'unit-coe-insp', 1, 1, 1, 0),
-        ('usr-prof-meaf-1', '6666666', '6666666', 'Prof. Marcus Vinícius (Instrutor MEAF)', '31944443333', 'Investigador', 'Policial', 'dept-acad', 'unit-acad-meaf', 1, 1, 1, 0),
-        ('usr-policial-coe', '4444444', '4444444', 'Policial Eduardo Costa', '31966665555', 'Investigador', 'Policial', 'dept-coe', 'unit-coe-insp', 0, 0, 1, 0),
-        ('usr-policial-dhpp', '5555555', '5555555', 'Escrivã Ana Lima', '31955554444', 'Escrivão', 'Policial', 'dept-dhpp', 'unit-dhpp-1', 0, 0, 1, 0);
-      `);
-
-      await connection.query(`
-        INSERT INTO usuario_cursos (id, usuario_id, curso_id, data_conclusao, data_validade) VALUES
-        ('uc-1', 'usr-master-geral', 'course-fuzil', '2025-10-15', '2027-10-15'),
-        ('uc-2', 'usr-master-geral', 'course-pistola', '2025-11-20', '2027-11-20'),
-        ('uc-3', 'usr-admin-coe', 'course-fuzil', '2025-05-10', '2027-05-10'),
-        ('uc-4', 'usr-admin-coe', 'course-pistola', '2025-06-01', '2027-06-01'),
-        ('uc-5', 'usr-armeiro-coe', 'course-fuzil', '2025-01-15', '2027-01-15'),
-        ('uc-6', 'usr-armeiro-coe', 'course-pistola', '2025-02-10', '2027-02-10'),
-        ('uc-7', 'usr-armeiro-coe', 'course-12', '2025-03-01', '2027-03-01'),
-        ('uc-8', 'usr-policial-coe', 'course-fuzil', '2025-08-12', '2027-08-12'),
-        ('uc-9', 'usr-policial-coe', 'course-pistola', '2023-01-10', '2025-01-10'),
-        ('uc-10', 'usr-policial-dhpp', 'course-pistola', '2025-04-10', '2027-04-10');
-      `);
-    }
-
-    const [weaponRows]: any = await connection.query('SELECT COUNT(*) as count FROM armas');
-    if (weaponRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'armas'...");
-      await connection.query(`
-        INSERT INTO armas (id, tipo, numero_serie, fabricante, modelo, calibre, quantidade_carregadores, status, departamento_id, unidade_id, cofre_id, data_ultima_manutencao, responsavel_ultima_manutencao) VALUES
-        ('weap-1', 'Fuzil', 'EKG-5486', 'Taurus', 'T4', '5,56x45mm', 4, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-1', '2026-05-10', 'Agente Carlos Andrade'),
-        ('weap-2', 'Pistola', 'PT-998822', 'Taurus', 'PT92', '.40 S&W', 3, 'No Cofre', 'dept-coe', 'unit-coe-insp', 'vault-coe-2', '2026-06-15', 'Agente Carlos Andrade'),
-        ('weap-3', 'Espingarda', 'CBC-12009', 'CBC', 'CBC 586-P', '12 GA', 1, 'No Cofre', 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-1', '2026-04-01', 'Armeiro DHPP');
-      `);
-    }
-
-    const [ammoStockRows]: any = await connection.query('SELECT COUNT(*) as count FROM estoque_municoes');
-    if (ammoStockRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'estoque_municoes'...");
-      await connection.query(`
-        INSERT INTO estoque_municoes (id, calibre_id, quantidade, departamento_id, unidade_id, cofre_id) VALUES
-        ('stock-1', 'cal-556', 2500, 'dept-coe', 'unit-coe-insp', 'vault-coe-3'),
-        ('stock-2', 'cal-40', 1200, 'dept-coe', 'unit-coe-insp', 'vault-coe-4'),
-        ('stock-3', 'cal-9mm', 800, 'dept-dhpp', 'unit-dhpp-1', 'vault-dhpp-2'),
-        ('stock-acad-40', 'cal-40', 5000, 'dept-acad', 'unit-acad-meaf', 'vault-acad-2'),
-        ('stock-acad-9mm', 'cal-9mm', 5000, 'dept-acad', 'unit-acad-meaf', 'vault-acad-2');
-      `);
-    }
-
-    const [auditRows]: any = await connection.query('SELECT COUNT(*) as count FROM logs_auditoria');
-    if (auditRows[0].count === 0) {
-      logs.push("Inserindo dados iniciais em 'logs_auditoria'...");
-      await connection.query(`
-        INSERT INTO logs_auditoria (id, data_hora, usuario_id, nome_usuario, masp_usuario, perfil_usuario, modulo, acao, detalhes, endereco_ip) VALUES
-        ('log-1', NOW(), 'usr-master-geral', 'Administrador Geral Master', '1255748', 'Geral', 'Sistema', 'Remodelagem do Banco', 'Inicialização do banco de dados 100% remodelado e traduzido para o Português', '127.0.0.1');
-      `);
-    }
-
-    // Seed Tipos de Materiais
-    const [tipoMatRows]: any = await connection.query('SELECT COUNT(*) as count FROM tipos_materiais');
-    if (tipoMatRows[0].count === 0) {
-      logs.push("Inserindo tipos iniciais de materiais em 'tipos_materiais'...");
-      await connection.query(`
-        INSERT INTO tipos_materiais (id, nome, descricao, categoria, eh_consumivel) VALUES
-        ('tipo-mat-colete', 'Colete Balístico', 'Colete de proteção balística individual (Nível II, III-A, etc.)', 'Proteção Balística', 0),
-        ('tipo-mat-algema', 'Algemas', 'Par de algemas de corrente ou dobradiça em aço inox com chave', 'Contenção', 0),
-        ('tipo-mat-espargidor', 'Espargidor / Spray de Pimenta', 'Agente químico lacrimogêneo/OC em aerosol para controle de distúrbios e defesa', 'Menos Letal', 1),
-        ('tipo-mat-granada', 'Granada de Efeito Moral / Gás', 'Granadas não letais de luz e som, fumaça ou gás lacrimogêneo', 'Menos Letal', 1),
-        ('tipo-mat-lanterna', 'Lanterna Tática', 'Lanterna tática de alta intensidade recarregável para operações noturnas e CQB', 'Iluminação', 0),
-        ('tipo-mat-escudo', 'Escudo Balístico', 'Escudo de proteção balística com visor blindado', 'Proteção Balística', 0),
-        ('tipo-mat-radio', 'Rádio Comunicador HT', 'Rádio transceptor portátil digital/analógico VHF/UHF com bateria e carregador', 'Comunicação', 0),
-        ('tipo-mat-bastao', 'Bastão Retrátil / Tonfa', 'Bastão tático retrátil em aço ou tonfa de polímero para contenção', 'Contenção', 0),
-        ('tipo-mat-taser', 'Dispositivo Eletrochoque / Spark / Taser', 'Arma de eletrochoque por emissão de pulsos elétricos com cartuchos', 'Menos Letal', 0),
-        ('tipo-mat-drone', 'Aeronave Remotamente Pilotada (Drone)', 'Drone multirotor tático para vigilância, inteligência e reconhecimento aéreo', 'Tecnologia e Monitoramento', 0),
-        ('tipo-mat-aph', 'Kit de APH Tático / Torniquete', 'Kit de Primeiros Socorros em Combate (Torniquete, bandagem, selo de tórax)', 'Saúde Operacional', 1);
-      `);
-    }
-
-    // Seed Materiais de Exemplo
-    const [matRows]: any = await connection.query('SELECT COUNT(*) as count FROM materiais');
-    if (matRows[0].count === 0) {
-      logs.push("Inserindo materiais iniciais em 'materiais'...");
-      await connection.query(`
-        INSERT INTO materiais 
-        (id, tipo_material_id, tipo_material_nome, nome, quantidade, quantidade_disponivel, quantidade_em_uso, quantidade_consumida, departamento_id, departamento_nome, unidade_id, unidade_nome, validade, local_guarda, numero_serie, observacoes, criado_por_nome) 
-        VALUES
-        ('mat-01', 'tipo-mat-colete', 'Colete Balístico', 'Colete Balístico Nível III-A CBC Tam G', 15, 12, 3, 0, 'dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'unit-coe-insp', 'INSPETORIA COE', '2028-12-31', 'Armário de Proteção Balística A-01', 'PAT-COE-7890', 'Capas pretas táticas com sistema MOLLE', 'Administrador Geral Master'),
-        ('mat-02', 'tipo-mat-algema', 'Algemas', 'Par de Algemas de Corrente Inox Invictus', 20, 16, 4, 0, 'dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'unit-coe-insp', 'INSPETORIA COE', NULL, 'Gaveta de Contenção 03', 'SERIE-ALG-044', 'Acompanha 02 chaves por par', 'Administrador Geral Master'),
-        ('mat-03', 'tipo-mat-espargidor', 'Espargidor / Spray de Pimenta', 'Espargidor de Pimenta GL-108 Max Condor 50g', 30, 24, 4, 2, 'dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'unit-coe-insp', 'INSPETORIA COE', '2027-06-30', 'Prateleira de Não Letais B-02', 'LOTE-2024-C9', 'Material de uso único; relatar acionamento e ocorrência', 'Administrador Geral Master'),
-        ('mat-04', 'tipo-mat-radio', 'Rádio Comunicador HT', 'Rádio HT Motorola APX2000 Digital VHF', 10, 8, 2, 0, 'dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'unit-coe-insp', 'INSPETORIA COE', NULL, 'Bancada de Carregadores R-01', 'HT-MOT-102', 'Inclui base carregadora e fone de lapela acústico', 'Administrador Geral Master'),
-        ('mat-05', 'tipo-mat-drone', 'Aeronave Remotamente Pilotada (Drone)', 'Drone DJI Matrice 30T com Câmera Térmica e Zoom', 2, 1, 1, 0, 'dept-coe', 'DEPARTAMENTO DE OPERAÇÕES ESTRATÉGICAS (COE)', 'unit-coe-grt', 'GRUPO DE RESGATE TÁTICO (GRT)', '2030-01-01', 'Maleta Rígida Tática Case 01', 'DJI-M30T-BR09', 'Acompanha 6 baterias inteligentes e estação de recarga rápida', 'Administrador Geral Master'),
-        ('mat-06', 'tipo-mat-colete', 'Colete Balístico', 'Colete Balístico Nível III-A Feminino Tam M', 10, 10, 0, 0, 'dept-acad', 'ACADEMIA DE POLICIA', 'unit-acad-meaf', 'MEAF - Módulo de Ensino de Armamento e Tiro', '2029-05-15', 'Sala MEAF Armário 04', 'PAT-ACAD-4512', 'Para instrução de armamento e tiro na Acadepol', 'Administrador Geral Master');
-      `);
-    }
-
     await connection.query('SET FOREIGN_KEY_CHECKS = 1;');
     connection.release();
 
     return {
       success: true,
-      message: 'Todas as tabelas do MySQL foram remodeladas e organizadas em Português com sucesso!',
+      message: 'Todas as 30 tabelas do MariaDB / MySQL estruturadas em Português com sucesso!',
       log: logs,
     };
   } catch (err: any) {
-    console.error('[MySQL Init Schema Error]', err);
+    console.error('[Erro Inicialização MySQL]', err);
     return {
       success: false,
       message: `Erro ao inicializar tabelas MySQL: ${err.message}`,

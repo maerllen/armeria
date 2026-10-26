@@ -3,7 +3,7 @@ import { User, UserCargo, Department, Unit, Course } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
 import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette } from 'lucide-react';
-import { ThemeToggle } from './ThemeToggle';
+import { ThemeToggle } from './AlternadorTema';
 
 interface ProfileModuleProps {
   currentUser?: User | null;

@@ -3,7 +3,7 @@ import { User } from '../types';
 import { formatMasp } from '../utils/masks';
 import { Shield, LogOut, KeyRound, Smartphone, Monitor, Menu, X, ChevronDown } from 'lucide-react';
 import { DeviceInfo, DeviceMode } from '../utils/deviceDetection';
-import { ThemeToggle } from './ThemeToggle';
+import { ThemeToggle } from './AlternadorTema';
 
 interface NavbarProps {
   currentUser: User | null;

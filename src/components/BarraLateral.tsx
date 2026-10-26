@@ -20,7 +20,7 @@ import {
   Package
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
-import { ThemeToggle } from './ThemeToggle';
+import { ThemeToggle } from './AlternadorTema';
 
 interface SidebarProps {
   currentUser: UserType | null;

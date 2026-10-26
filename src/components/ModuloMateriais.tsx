@@ -37,7 +37,7 @@ import {
   Info
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
-import { MaterialReceiptModal } from './MaterialReceiptModal';
+import { MaterialReceiptModal } from './ModalReciboMaterial';
 
 interface MaterialModuleProps {
   currentUser: User | null;

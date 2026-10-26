@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { WeaponTransfer, User } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
-import { printTransferReceipt } from './TransferReceiptModal';
+import { printTransferReceipt } from './ModalReciboTransferencia';
 import {
   ArrowRightLeft,
   Search,
