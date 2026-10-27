@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -98,6 +98,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     responsibleMasp: string;
   } | null>(null);
   const [isSubmittingQuickMovement, setIsSubmittingQuickMovement] = useState(false);
+
+  // Vault Movement History Modal State (detalhes iniciam ocultos e só mostram se selecionados)
+  const [vaultHistoryStock, setVaultHistoryStock] = useState<AmmunitionStock | null>(null);
+  const [selectedHistoryMovId, setSelectedHistoryMovId] = useState<string | null>(null);
+  const [historyFilterCaliber, setHistoryFilterCaliber] = useState<boolean>(true);
 
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
@@ -564,6 +569,125 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     printDocumentInPage(html);
   };
 
+  // Print Vault Movement History Report
+  const handlePrintVaultHistoryReport = (targetStock: AmmunitionStock, historyMovs: AmmunitionMovement[]) => {
+    const vault = vaultSpaces.find(v => v.id === targetStock.vaultSpaceId);
+    const unit = units.find(u => u.id === targetStock.unitId);
+    const dept = departments.find(d => d.id === targetStock.departmentId);
+    const cal = calibers.find(c => c.id === targetStock.caliberId);
+
+    const totalEntradas = historyMovs
+      .filter(m => m.type === 'Entrada')
+      .reduce((sum, m) => sum + m.quantity, 0);
+
+    const totalSaidas = historyMovs
+      .filter(m => m.type === 'Saída')
+      .reduce((sum, m) => sum + m.quantity, 0);
+
+    const totalDevolvido = historyMovs
+      .reduce((sum, m) => sum + (m.returnedQuantity || 0), 0);
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Relatório de Movimentações - Cofre ${vault?.code || ''}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 15px; font-size: 11px; line-height: 1.35; }
+          .header { border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+          .title { font-size: 15px; font-weight: 900; text-transform: uppercase; color: #000; }
+          .subtitle { font-size: 11px; font-weight: bold; color: #374151; margin-top: 2px; }
+          .meta-box { background: #f3f4f6; border: 1px solid #d1d5db; border-radius: 6px; padding: 10px; margin-bottom: 14px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; font-family: monospace; font-size: 11px; }
+          .meta-item .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
+          .meta-item .val { font-size: 11px; font-weight: bold; color: #000; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 14px; font-size: 10px; }
+          th, td { border: 1px solid #d1d5db; padding: 6px 8px; text-align: left; }
+          th { background: #f9fafb; font-weight: bold; text-transform: uppercase; font-size: 9px; color: #374151; }
+          .badge-entrada { background: #dcfce7; color: #166534; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; display: inline-block; }
+          .badge-saida { background: #fef3c7; color: #92400e; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 9px; display: inline-block; }
+          .footer { margin-top: 25px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+          .signatures { margin-top: 35px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 10px; }
+          .sig-line { border-top: 1px solid #000; padding-top: 6px; font-weight: bold; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div>
+            <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+            <div class="subtitle">SISTEMA DE ARMERIA • RELATÓRIO DE MOVIMENTAÇÕES DE MUNIÇÕES NO COFRE</div>
+          </div>
+          <div style="text-align: right; font-family: monospace; font-size: 10px;">
+            Emissão: ${new Date().toLocaleString('pt-BR')}
+          </div>
+        </div>
+
+        <div class="meta-box">
+          <div class="meta-item"><span class="label">Cofre:</span><span class="val">${vault?.code || 'N/A'}</span></div>
+          <div class="meta-item"><span class="label">Calibre:</span><span class="val">${historyFilterCaliber ? (cal?.name || 'N/A') : 'Todos os Calibres'}</span></div>
+          <div class="meta-item"><span class="label">Unidade:</span><span class="val">${unit?.name || 'N/A'}</span></div>
+          <div class="meta-item"><span class="label">Departamento:</span><span class="val">${dept?.name || 'N/A'}</span></div>
+          <div class="meta-item"><span class="label">Estoque Atual:</span><span class="val" style="color: #059669;">${targetStock.quantity} un.</span></div>
+          <div class="meta-item"><span class="label">Total Entradas:</span><span class="val">+${totalEntradas} un.</span></div>
+          <div class="meta-item"><span class="label">Total Saídas:</span><span class="val">-${totalSaidas} un.</span></div>
+          <div class="meta-item"><span class="label">Total Devolvido:</span><span class="val">${totalDevolvido} un.</span></div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 15%;">Data/Hora</th>
+              <th style="width: 10%;">Tipo</th>
+              <th style="width: 12%;">Calibre</th>
+              <th style="width: 10%; text-align: right;">Qtd</th>
+              <th style="width: 20%;">Policial Responsável</th>
+              <th style="width: 18%;">Motivo / Destino</th>
+              <th style="width: 15%;">Informações Adicionais</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${historyMovs.length === 0 ? `
+              <tr><td colspan="7" style="text-align: center; color: #6b7280; padding: 15px;">Nenhuma movimentação registrada para este cofre.</td></tr>
+            ` : historyMovs.map(m => {
+              const mCal = calibers.find(c => c.id === m.caliberId);
+              const resp = m.responsibleName ? `${m.responsibleName}${m.responsibleMasp ? ` (${m.responsibleMasp})` : ''}` : (m.recipientOrReason || '-');
+              return `
+                <tr>
+                  <td style="font-family: monospace;">${formatTimestamp(m.createdAt)}</td>
+                  <td><span class="${m.type === 'Entrada' ? 'badge-entrada' : 'badge-saida'}">${m.type}</span></td>
+                  <td><strong>${mCal?.name || m.caliberId}</strong></td>
+                  <td style="text-align: right; font-weight: bold; font-family: monospace;">${m.type === 'Entrada' ? `+${m.quantity}` : `-${m.quantity}`}</td>
+                  <td>${resp}</td>
+                  <td>${m.recipientOrReason || '-'}</td>
+                  <td>${m.observation || '-'}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+
+        <div class="signatures">
+          <div class="sig-line">
+            ${currentUser.name} (MASP: ${currentUser.masp})<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Emissão</span>
+          </div>
+          <div class="sig-line">
+            Visto da Chefia / Inspetoria<br>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Assinatura / Carimbo</span>
+          </div>
+        </div>
+
+        <div class="footer">
+          Documento gerado eletronicamente pelo Sistema de Armeria • Polícia Civil de Minas Gerais
+        </div>
+      </body>
+      </html>
+    `;
+
+    printDocumentInPage(html);
+  };
+
   // Submit Unused Ammo Return
   const handleConfirmReturnAmmo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -955,6 +1079,20 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                     <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
+
+                                {/* Ícone de ver histórico de movimentações do cofre */}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setVaultHistoryStock(st);
+                                    setSelectedHistoryMovId(null);
+                                    setHistoryFilterCaliber(true);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-blue-400 hover:bg-slate-800 rounded-lg border border-transparent hover:border-slate-700 transition"
+                                  title="Ver Histórico de Movimentações do Cofre"
+                                >
+                                  <History className="w-3.5 h-3.5" />
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -1952,6 +2090,330 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Histórico de Movimentações do Cofre (inicia oculto e só mostra detalhes se selecionado) */}
+      {vaultHistoryStock && (() => {
+        const vault = vaultSpaces.find(v => v.id === vaultHistoryStock.vaultSpaceId);
+        const unit = units.find(u => u.id === vaultHistoryStock.unitId);
+        const dept = departments.find(d => d.id === vaultHistoryStock.departmentId);
+        const cal = calibers.find(c => c.id === vaultHistoryStock.caliberId);
+
+        const filteredHistoryMovs = movements.filter(m => {
+          const isSameVault = m.vaultSpaceId === vaultHistoryStock.vaultSpaceId;
+          if (historyFilterCaliber) {
+            return isSameVault && m.caliberId === vaultHistoryStock.caliberId;
+          }
+          return isSameVault;
+        });
+
+        const totalEntradas = filteredHistoryMovs
+          .filter(m => m.type === 'Entrada')
+          .reduce((sum, m) => sum + m.quantity, 0);
+
+        const totalSaidas = filteredHistoryMovs
+          .filter(m => m.type === 'Saída')
+          .reduce((sum, m) => sum + m.quantity, 0);
+
+        const totalDevolvido = filteredHistoryMovs
+          .reduce((sum, m) => sum + (m.returnedQuantity || 0), 0);
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl">
+              
+              {/* Header */}
+              <div className="px-6 py-4 bg-slate-800/90 border-b border-slate-700 flex items-center justify-between shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2 bg-blue-500/10 text-blue-400 rounded-xl border border-blue-500/20">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h3 className="text-base font-bold text-slate-100">
+                        Histórico de Movimentações do Cofre
+                      </h3>
+                      <span className="text-xs font-mono font-bold bg-slate-950 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded">
+                        Cofre: {vault?.code || 'N/A'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {unit?.name ? `${unit.name} • ` : ''}{dept?.name || ''}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handlePrintVaultHistoryReport(vaultHistoryStock, filteredHistoryMovs)}
+                    className="flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm"
+                    title="Imprimir Relatório Completo deste Cofre"
+                  >
+                    <Printer className="w-4 h-4 text-amber-400" />
+                    <span>Imprimir Relatório</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setVaultHistoryStock(null);
+                      setSelectedHistoryMovId(null);
+                    }}
+                    className="p-1.5 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Sub-header Summary & Filter Controls */}
+              <div className="p-4 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                {/* Filter toggle */}
+                <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-xl border border-slate-800 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setHistoryFilterCaliber(true)}
+                    className={`px-3 py-1 rounded-lg font-medium transition ${
+                      historyFilterCaliber
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Calibre {cal?.name || ''}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setHistoryFilterCaliber(false)}
+                    className={`px-3 py-1 rounded-lg font-medium transition ${
+                      !historyFilterCaliber
+                        ? 'bg-amber-400 text-slate-950 font-bold shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                  >
+                    Todas as Munições do Cofre
+                  </button>
+                </div>
+
+                {/* Counters */}
+                <div className="flex items-center space-x-2 text-xs font-mono">
+                  <span className="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-300">
+                    Total: <strong className="text-white">{filteredHistoryMovs.length}</strong> reg.
+                  </span>
+                  <span className="bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-lg text-emerald-400">
+                    +{totalEntradas} un
+                  </span>
+                  <span className="bg-amber-950/60 border border-amber-800/60 px-2.5 py-1 rounded-lg text-amber-400">
+                    -{totalSaidas} un
+                  </span>
+                  {totalDevolvido > 0 && (
+                    <span className="bg-blue-950/60 border border-blue-800/60 px-2.5 py-1 rounded-lg text-blue-400">
+                      ↩ {totalDevolvido} dev.
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Notice that details start hidden and are only shown when selected */}
+              <div className="px-6 py-2 bg-slate-900/60 border-b border-slate-800/50 flex items-center justify-between text-[11px] text-slate-400 shrink-0">
+                <span>Clique em qualquer movimentação da lista para ver os detalhes completos.</span>
+                {selectedHistoryMovId && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHistoryMovId(null)}
+                    className="text-amber-400 hover:underline font-medium text-[11px]"
+                  >
+                    Ocultar detalhes abertos
+                  </button>
+                )}
+              </div>
+
+              {/* Movement List */}
+              <div className="p-6 overflow-y-auto space-y-2.5 flex-1">
+                {filteredHistoryMovs.length === 0 ? (
+                  <div className="text-center py-12 text-slate-500">
+                    <History className="w-10 h-10 mx-auto mb-2 opacity-30" />
+                    <p className="text-sm font-medium">Nenhuma movimentação registrada para este cofre.</p>
+                  </div>
+                ) : (
+                  filteredHistoryMovs.map((m) => {
+                    const mCal = calibers.find(c => c.id === m.caliberId);
+                    const isSelected = selectedHistoryMovId === m.id;
+                    const isEntrada = m.type === 'Entrada';
+
+                    return (
+                      <div
+                        key={m.id}
+                        className={`border rounded-xl transition duration-150 overflow-hidden ${
+                          isSelected
+                            ? 'bg-slate-950 border-amber-500/50 shadow-md ring-1 ring-amber-500/20'
+                            : 'bg-slate-950/70 border-slate-800/90 hover:border-slate-700 hover:bg-slate-950'
+                        }`}
+                      >
+                        {/* Clickable Header Row */}
+                        <div
+                          onClick={() => setSelectedHistoryMovId(isSelected ? null : m.id)}
+                          className="p-3.5 flex items-center justify-between cursor-pointer select-none space-x-3"
+                        >
+                          <div className="flex items-center space-x-3 min-w-0">
+                            {/* Type Icon */}
+                            <div className={`p-1.5 rounded-lg border shrink-0 ${
+                              isEntrada
+                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                            }`}>
+                              {isEntrada ? <ArrowDownLeft className="w-4 h-4" /> : <ArrowUpRight className="w-4 h-4" />}
+                            </div>
+
+                            {/* Main Info */}
+                            <div className="min-w-0">
+                              <div className="flex items-center space-x-2">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded border ${
+                                  isEntrada
+                                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                    : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                }`}>
+                                  {m.type}
+                                </span>
+                                <span className="font-mono font-bold text-slate-200 text-xs">
+                                  {mCal ? mCal.name : m.caliberId}
+                                </span>
+                                <span className="text-[11px] text-slate-500 font-mono">
+                                  {formatTimestamp(m.createdAt)}
+                                </span>
+                              </div>
+
+                              <p className="text-xs text-slate-400 truncate mt-0.5">
+                                Responsável: <strong className="text-slate-200">{m.responsibleName || m.recipientOrReason || 'Não informado'}</strong>
+                                {m.responsibleMasp && <span className="font-mono text-slate-400"> ({m.responsibleMasp})</span>}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Quantity & Chevron */}
+                          <div className="flex items-center space-x-3 shrink-0">
+                            <span className={`text-sm font-mono font-black ${
+                              isEntrada ? 'text-emerald-400' : 'text-amber-400'
+                            }`}>
+                              {isEntrada ? `+${m.quantity}` : `-${m.quantity}`} un
+                            </span>
+
+                            <div className="text-slate-400 p-1 rounded-md hover:bg-slate-800 transition">
+                              {isSelected ? (
+                                <ChevronUp className="w-4 h-4 text-amber-400" />
+                              ) : (
+                                <ChevronDown className="w-4 h-4" />
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expandable Details - Inicia oculto e só mostra se for selecionado */}
+                        {isSelected && (
+                          <div className="px-4 pb-4 pt-2 border-t border-slate-800/80 bg-slate-900/60 space-y-3 animate-fadeIn text-xs">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                              {/* Motivo / Destino */}
+                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                                  Motivo / Destino
+                                </span>
+                                <p className="font-medium text-slate-200 mt-0.5">
+                                  {m.recipientOrReason || '-'}
+                                </p>
+                              </div>
+
+                              {/* Policial Responsável */}
+                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                                  Policial Responsável
+                                </span>
+                                <p className="font-medium text-slate-200 mt-0.5">
+                                  {m.responsibleName || '-'}
+                                </p>
+                                {m.responsibleMasp && (
+                                  <span className="text-[10px] text-slate-400 font-mono block">
+                                    MASP: {m.responsibleMasp} {m.responsibleType === 'FORA_DO_SISTEMA' ? '(Outro Órgão)' : ''}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Armeiro / Operador */}
+                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block">
+                                  Armeiro / Operador
+                                </span>
+                                <p className="font-medium text-slate-200 mt-0.5">
+                                  {m.userName || 'Sistema'}
+                                </p>
+                                <span className="text-[10px] text-slate-500 font-mono block">
+                                  ID: #{m.id}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Informações Adicionais */}
+                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-1">
+                                Informações Adicionais
+                              </span>
+                              <p className="text-amber-300 font-mono text-[11px] whitespace-pre-wrap leading-relaxed">
+                                {m.observation?.trim() ? m.observation.trim() : <span className="text-slate-500 italic font-sans text-xs">Nenhuma informação adicional informada.</span>}
+                              </p>
+                            </div>
+
+                            {/* Devolução de munição não utilizada se houver */}
+                            {Boolean(m.returnedQuantity && m.returnedQuantity > 0) && (
+                              <div className="bg-blue-950/40 p-2.5 rounded-xl border border-blue-800/60 flex items-center justify-between text-blue-300">
+                                <div className="flex items-center space-x-2">
+                                  <RotateCcw className="w-4 h-4 text-blue-400 shrink-0" />
+                                  <span>
+                                    <strong>{m.returnedQuantity} un</strong> devolvidas em {m.returnedAt ? formatTimestamp(m.returnedAt) : ''}
+                                    {m.returnedByUserName ? ` por ${m.returnedByUserName}` : ''}
+                                  </span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Ação individual para imprimir recibo desta movimentação */}
+                            <div className="flex justify-end pt-1">
+                              <button
+                                type="button"
+                                onClick={() => handlePrintDirectReceipt(m)}
+                                className="flex items-center space-x-1.5 text-xs font-bold text-slate-300 hover:text-amber-400 bg-slate-950 hover:bg-slate-800 border border-slate-800 px-3 py-1.5 rounded-lg transition"
+                                title="Imprimir comprovante desta movimentação"
+                              >
+                                <Printer className="w-3.5 h-3.5 text-amber-400" />
+                                <span>Imprimir Comprovante Individual</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="px-6 py-3 bg-slate-800/80 border-t border-slate-700 flex items-center justify-between shrink-0">
+                <span className="text-xs text-slate-400">
+                  {filteredHistoryMovs.length} registro(s) encontrado(s) no cofre {vault?.code || ''}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setVaultHistoryStock(null);
+                    setSelectedHistoryMovId(null);
+                  }}
+                  className="px-4 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-slate-700 hover:bg-slate-600 rounded-xl transition"
+                >
+                  Fechar
+                </button>
+              </div>
+
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal
