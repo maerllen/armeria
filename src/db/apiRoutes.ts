@@ -983,6 +983,79 @@ apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
   }
 });
 
+apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { quantity, caliberId, additionalInfo, actor } = req.body;
+    if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
+
+    if (actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !(actor.role === 'Policial' && actor.canMoveAmmunition)) {
+      return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e administradores podem alterar dados de estoque de munição.' });
+    }
+
+    const pool = getPool();
+    const [stocks]: any = await pool.query(
+      'SELECT ID_ESTOQUE_MUNICOES as id, CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, QUANTIDADE_ESTOQUE_MUNICOES as quantity, COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId, DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, UNIDADE_ID_ESTOQUE_MUNICOES as unitId FROM ESTOQUE_MUNICOES WHERE ID_ESTOQUE_MUNICOES = ?',
+      [id]
+    );
+
+    if (!stocks || stocks.length === 0) {
+      return res.status(404).json({ error: 'Registro de estoque não encontrado.' });
+    }
+
+    const currentStock = stocks[0];
+    const newQty = parseInt(String(quantity), 10);
+    if (isNaN(newQty) || newQty < 0) {
+      return res.status(400).json({ error: 'Quantidade inválida.' });
+    }
+
+    const newCaliberId = caliberId || currentStock.caliberId;
+    const cleanInfo = typeof additionalInfo === 'string' ? additionalInfo.slice(0, 500) : '';
+
+    await pool.query(
+      'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
+      [newQty, newCaliberId, id]
+    );
+
+    if (cleanInfo) {
+      const [lastMovs]: any = await pool.query(
+        'SELECT ID_MOVIMENTACOES_MUNICOES as id FROM MOVIMENTACOES_MUNICOES WHERE COFRE_ID_MOVIMENTACOES_MUNICOES = ? AND CALIBRE_ID_MOVIMENTACOES_MUNICOES = ? ORDER BY DATA_CRIACAO_MOVIMENTACOES_MUNICOES DESC LIMIT 1',
+        [currentStock.vaultSpaceId, currentStock.caliberId]
+      );
+      if (lastMovs && lastMovs.length > 0) {
+        await pool.query(
+          'UPDATE MOVIMENTACOES_MUNICOES SET OBSERVACAO_MOVIMENTACOES_MUNICOES = ?, CALIBRE_ID_MOVIMENTACOES_MUNICOES = ? WHERE ID_MOVIMENTACOES_MUNICOES = ?',
+          [cleanInfo, newCaliberId, lastMovs[0].id]
+        );
+      } else {
+        const movId = `ammomov-${Date.now()}`;
+        await pool.query(
+          `INSERT INTO MOVIMENTACOES_MUNICOES 
+           (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+            TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+           VALUES (?, 'Entrada', ?, ?, ?, ?, ?, 'Ajuste de Estoque', 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            movId, newCaliberId, newQty, currentStock.departmentId, currentStock.unitId, currentStock.vaultSpaceId,
+            actor.id, actor.name, actor.masp, cleanInfo, actor.id, actor.name
+          ]
+        );
+      }
+    }
+
+    await insertAuditLog(
+      'Munições',
+      'Editar',
+      `Alterado estoque ID ${id}: Quantidade para ${newQty}, Calibre ${newCaliberId}${cleanInfo ? ` - Informações adicionais: ${cleanInfo}` : ''}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, quantity: newQty, caliberId: newCaliberId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 apiRouter.get('/ammo-movements', async (req: Request, res: Response) => {
   try {
     const pool = getPool();

@@ -78,6 +78,27 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetAmmo, setDeleteTargetAmmo] = useState<{ type: 'caliber' | 'stock' | 'movement'; id: string; label: string } | null>(null);
 
+  // Edit Ammo Stock Modal State (substituindo exclusão permanente por alteração de informações)
+  const [editingStock, setEditingStock] = useState<{
+    stock: AmmunitionStock;
+    caliberId: string;
+    quantity: number;
+    additionalInfo: string;
+  } | null>(null);
+  const [isSavingStock, setIsSavingStock] = useState(false);
+
+  // Quick Direct Vault Movement State (Entrada e Saída direto no cofre)
+  const [quickVaultMovement, setQuickVaultMovement] = useState<{
+    stock: AmmunitionStock;
+    type: 'Entrada' | 'Saída';
+    quantity: number;
+    responsibleType: 'SISTEMA' | 'FORA_DO_SISTEMA';
+    responsibleUserId: string;
+    responsibleName: string;
+    responsibleMasp: string;
+  } | null>(null);
+  const [isSubmittingQuickMovement, setIsSubmittingQuickMovement] = useState(false);
+
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
   const isAdmin = currentUser.role === 'Administrador';
@@ -264,6 +285,117 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       setErrorMsg(err.message || 'Erro ao realizar exclusão.');
     } finally {
       setDeleteTargetAmmo(null);
+    }
+  };
+
+  // Open Edit Stock Modal (Substitui exclusão por alteração das informações)
+  const handleOpenEditStock = (st: AmmunitionStock, currentObs: string) => {
+    setEditingStock({
+      stock: st,
+      caliberId: st.caliberId,
+      quantity: st.quantity,
+      additionalInfo: currentObs || ''
+    });
+  };
+
+  // Save Stock Edit
+  const handleSaveStockEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStock) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsSavingStock(true);
+    try {
+      await storage.updateAmmoStock(
+        editingStock.stock.id,
+        {
+          quantity: editingStock.quantity,
+          caliberId: editingStock.caliberId,
+          additionalInfo: editingStock.additionalInfo
+        },
+        currentUser
+      );
+      setSuccessMsg('Informações da munição alteradas com sucesso no cofre.');
+      setEditingStock(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao alterar informações da munição.');
+    } finally {
+      setIsSavingStock(false);
+    }
+  };
+
+  // Open Direct Vault Movement (Entrada ou Saída direto no cofre)
+  const handleOpenQuickMovement = (st: AmmunitionStock, type: 'Entrada' | 'Saída') => {
+    const activeUsers = users.length > 0 ? users : storage.getUsers();
+    const defaultUser = activeUsers.find(u => u.id === currentUser.id) || activeUsers[0] || currentUser;
+    setQuickVaultMovement({
+      stock: st,
+      type,
+      quantity: type === 'Entrada' ? 50 : Math.min(50, st.quantity || 1),
+      responsibleType: 'SISTEMA',
+      responsibleUserId: defaultUser?.id || '',
+      responsibleName: defaultUser?.name || currentUser.name,
+      responsibleMasp: defaultUser?.masp || currentUser.masp
+    });
+  };
+
+  // Save Direct Vault Movement (Inserindo apenas quantidade e policial responsável)
+  const handleSaveQuickMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickVaultMovement) return;
+    const { stock, type, quantity: movQty, responsibleType, responsibleUserId, responsibleName, responsibleMasp } = quickVaultMovement;
+
+    if (movQty <= 0) {
+      setErrorMsg('A quantidade deve ser maior que zero.');
+      return;
+    }
+
+    if (type === 'Saída' && movQty > stock.quantity) {
+      setErrorMsg(`Quantidade de saída (${movQty}) não pode exceder o estoque disponível no cofre (${stock.quantity} un).`);
+      return;
+    }
+
+    if (responsibleType === 'SISTEMA' && !responsibleUserId) {
+      setErrorMsg('Selecione o policial responsável pela movimentação.');
+      return;
+    }
+
+    if (responsibleType === 'FORA_DO_SISTEMA' && (!responsibleName.trim() || !responsibleMasp.trim())) {
+      setErrorMsg('Informe o nome e o MASP do policial responsável.');
+      return;
+    }
+
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsSubmittingQuickMovement(true);
+    try {
+      const activeUsers = users.length > 0 ? users : storage.getUsers();
+      const respUser = activeUsers.find(u => u.id === responsibleUserId);
+      const finalName = responsibleType === 'SISTEMA' ? (respUser?.name || currentUser.name) : responsibleName.trim();
+      const finalMasp = responsibleType === 'SISTEMA' ? (respUser?.masp || currentUser.masp) : responsibleMasp.trim();
+
+      await storage.addAmmoMovement({
+        type,
+        caliberId: stock.caliberId,
+        quantity: movQty,
+        vaultSpaceId: stock.vaultSpaceId,
+        recipientOrReason: type === 'Entrada' ? 'Abastecimento direto no cofre' : 'Saída direta do cofre',
+        responsibleType,
+        responsibleUserId: responsibleType === 'SISTEMA' ? responsibleUserId : undefined,
+        responsibleName: finalName,
+        responsibleMasp: finalMasp,
+        observation: ''
+      });
+
+      const vault = vaultSpaces.find(v => v.id === stock.vaultSpaceId);
+      setSuccessMsg(`${type} de ${movQty} unidades registrada com sucesso no cofre ${vault?.code || ''}.`);
+      setQuickVaultMovement(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || `Erro ao registrar ${type.toLowerCase()} de munição no cofre.`);
+    } finally {
+      setIsSubmittingQuickMovement(false);
     }
   };
 
@@ -771,9 +903,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
                                 <div className="bg-slate-950/70 p-2.5 rounded-xl border border-slate-800/90 text-[11px] font-mono">
                                   <div className="flex flex-col space-y-1">
-                                    <span className="text-slate-400 font-sans text-[10px] font-medium">Observação:</span>
+                                    <span className="text-slate-400 font-sans text-[10px] font-medium">Informações adicionais:</span>
                                     <p className="font-medium text-amber-300 break-words whitespace-pre-wrap leading-relaxed text-xs">
-                                      {ammoObs ? ammoObs : <span className="font-normal text-slate-500 italic font-sans text-xs">Padrão / Sem observação</span>}
+                                      {ammoObs ? ammoObs : <span className="font-normal text-slate-500 italic font-sans text-xs">Padrão / Sem informações adicionais</span>}
                                     </p>
                                   </div>
                                 </div>
@@ -786,13 +918,41 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                 <span className="text-base font-mono font-black text-emerald-400">
                                   {st.quantity} un
                                 </span>
-                                {(isGeral || isArmeiro || isAdmin) && (
+
+                                {/* Opções de Entrar e Sair direto no cofre */}
+                                {canManageStock && (
+                                  <div className="flex items-center space-x-1 ml-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenQuickMovement(st, 'Entrada')}
+                                      className="flex items-center space-x-1 px-2 py-1 text-[11px] font-bold rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition shadow-sm"
+                                      title="Entrar com munição direto neste cofre"
+                                    >
+                                      <Plus className="w-3 h-3" />
+                                      <span>Entrar</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={st.quantity <= 0}
+                                      onClick={() => handleOpenQuickMovement(st, 'Saída')}
+                                      className="flex items-center space-x-1 px-2 py-1 text-[11px] font-bold rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 disabled:opacity-40 disabled:cursor-not-allowed transition shadow-sm"
+                                      title="Sair com munição direto deste cofre"
+                                    >
+                                      <ArrowUpRight className="w-3 h-3" />
+                                      <span>Sair</span>
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Ícone de alterar informações (substituindo o antigo ícone de excluir permanentemente) */}
+                                {canManageStock && (
                                   <button
-                                    onClick={() => handleDeleteStock(st)}
-                                    className="p-1 text-slate-500 hover:text-red-400 rounded transition"
-                                    title="Excluir Lançamento de Estoque"
+                                    type="button"
+                                    onClick={() => handleOpenEditStock(st, ammoObs)}
+                                    className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg border border-transparent hover:border-slate-700 transition"
+                                    title="Alterar Informações da Munição"
                                   >
-                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <Edit2 className="w-3.5 h-3.5" />
                                   </button>
                                 )}
                               </div>
@@ -1402,11 +1562,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 )}
               </div>
 
-              {/* Observação (até 500 caracteres) */}
+              {/* Informações adicionais (até 500 caracteres) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Observação da Movimentação
+                    Informações adicionais
                   </label>
                   <span className="text-[10px] font-mono text-slate-400">
                     {observation.length} / 500
@@ -1417,7 +1577,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   rows={3}
                   value={observation}
                   onChange={(e) => setObservation(e.target.value)}
-                  placeholder="Descreva observações específicas da movimentação (máximo 500 caracteres)..."
+                  placeholder="Descreva informações adicionais da movimentação (máximo 500 caracteres)..."
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 resize-none"
                 />
               </div>
@@ -1489,6 +1649,303 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   className="bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
                 >
                   Confirmar Devolução
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Alterar Informações da Munição (substitui exclusão permanente) */}
+      {editingStock && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl space-y-4">
+            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">Alterar Informações da Munição</h3>
+                  <p className="text-[11px] text-slate-400">
+                    Cofre: {vaultSpaces.find(v => v.id === editingStock.stock.vaultSpaceId)?.code || 'N/A'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingStock(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveStockEdit} className="p-6 pt-2 space-y-4">
+              {/* Calibre */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Calibre <span className="text-amber-400">*</span>
+                </label>
+                <select
+                  value={editingStock.caliberId}
+                  onChange={(e) => setEditingStock({ ...editingStock, caliberId: e.target.value })}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                  required
+                >
+                  {calibers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Quantidade */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Quantidade <span className="text-amber-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    value={editingStock.quantity}
+                    onChange={(e) => setEditingStock({
+                      ...editingStock,
+                      quantity: Math.max(0, parseInt(e.target.value) || 0)
+                    })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-emerald-400 focus:outline-none focus:border-amber-500"
+                    required
+                  />
+                  <span className="absolute right-3.5 top-2.5 text-xs text-slate-500 font-mono">unidades</span>
+                </div>
+              </div>
+
+              {/* Informações adicionais (escrito Informações adicionais ao invés de Observações) */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Informações adicionais
+                </label>
+                <textarea
+                  value={editingStock.additionalInfo}
+                  onChange={(e) => setEditingStock({ ...editingStock, additionalInfo: e.target.value })}
+                  placeholder="Descreva informações adicionais, lote, fabricante, finalidade ou observações técnicas..."
+                  maxLength={500}
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 resize-none leading-relaxed"
+                />
+                <div className="flex justify-end mt-1">
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {editingStock.additionalInfo.length}/500 caracteres
+                  </span>
+                </div>
+              </div>
+
+              {/* Ações */}
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setEditingStock(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingStock}
+                  className="px-4 py-2 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 rounded-xl transition flex items-center space-x-1.5 shadow-md shadow-amber-400/10"
+                >
+                  {isSavingStock ? (
+                    <span>Salvando...</span>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Salvar Alterações</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Entrada / Saída Direta no Cofre */}
+      {quickVaultMovement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl space-y-4">
+            <div className={`px-6 py-4 border-b flex items-center justify-between ${
+              quickVaultMovement.type === 'Entrada'
+                ? 'bg-emerald-950/40 border-emerald-800/60'
+                : 'bg-amber-950/40 border-amber-800/60'
+            }`}>
+              <div className="flex items-center space-x-2.5">
+                <div className={`p-2 rounded-xl border ${
+                  quickVaultMovement.type === 'Entrada'
+                    ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                    : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                }`}>
+                  {quickVaultMovement.type === 'Entrada' ? (
+                    <ArrowDownLeft className="w-5 h-5" />
+                  ) : (
+                    <ArrowUpRight className="w-5 h-5" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">
+                    {quickVaultMovement.type === 'Entrada' ? 'Entrada Direta no Cofre' : 'Saída Direta do Cofre'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {calibers.find(c => c.id === quickVaultMovement.stock.caliberId)?.name} &bull; Cofre {vaultSpaces.find(v => v.id === quickVaultMovement.stock.vaultSpaceId)?.code}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuickVaultMovement(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="px-6 pt-2">
+              <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex items-center justify-between">
+                <span className="text-xs text-slate-400">Estoque Atual no Cofre:</span>
+                <span className="text-sm font-mono font-bold text-slate-200">
+                  {quickVaultMovement.stock.quantity} unidades
+                </span>
+              </div>
+            </div>
+
+            {/* Inserindo apenas quantidade e o policial responsável */}
+            <form onSubmit={handleSaveQuickMovement} className="p-6 pt-2 space-y-4">
+              {/* Quantidade */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Quantidade a {quickVaultMovement.type === 'Entrada' ? 'Entrar' : 'Sair'} <span className="text-amber-400">*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    min="1"
+                    max={quickVaultMovement.type === 'Saída' ? quickVaultMovement.stock.quantity : undefined}
+                    step="1"
+                    value={quickVaultMovement.quantity}
+                    onChange={(e) => setQuickVaultMovement({
+                      ...quickVaultMovement,
+                      quantity: Math.max(1, parseInt(e.target.value) || 1)
+                    })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-base font-mono font-bold text-slate-100 focus:outline-none focus:border-amber-500"
+                    required
+                  />
+                  <span className="absolute right-3.5 top-3 text-xs text-slate-500 font-mono">unidades</span>
+                </div>
+                {quickVaultMovement.type === 'Saída' && (
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Disponível no cofre: {quickVaultMovement.stock.quantity} un.
+                  </p>
+                )}
+              </div>
+
+              {/* Policial Responsável pela Movimentação */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Policial Responsável pela Movimentação <span className="text-amber-400">*</span>
+                  </label>
+                  <div className="flex items-center space-x-2 text-[10px]">
+                    <button
+                      type="button"
+                      onClick={() => setQuickVaultMovement({ ...quickVaultMovement, responsibleType: 'SISTEMA' })}
+                      className={`px-1.5 py-0.5 rounded ${quickVaultMovement.responsibleType === 'SISTEMA' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      Cadastrado
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickVaultMovement({ ...quickVaultMovement, responsibleType: 'FORA_DO_SISTEMA' })}
+                      className={`px-1.5 py-0.5 rounded ${quickVaultMovement.responsibleType === 'FORA_DO_SISTEMA' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-slate-200'}`}
+                    >
+                      Outro
+                    </button>
+                  </div>
+                </div>
+
+                {quickVaultMovement.responsibleType === 'SISTEMA' ? (
+                  <select
+                    value={quickVaultMovement.responsibleUserId}
+                    onChange={(e) => {
+                      const uid = e.target.value;
+                      const activeUsers = users.length > 0 ? users : storage.getUsers();
+                      const foundUser = activeUsers.find(u => u.id === uid);
+                      setQuickVaultMovement({
+                        ...quickVaultMovement,
+                        responsibleUserId: uid,
+                        responsibleName: foundUser?.name || '',
+                        responsibleMasp: foundUser?.masp || ''
+                      });
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                    required
+                  >
+                    <option value="">Selecione o policial responsável...</option>
+                    {(users.length > 0 ? users : storage.getUsers()).map((u) => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} (MASP: {u.masp}) - {u.cargo}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nome do Policial"
+                      value={quickVaultMovement.responsibleName}
+                      onChange={(e) => setQuickVaultMovement({ ...quickVaultMovement, responsibleName: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                      required
+                    />
+                    <input
+                      type="text"
+                      placeholder="MASP"
+                      value={quickVaultMovement.responsibleMasp}
+                      onChange={(e) => setQuickVaultMovement({ ...quickVaultMovement, responsibleMasp: e.target.value })}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                      required
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Ações */}
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setQuickVaultMovement(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingQuickMovement}
+                  className={`px-4 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow-md ${
+                    quickVaultMovement.type === 'Entrada'
+                      ? 'text-slate-950 bg-emerald-400 hover:bg-emerald-300 shadow-emerald-400/10'
+                      : 'text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-amber-400/10'
+                  }`}
+                >
+                  {isSubmittingQuickMovement ? (
+                    <span>Processando...</span>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirmar {quickVaultMovement.type}</span>
+                    </>
+                  )}
                 </button>
               </div>
             </form>

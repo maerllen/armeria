@@ -738,6 +738,23 @@ class StorageService {
     return true;
   }
 
+  public async updateAmmoStock(
+    id: string,
+    data: { quantity: number; caliberId?: string; additionalInfo?: string },
+    actorUser?: User
+  ): Promise<boolean> {
+    const actor = actorUser || this.state.currentUser;
+    const res = await fetch(`/api/ammo-stocks/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, actor })
+    });
+    const resData = await res.json();
+    if (!res.ok) throw new Error(resData.error || 'Erro ao alterar dados de estoque de munição.');
+    await this.refreshFromServer();
+    return true;
+  }
+
   public async deleteAmmoStock(id: string, actorUser?: User): Promise<boolean> {
     const actor = actorUser || this.state.currentUser;
     const res = await fetch(`/api/ammo-stocks/${id}`, {

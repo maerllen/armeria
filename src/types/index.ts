@@ -113,6 +113,7 @@ export interface AmmunitionStock {
   unitId: string;
   departmentId: string;
   quantity: number;
+  additionalInfo?: string;
 }
 
 export type AmmoMovementType = 'Entrada' | 'Saída';
