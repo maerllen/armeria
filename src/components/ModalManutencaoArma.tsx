@@ -1,7 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { User, Weapon, ExternalWorkshop, VaultSpace } from '../types';
 import { storage } from '../services/storage';
-import { Wrench, X, Check, Calendar, UserCheck, Building, MapPin, Search, AlertCircle, Info, Shield } from 'lucide-react';
+import {
+  Wrench,
+  X,
+  Check,
+  Calendar,
+  UserCheck,
+  Building,
+  MapPin,
+  Search,
+  AlertCircle,
+  Info,
+  Shield,
+  CheckCircle2,
+  RefreshCw
+} from 'lucide-react';
 
 interface ModalManutencaoArmaProps {
   weapon: Weapon;
@@ -29,9 +43,16 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
   const [armorerName, setArmorerName] = useState<string>(currentUser.name || '');
   const [description, setDescription] = useState<string>('');
 
+  // Registered armorers in the system
+  const [registeredArmorers, setRegisteredArmorers] = useState<User[]>([]);
+  const [selectedArmorerUserId, setSelectedArmorerUserId] = useState<string>('');
+
   // External workshop fields
   const [registeredWorkshops, setRegisteredWorkshops] = useState<ExternalWorkshop[]>([]);
-  const [selectedWorkshopId, setSelectedWorkshopId] = useState<string>('NEW');
+  const [loadingWorkshops, setLoadingWorkshops] = useState<boolean>(false);
+  const [selectedWorkshopId, setSelectedWorkshopId] = useState<string>('MANUAL');
+  const [isAutoFilledWorkshop, setIsAutoFilledWorkshop] = useState<boolean>(false);
+
   const [workshopName, setWorkshopName] = useState<string>('');
   const [workshopCep, setWorkshopCep] = useState<string>('');
   const [workshopStreet, setWorkshopStreet] = useState<string>('');
@@ -52,19 +73,62 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
   const shotCountAtMaintenance = Number(weapon.shotCount) || 0;
   const vaultCode = vaultSpaces.find(v => v.id === weapon.vaultSpaceId)?.code || weapon.vaultSpaceId || 'No Cofre';
 
-  // Load registered workshops
-  useEffect(() => {
-    storage.getExternalWorkshops().then(shops => {
+  // Load workshops from database
+  const loadWorkshops = async () => {
+    try {
+      setLoadingWorkshops(true);
+      const shops = await storage.getExternalWorkshops();
       setRegisteredWorkshops(shops || []);
-    }).catch(err => {
+    } catch (err) {
       console.warn('Erro ao carregar armerias cadastradas:', err);
-    });
+    } finally {
+      setLoadingWorkshops(false);
+    }
+  };
+
+  // Load registered armorers & workshops
+  useEffect(() => {
+    // 1. Armeiros cadastrados no sistema
+    const allUsers = storage.getUsers();
+    const armorers = allUsers.filter(u =>
+      u.role === 'Armeiro' ||
+      u.role === 'Geral' ||
+      u.role === 'Administrador' ||
+      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    );
+    const armorerList = armorers.length > 0 ? armorers : allUsers;
+    setRegisteredArmorers(armorerList);
+
+    if (currentUser) {
+      const match = armorerList.find(u => u.id === currentUser.id || u.name === currentUser.name);
+      if (match) {
+        setSelectedArmorerUserId(match.id);
+        if (!armorerName) setArmorerName(match.name);
+      }
+    }
+
+    // 2. Armerias cadastradas no banco de dados
+    loadWorkshops();
   }, []);
 
-  // Handle workshop selection
+  // Handle armorer selection
+  const handleArmorerSelect = (userId: string) => {
+    setSelectedArmorerUserId(userId);
+    if (userId === 'MANUAL' || !userId) {
+      // Mantém liberado para digitação manual
+    } else {
+      const found = registeredArmorers.find(u => u.id === userId);
+      if (found) {
+        setArmorerName(found.name);
+      }
+    }
+  };
+
+  // Handle workshop selection (busca do banco e preenche automaticamente todos os campos)
   const handleSelectWorkshop = (id: string) => {
     setSelectedWorkshopId(id);
-    if (id === 'NEW') {
+    if (id === 'MANUAL' || id === 'NEW' || !id) {
+      setIsAutoFilledWorkshop(false);
       setWorkshopName('');
       setWorkshopCep('');
       setWorkshopStreet('');
@@ -75,9 +139,12 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
       setWorkshopState('MG');
       setWorkshopArmorerName('');
       setWorkshopCredenciamentoPf('');
+      setSaveWorkshop(true);
     } else {
       const found = registeredWorkshops.find(w => w.id === id);
       if (found) {
+        setIsAutoFilledWorkshop(true);
+        // Preenche automaticamente todos os dados resgatados do banco de dados
         setWorkshopName(found.name || '');
         setWorkshopCep(found.cep || '');
         setWorkshopStreet(found.street || '');
@@ -88,6 +155,7 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
         setWorkshopState(found.state || 'MG');
         setWorkshopArmorerName(found.responsibleArmorer || '');
         setWorkshopCredenciamentoPf(found.credenciamentoPf || '');
+        setSaveWorkshop(false);
       }
     }
   };
@@ -303,19 +371,45 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                Armeiro Responsável {maintType === 'Externa' ? 'pelo Despacho' : ''} *
-              </label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={armorerName}
-                  onChange={(e) => setArmorerName(e.target.value)}
-                  placeholder="Nome do armeiro..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
-                  required
-                />
-                <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Armeiro Responsável {maintType === 'Externa' ? 'pelo Despacho' : ''} *
+                </label>
+                <span className="text-[10px] text-slate-400">Selecione ou digite</span>
+              </div>
+              <div className="space-y-1.5">
+                {/* Select list com os armeiros cadastrados */}
+                <select
+                  value={selectedArmorerUserId}
+                  onChange={(e) => handleArmorerSelect(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none font-medium"
+                >
+                  <option value="">-- Selecionar da lista de Armeiros Cadastrados --</option>
+                  {registeredArmorers.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} (MASP: {u.masp} • {u.cargo || u.role})
+                    </option>
+                  ))}
+                  <option value="MANUAL">Digitar armeiro manualmente abaixo...</option>
+                </select>
+
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={armorerName}
+                    onChange={(e) => {
+                      setArmorerName(e.target.value);
+                      if (selectedArmorerUserId !== 'MANUAL') {
+                        const matches = registeredArmorers.find(u => u.id === selectedArmorerUserId)?.name === e.target.value;
+                        if (!matches) setSelectedArmorerUserId('MANUAL');
+                      }
+                    }}
+                    placeholder="Nome do armeiro responsável..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    required
+                  />
+                  <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                </div>
               </div>
             </div>
           </div>
@@ -328,33 +422,63 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
                   <Building className="w-4 h-4" />
                   <span>Dados da Armeria Externa</span>
                 </h4>
-                {registeredWorkshops.length > 0 && (
-                  <span className="text-[10px] text-slate-400 font-mono">
-                    {registeredWorkshops.length} armerias cadastradas
-                  </span>
-                )}
+                <div className="flex items-center space-x-2">
+                  {loadingWorkshops ? (
+                    <span className="text-[10px] text-amber-400 font-mono flex items-center space-x-1">
+                      <RefreshCw className="w-3 h-3 animate-spin" />
+                      <span>Buscando do banco...</span>
+                    </span>
+                  ) : (
+                    <span className="text-[10px] text-slate-400 font-mono">
+                      {registeredWorkshops.length} armeria(s) no banco
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={loadWorkshops}
+                    disabled={loadingWorkshops}
+                    title="Recarregar armerias do banco de dados"
+                    className="p-1 text-slate-400 hover:text-amber-400 rounded transition"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingWorkshops ? 'animate-spin text-amber-400' : ''}`} />
+                  </button>
+                </div>
               </div>
 
-              {/* Autocomplete / Select from previously registered workshops */}
-              {registeredWorkshops.length > 0 && (
-                <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Selecionar Armeria Cadastrada
-                  </label>
-                  <select
-                    value={selectedWorkshopId}
-                    onChange={(e) => handleSelectWorkshop(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none font-medium"
-                  >
-                    <option value="NEW">+ Cadastrar Nova Armeria</option>
-                    {registeredWorkshops.map(shop => (
-                      <option key={shop.id} value={shop.id}>
-                        {shop.name} {shop.city ? `(${shop.city} - ${shop.state})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              {/* Select list para selecionar armeria cadastrada */}
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Selecionar Armeria Cadastrada
+                </label>
+                <select
+                  value={selectedWorkshopId}
+                  onChange={(e) => handleSelectWorkshop(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none font-medium"
+                >
+                  <option value="MANUAL">-- Preencher / Digitar Manualmente Nova Armeria --</option>
+                  {registeredWorkshops.map(shop => (
+                    <option key={shop.id} value={shop.id}>
+                      {shop.name} {shop.city ? `(${shop.city} - ${shop.state})` : ''} {shop.responsibleArmorer ? `• Armeiro: ${shop.responsibleArmorer}` : ''}
+                    </option>
+                  ))}
+                </select>
+
+                {isAutoFilledWorkshop && selectedWorkshopId !== 'MANUAL' && (
+                  <div className="mt-2 p-2.5 bg-emerald-950/40 border border-emerald-800/60 rounded-xl text-[11px] text-emerald-300 flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Dados resgatados do banco de dados e preenchidos automaticamente. Todos os campos continuam liberados para edição manual se necessário.</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectWorkshop('MANUAL')}
+                      className="text-[10px] underline hover:text-emerald-100 ml-2 shrink-0 font-medium whitespace-nowrap"
+                    >
+                      Preencher Manualmente
+                    </button>
+                  </div>
+                )}
+              </div>
 
               {/* Nome da Armeria */}
               <div>
