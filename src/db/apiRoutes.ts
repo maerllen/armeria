@@ -1556,6 +1556,8 @@ apiRouter.get('/maintenances', async (req: Request, res: Response) => {
         m.ARMERIA_BAIRRO as workshopNeighborhood,
         m.ARMERIA_CIDADE as workshopCity,
         m.ARMERIA_ESTADO as workshopState,
+        m.ARMERIA_ARMEIRO_RESPONSAVEL as workshopArmorerName,
+        m.ARMERIA_CREDENCIAMENTO_PF as workshopCredenciamentoPf,
         m.DATA_RETORNO as returnDate,
         m.ARMEIRO_RETORNO_ID as returnArmorerId,
         m.ARMEIRO_RETORNO_NOME as returnArmorerName,
@@ -1596,6 +1598,8 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
       workshopNeighborhood,
       workshopCity,
       workshopState,
+      workshopArmorerName,
+      workshopCredenciamentoPf,
       saveWorkshop,
       actor
     } = req.body;
@@ -1655,9 +1659,11 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
         ARMERIA_BAIRRO,
         ARMERIA_CIDADE,
         ARMERIA_ESTADO,
+        ARMERIA_ARMEIRO_RESPONSAVEL,
+        ARMERIA_CREDENCIAMENTO_PF,
         COFRE_ORIGINAL_ID,
         DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'EM_ANDAMENTO', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'EM_ANDAMENTO', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         maintId,
         id,
@@ -1676,6 +1682,8 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
         type === 'Externa' ? (workshopNeighborhood || '').trim() : null,
         type === 'Externa' ? (workshopCity || '').trim() : null,
         type === 'Externa' ? (workshopState || '').trim() : null,
+        type === 'Externa' ? (workshopArmorerName || '').trim() || null : null,
+        type === 'Externa' ? (workshopCredenciamentoPf || '').trim() || null : null,
         currentVaultId
       ]
     );
@@ -1700,8 +1708,8 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
           const shopId = `shop-${Date.now()}`;
           await pool.query(
             `INSERT INTO ARMERIAS_EXTERNAS (
-              ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, RESPONSAVEL, DATA_CRIACAO
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+              ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, RESPONSAVEL, ARMEIRO_RESPONSAVEL, CREDENCIAMENTO_PF, DATA_CRIACAO
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
             [
               shopId,
               cleanWName,
@@ -1712,7 +1720,9 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
               workshopNeighborhood || null,
               workshopCity || null,
               workshopState || null,
-              sentArmorerName || null
+              sentArmorerName || null,
+              workshopArmorerName || null,
+              workshopCredenciamentoPf || null
             ]
           );
         } else if (saveWorkshop) {
@@ -1724,7 +1734,9 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
               COMPLEMENTO = COALESCE(?, COMPLEMENTO),
               BAIRRO = COALESCE(?, BAIRRO),
               CIDADE = COALESCE(?, CIDADE),
-              ESTADO = COALESCE(?, ESTADO)
+              ESTADO = COALESCE(?, ESTADO),
+              ARMEIRO_RESPONSAVEL = COALESCE(?, ARMEIRO_RESPONSAVEL),
+              CREDENCIAMENTO_PF = COALESCE(?, CREDENCIAMENTO_PF)
              WHERE ID_ARMERIAS_EXTERNAS = ?`,
             [
               workshopCep || null,
@@ -1734,6 +1746,8 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
               workshopNeighborhood || null,
               workshopCity || null,
               workshopState || null,
+              workshopArmorerName || null,
+              workshopCredenciamentoPf || null,
               existingShop[0].ID_ARMERIAS_EXTERNAS
             ]
           );
@@ -1835,6 +1849,8 @@ apiRouter.get('/external-workshops', async (req: Request, res: Response) => {
         ESTADO as state,
         TELEFONE as phone,
         CONTATO as contact,
+        ARMEIRO_RESPONSAVEL as responsibleArmorer,
+        CREDENCIAMENTO_PF as credenciamentoPf,
         DATA_CRIACAO as createdAt
       FROM ARMERIAS_EXTERNAS
       ORDER BY NOME ASC
@@ -1847,7 +1863,7 @@ apiRouter.get('/external-workshops', async (req: Request, res: Response) => {
 
 apiRouter.post('/external-workshops', async (req: Request, res: Response) => {
   try {
-    const { id, name, cep, street, number, complement, neighborhood, city, state, phone, contact, actor } = req.body;
+    const { id, name, cep, street, number, complement, neighborhood, city, state, phone, contact, responsibleArmorer, credenciamentoPf, actor } = req.body;
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Nome da armeria é obrigatório.' });
     }
@@ -1859,20 +1875,20 @@ apiRouter.post('/external-workshops', async (req: Request, res: Response) => {
     if (existing && existing.length > 0) {
       await pool.query(
         `UPDATE ARMERIAS_EXTERNAS SET
-          NOME = ?, CEP = ?, LOGRADOURO = ?, NUMERO = ?, COMPLEMENTO = ?, BAIRRO = ?, CIDADE = ?, ESTADO = ?, TELEFONE = ?, CONTATO = ?
+          NOME = ?, CEP = ?, LOGRADOURO = ?, NUMERO = ?, COMPLEMENTO = ?, BAIRRO = ?, CIDADE = ?, ESTADO = ?, TELEFONE = ?, CONTATO = ?, ARMEIRO_RESPONSAVEL = ?, CREDENCIAMENTO_PF = ?
          WHERE ID_ARMERIAS_EXTERNAS = ?`,
-        [name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null, existing[0].ID_ARMERIAS_EXTERNAS]
+        [name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null, responsibleArmorer || null, credenciamentoPf || null, existing[0].ID_ARMERIAS_EXTERNAS]
       );
     } else {
       await pool.query(
         `INSERT INTO ARMERIAS_EXTERNAS (
-          ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, TELEFONE, CONTATO, DATA_CRIACAO
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-        [workshopId, name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null]
+          ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, TELEFONE, CONTATO, ARMEIRO_RESPONSAVEL, CREDENCIAMENTO_PF, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [workshopId, name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null, responsibleArmorer || null, credenciamentoPf || null]
       );
     }
 
-    await insertAuditLog('Armerias', 'Editar', `Cadastrada/atualizada armeria externa: ${name}`, actor, req.ip);
+    await insertAuditLog('Armerias', 'Editar', `Cadastrada/atualizada armeria externa: ${name} (Armeiro: ${responsibleArmorer || 'N/A'}, Cred. PF: ${credenciamentoPf || 'N/A'})`, actor, req.ip);
     return res.json({ id: workshopId, name: name.trim() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

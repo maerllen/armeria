@@ -58,6 +58,8 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
   const [state, setState] = useState<string>('MG');
   const [phone, setPhone] = useState<string>('');
   const [contact, setContact] = useState<string>('');
+  const [responsibleArmorer, setResponsibleArmorer] = useState<string>('');
+  const [credenciamentoPf, setCredenciamentoPf] = useState<string>('');
 
   useEffect(() => {
     loadWorkshops();
@@ -87,6 +89,8 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
     setState('MG');
     setPhone('');
     setContact('');
+    setResponsibleArmorer('');
+    setCredenciamentoPf('');
     setErrorMsg('');
   };
 
@@ -124,7 +128,15 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
     setSuccessMsg('');
 
     if (!name.trim()) {
-      setErrorMsg('Informe o nome da armeria ou oficina.');
+      setErrorMsg('Informe o nome da armeria ou oficina credenciada.');
+      return;
+    }
+    if (!responsibleArmorer.trim()) {
+      setErrorMsg('Informe o nome do armeiro responsável pela armeria.');
+      return;
+    }
+    if (!credenciamentoPf.trim()) {
+      setErrorMsg('Informe o número ou registro de credenciamento na Polícia Federal (PF).');
       return;
     }
 
@@ -141,10 +153,12 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
         city: city.trim() || undefined,
         state: state.trim() || undefined,
         phone: phone.trim() || undefined,
-        contact: contact.trim() || undefined
+        contact: contact.trim() || undefined,
+        responsibleArmorer: responsibleArmorer.trim() || undefined,
+        credenciamentoPf: credenciamentoPf.trim() || undefined
       });
 
-      setSuccessMsg(editingId ? 'Armeria atualizada com sucesso!' : 'Nova armeria cadastrada com sucesso!');
+      setSuccessMsg(editingId ? 'Armeria credenciada atualizada com sucesso!' : 'Nova armeria credenciada cadastrada com sucesso!');
       handleClearForm();
       await loadWorkshops();
       setActiveTab('list');
@@ -168,6 +182,8 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
     setState(shop.state || 'MG');
     setPhone(shop.phone || '');
     setContact(shop.contact || '');
+    setResponsibleArmorer(shop.responsibleArmorer || '');
+    setCredenciamentoPf(shop.credenciamentoPf || '');
     setErrorMsg('');
     setActiveTab('form');
   };
@@ -439,7 +455,51 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
               </div>
             </div>
 
-            {/* Telefone e Contato */}
+            {/* Responsável Técnico e Credenciamento PF */}
+            <div className="p-3 bg-purple-950/20 border border-purple-900/30 rounded-xl space-y-2.5">
+              <span className="text-[11px] font-bold text-purple-300 uppercase tracking-wider flex items-center space-x-1.5">
+                <Shield className="w-3.5 h-3.5" />
+                <span>Dados de Credenciamento na Polícia Federal</span>
+              </span>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Nome do Armeiro Responsável *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={responsibleArmorer}
+                      onChange={(e) => setResponsibleArmorer(e.target.value)}
+                      placeholder="Nome completo do armeiro credenciado..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:border-purple-500 focus:outline-none"
+                      required
+                    />
+                    <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Credenciamento PF (Polícia Federal) *
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={credenciamentoPf}
+                      onChange={(e) => setCredenciamentoPf(e.target.value)}
+                      placeholder="Ex: Portaria DPF nº 1234/2026 - CGC/PF"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:border-purple-500 focus:outline-none font-mono"
+                      required
+                    />
+                    <Shield className="w-3.5 h-3.5 text-purple-400 absolute left-2.5 top-3" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Telefone e Contato Adicional */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
@@ -459,14 +519,14 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Responsável / Armeiro Contato
+                  Contato Adicional / Gerente
                 </label>
                 <div className="relative">
                   <input
                     type="text"
                     value={contact}
                     onChange={(e) => setContact(e.target.value)}
-                    placeholder="Nome do armeiro técnico..."
+                    placeholder="Nome do contato comercial ou telefone fixo..."
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:border-purple-500 focus:outline-none"
                   />
                   <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
@@ -516,7 +576,7 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por nome da armeria, cidade ou contato..."
+                placeholder="Buscar por nome da armeria, cidade, armeiro ou credenciamento..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-4 py-2 text-xs text-slate-100 focus:border-purple-500 focus:outline-none placeholder-slate-500"
               />
             </div>
@@ -560,9 +620,27 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
                         </span>
                       </div>
 
+                      {/* Armeiro Responsável e Credenciamento PF */}
+                      {(shop.responsibleArmorer || shop.credenciamentoPf) && (
+                        <div className="p-2 bg-slate-900/90 rounded-lg border border-slate-800/80 text-[11px] space-y-0.5 mt-1">
+                          {shop.responsibleArmorer && (
+                            <div className="flex items-center space-x-1.5">
+                              <UserCheck className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              <span>Armeiro Responsável: <strong className="text-slate-100">{shop.responsibleArmorer}</strong></span>
+                            </div>
+                          )}
+                          {shop.credenciamentoPf && (
+                            <div className="flex items-center space-x-1.5">
+                              <Shield className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                              <span>Credenciamento PF: <strong className="font-mono text-purple-300">{shop.credenciamentoPf}</strong></span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {(shop.phone || shop.contact) && (
                         <div className="text-[11px] text-slate-400 flex items-center space-x-3 pt-0.5">
-                          {shop.phone && <span>Telefone: <strong className="text-slate-300">{shop.phone}</strong></span>}
+                          {shop.phone && <span>Telefone: <strong className="text-slate-300 font-mono">{shop.phone}</strong></span>}
                           {shop.contact && <span>Contato: <strong className="text-slate-300">{shop.contact}</strong></span>}
                         </div>
                       )}

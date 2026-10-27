@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Weapon, ExternalWorkshop, VaultSpace } from '../types';
 import { storage } from '../services/storage';
-import { Wrench, X, Check, Calendar, UserCheck, Building, MapPin, Search, AlertCircle, Info } from 'lucide-react';
+import { Wrench, X, Check, Calendar, UserCheck, Building, MapPin, Search, AlertCircle, Info, Shield } from 'lucide-react';
 
 interface ModalManutencaoArmaProps {
   weapon: Weapon;
@@ -40,6 +40,8 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
   const [workshopNeighborhood, setWorkshopNeighborhood] = useState<string>('');
   const [workshopCity, setWorkshopCity] = useState<string>('');
   const [workshopState, setWorkshopState] = useState<string>('MG');
+  const [workshopArmorerName, setWorkshopArmorerName] = useState<string>('');
+  const [workshopCredenciamentoPf, setWorkshopCredenciamentoPf] = useState<string>('');
   const [saveWorkshop, setSaveWorkshop] = useState<boolean>(true);
 
   const [loadingCep, setLoadingCep] = useState<boolean>(false);
@@ -71,6 +73,8 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
       setWorkshopNeighborhood('');
       setWorkshopCity('');
       setWorkshopState('MG');
+      setWorkshopArmorerName('');
+      setWorkshopCredenciamentoPf('');
     } else {
       const found = registeredWorkshops.find(w => w.id === id);
       if (found) {
@@ -82,6 +86,8 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
         setWorkshopNeighborhood(found.neighborhood || '');
         setWorkshopCity(found.city || '');
         setWorkshopState(found.state || 'MG');
+        setWorkshopArmorerName(found.responsibleArmorer || '');
+        setWorkshopCredenciamentoPf(found.credenciamentoPf || '');
       }
     }
   };
@@ -153,6 +159,8 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
         workshopNeighborhood: maintType === 'Externa' ? workshopNeighborhood.trim() : undefined,
         workshopCity: maintType === 'Externa' ? workshopCity.trim() : undefined,
         workshopState: maintType === 'Externa' ? workshopState.trim() : undefined,
+        workshopArmorerName: maintType === 'Externa' ? workshopArmorerName.trim() : undefined,
+        workshopCredenciamentoPf: maintType === 'Externa' ? workshopCredenciamentoPf.trim() : undefined,
         saveWorkshop: maintType === 'Externa' ? saveWorkshop : false
       });
 
@@ -361,6 +369,41 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
                   required
                 />
+              </div>
+
+              {/* Armeiro Responsável e Credenciamento PF */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Nome do Armeiro Responsável
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={workshopArmorerName}
+                      onChange={(e) => setWorkshopArmorerName(e.target.value)}
+                      placeholder="Nome do armeiro da oficina..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                    <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Credenciamento PF (Polícia Federal)
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={workshopCredenciamentoPf}
+                      onChange={(e) => setWorkshopCredenciamentoPf(e.target.value)}
+                      placeholder="Nº de registro ou certificado na PF..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
+                    />
+                    <Shield className="w-3.5 h-3.5 text-purple-400 absolute left-2.5 top-2.5" />
+                  </div>
+                </div>
               </div>
 
               {/* CEP com Busca Automática */}

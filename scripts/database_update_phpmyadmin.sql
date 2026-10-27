@@ -26,6 +26,7 @@ ALTER TABLE `ARMAS`
 -- ------------------------------------------------------------------------------
 -- 2. TABELA DE MANUTENÇÕES DE ARMAS (`MANUTENCOES_ARMAS`)
 -- Registra manutenções internas (na unidade) e externas (armerias especializadas)
+-- Inclui o Armeiro Responsável e Credenciamento PF da Armeria Externa
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `MANUTENCOES_ARMAS` (
   `ID_MANUTENCOES_ARMAS` VARCHAR(64) NOT NULL,
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS `MANUTENCOES_ARMAS` (
   `TIROS_NO_MOMENTO` INT(11) NOT NULL DEFAULT 0,
   `STATUS_MANUTENCAO` ENUM('EM_ANDAMENTO', 'CONCLUIDA') NOT NULL DEFAULT 'EM_ANDAMENTO',
   
-  -- Campos para Manutenção Externa (endereço e oficina)
+  -- Campos para Manutenção Externa (endereço, oficina e credenciamento)
   `ARMERIA_NOME` VARCHAR(255) DEFAULT NULL,
   `ARMERIA_CEP` VARCHAR(16) DEFAULT NULL,
   `ARMERIA_LOGRADOURO` VARCHAR(255) DEFAULT NULL,
@@ -48,6 +49,8 @@ CREATE TABLE IF NOT EXISTS `MANUTENCOES_ARMAS` (
   `ARMERIA_BAIRRO` VARCHAR(128) DEFAULT NULL,
   `ARMERIA_CIDADE` VARCHAR(128) DEFAULT NULL,
   `ARMERIA_ESTADO` VARCHAR(8) DEFAULT NULL,
+  `ARMERIA_ARMEIRO_RESPONSAVEL` VARCHAR(255) DEFAULT NULL,
+  `ARMERIA_CREDENCIAMENTO_PF` VARCHAR(128) DEFAULT NULL,
   
   -- Campos de Recebimento da Manutenção
   `DATA_RETORNO` DATETIME DEFAULT NULL,
@@ -63,9 +66,14 @@ CREATE TABLE IF NOT EXISTS `MANUTENCOES_ARMAS` (
   KEY `idx_manut_serie` (`NUMERO_SERIE_ARMAS`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Atualização se a tabela MANUTENCOES_ARMAS já existir:
+ALTER TABLE `MANUTENCOES_ARMAS`
+  ADD COLUMN IF NOT EXISTS `ARMERIA_ARMEIRO_RESPONSAVEL` VARCHAR(255) DEFAULT NULL AFTER `ARMERIA_ESTADO`,
+  ADD COLUMN IF NOT EXISTS `ARMERIA_CREDENCIAMENTO_PF` VARCHAR(128) DEFAULT NULL AFTER `ARMERIA_ARMEIRO_RESPONSAVEL`;
+
 -- ------------------------------------------------------------------------------
--- 3. TABELA DE ARMERIAS EXTERNAS (`ARMERIAS_EXTERNAS`)
--- Cadastro persistente de oficinas para autocomplete rápido e histórico
+-- 3. TABELA DE ARMERIAS EXTERNAS CREDENCIADAS (`ARMERIAS_EXTERNAS`)
+-- Cadastro persistente de armerias com Armeiro Responsável e Credenciamento PF
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `ARMERIAS_EXTERNAS` (
   `ID_ARMERIAS_EXTERNAS` VARCHAR(64) NOT NULL,
@@ -79,10 +87,18 @@ CREATE TABLE IF NOT EXISTS `ARMERIAS_EXTERNAS` (
   `ESTADO` VARCHAR(8) DEFAULT NULL,
   `TELEFONE` VARCHAR(32) DEFAULT NULL,
   `CONTATO` VARCHAR(128) DEFAULT NULL,
+  `ARMEIRO_RESPONSAVEL` VARCHAR(255) DEFAULT NULL,
+  `CREDENCIAMENTO_PF` VARCHAR(128) DEFAULT NULL,
   `DATA_CRIACAO` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`ID_ARMERIAS_EXTERNAS`),
-  KEY `idx_armeria_nome` (`NOME`)
+  KEY `idx_armeria_nome` (`NOME`),
+  KEY `idx_armeria_cred_pf` (`CREDENCIAMENTO_PF`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Atualização se a tabela ARMERIAS_EXTERNAS já existir:
+ALTER TABLE `ARMERIAS_EXTERNAS`
+  ADD COLUMN IF NOT EXISTS `ARMEIRO_RESPONSAVEL` VARCHAR(255) DEFAULT NULL AFTER `CONTATO`,
+  ADD COLUMN IF NOT EXISTS `CREDENCIAMENTO_PF` VARCHAR(128) DEFAULT NULL AFTER `ARMEIRO_RESPONSAVEL`;
 
 -- ------------------------------------------------------------------------------
 -- 4. TABELA DE REGISTRO DE DISPAROS / TIROS (`REGISTROS_TIROS_ARMAS`)

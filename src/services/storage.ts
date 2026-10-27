@@ -916,6 +916,8 @@ class StorageService {
     workshopNeighborhood?: string;
     workshopCity?: string;
     workshopState?: string;
+    workshopArmorerName?: string;
+    workshopCredenciamentoPf?: string;
     saveWorkshop?: boolean;
   }): Promise<{ id: string }> {
     const res = await fetch(`/api/weapons/${weaponId}/maintenance`, {

@@ -18,7 +18,8 @@ import {
   MapPin,
   Crosshair,
   UserCheck,
-  FileText
+  FileText,
+  Shield
 } from 'lucide-react';
 
 interface ModalHistoricoManutencoesProps {
@@ -119,7 +120,7 @@ export const ModalHistoricoManutencoes: React.FC<ModalHistoricoManutencoesProps>
           <td style="padding: 8px 6px;">
             <strong>Envio:</strong> ${m.sentDate ? formatTimestamp(m.sentDate) : 'N/A'}<br/>
             <strong>Armeiro:</strong> ${m.sentArmorerName || 'N/A'}<br/>
-            ${m.type === 'Externa' && m.workshopName ? `<strong>Armeria:</strong> ${m.workshopName}<br/>` : ''}
+            ${m.type === 'Externa' && m.workshopName ? `<strong>Armeria:</strong> ${m.workshopName}${m.workshopArmorerName ? ` | <strong>Armeiro Resp.:</strong> ${m.workshopArmorerName}` : ''}${m.workshopCredenciamentoPf ? ` | <strong>Cred. PF:</strong> ${m.workshopCredenciamentoPf}` : ''}<br/>` : ''}
             <span style="font-style: italic; color: #475569;">${m.sentDescription || ''}</span>
           </td>
           <td style="padding: 8px 6px;">
@@ -434,13 +435,29 @@ export const ModalHistoricoManutencoes: React.FC<ModalHistoricoManutencoesProps>
                         </div>
                       </div>
 
-                      {/* External Workshop Address (if Externa) */}
+                      {/* External Workshop Address & Armorer/PF info (if Externa) */}
                       {m.type === 'Externa' && (
-                        <div className="p-3 bg-purple-950/20 border border-purple-900/30 rounded-lg space-y-1">
-                          <div className="flex items-center space-x-1.5 font-bold text-purple-300 text-[11px]">
-                            <Building className="w-3.5 h-3.5" />
-                            <span>Armeria Externa: {m.workshopName}</span>
+                        <div className="p-3 bg-purple-950/20 border border-purple-900/30 rounded-lg space-y-1.5">
+                          <div className="flex items-center justify-between border-b border-purple-900/30 pb-1">
+                            <div className="flex items-center space-x-1.5 font-bold text-purple-300 text-[11px]">
+                              <Building className="w-3.5 h-3.5" />
+                              <span>Armeria Externa: {m.workshopName}</span>
+                            </div>
+                            {m.workshopCredenciamentoPf && (
+                              <div className="flex items-center space-x-1 text-[10px] text-purple-300 font-mono bg-purple-900/40 px-2 py-0.5 rounded border border-purple-700/50">
+                                <Shield className="w-3 h-3 text-purple-400" />
+                                <span>Cred. PF: {m.workshopCredenciamentoPf}</span>
+                              </div>
+                            )}
                           </div>
+
+                          {m.workshopArmorerName && (
+                            <div className="flex items-center space-x-1.5 text-[11px] text-slate-300">
+                              <UserCheck className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                              <span>Armeiro Responsável: <strong className="text-slate-100">{m.workshopArmorerName}</strong></span>
+                            </div>
+                          )}
+
                           <div className="text-[11px] text-slate-300 flex items-start space-x-1.5">
                             <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
                             <span>

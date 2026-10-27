@@ -185,6 +185,8 @@ export interface WeaponMaintenance {
   workshopNeighborhood?: string;
   workshopCity?: string;
   workshopState?: string;
+  workshopArmorerName?: string;
+  workshopCredenciamentoPf?: string;
   returnDate?: string;
   returnArmorerId?: string;
   returnArmorerName?: string;
@@ -205,6 +207,8 @@ export interface ExternalWorkshop {
   state?: string;
   phone?: string;
   contact?: string;
+  responsibleArmorer?: string; // Nome do armeiro responsável
+  credenciamentoPf?: string;   // Credenciamento da Polícia Federal (PF)
   createdAt?: string;
 }
 
