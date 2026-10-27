@@ -104,6 +104,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [selectedHistoryMovId, setSelectedHistoryMovId] = useState<string | null>(null);
   const [historyFilterCaliber, setHistoryFilterCaliber] = useState<boolean>(true);
 
+  // Histórico de Movimentação Accordion State (inicia oculto igual aos cofres)
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
   const isAdmin = currentUser.role === 'Administrador';
@@ -1108,36 +1111,68 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         })}
       </div>
 
-      {/* Movement Log Table with Column Filters */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm space-y-3 p-5">
-        <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-          <h2 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
-            <span>Histórico de Movimentação de Munições</span>
-            <span className="text-xs bg-slate-800 text-amber-400 px-2 py-0.5 rounded font-mono">
-              {filteredMovements.length}
+      {/* Movement Log Table with Column Filters (Inicia oculto igual aos cofres) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
+        
+        {/* Accordion Header (idêntico à div dos cofres) */}
+        <div
+          onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
+          className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                  HISTÓRICO
+                </span>
+                <h2 className="text-base font-bold text-slate-100">Histórico de Movimentação de Munições</h2>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {filteredMovements.length} registro(s) de movimentação de munições
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
+              {filteredMovements.length} Registros
             </span>
-          </h2>
-          {(colFilterData || colFilterTipo || colFilterCalibre || colFilterQtd || colFilterLocal || colFilterMotivo || colFilterPolicial || colFilterDevolucao) && (
-            <button
-              onClick={() => {
-                setColFilterData('');
-                setColFilterTipo('');
-                setColFilterCalibre('');
-                setColFilterQtd('');
-                setColFilterLocal('');
-                setColFilterMotivo('');
-                setColFilterPolicial('');
-                setColFilterDevolucao('');
-              }}
-              className="text-xs text-amber-400 hover:underline font-medium"
-            >
-              Limpar Filtros de Coluna
-            </button>
-          )}
+
+            <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
+              {isHistoryExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5" />}
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
+        {/* Content Body - Inicia oculto e só abre ao selecionar a div, igual aos cofres */}
+        {isHistoryExpanded && (
+          <div className="p-6 bg-slate-950/40 border-t border-slate-800/60 space-y-4">
+            {(colFilterData || colFilterTipo || colFilterCalibre || colFilterQtd || colFilterLocal || colFilterMotivo || colFilterPolicial || colFilterDevolucao) && (
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setColFilterData('');
+                    setColFilterTipo('');
+                    setColFilterCalibre('');
+                    setColFilterQtd('');
+                    setColFilterLocal('');
+                    setColFilterMotivo('');
+                    setColFilterPolicial('');
+                    setColFilterDevolucao('');
+                  }}
+                  className="text-xs text-amber-400 hover:underline font-medium"
+                >
+                  Limpar Filtros de Coluna
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
               <tr>
                 <th className="py-2 px-3 min-w-[110px]">Data / Hora</th>
@@ -1348,8 +1383,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 })
               )}
             </tbody>
-          </table>
-        </div>
+              </table>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal Calibres (Exibe Calibres, com opções de edição/cadastro apenas para perfil Geral) */}
