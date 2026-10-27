@@ -28,7 +28,10 @@ import {
   WeaponTransferItem,
   TipoMaterial,
   Material,
-  CautelaMaterial
+  CautelaMaterial,
+  WeaponMaintenance,
+  ExternalWorkshop,
+  WeaponShotRecord
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -859,6 +862,114 @@ class StorageService {
     if (!res.ok) throw new Error(data.error || 'Erro ao excluir arma.');
     await this.refreshFromServer();
     return true;
+  }
+
+  // --- WEAPON SHOTS / DISPAROS ---
+  public async addWeaponShots(
+    weaponId: string,
+    shotCount: number,
+    reason: string,
+    officerName: string,
+    officerMasp?: string
+  ): Promise<{ newTotal: number }> {
+    const res = await fetch(`/api/weapons/${weaponId}/add-shots`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shotCount,
+        reason,
+        officerName,
+        officerMasp,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao registrar disparos.');
+    await this.refreshFromServer();
+    return data;
+  }
+
+  public async getWeaponShots(weaponId: string): Promise<WeaponShotRecord[]> {
+    const res = await fetch(`/api/weapons/${weaponId}/shots`);
+    if (!res.ok) return [];
+    return await res.json();
+  }
+
+  // --- WEAPON MAINTENANCE ---
+  public async getMaintenances(weaponId?: string): Promise<WeaponMaintenance[]> {
+    const url = weaponId ? `/api/maintenances?weaponId=${encodeURIComponent(weaponId)}` : '/api/maintenances';
+    const res = await fetch(url);
+    if (!res.ok) return [];
+    return await res.json();
+  }
+
+  public async sendWeaponToMaintenance(weaponId: string, payload: {
+    type: 'Interna' | 'Externa';
+    sentDate: string;
+    sentArmorerName: string;
+    sentDescription: string;
+    workshopName?: string;
+    workshopCep?: string;
+    workshopStreet?: string;
+    workshopNumber?: string;
+    workshopComplement?: string;
+    workshopNeighborhood?: string;
+    workshopCity?: string;
+    workshopState?: string;
+    saveWorkshop?: boolean;
+  }): Promise<{ id: string }> {
+    const res = await fetch(`/api/weapons/${weaponId}/maintenance`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao enviar arma para manutenção.');
+    await this.refreshFromServer();
+    return data;
+  }
+
+  public async receiveWeaponFromMaintenance(maintenanceId: string, payload: {
+    returnDate: string;
+    returnArmorerName: string;
+    returnServiceDescription: string;
+  }): Promise<boolean> {
+    const res = await fetch(`/api/maintenances/${maintenanceId}/receive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...payload,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao receber arma da manutenção.');
+    await this.refreshFromServer();
+    return true;
+  }
+
+  // --- EXTERNAL WORKSHOPS ---
+  public async getExternalWorkshops(): Promise<ExternalWorkshop[]> {
+    const res = await fetch('/api/external-workshops');
+    if (!res.ok) return [];
+    return await res.json();
+  }
+
+  public async saveExternalWorkshop(workshop: Partial<ExternalWorkshop>): Promise<ExternalWorkshop> {
+    const res = await fetch('/api/external-workshops', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...workshop,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao salvar armeria externa.');
+    return data;
   }
 
   // --- WEAPON TRANSFERS BETWEEN UNITS ---

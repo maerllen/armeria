@@ -1298,6 +1298,8 @@ apiRouter.get('/weapons', async (req: Request, res: Response) => {
         OBSERVACAO_LOCALIZACAO_ARMAS as locationNote,
         DATA_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceDate, 
         RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceResponsible, 
+        TIROS_DISPARADOS_ARMAS as shotCount,
+        LOCAL_ANTERIOR_COFRE_ID_ARMAS as previousVaultSpaceId,
         DATA_CRIACAO_ARMAS as createdAt
       FROM ARMAS 
       ORDER BY DATA_CRIACAO_ARMAS ASC
@@ -1305,6 +1307,7 @@ apiRouter.get('/weapons', async (req: Request, res: Response) => {
 
     const mapped = (rows || []).map((w: any) => ({
       ...w,
+      shotCount: Number(w.shotCount || 0),
       lastMaintenanceDate: w.lastMaintenanceDate ? new Date(w.lastMaintenanceDate).toISOString().split('T')[0] : null
     }));
 
@@ -1333,8 +1336,8 @@ apiRouter.post('/weapons', async (req: Request, res: Response) => {
       `INSERT INTO ARMAS (
         ID_ARMAS, TIPO_ARMAS, NUMERO_SERIE_ARMAS, FABRICANTE_ARMAS, MODELO_ARMAS, CALIBRE_ARMAS,
         QUANTIDADE_CARREGADORES_ARMAS, STATUS_ARMAS, DEPARTAMENTO_ID_ARMAS, UNIDADE_ID_ARMAS,
-        COFRE_ID_ARMAS, DATA_ULTIMA_MANUTENCAO_ARMAS, RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS, DATA_CRIACAO_ARMAS
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'No Cofre', ?, ?, ?, ?, ?, NOW())`,
+        COFRE_ID_ARMAS, DATA_ULTIMA_MANUTENCAO_ARMAS, RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS, TIROS_DISPARADOS_ARMAS, DATA_CRIACAO_ARMAS
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, 'No Cofre', ?, ?, ?, ?, ?, 0, NOW())`,
       [
         id, type, cleanSerial, manufacturer, model, caliber, magazineQuantity || 1,
         departmentId || null, unitId || null, vaultSpaceId || null,
@@ -1356,6 +1359,7 @@ apiRouter.post('/weapons', async (req: Request, res: Response) => {
       departmentId,
       unitId,
       vaultSpaceId,
+      shotCount: 0,
       lastMaintenanceDate,
       lastMaintenanceResponsible,
       createdAt: new Date().toISOString()
@@ -1384,7 +1388,9 @@ apiRouter.put('/weapons/:id', async (req: Request, res: Response) => {
         UNIDADE_ID_ARMAS = COALESCE(?, UNIDADE_ID_ARMAS),
         COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
         DATA_ULTIMA_MANUTENCAO_ARMAS = COALESCE(?, DATA_ULTIMA_MANUTENCAO_ARMAS),
-        RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS = COALESCE(?, RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS)
+        RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS = COALESCE(?, RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS),
+        TIROS_DISPARADOS_ARMAS = COALESCE(?, TIROS_DISPARADOS_ARMAS),
+        LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS)
        WHERE ID_ARMAS = ?`,
       [
         updates.type ?? null,
@@ -1398,6 +1404,8 @@ apiRouter.put('/weapons/:id', async (req: Request, res: Response) => {
         updates.vaultSpaceId ?? null,
         updates.lastMaintenanceDate ?? null,
         updates.lastMaintenanceResponsible ?? null,
+        updates.shotCount !== undefined ? updates.shotCount : null,
+        updates.previousVaultSpaceId ?? null,
         id
       ]
     );
@@ -1431,6 +1439,441 @@ apiRouter.delete('/weapons/:id', async (req: Request, res: Response) => {
 
     await insertAuditLog('Armas', 'Excluir', `Excluída arma ${model} (Série: ${serial})`, actor, req.ip);
     return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// WEAPON SHOTS / DISPAROS
+// -------------------------------------------------------------
+apiRouter.post('/weapons/:id/add-shots', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { shotCount, reason, officerName, officerMasp, actor } = req.body;
+    const count = parseInt(shotCount, 10);
+    if (isNaN(count) || count <= 0) {
+      return res.status(400).json({ error: 'Informe uma quantidade válida de tiros (maior que zero).' });
+    }
+
+    const pool = getPool();
+    const [weaps]: any = await pool.query('SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, TIROS_DISPARADOS_ARMAS FROM ARMAS WHERE ID_ARMAS = ?', [id]);
+    if (!weaps || weaps.length === 0) {
+      return res.status(404).json({ error: 'Arma não encontrada.' });
+    }
+
+    const weapon = weaps[0];
+    const currentTotal = Number(weapon.TIROS_DISPARADOS_ARMAS) || 0;
+    const newTotal = currentTotal + count;
+
+    await pool.query('UPDATE ARMAS SET TIROS_DISPARADOS_ARMAS = ? WHERE ID_ARMAS = ?', [newTotal, id]);
+
+    const regId = `shot-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO REGISTROS_TIROS_ARMAS (
+        ID_REGISTROS_TIROS, ARMA_ID, NUMERO_SERIE, QUANTIDADE_TIROS, MOTIVO, POLICIAL_NOME, POLICIAL_MASP, TOTAL_TIROS_APOS, DATA_REGISTRO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        regId,
+        id,
+        weapon.NUMERO_SERIE_ARMAS,
+        count,
+        reason || 'Treinamento / Instrução',
+        officerName || actor?.name || 'Policial',
+        officerMasp || actor?.masp || '',
+        newTotal
+      ]
+    );
+
+    await insertAuditLog(
+      'Armas',
+      'Editar',
+      `Registrados ${count} tiros para a arma ${weapon.NUMERO_SERIE_ARMAS} por ${officerName || actor?.name}. Total acumulado: ${newTotal}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, newTotal, shotCount: count });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/weapons/:id/shots', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      `SELECT 
+        ID_REGISTROS_TIROS as id,
+        ARMA_ID as weaponId,
+        NUMERO_SERIE as serialNumber,
+        QUANTIDADE_TIROS as shotCount,
+        MOTIVO as reason,
+        POLICIAL_NOME as officerName,
+        POLICIAL_MASP as officerMasp,
+        TOTAL_TIROS_APOS as totalShotsAfter,
+        DATA_REGISTRO as createdAt
+       FROM REGISTROS_TIROS_ARMAS
+       WHERE ARMA_ID = ?
+       ORDER BY DATA_REGISTRO DESC`,
+      [id]
+    );
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// WEAPON MAINTENANCE (MANUTENÇÃO INTERNA / EXTERNA)
+// -------------------------------------------------------------
+apiRouter.get('/maintenances', async (req: Request, res: Response) => {
+  try {
+    const { weaponId } = req.query;
+    const pool = getPool();
+
+    let sql = `
+      SELECT 
+        m.ID_MANUTENCOES_ARMAS as id,
+        m.ARMA_ID_MANUTENCOES_ARMAS as weaponId,
+        m.NUMERO_SERIE_ARMAS as serialNumber,
+        w.MODELO_ARMAS as weaponModel,
+        w.TIPO_ARMAS as weaponType,
+        w.CALIBRE_ARMAS as caliber,
+        m.TIPO_MANUTENCAO as type,
+        m.DATA_ENVIO as sentDate,
+        m.ARMEIRO_ENVIO_ID as sentArmorerId,
+        m.ARMEIRO_ENVIO_NOME as sentArmorerName,
+        m.DESCRICAO_ENVIO as sentDescription,
+        m.TIROS_NO_MOMENTO as shotCountAtMaintenance,
+        m.STATUS_MANUTENCAO as status,
+        m.ARMERIA_NOME as workshopName,
+        m.ARMERIA_CEP as workshopCep,
+        m.ARMERIA_LOGRADOURO as workshopStreet,
+        m.ARMERIA_NUMERO as workshopNumber,
+        m.ARMERIA_COMPLEMENTO as workshopComplement,
+        m.ARMERIA_BAIRRO as workshopNeighborhood,
+        m.ARMERIA_CIDADE as workshopCity,
+        m.ARMERIA_ESTADO as workshopState,
+        m.DATA_RETORNO as returnDate,
+        m.ARMEIRO_RETORNO_ID as returnArmorerId,
+        m.ARMEIRO_RETORNO_NOME as returnArmorerName,
+        m.DESCRICAO_RETORNO as returnServiceDescription,
+        m.COFRE_ORIGINAL_ID as originalVaultSpaceId,
+        m.DATA_CRIACAO as createdAt
+      FROM MANUTENCOES_ARMAS m
+      LEFT JOIN ARMAS w ON w.ID_ARMAS = m.ARMA_ID_MANUTENCOES_ARMAS
+    `;
+
+    const params: any[] = [];
+    if (weaponId) {
+      sql += ' WHERE m.ARMA_ID_MANUTENCOES_ARMAS = ?';
+      params.push(weaponId);
+    }
+    sql += ' ORDER BY m.DATA_ENVIO DESC, m.DATA_CRIACAO DESC';
+
+    const [rows]: any = await pool.query(sql, params);
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      type, // 'Interna' | 'Externa'
+      sentDate,
+      sentArmorerName,
+      sentDescription,
+      workshopName,
+      workshopCep,
+      workshopStreet,
+      workshopNumber,
+      workshopComplement,
+      workshopNeighborhood,
+      workshopCity,
+      workshopState,
+      saveWorkshop,
+      actor
+    } = req.body;
+
+    if (!type || !['Interna', 'Externa'].includes(type)) {
+      return res.status(400).json({ error: 'Tipo de manutenção inválido. Selecione "Interna" ou "Externa".' });
+    }
+    if (!sentDate) {
+      return res.status(400).json({ error: 'Informe a data da manutenção.' });
+    }
+    if (!sentArmorerName || !sentArmorerName.trim()) {
+      return res.status(400).json({ error: 'Informe o armeiro responsável.' });
+    }
+    if (!sentDescription || !sentDescription.trim()) {
+      return res.status(400).json({ error: 'Informe a descrição da manutenção.' });
+    }
+
+    if (type === 'Externa') {
+      if (!workshopName || !workshopName.trim()) {
+        return res.status(400).json({ error: 'Para manutenção externa, informe o nome da armeria.' });
+      }
+    }
+
+    const pool = getPool();
+    const [weaps]: any = await pool.query(
+      'SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, MODELO_ARMAS, TIPO_ARMAS, CALIBRE_ARMAS, STATUS_ARMAS, COFRE_ID_ARMAS, TIROS_DISPARADOS_ARMAS FROM ARMAS WHERE ID_ARMAS = ?',
+      [id]
+    );
+
+    if (!weaps || weaps.length === 0) {
+      return res.status(404).json({ error: 'Arma não encontrada.' });
+    }
+
+    const weapon = weaps[0];
+    const currentVaultId = weapon.COFRE_ID_ARMAS || '';
+    const shotCountAtMaintenance = Number(weapon.TIROS_DISPARADOS_ARMAS) || 0;
+    const maintId = `maint-${Date.now()}`;
+
+    // Insert maintenance record
+    await pool.query(
+      `INSERT INTO MANUTENCOES_ARMAS (
+        ID_MANUTENCOES_ARMAS,
+        ARMA_ID_MANUTENCOES_ARMAS,
+        NUMERO_SERIE_ARMAS,
+        TIPO_MANUTENCAO,
+        DATA_ENVIO,
+        ARMEIRO_ENVIO_ID,
+        ARMEIRO_ENVIO_NOME,
+        DESCRICAO_ENVIO,
+        TIROS_NO_MOMENTO,
+        STATUS_MANUTENCAO,
+        ARMERIA_NOME,
+        ARMERIA_CEP,
+        ARMERIA_LOGRADOURO,
+        ARMERIA_NUMERO,
+        ARMERIA_COMPLEMENTO,
+        ARMERIA_BAIRRO,
+        ARMERIA_CIDADE,
+        ARMERIA_ESTADO,
+        COFRE_ORIGINAL_ID,
+        DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'EM_ANDAMENTO', ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        maintId,
+        id,
+        weapon.NUMERO_SERIE_ARMAS,
+        type,
+        sentDate,
+        actor?.id || null,
+        sentArmorerName.trim(),
+        sentDescription.trim(),
+        shotCountAtMaintenance,
+        type === 'Externa' ? (workshopName || '').trim() : null,
+        type === 'Externa' ? (workshopCep || '').trim() : null,
+        type === 'Externa' ? (workshopStreet || '').trim() : null,
+        type === 'Externa' ? (workshopNumber || '').trim() : null,
+        type === 'Externa' ? (workshopComplement || '').trim() : null,
+        type === 'Externa' ? (workshopNeighborhood || '').trim() : null,
+        type === 'Externa' ? (workshopCity || '').trim() : null,
+        type === 'Externa' ? (workshopState || '').trim() : null,
+        currentVaultId
+      ]
+    );
+
+    // Update weapon status to 'Manutenção', save current vault to LOCAL_ANTERIOR_COFRE_ID_ARMAS
+    await pool.query(
+      `UPDATE ARMAS SET 
+        STATUS_ARMAS = 'Manutenção',
+        LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS),
+        DATA_ULTIMA_MANUTENCAO_ARMAS = ?,
+        RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS = ?
+       WHERE ID_ARMAS = ?`,
+      [currentVaultId, sentDate, sentArmorerName.trim(), id]
+    );
+
+    // Save workshop in ARMERIAS_EXTERNAS if requested or if not exists
+    if (type === 'Externa' && workshopName && workshopName.trim()) {
+      try {
+        const cleanWName = workshopName.trim();
+        const [existingShop]: any = await pool.query('SELECT ID_ARMERIAS_EXTERNAS FROM ARMERIAS_EXTERNAS WHERE LOWER(NOME) = LOWER(?)', [cleanWName]);
+        if (!existingShop || existingShop.length === 0) {
+          const shopId = `shop-${Date.now()}`;
+          await pool.query(
+            `INSERT INTO ARMERIAS_EXTERNAS (
+              ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, RESPONSAVEL, DATA_CRIACAO
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              shopId,
+              cleanWName,
+              workshopCep || null,
+              workshopStreet || null,
+              workshopNumber || null,
+              workshopComplement || null,
+              workshopNeighborhood || null,
+              workshopCity || null,
+              workshopState || null,
+              sentArmorerName || null
+            ]
+          );
+        } else if (saveWorkshop) {
+          await pool.query(
+            `UPDATE ARMERIAS_EXTERNAS SET
+              CEP = COALESCE(?, CEP),
+              LOGRADOURO = COALESCE(?, LOGRADOURO),
+              NUMERO = COALESCE(?, NUMERO),
+              COMPLEMENTO = COALESCE(?, COMPLEMENTO),
+              BAIRRO = COALESCE(?, BAIRRO),
+              CIDADE = COALESCE(?, CIDADE),
+              ESTADO = COALESCE(?, ESTADO)
+             WHERE ID_ARMERIAS_EXTERNAS = ?`,
+            [
+              workshopCep || null,
+              workshopStreet || null,
+              workshopNumber || null,
+              workshopComplement || null,
+              workshopNeighborhood || null,
+              workshopCity || null,
+              workshopState || null,
+              existingShop[0].ID_ARMERIAS_EXTERNAS
+            ]
+          );
+        }
+      } catch (shopErr) {
+        console.warn('Erro ao salvar armeria externa:', shopErr);
+      }
+    }
+
+    await insertAuditLog(
+      'Manutenção',
+      'Criar',
+      `Arma ${weapon.NUMERO_SERIE_ARMAS} (${weapon.MODELO_ARMAS}) enviada para manutenção ${type}. Armeiro: ${sentArmorerName}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, id: maintId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/maintenances/:id/receive', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { returnDate, returnArmorerName, returnServiceDescription, actor } = req.body;
+
+    if (!returnServiceDescription || !returnServiceDescription.trim()) {
+      return res.status(400).json({ error: 'Informe o tipo de serviço que foi realizado na arma.' });
+    }
+
+    const pool = getPool();
+    const [maints]: any = await pool.query('SELECT * FROM MANUTENCOES_ARMAS WHERE ID_MANUTENCOES_ARMAS = ?', [id]);
+    if (!maints || maints.length === 0) {
+      return res.status(404).json({ error: 'Registro de manutenção não encontrado.' });
+    }
+
+    const maint = maints[0];
+    const weaponId = maint.ARMA_ID_MANUTENCOES_ARMAS;
+    const returnDateVal = returnDate || new Date().toISOString().split('T')[0];
+    const armorerVal = returnArmorerName || actor?.name || 'Armeiro';
+
+    // Update maintenance to CONCLUIDA
+    await pool.query(
+      `UPDATE MANUTENCOES_ARMAS SET
+        STATUS_MANUTENCAO = 'CONCLUIDA',
+        DATA_RETORNO = ?,
+        ARMEIRO_RETORNO_ID = ?,
+        ARMEIRO_RETORNO_NOME = ?,
+        DESCRICAO_RETORNO = ?
+       WHERE ID_MANUTENCOES_ARMAS = ?`,
+      [returnDateVal, actor?.id || null, armorerVal, returnServiceDescription.trim(), id]
+    );
+
+    // Restore weapon status to 'No Cofre' and restore vault space from COFRE_ORIGINAL_ID
+    const targetVaultId = maint.COFRE_ORIGINAL_ID || null;
+    await pool.query(
+      `UPDATE ARMAS SET
+        STATUS_ARMAS = 'No Cofre',
+        COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+        LOCAL_ANTERIOR_COFRE_ID_ARMAS = NULL,
+        DATA_ULTIMA_MANUTENCAO_ARMAS = ?,
+        RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS = ?
+       WHERE ID_ARMAS = ?`,
+      [targetVaultId, returnDateVal, armorerVal, weaponId]
+    );
+
+    await insertAuditLog(
+      'Manutenção',
+      'Concluir',
+      `Arma ${maint.NUMERO_SERIE_ARMAS} recebida da manutenção. Retornada ao cofre de origem. Serviço: ${returnServiceDescription.trim()}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// EXTERNAL WORKSHOPS (ARMERIAS EXTERNAS)
+// -------------------------------------------------------------
+apiRouter.get('/external-workshops', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        ID_ARMERIAS_EXTERNAS as id,
+        NOME as name,
+        CEP as cep,
+        LOGRADOURO as street,
+        NUMERO as number,
+        COMPLEMENTO as complement,
+        BAIRRO as neighborhood,
+        CIDADE as city,
+        ESTADO as state,
+        TELEFONE as phone,
+        CONTATO as contact,
+        DATA_CRIACAO as createdAt
+      FROM ARMERIAS_EXTERNAS
+      ORDER BY NOME ASC
+    `);
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/external-workshops', async (req: Request, res: Response) => {
+  try {
+    const { id, name, cep, street, number, complement, neighborhood, city, state, phone, contact, actor } = req.body;
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Nome da armeria é obrigatório.' });
+    }
+
+    const pool = getPool();
+    const workshopId = id || `shop-${Date.now()}`;
+    const [existing]: any = await pool.query('SELECT ID_ARMERIAS_EXTERNAS FROM ARMERIAS_EXTERNAS WHERE ID_ARMERIAS_EXTERNAS = ? OR LOWER(NOME) = LOWER(?)', [workshopId, name.trim()]);
+
+    if (existing && existing.length > 0) {
+      await pool.query(
+        `UPDATE ARMERIAS_EXTERNAS SET
+          NOME = ?, CEP = ?, LOGRADOURO = ?, NUMERO = ?, COMPLEMENTO = ?, BAIRRO = ?, CIDADE = ?, ESTADO = ?, TELEFONE = ?, CONTATO = ?
+         WHERE ID_ARMERIAS_EXTERNAS = ?`,
+        [name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null, existing[0].ID_ARMERIAS_EXTERNAS]
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO ARMERIAS_EXTERNAS (
+          ID_ARMERIAS_EXTERNAS, NOME, CEP, LOGRADOURO, NUMERO, COMPLEMENTO, BAIRRO, CIDADE, ESTADO, TELEFONE, CONTATO, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [workshopId, name.trim(), cep || null, street || null, number || null, complement || null, neighborhood || null, city || null, state || null, phone || null, contact || null]
+      );
+    }
+
+    await insertAuditLog('Armerias', 'Editar', `Cadastrada/atualizada armeria externa: ${name}`, actor, req.ip);
+    return res.json({ id: workshopId, name: name.trim() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

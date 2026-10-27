@@ -140,7 +140,7 @@ export interface AmmunitionMovement {
   createdAt: string;
 }
 
-export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Em Aula';
+export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula';
 
 export interface Weapon {
   id: string;
@@ -161,6 +161,62 @@ export interface Weapon {
   maintenanceReason?: string;
   maintenanceSentDate?: string;
   currentMovementId?: string;
+  shotCount?: number; // Quantidade de disparos/tiros efetuados pela arma
+  previousVaultSpaceId?: string; // Cofre onde a arma ficava antes de ir para manutenção
+  createdAt: string;
+}
+
+export interface WeaponMaintenance {
+  id: string;
+  weaponId: string;
+  serialNumber: string;
+  type: 'Interna' | 'Externa';
+  sentDate: string;
+  sentArmorerId?: string;
+  sentArmorerName: string;
+  sentDescription: string;
+  shotCountAtMaintenance: number;
+  status: 'EM_ANDAMENTO' | 'CONCLUIDA';
+  workshopName?: string;
+  workshopCep?: string;
+  workshopStreet?: string;
+  workshopNumber?: string;
+  workshopComplement?: string;
+  workshopNeighborhood?: string;
+  workshopCity?: string;
+  workshopState?: string;
+  returnDate?: string;
+  returnArmorerId?: string;
+  returnArmorerName?: string;
+  returnServiceDescription?: string;
+  originalVaultSpaceId?: string;
+  createdAt: string;
+}
+
+export interface ExternalWorkshop {
+  id: string;
+  name: string;
+  cep?: string;
+  street?: string;
+  number?: string;
+  complement?: string;
+  neighborhood?: string;
+  city?: string;
+  state?: string;
+  phone?: string;
+  contact?: string;
+  createdAt?: string;
+}
+
+export interface WeaponShotRecord {
+  id: string;
+  weaponId: string;
+  serialNumber: string;
+  shotCount: number;
+  reason: string;
+  officerName: string;
+  officerMasp?: string;
+  totalShotsAfter: number;
   createdAt: string;
 }
 

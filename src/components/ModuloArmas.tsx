@@ -2,13 +2,17 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TransferWeaponModal } from './ModalTransferirArmas';
 import { TransferReceiptModal } from './ModalReciboTransferencia';
 import { TransferHistoryModal } from './ModalHistoricoTransferencias';
 import { ReceiveTransferModal } from './ModalReceberTransferencia';
 import { PrintArsenalModal } from './ModalImprimirArsenal';
+import { ModalRegistrarTiros } from './ModalRegistrarTiros';
+import { ModalManutencaoArma } from './ModalManutencaoArma';
+import { ModalReceberManutencao } from './ModalReceberManutencao';
+import { ModalHistoricoManutencoes } from './ModalHistoricoManutencoes';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -81,6 +85,14 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [showTransitDetailModal, setShowTransitDetailModal] = useState(false);
   const [showPrintArsenalModal, setShowPrintArsenalModal] = useState(false);
+
+  // Maintenance & Shots Modals
+  const [showAddShotsModal, setShowAddShotsModal] = useState(false);
+  const [weaponForShots, setWeaponForShots] = useState<Weapon | null>(null);
+  const [showReceiveMaintenanceModal, setShowReceiveMaintenanceModal] = useState(false);
+  const [weaponToReceive, setWeaponToReceive] = useState<Weapon | null>(null);
+  const [showMaintenanceHistoryModal, setShowMaintenanceHistoryModal] = useState(false);
+  const [maintenanceHistoryWeapon, setMaintenanceHistoryWeapon] = useState<Weapon | null>(null);
 
   // Transfer Modals state (Exclusive to Geral, Admin, and Armeiro)
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -383,26 +395,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   // Open Maintenance Modal
   const handleOpenMaintenance = (weap: Weapon) => {
     setSelectedWeapon(weap);
-    setMaintDate(weap.lastMaintenanceDate || new Date().toISOString().split('T')[0]);
-    setMaintResponsible(weap.lastMaintenanceResponsible || currentUser.name);
     setShowMaintenanceModal(true);
-  };
-
-  const handleSaveMaintenance = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedWeapon) return;
-
-    try {
-      await storage.updateWeapon(selectedWeapon.id, {
-        lastMaintenanceDate: maintDate,
-        lastMaintenanceResponsible: maintResponsible.trim()
-      });
-      setSuccessMsg(`Manutenção registrada com sucesso para a arma ${selectedWeapon.serialNumber}.`);
-      setShowMaintenanceModal(false);
-      onRefresh();
-    } catch (err: any) {
-      alert(err.message || 'Erro ao atualizar manutenção.');
-    }
   };
 
   // Open Movement History
@@ -628,6 +621,20 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           >
             <Printer className="w-4 h-4 text-amber-400" />
             <span>Imprimir Arsenal</span>
+          </button>
+
+          {/* Histórico Geral de Manutenções */}
+          <button
+            id="open-general-maintenance-btn"
+            onClick={() => {
+              setMaintenanceHistoryWeapon(null);
+              setShowMaintenanceHistoryModal(true);
+            }}
+            className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+            title="Visualizar histórico geral de todas as manutenções de armas"
+          >
+            <Wrench className="w-4 h-4 text-amber-400" />
+            <span>Histórico de Manutenções</span>
           </button>
 
           {canAddEditWeapon && (
@@ -1172,14 +1179,23 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
                             : w.status === 'Pendente de Recibo'
                             ? 'bg-amber-500/30 text-amber-300 border-amber-500/50'
+                            : w.status === 'Manutenção' || w.status === 'Em Manutenção'
+                            ? 'bg-amber-500/25 text-amber-300 border-amber-500/50'
                             : 'bg-purple-950 text-purple-300 border-purple-800'
                         }`}>
                           {w.status}
                         </span>
 
-                        <span className="text-[10px] bg-slate-950 text-slate-400 px-2 py-0.5 rounded border border-slate-800 font-mono">
-                          {w.type}
-                        </span>
+                        <div className="flex items-center space-x-1">
+                          {(w.shotCount || 0) > 0 && (
+                            <span className="text-[10px] bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded font-mono font-bold" title="Quantidade de tiros efetuados">
+                              {w.shotCount} tiros
+                            </span>
+                          )}
+                          <span className="text-[10px] bg-slate-950 text-slate-400 px-2 py-0.5 rounded border border-slate-800 font-mono">
+                            {w.type}
+                          </span>
+                        </div>
                       </div>
 
                       {/* Main Weapon Title */}
@@ -1194,14 +1210,16 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       <div className="text-[11px] text-slate-400 mt-2 space-y-0.5 font-mono">
                         {(selectedUnitId === 'ALL' || !selectedUnitId) && (
                           <p className="text-slate-300 font-semibold truncate flex items-center space-x-1">
-                            <Building className="w-3 h-3 text-amber-400 shrink-0" />
+                            <Building className="w-3 text-amber-400 shrink-0" />
                             <span>{weaponUnit?.name || 'Unidade'}</span>
                           </p>
                         )}
                         <p>Calibre: <strong className="text-slate-200">{w.caliber}</strong></p>
                         <p>
                           Cofre: <strong className="text-slate-200">
-                            {vault ? vault.code : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Em Trânsito')}
+                            {w.status === 'Manutenção' || w.status === 'Em Manutenção'
+                              ? 'Em Manutenção'
+                              : vault ? vault.code : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Em Trânsito')}
                           </strong>
                         </p>
                       </div>
@@ -1309,7 +1327,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 <div>
                   <span className="text-slate-400 text-[10px] block">LOCAL NO COFRE:</span>
                   <span className="font-bold text-amber-400">
-                    {vaultSpaces.find(v => v.id === selectedWeaponDetail.vaultSpaceId)?.code || 'Em Trânsito'}
+                    {vaultSpaces.find(v => v.id === selectedWeaponDetail.vaultSpaceId)?.code || (selectedWeaponDetail.status === 'Manutenção' ? 'Em Manutenção' : 'Em Trânsito')}
                   </span>
                 </div>
                 <div>
@@ -1318,6 +1336,32 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                     {selectedWeaponDetail.lastMaintenanceDate || 'Sem registro'}
                   </span>
                 </div>
+              </div>
+
+              {/* Quantidade de Tiros / Disparos Efetuados */}
+              <div className="pt-2.5 border-t border-slate-800 flex items-center justify-between">
+                <div>
+                  <span className="text-slate-400 text-[10px] block font-mono">QUANTIDADE DE TIROS / DISPAROS:</span>
+                  <div className="flex items-center space-x-1.5 mt-0.5">
+                    <span className="text-amber-400 font-bold font-mono text-sm">
+                      {(selectedWeaponDetail.shotCount || 0).toLocaleString('pt-BR')}
+                    </span>
+                    <span className="text-slate-400 text-xs">tiros disparados</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setWeaponForShots(selectedWeaponDetail);
+                    setShowAddShotsModal(true);
+                  }}
+                  className="bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 text-xs font-semibold px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5 shadow-sm"
+                  title="Registrar disparos efetuados pela arma em treinamento ou estande"
+                >
+                  <Crosshair className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Registrar Tiros</span>
+                </button>
               </div>
             </div>
 
@@ -1334,10 +1378,23 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   <span>Histórico</span>
                 </button>
 
+                {/* Maintenance History Button for this Weapon */}
+                <button
+                  onClick={() => {
+                    setMaintenanceHistoryWeapon(selectedWeaponDetail);
+                    setShowMaintenanceHistoryModal(true);
+                  }}
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center space-x-1.5"
+                  title="Histórico de manutenções deste armamento"
+                >
+                  <Wrench className="w-4 h-4 text-amber-400" />
+                  <span>Histórico Manutenções</span>
+                </button>
+
                 {/* Transfer Weapon Button (Geral, Admin, Armeiro) */}
                 {canTransferWeapons && (() => {
                   const isWeaponFromMyUnit = isGeral || !currentUser.unitId || selectedWeaponDetail.unitId === currentUser.unitId;
-                  const isTransferDisabled = !isWeaponFromMyUnit || selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo';
+                  const isTransferDisabled = !isWeaponFromMyUnit || selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo' || selectedWeaponDetail.status === 'Manutenção';
                   
                   return (
                     <button
@@ -1351,7 +1408,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       title={
                         !isWeaponFromMyUnit
                           ? 'Você só pode transferir armas pertencentes à sua própria unidade.'
-                          : selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo'
+                          : selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo' || selectedWeaponDetail.status === 'Manutenção'
                           ? `Arma com status "${selectedWeaponDetail.status}". Não é possível transferir no momento.`
                           : 'Transferir esta arma para outra unidade'
                       }
@@ -1363,8 +1420,20 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   );
                 })()}
 
-                {/* Maintenance Button */}
-                {canManageMaintenance && (
+                {/* Maintenance Actions: Send to Maintenance vs Receive from Maintenance */}
+                {canManageMaintenance && (selectedWeaponDetail.status === 'Manutenção' || selectedWeaponDetail.status === 'Em Manutenção') ? (
+                  <button
+                    onClick={() => {
+                      setWeaponToReceive(selectedWeaponDetail);
+                      setShowReceiveMaintenanceModal(true);
+                    }}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-xl border border-emerald-500/40 transition flex items-center space-x-1.5 shadow-lg shadow-emerald-950/40"
+                    title="Confirmar retorno da arma ao cofre e registrar tipo de serviço realizado"
+                  >
+                    <CheckCircle2 className="w-4 h-4 text-emerald-200" />
+                    <span>(RECEBER DA MANUTENÇÃO)</span>
+                  </button>
+                ) : canManageMaintenance && selectedWeaponDetail.status === 'No Cofre' ? (
                   <button
                     onClick={() => handleOpenMaintenance(selectedWeaponDetail)}
                     className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center space-x-1.5"
@@ -1372,7 +1441,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                     <Wrench className="w-4 h-4 text-amber-400" />
                     <span>Manutenção</span>
                   </button>
-                )}
+                ) : null}
 
                 {/* Transit Details if in transit */}
                 {selectedWeaponDetail.status === 'Em Trânsito' && (
@@ -1683,64 +1752,79 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         </div>
       )}
 
-      {/* Modal Maintenance */}
+      {/* Modal Registrar Tiros */}
+      {showAddShotsModal && weaponForShots && (
+        <ModalRegistrarTiros
+          weapon={weaponForShots}
+          currentUser={currentUser}
+          onClose={() => {
+            setShowAddShotsModal(false);
+            setWeaponForShots(null);
+          }}
+          onSuccess={(newTotal) => {
+            setSuccessMsg(`Disparos registrados com sucesso! Total acumulado da arma: ${newTotal.toLocaleString('pt-BR')} tiros.`);
+            onRefresh();
+            if (selectedWeaponDetail && selectedWeaponDetail.id === weaponForShots.id) {
+              setSelectedWeaponDetail({ ...selectedWeaponDetail, shotCount: newTotal });
+            }
+          }}
+        />
+      )}
+
+      {/* Modal Enviar para Manutenção (Interna ou Externa) */}
       {showMaintenanceModal && selectedWeapon && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
-            <h3 className="text-lg font-bold text-slate-100 mb-2 flex items-center space-x-2">
-              <Wrench className="w-5 h-5 text-amber-400" />
-              <span>Registro de Manutenção</span>
-            </h3>
-            <p className="text-xs text-slate-400 mb-4">
-              Arma: <strong className="text-amber-400 font-mono">{selectedWeapon.model} ({selectedWeapon.serialNumber})</strong>
-            </p>
+        <ModalManutencaoArma
+          weapon={selectedWeapon}
+          currentUser={currentUser}
+          vaultSpaces={vaultSpaces}
+          onClose={() => {
+            setShowMaintenanceModal(false);
+            setSelectedWeapon(null);
+          }}
+          onSuccess={() => {
+            setSuccessMsg(`Arma ${selectedWeapon.serialNumber} enviada para manutenção. O status foi alterado para "Manutenção".`);
+            setShowMaintenanceModal(false);
+            setSelectedWeapon(null);
+            setSelectedWeaponDetail(null);
+            onRefresh();
+          }}
+        />
+      )}
 
-            <form onSubmit={handleSaveMaintenance} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Data da Última Manutenção
-                </label>
-                <input
-                  type="date"
-                  value={maintDate}
-                  onChange={(e) => setMaintDate(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                  required
-                />
-              </div>
+      {/* Modal Receber da Manutenção */}
+      {showReceiveMaintenanceModal && weaponToReceive && (
+        <ModalReceberManutencao
+          weapon={weaponToReceive}
+          currentUser={currentUser}
+          vaultSpaces={vaultSpaces}
+          onClose={() => {
+            setShowReceiveMaintenanceModal(false);
+            setWeaponToReceive(null);
+          }}
+          onSuccess={() => {
+            setSuccessMsg(`Arma ${weaponToReceive.serialNumber} recebida da manutenção e retornada ao cofre de origem com sucesso.`);
+            setShowReceiveMaintenanceModal(false);
+            setWeaponToReceive(null);
+            setSelectedWeaponDetail(null);
+            onRefresh();
+          }}
+        />
+      )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Responsável pela Manutenção
-                </label>
-                <input
-                  type="text"
-                  value={maintResponsible}
-                  onChange={(e) => setMaintResponsible(e.target.value)}
-                  placeholder="Nome do Armeiro ou Técnico..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                  required
-                />
-              </div>
-
-              <div className="pt-2 flex justify-end space-x-3">
-                <button
-                  type="button"
-                  onClick={() => setShowMaintenanceModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow"
-                >
-                  Salvar Manutenção
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {/* Modal Histórico de Manutenções (Individual por arma ou Geral) */}
+      {showMaintenanceHistoryModal && (
+        <ModalHistoricoManutencoes
+          weapon={maintenanceHistoryWeapon}
+          weapons={weapons}
+          departments={departments}
+          units={units}
+          vaultSpaces={vaultSpaces}
+          currentUser={currentUser}
+          onClose={() => {
+            setShowMaintenanceHistoryModal(false);
+            setMaintenanceHistoryWeapon(null);
+          }}
+        />
       )}
 
       {/* Modal History (Last 5 movements) */}
