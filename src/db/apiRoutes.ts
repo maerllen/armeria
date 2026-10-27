@@ -1879,6 +1879,26 @@ apiRouter.post('/external-workshops', async (req: Request, res: Response) => {
   }
 });
 
+apiRouter.delete('/external-workshops/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor;
+    if (actor && actor.role !== 'Geral') {
+      return res.status(403).json({ error: 'Permissão negada. Apenas usuários Gerais podem excluir armerias.' });
+    }
+
+    const pool = getPool();
+    const [shops]: any = await pool.query('SELECT NOME FROM ARMERIAS_EXTERNAS WHERE ID_ARMERIAS_EXTERNAS = ?', [id]);
+    const shopName = shops && shops.length > 0 ? shops[0].NOME : id;
+
+    await pool.query('DELETE FROM ARMERIAS_EXTERNAS WHERE ID_ARMERIAS_EXTERNAS = ?', [id]);
+    await insertAuditLog('Armerias', 'Excluir', `Excluída armeria externa: ${shopName}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // -------------------------------------------------------------
 // WEAPON MOVEMENTS (CAUTELAS, SOLICITAÇÕES, DEVOLUÇÕES)
 // -------------------------------------------------------------

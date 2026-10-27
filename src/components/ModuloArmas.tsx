@@ -13,6 +13,7 @@ import { ModalRegistrarTiros } from './ModalRegistrarTiros';
 import { ModalManutencaoArma } from './ModalManutencaoArma';
 import { ModalReceberManutencao } from './ModalReceberManutencao';
 import { ModalHistoricoManutencoes } from './ModalHistoricoManutencoes';
+import { ModalCadastrarArmeria } from './ModalCadastrarArmeria';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -93,6 +94,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [weaponToReceive, setWeaponToReceive] = useState<Weapon | null>(null);
   const [showMaintenanceHistoryModal, setShowMaintenanceHistoryModal] = useState(false);
   const [maintenanceHistoryWeapon, setMaintenanceHistoryWeapon] = useState<Weapon | null>(null);
+  const [showRegisterWorkshopModal, setShowRegisterWorkshopModal] = useState(false);
 
   // Transfer Modals state (Exclusive to Geral, Admin, and Armeiro)
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -636,6 +638,19 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             <Wrench className="w-4 h-4 text-amber-400" />
             <span>Histórico de Manutenções</span>
           </button>
+
+          {/* Atalho Exclusivo: Perfil "Geral" para Cadastrar Armeria */}
+          {isGeral && (
+            <button
+              id="open-register-workshop-btn"
+              onClick={() => setShowRegisterWorkshopModal(true)}
+              className="bg-purple-950/80 hover:bg-purple-900 text-purple-200 border border-purple-800/80 hover:border-purple-600 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              title="Atalho exclusivo para perfil Geral: Cadastrar e gerenciar armerias e oficinas externas"
+            >
+              <Building className="w-4 h-4 text-purple-400" />
+              <span>Cadastrar Armeria</span>
+            </button>
+          )}
 
           {canAddEditWeapon && (
             <button
@@ -1823,6 +1838,17 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           onClose={() => {
             setShowMaintenanceHistoryModal(false);
             setMaintenanceHistoryWeapon(null);
+          }}
+        />
+      )}
+
+      {/* Modal Cadastrar Armeria (Exclusivo: Geral) */}
+      {showRegisterWorkshopModal && isGeral && (
+        <ModalCadastrarArmeria
+          currentUser={currentUser}
+          onClose={() => setShowRegisterWorkshopModal(false)}
+          onSuccess={() => {
+            setSuccessMsg('Armeria externa salva com sucesso!');
           }}
         />
       )}

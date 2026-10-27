@@ -972,6 +972,17 @@ class StorageService {
     return data;
   }
 
+  public async deleteExternalWorkshop(id: string): Promise<boolean> {
+    const res = await fetch(`/api/external-workshops/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor: this.state.currentUser })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao excluir armeria.');
+    return true;
+  }
+
   // --- WEAPON TRANSFERS BETWEEN UNITS ---
   public getWeaponTransfers(currentUser?: User | null): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
