@@ -1613,8 +1613,8 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
     if (!sentArmorerName || !sentArmorerName.trim()) {
       return res.status(400).json({ error: 'Informe o armeiro responsável.' });
     }
-    if (!sentDescription || !sentDescription.trim()) {
-      return res.status(400).json({ error: 'Informe a descrição da manutenção.' });
+    if (type === 'Interna' && (!sentDescription || !sentDescription.trim())) {
+      return res.status(400).json({ error: 'Informe a descrição da manutenção interna.' });
     }
 
     if (type === 'Externa') {
@@ -1672,7 +1672,7 @@ apiRouter.post('/weapons/:id/maintenance', async (req: Request, res: Response) =
         sentDate,
         actor?.id || null,
         sentArmorerName.trim(),
-        sentDescription.trim(),
+        type === 'Interna' ? sentDescription.trim() : ((sentDescription || '').trim() || 'Enviada para manutenção externa'),
         shotCountAtMaintenance,
         type === 'Externa' ? (workshopName || '').trim() : null,
         type === 'Externa' ? (workshopCep || '').trim() : null,

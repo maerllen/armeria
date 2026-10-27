@@ -196,8 +196,8 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
       setErrorMsg('Informe o armeiro responsável.');
       return;
     }
-    if (!description.trim()) {
-      setErrorMsg('Informe a descrição detalhada da manutenção.');
+    if (maintType === 'Interna' && !description.trim()) {
+      setErrorMsg('Informe a descrição detalhada da manutenção interna.');
       return;
     }
 
@@ -218,7 +218,7 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
         type: maintType,
         sentDate,
         sentArmorerName: armorerName.trim(),
-        sentDescription: description.trim(),
+        sentDescription: maintType === 'Interna' ? description.trim() : (description.trim() || 'Enviada para manutenção externa em armeria credenciada.'),
         workshopName: maintType === 'Externa' ? workshopName.trim() : undefined,
         workshopCep: maintType === 'Externa' ? workshopCep.trim() : undefined,
         workshopStreet: maintType === 'Externa' ? workshopStreet.trim() : undefined,
@@ -662,27 +662,35 @@ export const ModalManutencaoArma: React.FC<ModalManutencaoArmaProps> = ({
             </div>
           )}
 
-          {/* Descrição da Manutenção (Texto Longo) */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-              Descrição da Manutenção *
-            </label>
-            <textarea
-              rows={4}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={
-                maintType === 'Interna'
-                  ? 'Ex: Trocado o percursor da arma que apresentou falha mecânica, substituída mola recuperadora e realizada lubrificação completa.'
-                  : 'Ex: Arma apresentando pane de ejeção e folga no ferrolho. Enviada para reparo especializado, substituição de extrator e testes de estande.'
-              }
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 focus:border-amber-500 focus:outline-none leading-relaxed"
-              required
-            />
-            <span className="text-[10px] text-slate-400 block mt-1">
-              Descreva detalhadamente o serviço efetuado, peças trocadas ou laudo de envio.
-            </span>
-          </div>
+          {/* Descrição da Manutenção: apenas na manutenção interna. Na externa, preenchido apenas ao receber a arma */}
+          {maintType === 'Interna' ? (
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                Descrição da Manutenção *
+              </label>
+              <textarea
+                rows={4}
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="Ex: Trocado o percursor da arma que apresentou falha mecânica, substituída mola recuperadora e realizada lubrificação completa."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 focus:border-amber-500 focus:outline-none leading-relaxed"
+                required
+              />
+              <span className="text-[10px] text-slate-400 block mt-1">
+                Descreva detalhadamente o serviço efetuado, peças trocadas ou reparos executados pelo armeiro da unidade.
+              </span>
+            </div>
+          ) : (
+            <div className="p-3.5 bg-purple-950/20 border border-purple-900/40 rounded-xl text-xs space-y-1">
+              <div className="flex items-center space-x-1.5 font-bold text-purple-300 text-[11px]">
+                <Info className="w-4 h-4 text-purple-400 shrink-0" />
+                <span>Descrição da Manutenção (Preenchimento no Recebimento)</span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                Para manutenção externa, o campo <strong>"Descrição da Manutenção"</strong> (laudo dos reparos, peças trocadas e testes realizados) será preenchido pelo armeiro no momento de <strong>receber a arma</strong> de volta da armeria.
+              </p>
+            </div>
+          )}
 
           {/* Action buttons */}
           <div className="pt-3 border-t border-slate-800 flex items-center justify-between">

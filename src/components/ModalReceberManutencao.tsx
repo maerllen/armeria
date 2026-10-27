@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, Weapon, WeaponMaintenance, VaultSpace } from '../types';
 import { storage } from '../services/storage';
-import { CheckCircle2, X, Calendar, UserCheck, Wrench, Building, AlertCircle, RotateCcw, ShieldCheck } from 'lucide-react';
+import { CheckCircle2, X, Calendar, UserCheck, Wrench, Building, AlertCircle, RotateCcw, ShieldCheck, Shield } from 'lucide-react';
 import { formatTimestamp } from '../utils/masks';
 
 interface ModalReceberManutencaoProps {
@@ -24,11 +24,31 @@ export const ModalReceberManutencao: React.FC<ModalReceberManutencaoProps> = ({
   const [activeMaint, setActiveMaint] = useState<WeaponMaintenance | null>(null);
   const [returnDate, setReturnDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [returnArmorerName, setReturnArmorerName] = useState<string>(currentUser.name || '');
+  const [registeredArmorers, setRegisteredArmorers] = useState<User[]>([]);
+  const [selectedArmorerUserId, setSelectedArmorerUserId] = useState<string>('');
   const [serviceDescription, setServiceDescription] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
   useEffect(() => {
     loadActiveMaintenance();
+    // Carregar armeiros cadastrados
+    const users = storage.getUsers();
+    const armorers = users.filter(u =>
+      u.role === 'Armeiro' ||
+      u.role === 'Geral' ||
+      u.role === 'Administrador' ||
+      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    );
+    const list = armorers.length > 0 ? armorers : users;
+    setRegisteredArmorers(list);
+
+    if (currentUser) {
+      const match = list.find(u => u.id === currentUser.id || u.name === currentUser.name);
+      if (match) {
+        setSelectedArmorerUserId(match.id);
+        if (!returnArmorerName) setReturnArmorerName(match.name);
+      }
+    }
   }, [weapon.id]);
 
   const loadActiveMaintenance = async () => {
@@ -154,16 +174,30 @@ export const ModalReceberManutencao: React.FC<ModalReceberManutencaoProps> = ({
                   <span className="text-slate-200 font-semibold">{activeMaint?.sentArmorerName || 'N/A'}</span>
                 </div>
                 {activeMaint?.type === 'Externa' && activeMaint.workshopName && (
-                  <div className="col-span-2">
-                    <span className="text-slate-400 block text-[10px]">Armeria Externa:</span>
-                    <span className="text-amber-400 font-semibold">
-                      {activeMaint.workshopName} {activeMaint.workshopCity ? `(${activeMaint.workshopCity} - ${activeMaint.workshopState})` : ''}
-                    </span>
+                  <div className="col-span-2 p-2.5 bg-purple-950/20 border border-purple-900/30 rounded-lg space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-purple-300 font-bold text-[11px] flex items-center space-x-1.5">
+                        <Building className="w-3.5 h-3.5" />
+                        <span>Armeria: {activeMaint.workshopName} {activeMaint.workshopCity ? `(${activeMaint.workshopCity} - ${activeMaint.workshopState})` : ''}</span>
+                      </span>
+                      {activeMaint.workshopCredenciamentoPf && (
+                        <span className="text-[10px] text-purple-300 font-mono bg-purple-900/40 px-2 py-0.5 rounded border border-purple-700/50 flex items-center space-x-1">
+                          <Shield className="w-3 h-3 text-purple-400" />
+                          <span>Cred. PF: {activeMaint.workshopCredenciamentoPf}</span>
+                        </span>
+                      )}
+                    </div>
+                    {activeMaint.workshopArmorerName && (
+                      <div className="text-[11px] text-slate-300 flex items-center space-x-1">
+                        <UserCheck className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Armeiro da Armeria: <strong className="text-slate-100">{activeMaint.workshopArmorerName}</strong></span>
+                      </div>
+                    )}
                   </div>
                 )}
-                {activeMaint?.sentDescription && (
+                {activeMaint?.sentDescription && activeMaint?.type === 'Interna' && (
                   <div className="col-span-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800 text-slate-300">
-                    <span className="text-slate-400 block text-[10px] font-bold uppercase mb-0.5">Descrição/Motivo do Envio:</span>
+                    <span className="text-slate-400 block text-[10px] font-bold uppercase mb-0.5">Descrição Informada no Envio:</span>
                     <p className="italic">{activeMaint.sentDescription}</p>
                   </div>
                 )}
@@ -205,27 +239,59 @@ export const ModalReceberManutencao: React.FC<ModalReceberManutencaoProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Armeiro que Recebeu *
-                </label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={returnArmorerName}
-                    onChange={(e) => setReturnArmorerName(e.target.value)}
-                    placeholder="Nome do armeiro..."
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
-                    required
-                  />
-                  <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-3" />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                    Armeiro que Recebeu *
+                  </label>
+                  <span className="text-[10px] text-slate-400">Selecione ou digite</span>
+                </div>
+                <div className="space-y-1.5">
+                  <select
+                    value={selectedArmorerUserId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSelectedArmorerUserId(val);
+                      if (val !== 'MANUAL' && val) {
+                        const found = registeredArmorers.find(u => u.id === val);
+                        if (found) setReturnArmorerName(found.name);
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none font-medium"
+                  >
+                    <option value="">-- Selecionar da lista de Armeiros Cadastrados --</option>
+                    {registeredArmorers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} (MASP: {u.masp} • {u.cargo || u.role})
+                      </option>
+                    ))}
+                    <option value="MANUAL">Digitar armeiro manualmente...</option>
+                  </select>
+
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={returnArmorerName}
+                      onChange={(e) => {
+                        setReturnArmorerName(e.target.value);
+                        if (selectedArmorerUserId !== 'MANUAL') {
+                          const matches = registeredArmorers.find(u => u.id === selectedArmorerUserId)?.name === e.target.value;
+                          if (!matches) setSelectedArmorerUserId('MANUAL');
+                        }
+                      }}
+                      placeholder="Nome do armeiro que recebeu..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-100 focus:border-emerald-500 focus:outline-none"
+                      required
+                    />
+                    <UserCheck className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Campo de texto para informar o tipo de serviço que foi realizado */}
+            {/* Campo de texto: Descrição da Manutenção Realizada */}
             <div>
               <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                Tipo de Serviço que Foi Realizado *
+                Descrição da Manutenção Realizada *
               </label>
               <textarea
                 rows={4}
@@ -236,7 +302,7 @@ export const ModalReceberManutencao: React.FC<ModalReceberManutencaoProps> = ({
                 required
               />
               <span className="text-[10px] text-slate-400 block mt-1">
-                Informe o laudo técnico do serviço efetuado, trocas efetuadas e observações de testes.
+                Informe o laudo técnico do serviço efetuado, trocas efetuadas e observações de testes pela armeria para retorno ao cofre.
               </span>
             </div>
 
