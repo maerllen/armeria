@@ -91,11 +91,11 @@ export interface Course {
   createdAt: string;
 }
 
-export type VaultSpaceType = 'ARMAS' | 'MUNIÇÕES';
+export type VaultSpaceType = 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS';
 
 export interface VaultSpace {
   id: string;
-  code: string; // e.g., "A1-G1", "C1-L1"
+  code: string; // e.g., "A1-G1", "C1-L1", "PAIOL-01"
   type: VaultSpaceType;
   departmentId: string;
   unitId: string;
@@ -775,6 +775,8 @@ export interface Explosivo {
   dataValidade?: string;
   classeRisco: string;
   localArmazenamento: string;
+  cofreId?: string;
+  vaultSpaceId?: string;
   status: ExplosivoStatus;
   departmentId: string;
   unitId: string;

@@ -3,6 +3,7 @@ import {
   User,
   Department,
   Unit,
+  VaultSpace,
   Explosivo,
   MovimentacaoExplosivo,
   ExplosivoStatus,
@@ -36,13 +37,16 @@ import {
   UserCheck,
   UserX,
   FileText,
-  Boxes
+  Boxes,
+  Vault,
+  FolderPlus
 } from 'lucide-react';
 
 interface ModuloExplosivosProps {
   currentUser: User;
   departments: Department[];
   units: Unit[];
+  vaultSpaces?: VaultSpace[];
   users?: User[];
   onRefresh: () => void;
 }
@@ -79,6 +83,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   currentUser,
   departments,
   units,
+  vaultSpaces: propVaultSpaces,
   users = [],
   onRefresh
 }) => {
@@ -93,6 +98,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   // Local data from storage
   const [explosivos, setExplosivos] = useState<Explosivo[]>(() => storage.getExplosivos(currentUser));
   const [movimentacoes, setMovimentacoes] = useState<MovimentacaoExplosivo[]>(() => storage.getMovimentacoesExplosivos(currentUser));
+  const [allVaults, setAllVaults] = useState<VaultSpace[]>(() => propVaultSpaces || storage.getVaultSpaces(currentUser));
 
   // Department / Unit selector
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
@@ -115,6 +121,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [filterTipo, setFilterTipo] = useState<string>('TODOS');
   const [filterStatus, setFilterStatus] = useState<string>('TODOS');
   const [filterClasseRisco, setFilterClasseRisco] = useState<string>('TODOS');
+  const [filterLocalCofre, setFilterLocalCofre] = useState<string>('TODOS');
 
   // Modals state
   const [showItemModal, setShowItemModal] = useState(false);
@@ -124,6 +131,13 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [selectedItemDetail, setSelectedItemDetail] = useState<Explosivo | null>(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState<Explosivo | null>(null);
+
+  // Quick Create Vault Space Modal
+  const [showCreateVaultModal, setShowCreateVaultModal] = useState(false);
+  const [newVaultCode, setNewVaultCode] = useState('');
+  const [newVaultDeptId, setNewVaultDeptId] = useState('');
+  const [newVaultUnitId, setNewVaultUnitId] = useState('');
+  const [isSubmittingVault, setIsSubmittingVault] = useState(false);
 
   // Notifications
   const [errorMsg, setErrorMsg] = useState('');
@@ -141,6 +155,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [formDataValidade, setFormDataValidade] = useState('');
   const [formClasseRisco, setFormClasseRisco] = useState(CLASSES_RISCO[0]);
   const [formLocalArmazenamento, setFormLocalArmazenamento] = useState('');
+  const [formCofreId, setFormCofreId] = useState('');
   const [formStatus, setFormStatus] = useState<ExplosivoStatus>('Disponível');
   const [formDeptId, setFormDeptId] = useState(currentUser.departmentId || '');
   const [formUnitId, setFormUnitId] = useState(currentUser.unitId || '');
@@ -162,11 +177,26 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const reloadData = () => {
     setExplosivos(storage.getExplosivos(currentUser));
     setMovimentacoes(storage.getMovimentacoesExplosivos(currentUser));
+    setAllVaults(storage.getVaultSpaces(currentUser));
   };
 
   useEffect(() => {
     reloadData();
-  }, [currentUser]);
+  }, [currentUser, propVaultSpaces]);
+
+  // Scoped vault spaces for the active unit/form unit
+  const activeUnitIdForVaults = formUnitId || (selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
+
+  const availableVaultsForUnit = useMemo(() => {
+    if (!activeUnitIdForVaults || activeUnitIdForVaults === 'ALL') {
+      return allVaults;
+    }
+    return allVaults.filter(v => v.unitId === activeUnitIdForVaults);
+  }, [allVaults, activeUnitIdForVaults]);
+
+  const explosiveVaultSpaces = useMemo(() => {
+    return availableVaultsForUnit.filter(v => v.type === 'EXPLOSIVOS');
+  }, [availableVaultsForUnit]);
 
   // Filtered Explosives list
   const filteredExplosivos = useMemo(() => {
@@ -191,6 +221,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       if (filterClasseRisco !== 'TODOS' && item.classeRisco !== filterClasseRisco) {
         return false;
       }
+      // Local do Cofre filter
+      if (filterLocalCofre !== 'TODOS') {
+        const matchesCofre = item.cofreId === filterLocalCofre || item.vaultSpaceId === filterLocalCofre || item.localArmazenamento === filterLocalCofre;
+        if (!matchesCofre) return false;
+      }
       // Search term
       if (searchTerm.trim()) {
         const query = searchTerm.toLowerCase();
@@ -203,7 +238,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       }
       return true;
     });
-  }, [explosivos, selectedDeptId, selectedUnitId, filterTipo, filterStatus, filterClasseRisco, searchTerm]);
+  }, [explosivos, selectedDeptId, selectedUnitId, filterTipo, filterStatus, filterClasseRisco, filterLocalCofre, searchTerm]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -223,6 +258,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const handleOpenItemModal = (item?: Explosivo) => {
     setErrorMsg('');
     setSuccessMsg('');
+    const targetDept = selectedDeptId !== 'ALL' ? selectedDeptId : currentUser.departmentId;
+    const targetUnit = selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId;
+
     if (item) {
       setEditingItem(item);
       setFormNome(item.nome);
@@ -236,6 +274,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       setFormDataValidade(item.dataValidade ? item.dataValidade.substring(0, 10) : '');
       setFormClasseRisco(item.classeRisco);
       setFormLocalArmazenamento(item.localArmazenamento);
+      setFormCofreId(item.cofreId || item.vaultSpaceId || '');
       setFormStatus(item.status);
       setFormDeptId(item.departmentId);
       setFormUnitId(item.unitId);
@@ -252,10 +291,16 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       setFormDataFabricacao(new Date().toISOString().substring(0, 10));
       setFormDataValidade('');
       setFormClasseRisco(CLASSES_RISCO[0]);
-      setFormLocalArmazenamento('Paiol de Explosivos - Cofre E-1');
+
+      // Select default explosive vault space if available
+      const expVaults = allVaults.filter(v => v.unitId === targetUnit && v.type === 'EXPLOSIVOS');
+      const defaultVault = expVaults[0] || allVaults.filter(v => v.unitId === targetUnit)[0];
+      setFormCofreId(defaultVault ? defaultVault.id : '');
+      setFormLocalArmazenamento(defaultVault ? defaultVault.code : 'PAIOL-01');
+
       setFormStatus('Disponível');
-      setFormDeptId(selectedDeptId !== 'ALL' ? selectedDeptId : currentUser.departmentId);
-      setFormUnitId(selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
+      setFormDeptId(targetDept);
+      setFormUnitId(targetUnit);
       setFormObservacoes('');
     }
     setShowItemModal(true);
@@ -274,8 +319,15 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       setErrorMsg('A quantidade não pode ser negativa.');
       return;
     }
+    if (!formLocalArmazenamento.trim() && !formCofreId) {
+      setErrorMsg('Selecione ou crie um local no cofre para armazenar o explosivo.');
+      return;
+    }
 
     try {
+      const selectedVault = allVaults.find(v => v.id === formCofreId);
+      const storageCode = selectedVault ? selectedVault.code : formLocalArmazenamento.trim() || 'PAIOL-01';
+
       const itemToSave: Explosivo = {
         id: editingItem ? editingItem.id : `exp-${Date.now()}`,
         nome: formNome.trim(),
@@ -288,7 +340,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         dataFabricacao: formDataFabricacao || undefined,
         dataValidade: formDataValidade || undefined,
         classeRisco: formClasseRisco,
-        localArmazenamento: formLocalArmazenamento.trim() || 'Paiol Principal',
+        localArmazenamento: storageCode,
+        cofreId: formCofreId || undefined,
+        vaultSpaceId: formCofreId || undefined,
         status: formStatus,
         departmentId: formDeptId || currentUser.departmentId,
         unitId: formUnitId || currentUser.unitId,
@@ -300,8 +354,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       setShowItemModal(false);
       setSuccessMsg(
         editingItem
-          ? `Explosivo "${itemToSave.nome}" atualizado com sucesso.`
-          : `Explosivo "${itemToSave.nome}" cadastrado com sucesso.`
+          ? `Explosivo "${itemToSave.nome}" atualizado com sucesso no local "${storageCode}".`
+          : `Explosivo "${itemToSave.nome}" cadastrado com sucesso no cofre "${storageCode}".`
       );
       reloadData();
       onRefresh();
@@ -320,6 +374,42 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao excluir explosivo.');
+    }
+  };
+
+  // Handler to Create a New Storage Space in the Vault for Explosives
+  const handleCreateExplosiveVault = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newVaultCode.trim()) {
+      setErrorMsg('Informe o código do novo local para armazenar explosivos (ex: PAIOL-01).');
+      return;
+    }
+
+    try {
+      setIsSubmittingVault(true);
+      const targetDept = newVaultDeptId || formDeptId || (selectedDeptId !== 'ALL' ? selectedDeptId : currentUser.departmentId);
+      const targetUnit = newVaultUnitId || formUnitId || (selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
+
+      const created = await storage.addVaultSpace({
+        code: newVaultCode.trim().toUpperCase(),
+        type: 'EXPLOSIVOS',
+        departmentId: targetDept,
+        unitId: targetUnit
+      });
+
+      // Update local state and auto-select newly created vault space
+      setAllVaults(storage.getVaultSpaces(currentUser));
+      setFormCofreId(created.id);
+      setFormLocalArmazenamento(created.code);
+      setSuccessMsg(`Local de cofre "${created.code}" para armazenar explosivos criado com sucesso!`);
+      setShowCreateVaultModal(false);
+      setNewVaultCode('');
+      onRefresh();
+      reloadData();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao criar local no cofre para explosivos.');
+    } finally {
+      setIsSubmittingVault(false);
     }
   };
 
@@ -451,7 +541,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <td style="padding: 8px; font-family: monospace;">${item.lote}</td>
         <td style="padding: 8px;">${item.fabricante}</td>
         <td style="padding: 8px; font-size: 11px;">${item.classeRisco}</td>
-        <td style="padding: 8px;">${item.localArmazenamento}</td>
+        <td style="padding: 8px; font-weight: bold; color: #0369a1;">${item.localArmazenamento}</td>
         <td style="padding: 8px; font-weight: bold; text-align: center;">${item.status}</td>
       </tr>
     `).join('');
@@ -469,13 +559,13 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px;">
           <thead>
             <tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8; text-align: left;">
-              <th style="padding: 8px;">Item / Material</th>
-              <th style="padding: 8px;">Tipo</th>
-              <th style="padding: 8px; text-align: center;">Qtd. Saldo</th>
+              <th style="padding: 8px;">Nome do Explosivo</th>
+              <th style="padding: 8px;">Tipo de Explosivo</th>
+              <th style="padding: 8px; text-align: center;">Quantidade</th>
               <th style="padding: 8px;">Lote</th>
               <th style="padding: 8px;">Fabricante</th>
               <th style="padding: 8px;">Classe de Risco</th>
-              <th style="padding: 8px;">Localização</th>
+              <th style="padding: 8px;">Local do Cofre</th>
               <th style="padding: 8px; text-align: center;">Status</th>
             </tr>
           </thead>
@@ -564,7 +654,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400">
-                Gestão rigorosa de altos e baixos explosivos, iniciadores, dispositivos táticos e rastreabilidade de consumo.
+                Gestão por Tipo de Explosivo, Nome, Quantidade, Unidade de Medida e Local de Guarda no Cofre.
               </p>
             </div>
           </div>
@@ -582,10 +672,24 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
               </button>
 
               <button
+                onClick={() => {
+                  setNewVaultCode('');
+                  setNewVaultDeptId(selectedDeptId !== 'ALL' ? selectedDeptId : currentUser.departmentId);
+                  setNewVaultUnitId(selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
+                  setShowCreateVaultModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
+                title="Cadastrar novo local no cofre para armazenar explosivos"
+              >
+                <Vault className="w-4 h-4 text-amber-400" />
+                <span>+ Local no Cofre</span>
+              </button>
+
+              <button
                 onClick={() => handleOpenMovementModal(undefined, 'Saída')}
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
               >
-                <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                <ArrowRightLeft className="w-4 h-4 text-cyan-400" />
                 <span>Movimentar</span>
               </button>
             </>
@@ -596,7 +700,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
             className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
           >
             <History className="w-4 h-4 text-cyan-400" />
-            <span>Histórico de Movimentações</span>
+            <span>Histórico</span>
           </button>
 
           <button
@@ -639,7 +743,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <div className="glass-card p-3 rounded-2xl border border-slate-800">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
             <Boxes className="w-4 h-4 text-amber-400" />
-            <span>Itens Cadastrados</span>
+            <span>Itens no Acervo</span>
           </div>
           <p className="text-2xl font-black text-slate-100 font-mono">{stats.totalItens}</p>
         </div>
@@ -662,18 +766,18 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
         <div className="glass-card p-3 rounded-2xl border border-slate-800">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>Disponíveis</span>
+            <Vault className="w-4 h-4 text-cyan-400" />
+            <span>Locais no Cofre</span>
           </div>
-          <p className="text-2xl font-black text-emerald-400 font-mono">{stats.disponiveis}</p>
+          <p className="text-2xl font-black text-cyan-400 font-mono">{explosiveVaultSpaces.length}</p>
         </div>
 
         <div className="glass-card p-3 rounded-2xl border border-slate-800 col-span-2 sm:col-span-1">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
-            <Clock className="w-4 h-4 text-rose-400" />
-            <span>Itens Vencidos</span>
+            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+            <span>Disponíveis</span>
           </div>
-          <p className="text-2xl font-black text-rose-400 font-mono">{stats.vencidos}</p>
+          <p className="text-2xl font-black text-emerald-400 font-mono">{stats.disponiveis}</p>
         </div>
       </div>
 
@@ -738,7 +842,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
             onChange={(e) => setFilterTipo(e.target.value)}
             className="w-full py-2 px-3 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
           >
-            <option value="TODOS">Todos os Tipos</option>
+            <option value="TODOS">Todos os Tipos de Explosivo</option>
             {TIPOS_EXPLOSIVOS.map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
@@ -747,13 +851,15 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
         <div>
           <select
-            value={filterClasseRisco}
-            onChange={(e) => setFilterClasseRisco(e.target.value)}
+            value={filterLocalCofre}
+            onChange={(e) => setFilterLocalCofre(e.target.value)}
             className="w-full py-2 px-3 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
           >
-            <option value="TODOS">Todas as Classes de Risco</option>
-            {CLASSES_RISCO.map(c => (
-              <option key={c} value={c}>{c}</option>
+            <option value="TODOS">Todos os Locais no Cofre</option>
+            {availableVaultsForUnit.map(v => (
+              <option key={v.id} value={v.id}>
+                {v.code} ({v.type})
+              </option>
             ))}
           </select>
         </div>
@@ -776,9 +882,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       {filteredExplosivos.length === 0 ? (
         <div className="glass-card p-12 text-center rounded-2xl border border-slate-800">
           <Bomb className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-slate-300">Nenhum explosivo encontrado</h3>
+          <h3 className="text-base font-bold text-slate-300">Nenhum material explosivo encontrado</h3>
           <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-            Não há registros correspondentes aos filtros selecionados. Utilize o botão "Novo Explosivo" acima para registrar um material.
+            Não há registros correspondentes aos filtros selecionados. Utilize o botão "Novo Explosivo" acima para registrar um material com tipo, nome, quantidade, unidade de medida e local do cofre.
           </p>
         </div>
       ) : (
@@ -794,18 +900,24 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
               >
                 {/* Top strip highlight for risk */}
                 <div
-                  className={`absolute top-0 left-0 right-0 h-1 ${
-                    isHighExplosive ? 'bg-gradient-to-r from-red-500 to-amber-500' : 'bg-gradient-to-r from-purple-500 to-cyan-500'
+                  className={`absolute top-0 left-0 right-0 h-1.5 ${
+                    isHighExplosive
+                      ? 'bg-gradient-to-r from-red-600 via-amber-500 to-red-600'
+                      : 'bg-gradient-to-r from-purple-500 via-cyan-400 to-purple-500'
                   }`}
                 />
 
                 <div>
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 block">
+                      {/* 1. Tipo de Explosivo */}
+                      <span className="text-[10px] font-mono font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1">
+                        <Flame className="w-3 h-3 text-red-400" />
                         {item.tipo}
                       </span>
-                      <h3 className="text-base font-black text-slate-100 leading-snug">
+
+                      {/* 2. Nome do Explosivo */}
+                      <h3 className="text-base font-black text-slate-100 leading-snug mt-0.5">
                         {item.nome}
                       </h3>
                       {item.subtipo && (
@@ -836,16 +948,27 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                     </div>
                   </div>
 
-                  {/* Stock Quantity Highlight */}
-                  <div className="mt-3 p-2.5 bg-slate-900/80 rounded-xl border border-slate-800/80 flex items-center justify-between">
-                    <span className="text-xs text-slate-400 font-medium">Estoque Atual:</span>
-                    <span className="text-lg font-black text-amber-400 font-mono">
-                      {item.quantidade} <span className="text-xs font-normal text-slate-400">{item.unidadeMedida}</span>
+                  {/* 3 & 4. Quantidade e Unidade de Medida Highlight */}
+                  <div className="mt-3 p-2.5 bg-slate-900/90 rounded-xl border border-slate-800 flex items-center justify-between">
+                    <span className="text-xs text-slate-400 font-medium">Quantidade em Estoque:</span>
+                    <span className="text-lg font-black text-amber-400 font-mono flex items-baseline gap-1">
+                      {item.quantidade} <span className="text-xs font-semibold text-slate-300 uppercase">{item.unidadeMedida}</span>
                     </span>
                   </div>
 
-                  {/* Details Grid */}
-                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400">
+                  {/* 5. Local do Cofre Prominent Display */}
+                  <div className="mt-2.5 p-2 bg-cyan-950/30 border border-cyan-800/40 rounded-xl flex items-center justify-between">
+                    <div className="flex items-center space-x-1.5 text-xs text-slate-300">
+                      <Vault className="w-4 h-4 text-cyan-400 shrink-0" />
+                      <span className="text-[11px] font-semibold text-slate-400">Local do Cofre:</span>
+                    </div>
+                    <span className="text-xs font-black font-mono text-cyan-300 tracking-wide bg-cyan-950/80 px-2 py-0.5 rounded-lg border border-cyan-700/50">
+                      {item.localArmazenamento || 'PAIOL-01'}
+                    </span>
+                  </div>
+
+                  {/* Secondary Details Grid */}
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-slate-400 pt-2 border-t border-slate-800/60">
                     <div>
                       <span className="block text-slate-500 text-[10px] uppercase font-semibold">Lote:</span>
                       <span className="font-mono text-slate-200 font-semibold">{item.lote}</span>
@@ -869,11 +992,6 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                         {item.dataValidade ? formatDisplayDate(item.dataValidade) : 'Indeterminada'}
                       </span>
                     </div>
-
-                    <div className="col-span-2 pt-1 border-t border-slate-800/60">
-                      <span className="block text-slate-500 text-[10px] uppercase font-semibold">Local no Paiol:</span>
-                      <span className="text-cyan-300 font-medium">{item.localArmazenamento}</span>
-                    </div>
                   </div>
                 </div>
 
@@ -882,7 +1000,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   <div className="flex items-center space-x-1">
                     <button
                       onClick={() => setSelectedItemDetail(item)}
-                      title="Ver Detalhes"
+                      title="Ver Ficha Técnica Completa"
                       className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition"
                     >
                       <Eye className="w-4 h-4" />
@@ -914,7 +1032,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       <button
                         onClick={() => handleOpenMovementModal(item, 'Entrada')}
                         className="px-2 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-[11px] font-bold border border-emerald-500/30 transition flex items-center space-x-1"
-                        title="Registrar Entrada / Suprimento"
+                        title="Registrar Entrada / Abastecimento"
                       >
                         <span>+ Entrar</span>
                       </button>
@@ -958,20 +1076,22 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
             <form onSubmit={handleSaveItem} className="p-4 sm:p-6 overflow-y-auto space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 1. Nome do Explosivo */}
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Nome Comercial / Denominação Oficial *
+                    Nome do Explosivo (Denominação Oficial) *
                   </label>
                   <input
                     type="text"
                     required
                     value={formNome}
                     onChange={(e) => setFormNome(e.target.value)}
-                    placeholder="Ex: Emulsão Britex 1 1/4x8, C-4 Demolição, Granada GL-304"
+                    placeholder="Ex: Emulsão Britex 1 1/4x8, C-4 Demolição, Cordel Detonante NP-10, Granada GL-304"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
                   />
                 </div>
 
+                {/* 2. Tipo de Explosivo */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Tipo de Explosivo *
@@ -987,6 +1107,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   </select>
                 </div>
 
+                {/* Subtipo */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Subtipo / Especificação Técnica
@@ -1000,6 +1121,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
+                {/* 3. Quantidade */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Quantidade em Estoque *
@@ -1015,6 +1137,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
+                {/* 4. Unidade de Medida */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Unidade de Medida *
@@ -1030,6 +1153,90 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   </select>
                 </div>
 
+                {/* 5. Local do Cofre (com opção de criar local para armazenar explosivos) */}
+                <div className="sm:col-span-2 p-3 bg-slate-950/70 border border-amber-500/20 rounded-xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                      <Vault className="w-4 h-4 text-amber-400" />
+                      Local do Cofre para Armazenar Explosivos *
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setNewVaultCode('');
+                        setNewVaultDeptId(formDeptId || currentUser.departmentId);
+                        setNewVaultUnitId(formUnitId || currentUser.unitId);
+                        setShowCreateVaultModal(true);
+                      }}
+                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-bold flex items-center gap-1 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-amber-400" />
+                      <span>+ Criar Local no Cofre</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div>
+                      <select
+                        value={formCofreId}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          if (val === '__CREATE_NEW__') {
+                            setNewVaultCode('');
+                            setNewVaultDeptId(formDeptId || currentUser.departmentId);
+                            setNewVaultUnitId(formUnitId || currentUser.unitId);
+                            setShowCreateVaultModal(true);
+                            return;
+                          }
+                          setFormCofreId(val);
+                          const found = availableVaultsForUnit.find(v => v.id === val);
+                          if (found) {
+                            setFormLocalArmazenamento(found.code);
+                          }
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
+                      >
+                        <option value="">Selecione o local no cofre cadastrado...</option>
+                        {explosiveVaultSpaces.length > 0 && (
+                          <optgroup label="Cofres / Paióis de Explosivos">
+                            {explosiveVaultSpaces.map(v => (
+                              <option key={v.id} value={v.id}>
+                                {v.code} (Paiol de Explosivos)
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {availableVaultsForUnit.filter(v => v.type !== 'EXPLOSIVOS').length > 0 && (
+                          <optgroup label="Outros Espaços de Armazenamento no Cofre">
+                            {availableVaultsForUnit.filter(v => v.type !== 'EXPLOSIVOS').map(v => (
+                              <option key={v.id} value={v.id}>
+                                {v.code} ({v.type})
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                        <option value="__CREATE_NEW__">+ Criar Novo Local para Armazenar Explosivos...</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <input
+                        type="text"
+                        required
+                        value={formLocalArmazenamento}
+                        onChange={(e) => setFormLocalArmazenamento(e.target.value)}
+                        placeholder="Identificação do local no cofre (ex: PAIOL-01, COFRE-EXP-A1)"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none font-mono"
+                      />
+                    </div>
+                  </div>
+                  <span className="text-[10px] text-slate-400 block">
+                    Defina o espaço físico seguro onde o material ficará custodiado dentro da unidade policial.
+                  </span>
+                </div>
+
+                {/* Lote e Fabricante */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Número do Lote
@@ -1056,6 +1263,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
+                {/* Datas */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Data de Fabricação
@@ -1080,7 +1288,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
-                <div className="sm:col-span-2">
+                {/* Classe de Risco e Status */}
+                <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Classe de Risco (ONU / Transporte)
                   </label>
@@ -1093,20 +1302,6 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       <option key={c} value={c}>{c}</option>
                     ))}
                   </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Local de Armazenamento (Paiol / Cofre / Gaveta) *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={formLocalArmazenamento}
-                    onChange={(e) => setFormLocalArmazenamento(e.target.value)}
-                    placeholder="Ex: Paiol de Alto Poder - Cofre A1"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
-                  />
                 </div>
 
                 <div>
@@ -1124,12 +1319,13 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   </select>
                 </div>
 
+                {/* Observações */}
                 <div className="sm:col-span-2">
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Informações Adicionais / Observações Técnicas
                   </label>
                   <textarea
-                    rows={3}
+                    rows={2}
                     value={formObservacoes}
                     onChange={(e) => setFormObservacoes(e.target.value)}
                     placeholder="Descreva particularidades, laudos de peritagem, compatibilidade química..."
@@ -1151,6 +1347,115 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
                 >
                   <span>{editingItem ? 'Salvar Alterações' : 'Cadastrar Explosivo'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Criar Local para Armazenar Explosivos no Cofre */}
+      {showCreateVaultModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="glass-card bg-slate-900 border border-amber-500/30 rounded-2xl w-full max-w-md shadow-2xl animate-fade-in my-auto">
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-400">
+                  <Vault className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-100">
+                    Criar Local no Cofre para Armazenar Explosivos
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Cadastro de novo paiol / compartimento seguro
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowCreateVaultModal(false)}
+                className="text-slate-400 hover:text-slate-200 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateExplosiveVault} className="p-4 sm:p-5 space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Código do Local no Cofre / Paiol *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={newVaultCode}
+                  onChange={(e) => setNewVaultCode(e.target.value)}
+                  placeholder="Ex: PAIOL-01, COFRE-EXP-A1, GAVETA-E1"
+                  className="w-full px-3.5 py-2.5 bg-slate-950 border border-slate-700 rounded-xl text-sm font-mono text-slate-100 focus:border-amber-400 outline-none uppercase"
+                />
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  Identificador visual do compartimento de explosivos dentro da unidade.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Tipo de Local
+                </label>
+                <div className="p-2.5 bg-red-950/40 border border-red-800/60 rounded-xl flex items-center space-x-2 text-xs text-red-200">
+                  <Bomb className="w-4 h-4 text-red-400 shrink-0" />
+                  <span className="font-semibold">Paiol / Cofre para Explosivos e Detonantes (EXPLOSIVOS)</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Departamento
+                  </label>
+                  <select
+                    value={newVaultDeptId}
+                    onChange={(e) => setNewVaultDeptId(e.target.value)}
+                    disabled={!isGeral}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
+                  >
+                    {availableDepts.map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Unidade Policial
+                  </label>
+                  <select
+                    value={newVaultUnitId}
+                    onChange={(e) => setNewVaultUnitId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
+                  >
+                    {units.filter(u => !newVaultDeptId || u.departmentId === newVaultDeptId).map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-800 flex justify-end space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCreateVaultModal(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingVault}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
+                >
+                  <Vault className="w-4 h-4" />
+                  <span>{isSubmittingVault ? 'Salvando...' : 'Criar Local de Armazenamento'}</span>
                 </button>
               </div>
             </form>
@@ -1192,7 +1497,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 >
                   {explosivos.map(exp => (
                     <option key={exp.id} value={exp.id}>
-                      {exp.nome} (Lote: {exp.lote} | Saldo: {exp.quantidade} {exp.unidadeMedida})
+                      {exp.nome} (Cofre: {exp.localArmazenamento} | Saldo: {exp.quantidade} {exp.unidadeMedida})
                     </option>
                   ))}
                 </select>
@@ -1470,14 +1775,14 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
             <div className="p-4 sm:p-6 space-y-3 text-xs">
               <div>
-                <span className="text-[10px] uppercase font-bold text-slate-500 block">Nome / Denominação:</span>
+                <span className="text-[10px] uppercase font-bold text-slate-500 block">Nome do Explosivo:</span>
                 <p className="text-sm font-bold text-slate-100">{selectedItemDetail.nome}</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Tipo:</span>
-                  <p className="text-slate-300">{selectedItemDetail.tipo}</p>
+                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Tipo de Explosivo:</span>
+                  <p className="text-slate-300 font-semibold">{selectedItemDetail.tipo}</p>
                 </div>
                 <div>
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Subtipo:</span>
@@ -1513,9 +1818,12 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   <span className="text-[10px] uppercase font-bold text-slate-500 block">Classe de Risco:</span>
                   <p className="text-slate-200">{selectedItemDetail.classeRisco}</p>
                 </div>
-                <div className="col-span-2">
-                  <span className="text-[10px] uppercase font-bold text-slate-500 block">Local no Paiol:</span>
-                  <p className="text-cyan-300 font-semibold">{selectedItemDetail.localArmazenamento}</p>
+                <div className="col-span-2 p-2 bg-slate-950/80 rounded-xl border border-cyan-800/40">
+                  <span className="text-[10px] uppercase font-bold text-cyan-400 flex items-center gap-1">
+                    <Vault className="w-3 h-3" />
+                    Local do Cofre / Paiol:
+                  </span>
+                  <p className="text-cyan-200 font-bold font-mono text-xs mt-0.5">{selectedItemDetail.localArmazenamento}</p>
                 </div>
                 {selectedItemDetail.observacoes && (
                   <div className="col-span-2">
@@ -1543,7 +1851,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <ConfirmDeleteModal
           isOpen={Boolean(deleteTargetItem)}
           title="Excluir Material Explosivo"
-          description={`Deseja realmente remover o explosivo "${deleteTargetItem.nome}" (Lote: ${deleteTargetItem.lote}) permanentemente do acervo?`}
+          description={`Deseja realmente remover o explosivo "${deleteTargetItem.nome}" (Lote: ${deleteTargetItem.lote}, Local: ${deleteTargetItem.localArmazenamento}) permanentemente do acervo?`}
           onConfirm={handleDeleteItem}
           onClose={() => setDeleteTargetItem(null)}
         />

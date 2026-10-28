@@ -4,7 +4,7 @@ import { storage } from '../services/storage';
 import { 
   Vault, Plus, Trash2, Edit2, AlertCircle, Check, Crosshair, Disc, 
   Search, ChevronDown, ChevronUp, Building, Eye, Printer, X, Filter,
-  Shield, Layers, Package
+  Shield, Layers, Package, Bomb
 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
@@ -25,7 +25,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   onRefresh
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'ARMAS' | 'MUNIÇÕES'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS'>('ALL');
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL');
   const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
   const [selectedVaultForDetails, setSelectedVaultForDetails] = useState<VaultSpace | null>(null);
@@ -63,6 +63,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   // Global counts for filter badges
   const totalArmas = useMemo(() => userScopedVaults.filter(v => v.type === 'ARMAS').length, [userScopedVaults]);
   const totalMunicoes = useMemo(() => userScopedVaults.filter(v => v.type === 'MUNIÇÕES').length, [userScopedVaults]);
+  const totalExplosivos = useMemo(() => userScopedVaults.filter(v => v.type === 'EXPLOSIVOS').length, [userScopedVaults]);
   const totalAll = userScopedVaults.length;
 
   // Available departments & units for modal
@@ -312,6 +313,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
     const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
     const isArmas = v.type === 'ARMAS';
+    const isMunicoes = v.type === 'MUNIÇÕES';
+    const isExplosivos = v.type === 'EXPLOSIVOS';
 
     return (
       <div
@@ -319,7 +322,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         className={`bg-slate-900 border rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm transition hover:border-slate-600 ${
           isArmas 
             ? 'border-amber-900/30 hover:border-amber-500/50' 
-            : 'border-cyan-900/30 hover:border-cyan-500/50'
+            : isMunicoes
+            ? 'border-cyan-900/30 hover:border-cyan-500/50'
+            : 'border-red-900/30 hover:border-red-500/50'
         }`}
       >
         <div>
@@ -333,11 +338,25 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   className={`text-[10px] font-bold px-2 py-0.5 rounded-lg border flex items-center space-x-1 ${
                     isArmas
                       ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
-                      : 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+                      : isMunicoes
+                      ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+                      : 'bg-red-950/80 text-red-300 border-red-800/80'
                   }`}
                 >
-                  {isArmas ? <Crosshair className="w-3 h-3 text-amber-400" /> : <Disc className="w-3 h-3 text-cyan-400" />}
-                  <span>{isArmas ? 'Cofre para Armas' : 'Cofre para Munições'}</span>
+                  {isArmas ? (
+                    <Crosshair className="w-3 h-3 text-amber-400" />
+                  ) : isMunicoes ? (
+                    <Disc className="w-3 h-3 text-cyan-400" />
+                  ) : (
+                    <Bomb className="w-3 h-3 text-red-400" />
+                  )}
+                  <span>
+                    {isArmas
+                      ? 'Cofre para Armas'
+                      : isMunicoes
+                      ? 'Cofre para Munições'
+                      : 'Paiol / Cofre de Explosivos'}
+                  </span>
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-300">
@@ -529,6 +548,25 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 typeFilter === 'MUNIÇÕES' ? 'bg-cyan-900/80 text-cyan-200' : 'bg-slate-900 text-slate-500'
               }`}>
                 {totalMunicoes}
+              </span>
+            </button>
+
+            {/* Filter: Paiol / Cofre para Explosivos */}
+            <button
+              type="button"
+              onClick={() => setTypeFilter('EXPLOSIVOS')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                typeFilter === 'EXPLOSIVOS'
+                  ? 'bg-red-950/90 text-red-300 border border-red-800 shadow-sm'
+                  : 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
+              }`}
+            >
+              <Bomb className="w-3.5 h-3.5 text-red-400" />
+              <span>Cofre de Explosivos</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                typeFilter === 'EXPLOSIVOS' ? 'bg-red-900/80 text-red-200' : 'bg-slate-900 text-slate-500'
+              }`}>
+                {totalExplosivos}
               </span>
             </button>
 
@@ -956,7 +994,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Tipo de Local / Cofre
                 </label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <button
                     type="button"
                     onClick={() => setType('ARMAS')}
@@ -971,7 +1009,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       <span className="text-xs font-bold text-slate-100">Cofre de Armas</span>
                     </div>
                     <span className="text-[10px] text-slate-400 leading-tight">
-                      Para custódia de pistolas, fuzis e espingardas
+                      Para custódia de pistolas e fuzis
                     </span>
                   </button>
 
@@ -989,7 +1027,25 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       <span className="text-xs font-bold text-slate-100">Cofre de Munições</span>
                     </div>
                     <span className="text-[10px] text-slate-400 leading-tight">
-                      Para estocagem de cartuchos e lotes de munição
+                      Para estocagem de cartuchos
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setType('EXPLOSIVOS')}
+                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                      type === 'EXPLOSIVOS'
+                        ? 'bg-red-950/70 border-red-500 text-red-200 shadow-sm'
+                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-2 mb-1.5">
+                      <Bomb className={`w-4 h-4 ${type === 'EXPLOSIVOS' ? 'text-red-400' : 'text-slate-500'}`} />
+                      <span className="text-xs font-bold text-slate-100">Paiol / Explosivos</span>
+                    </div>
+                    <span className="text-[10px] text-slate-400 leading-tight">
+                      Para altos explosivos e espoletas
                     </span>
                   </button>
                 </div>

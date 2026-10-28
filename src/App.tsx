@@ -362,6 +362,7 @@ export default function App() {
               currentUser={currentUser}
               departments={departments}
               units={units}
+              vaultSpaces={vaultSpaces}
               users={allUsers}
               onRefresh={refreshData}
             />

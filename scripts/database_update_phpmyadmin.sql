@@ -169,34 +169,46 @@ SELECT
 FROM `ARMAS`;
 
 -- ------------------------------------------------------------------------------
--- 7. TABELA DE EXPLOSIVOS E DETONANTES (`EXPLOSIVOS`)
--- Cadastro completo de altos e baixos explosivos, iniciadores e acessórios
+-- 7. ATUALIZAÇÃO DA TABELA DE COFRES (`COFRES`)
+-- Permite criação de locais para armazenar explosivos (Paiol / Cofre de Explosivos)
+-- ------------------------------------------------------------------------------
+ALTER TABLE `COFRES` 
+  MODIFY COLUMN `TIPO_COFRES` ENUM('ARMAS', 'MUNIÇÕES', 'EXPLOSIVOS') NOT NULL DEFAULT 'ARMAS';
+
+-- ------------------------------------------------------------------------------
+-- 8. TABELA DE EXPLOSIVOS E DETONANTES (`EXPLOSIVOS`)
+-- Cadastro completo com Tipo de Explosivo, Nome, Unidade de Medida, Quantidade e Local do Cofre
 -- ------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `EXPLOSIVOS` (
-  `ID` VARCHAR(64) NOT NULL,
-  `NOME` VARCHAR(255) NOT NULL,
-  `TIPO` VARCHAR(128) NOT NULL,
-  `SUBTIPO` VARCHAR(128) DEFAULT NULL,
-  `QUANTIDADE` DECIMAL(12,3) NOT NULL DEFAULT 0.000,
-  `UNIDADE_MEDIDA` VARCHAR(32) NOT NULL DEFAULT 'kg',
-  `LOTE` VARCHAR(128) NOT NULL,
-  `FABRICANTE` VARCHAR(255) NOT NULL,
-  `DATA_FABRICACAO` DATE DEFAULT NULL,
-  `DATA_VALIDADE` DATE DEFAULT NULL,
-  `CLASSE_RISCO` VARCHAR(128) NOT NULL DEFAULT '1.1D',
-  `LOCAL_ARMAZENAMENTO` VARCHAR(255) NOT NULL,
-  `STATUS` ENUM('Disponível', 'Em Uso/Operação', 'Vencido', 'Quarentena/Perícia', 'Descartado') NOT NULL DEFAULT 'Disponível',
-  `DEPARTAMENTO_ID` VARCHAR(64) NOT NULL,
-  `UNIDADE_ID` VARCHAR(64) NOT NULL,
-  `OBSERVACOES` TEXT DEFAULT NULL,
-  `DATA_CRIACAO` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`ID`),
-  KEY `idx_explosivos_dept` (`DEPARTAMENTO_ID`),
-  KEY `idx_explosivos_unidade` (`UNIDADE_ID`),
-  KEY `idx_explosivos_tipo` (`TIPO`),
-  KEY `idx_explosivos_status` (`STATUS`),
-  KEY `idx_explosivos_lote` (`LOTE`)
+  `ID_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `NOME_EXPLOSIVOS` VARCHAR(255) NOT NULL,
+  `TIPO_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `SUBTIPO_EXPLOSIVOS` VARCHAR(128) DEFAULT NULL,
+  `QUANTIDADE_EXPLOSIVOS` DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+  `UNIDADE_MEDIDA_EXPLOSIVOS` VARCHAR(32) NOT NULL DEFAULT 'kg',
+  `LOTE_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `FABRICANTE_EXPLOSIVOS` VARCHAR(255) NOT NULL,
+  `DATA_FABRICACAO_EXPLOSIVOS` DATE DEFAULT NULL,
+  `DATA_VALIDADE_EXPLOSIVOS` DATE DEFAULT NULL,
+  `CLASSE_RISCO_EXPLOSIVOS` VARCHAR(128) NOT NULL DEFAULT '1.1D',
+  `LOCAL_ARMAZENAMENTO_EXPLOSIVOS` VARCHAR(255) NOT NULL,
+  `COFRE_ID_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL,
+  `STATUS_EXPLOSIVOS` ENUM('Disponível', 'Em Uso/Operação', 'Vencido', 'Quarentena/Perícia', 'Descartado') NOT NULL DEFAULT 'Disponível',
+  `DEPARTAMENTO_ID_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `UNIDADE_ID_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `OBSERVACOES_EXPLOSIVOS` TEXT DEFAULT NULL,
+  `DATA_CRIACAO_EXPLOSIVOS` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ID_EXPLOSIVOS`),
+  KEY `idx_explosivos_dept` (`DEPARTAMENTO_ID_EXPLOSIVOS`),
+  KEY `idx_explosivos_unidade` (`UNIDADE_ID_EXPLOSIVOS`),
+  KEY `idx_explosivos_tipo` (`TIPO_EXPLOSIVOS`),
+  KEY `idx_explosivos_status` (`STATUS_EXPLOSIVOS`),
+  KEY `idx_explosivos_lote` (`LOTE_EXPLOSIVOS`),
+  KEY `idx_explosivos_cofre` (`COFRE_ID_EXPLOSIVOS`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE `EXPLOSIVOS` 
+  ADD COLUMN IF NOT EXISTS `COFRE_ID_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL AFTER `LOCAL_ARMAZENAMENTO_EXPLOSIVOS`;
 
 -- ------------------------------------------------------------------------------
 -- 8. TABELA DE MOVIMENTAÇÕES DE EXPLOSIVOS (`MOVIMENTACOES_EXPLOSIVOS`)

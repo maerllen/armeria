@@ -6303,6 +6303,8 @@ apiRouter.get('/explosivos', async (req: Request, res: Response) => {
         DATA_VALIDADE_EXPLOSIVOS as dataValidade,
         CLASSE_RISCO_EXPLOSIVOS as classeRisco,
         LOCAL_ARMAZENAMENTO_EXPLOSIVOS as localArmazenamento,
+        COFRE_ID_EXPLOSIVOS as cofreId,
+        COFRE_ID_EXPLOSIVOS as vaultSpaceId,
         STATUS_EXPLOSIVOS as status,
         DEPARTAMENTO_ID_EXPLOSIVOS as departmentId,
         UNIDADE_ID_EXPLOSIVOS as unitId,
@@ -6352,6 +6354,8 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
       dataValidade,
       classeRisco,
       localArmazenamento,
+      cofreId,
+      vaultSpaceId,
       status,
       departmentId,
       unitId,
@@ -6369,11 +6373,12 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Lote de fabricação é obrigatório.' });
     }
     if (!localArmazenamento || !localArmazenamento.trim()) {
-      return res.status(400).json({ error: 'Local de armazenamento/paiol é obrigatório.' });
+      return res.status(400).json({ error: 'Local de armazenamento/cofre é obrigatório.' });
     }
 
     const qty = parseFloat(quantidade) || 0;
     const finalId = id || `exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const finalCofreId = cofreId || vaultSpaceId || null;
 
     const [existing]: any = await pool.query('SELECT ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?', [finalId]);
     if (existing && existing.length > 0) {
@@ -6390,6 +6395,7 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
           DATA_VALIDADE_EXPLOSIVOS = ?,
           CLASSE_RISCO_EXPLOSIVOS = ?,
           LOCAL_ARMAZENAMENTO_EXPLOSIVOS = ?,
+          COFRE_ID_EXPLOSIVOS = ?,
           STATUS_EXPLOSIVOS = ?,
           DEPARTAMENTO_ID_EXPLOSIVOS = ?,
           UNIDADE_ID_EXPLOSIVOS = ?,
@@ -6400,13 +6406,14 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
           tipo.trim(),
           subtipo?.trim() || null,
           qty,
-          unidadeMedida || 'unidades',
+          unidadeMedida || 'kg',
           lote.trim(),
           fabricante?.trim() || null,
           dataFabricacao || null,
           dataValidade || null,
           classeRisco?.trim() || '1.1D',
           localArmazenamento.trim(),
+          finalCofreId,
           status || 'Disponível',
           departmentId || null,
           unitId || null,
@@ -6428,23 +6435,24 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
           ID_EXPLOSIVOS, NOME_EXPLOSIVOS, TIPO_EXPLOSIVOS, SUBTIPO_EXPLOSIVOS,
           QUANTIDADE_EXPLOSIVOS, UNIDADE_MEDIDA_EXPLOSIVOS, LOTE_EXPLOSIVOS,
           FABRICANTE_EXPLOSIVOS, DATA_FABRICACAO_EXPLOSIVOS, DATA_VALIDADE_EXPLOSIVOS,
-          CLASSE_RISCO_EXPLOSIVOS, LOCAL_ARMAZENAMENTO_EXPLOSIVOS, STATUS_EXPLOSIVOS,
-          DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS, OBSERVACOES_EXPLOSIVOS,
-          DATA_CRIACAO_EXPLOSIVOS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          CLASSE_RISCO_EXPLOSIVOS, LOCAL_ARMAZENAMENTO_EXPLOSIVOS, COFRE_ID_EXPLOSIVOS,
+          STATUS_EXPLOSIVOS, DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS,
+          OBSERVACOES_EXPLOSIVOS, DATA_CRIACAO_EXPLOSIVOS
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           finalId,
           nome.trim(),
           tipo.trim(),
           subtipo?.trim() || null,
           qty,
-          unidadeMedida || 'unidades',
+          unidadeMedida || 'kg',
           lote.trim(),
           fabricante?.trim() || null,
           dataFabricacao || null,
           dataValidade || null,
           classeRisco?.trim() || '1.1D',
           localArmazenamento.trim(),
+          finalCofreId,
           status || 'Disponível',
           departmentId || null,
           unitId || null,
@@ -6455,7 +6463,7 @@ apiRouter.post('/explosivos', async (req: Request, res: Response) => {
       await insertAuditLog(
         'Explosivos',
         'Criar',
-        `Cadastrado novo material explosivo: "${nome.trim()}" (Qtd: ${qty} ${unidadeMedida || 'unidades'})`,
+        `Cadastrado novo material explosivo: "${nome.trim()}" (Qtd: ${qty} ${unidadeMedida || 'kg'})`,
         actor,
         req.ip
       );
