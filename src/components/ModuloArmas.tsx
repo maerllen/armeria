@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer } from '../types';
+import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2 } from 'lucide-react';
@@ -231,10 +231,11 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     }
   };
 
-  const canAddEditWeapon = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
-  const canDeleteWeapon = isGeral || isArmeiro || isAdmin;
-  const canManageMaintenance = isGeral || isArmeiro;
-  const canTransferWeapons = isGeral || isAdmin || isArmeiro;
+  const isExplosivista = isUserExplosivista(currentUser);
+  const canAddEditWeapon = isGeral || isArmeiro || isAdmin || isExplosivista || (isPolicial && currentUser.canMoveWeapons);
+  const canDeleteWeapon = isGeral || isArmeiro || isAdmin || isExplosivista;
+  const canManageMaintenance = isGeral || isArmeiro || isExplosivista;
+  const canTransferWeapons = isGeral || isAdmin || isArmeiro || isExplosivista;
 
   const weaponTransfers = canTransferWeapons ? storage.getWeaponTransfers(currentUser) : [];
   const pendingTransfers = canTransferWeapons ? storage.getPendingIncomingTransfers(currentUser) : [];

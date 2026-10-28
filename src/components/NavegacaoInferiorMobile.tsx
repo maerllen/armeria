@@ -1,6 +1,6 @@
 import React from 'react';
-import { ModuleType, User as UserType } from '../types';
-import { User, Crosshair, Disc, ArrowRightLeft, Smartphone, Menu } from 'lucide-react';
+import { ModuleType, User as UserType, isUserExplosivista } from '../types';
+import { User, Crosshair, Disc, ArrowRightLeft, Smartphone, Menu, Bomb } from 'lucide-react';
 
 interface MobileBottomNavProps {
   currentUser?: UserType | null;
@@ -18,40 +18,75 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   pendingMovementsCount = 0
 }) => {
   const isGeral = currentUser?.role === 'Geral';
+  const isArmeiro = currentUser?.role === 'Armeiro';
+  const isExplosivista = isUserExplosivista(currentUser);
 
-  const quickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number; visible?: boolean }[] = [
-    {
-      id: 'meu-perfil',
-      label: 'Perfil',
-      icon: User,
-      visible: true
-    },
-    {
-      id: 'armas',
-      label: 'Armas',
-      icon: Crosshair,
-      visible: true
-    },
-    {
-      id: 'municoes',
-      label: 'Munições',
-      icon: Disc,
-      visible: true
-    },
-    {
-      id: 'movimentacoes',
-      label: 'Movimentações',
-      icon: ArrowRightLeft,
-      visible: true,
-      badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
-    },
-    {
-      id: 'iniciar-aula-mobile',
-      label: 'Aula',
-      icon: Smartphone,
-      visible: isGeral
-    }
-  ];
+  const quickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number; visible?: boolean }[] = isExplosivista
+    ? [
+        {
+          id: 'meu-perfil',
+          label: 'Perfil',
+          icon: User,
+          visible: true
+        },
+        {
+          id: 'explosivos',
+          label: 'Explosivos',
+          icon: Bomb,
+          visible: true
+        },
+        {
+          id: 'armas',
+          label: 'Armas',
+          icon: Crosshair,
+          visible: true
+        },
+        {
+          id: 'municoes',
+          label: 'Munições',
+          icon: Disc,
+          visible: true
+        }
+      ]
+    : [
+        {
+          id: 'meu-perfil',
+          label: 'Perfil',
+          icon: User,
+          visible: true
+        },
+        {
+          id: 'armas',
+          label: 'Armas',
+          icon: Crosshair,
+          visible: true
+        },
+        {
+          id: 'municoes',
+          label: 'Munições',
+          icon: Disc,
+          visible: true
+        },
+        {
+          id: 'explosivos',
+          label: 'Explosivos',
+          icon: Bomb,
+          visible: isGeral || isArmeiro
+        },
+        {
+          id: 'movimentacoes',
+          label: 'Movimentações',
+          icon: ArrowRightLeft,
+          visible: true,
+          badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
+        },
+        {
+          id: 'iniciar-aula-mobile',
+          label: 'Aula',
+          icon: Smartphone,
+          visible: isGeral
+        }
+      ];
 
   const visibleTabs = quickTabs.filter(tab => tab.visible !== false);
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { User as UserType, Department, ModuleType } from '../types';
+import { User as UserType, Department, ModuleType, isUserExplosivista } from '../types';
 import {
   User,
   Building2,
@@ -17,7 +17,8 @@ import {
   X,
   Shield,
   ShieldCheck,
-  Package
+  Package,
+  Bomb
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 import { ThemeToggle } from './AlternadorTema';
@@ -43,6 +44,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const userRole = currentUser?.role || 'Policial';
   const isGeral = userRole === 'Geral';
+  const isExplosivista = isUserExplosivista(currentUser);
   const userDept = departments.find(d => d.id === currentUser?.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
   const isProfessorAcadepol = Boolean(
@@ -57,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ((userRole === 'Administrador' || userRole === 'Armeiro') && isAcademiaDept) ||
     isProfessorAcadepol;
 
+  // Se for Explosivista, ele visualiza estritamente apenas: Explosivos, Armas, Munições e Meu Perfil
   const navItems: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; visible: boolean; badge?: number }[] = [
     {
       id: 'meu-perfil',
@@ -65,21 +68,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: true
     },
     {
-      id: 'unidade',
-      label: 'Unidades e Deptos',
-      icon: Building2,
-      visible: true
+      id: 'explosivos',
+      label: 'Explosivos',
+      icon: Bomb,
+      visible: isExplosivista || isGeral || userRole === 'Armeiro' || userRole === 'Administrador'
     },
     {
-      id: 'usuarios',
-      label: 'Usuários e Cursos',
-      icon: Users,
-      visible: true
-    },
-    {
-      id: 'cofre',
-      label: 'Locais do Cofre',
-      icon: Vault,
+      id: 'armas',
+      label: 'Armas',
+      icon: Crosshair,
       visible: true
     },
     {
@@ -89,65 +86,77 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: true
     },
     {
-      id: 'armas',
-      label: 'Armas',
-      icon: Crosshair,
-      visible: true
+      id: 'unidade',
+      label: 'Unidades e Deptos',
+      icon: Building2,
+      visible: !isExplosivista
+    },
+    {
+      id: 'usuarios',
+      label: 'Usuários e Cursos',
+      icon: Users,
+      visible: !isExplosivista
+    },
+    {
+      id: 'cofre',
+      label: 'Locais do Cofre',
+      icon: Vault,
+      visible: !isExplosivista
     },
     {
       id: 'movimentacoes',
       label: 'Movimentações',
       icon: ArrowRightLeft,
-      visible: true,
+      visible: !isExplosivista,
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
     },
     {
       id: 'materiais',
       label: 'Materiais',
       icon: Package,
-      visible: true
+      visible: !isExplosivista
     },
     {
       id: 'iniciar-aula-mobile',
       label: 'Iniciar Aula (Modo Celular)',
       icon: Smartphone,
-      visible: isGeral
+      visible: !isExplosivista && isGeral
     },
     {
       id: 'cursos',
       label: 'Curso de Formação',
       icon: GraduationCap,
-      visible: canManageCourses
+      visible: !isExplosivista && canManageCourses
     },
     {
       id: 'ensino-continuado',
       label: 'Ensino Continuado',
       icon: Award,
-      visible: canManageCourses
+      visible: !isExplosivista && canManageCourses
     },
     {
       id: 'gerencia-cursos',
       label: 'Gerência de Cursos',
       icon: BookOpen,
-      visible: canManageCourses
+      visible: !isExplosivista && canManageCourses
     },
     {
       id: 'calendario',
       label: 'Calendário Curso de Formação',
       icon: Calendar,
-      visible: isProfessorAcadepol
+      visible: !isExplosivista && isProfessorAcadepol
     },
     {
       id: 'certificados',
       label: 'Verificar Certificados',
       icon: ShieldCheck,
-      visible: isGeral
+      visible: !isExplosivista && isGeral
     },
     {
       id: 'relatorio',
       label: 'Relatórios',
       icon: FileText,
-      visible: userRole === 'Geral' || userRole === 'Administrador' || userRole === 'Armeiro'
+      visible: !isExplosivista && (userRole === 'Geral' || userRole === 'Administrador' || userRole === 'Armeiro')
     }
   ];
 

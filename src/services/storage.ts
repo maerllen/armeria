@@ -31,7 +31,10 @@ import {
   CautelaMaterial,
   WeaponMaintenance,
   ExternalWorkshop,
-  WeaponShotRecord
+  WeaponShotRecord,
+  Explosivo,
+  MovimentacaoExplosivo,
+  isUserExplosivista
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -63,6 +66,8 @@ export interface AppState {
   tiposMateriais: TipoMaterial[];
   materiais: Material[];
   cautelasMateriais: CautelaMaterial[];
+  explosivos: Explosivo[];
+  movimentacoesExplosivos: MovimentacaoExplosivo[];
 }
 
 class StorageService {
@@ -93,7 +98,9 @@ class StorageService {
     certificados: [],
     tiposMateriais: [],
     materiais: [],
-    cautelasMateriais: []
+    cautelasMateriais: [],
+    explosivos: [],
+    movimentacoesExplosivos: []
   };
 
   constructor() {
@@ -137,7 +144,9 @@ class StorageService {
         weaponTransfersRes,
         tiposMateriaisRes,
         materiaisRes,
-        cautelasMateriaisRes
+        cautelasMateriaisRes,
+        explosivosRes,
+        movimentacoesExplosivosRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -164,7 +173,9 @@ class StorageService {
         fetch('/api/weapon-transfers').then(r => r.ok ? r.json() : []),
         fetch('/api/tipos-materiais').then(r => r.ok ? r.json() : []),
         fetch('/api/materiais').then(r => r.ok ? r.json() : []),
-        fetch('/api/cautelas-materiais').then(r => r.ok ? r.json() : [])
+        fetch('/api/cautelas-materiais').then(r => r.ok ? r.json() : []),
+        fetch('/api/explosivos').then(r => r.ok ? r.json() : []),
+        fetch('/api/movimentacoes-explosivos').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -193,6 +204,8 @@ class StorageService {
       this.state.tiposMateriais = tiposMateriaisRes || [];
       this.state.materiais = materiaisRes || [];
       this.state.cautelasMateriais = cautelasMateriaisRes || [];
+      this.state.explosivos = explosivosRes || [];
+      this.state.movimentacoesExplosivos = movimentacoesExplosivosRes || [];
 
 
       // Refresh current user reference if logged in
@@ -2031,8 +2044,77 @@ class StorageService {
       return { success: false, error: err.message };
     }
   }
+
+  // =================================================================
+  // MÉTODOS DO MÓDULO DE EXPLOSIVOS
+  // =================================================================
+  public getExplosivos(user?: User | null): Explosivo[] {
+    const actor = user || this.state.currentUser;
+    const list = this.state.explosivos || [];
+    if (!actor || actor.role === 'Geral') {
+      return list;
+    }
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      return list.filter(e => !e.departmentId || e.departmentId === actor.departmentId);
+    }
+    return list.filter(e => !e.unitId || e.unitId === actor.unitId);
+  }
+
+  public async saveExplosivo(exp: Partial<Explosivo>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/explosivos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...exp, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteExplosivo(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/explosivos/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getMovimentacoesExplosivos(explosivoId?: string): MovimentacaoExplosivo[] {
+    const list = this.state.movimentacoesExplosivos || [];
+    if (explosivoId) {
+      return list.filter(m => m.explosivoId === explosivoId);
+    }
+    return list;
+  }
+
+  public async saveMovimentacaoExplosivo(mov: Partial<MovimentacaoExplosivo>): Promise<{ success: boolean; id?: string; newQuantity?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/movimentacoes-explosivos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...mov, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, newQuantity: data.newQuantity };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
-
-
 
 export const storage = new StorageService();

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType } from '../types';
+import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History } from 'lucide-react';
@@ -110,7 +110,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const isGeral = currentUser.role === 'Geral';
   const isArmeiro = currentUser.role === 'Armeiro';
   const isAdmin = currentUser.role === 'Administrador';
-  const canManageStock = isGeral || isArmeiro || isAdmin || (currentUser.role === 'Policial' && currentUser.canMoveAmmunition);
+  const isExplosivista = isUserExplosivista(currentUser);
+  const canManageStock = isGeral || isArmeiro || isAdmin || isExplosivista || (currentUser.role === 'Policial' && currentUser.canMoveAmmunition);
 
   // Available vault spaces for ammo: MUST BE TYPE MUNIÇÕES
   const ammoVaultSpaces = vaultSpaces.filter(v => v.type === 'MUNIÇÕES');

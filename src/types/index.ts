@@ -1,4 +1,4 @@
-export type UserRole = 'Geral' | 'Administrador' | 'Armeiro' | 'Policial';
+export type UserRole = 'Geral' | 'Administrador' | 'Armeiro' | 'Policial' | 'Explosivista';
 
 export type ModuleType = 
   | 'meu-perfil' 
@@ -7,6 +7,7 @@ export type ModuleType =
   | 'cofre' 
   | 'municoes' 
   | 'armas' 
+  | 'explosivos'
   | 'materiais'
   | 'movimentacoes' 
   | 'relatorio'
@@ -24,7 +25,8 @@ export type UserCargo =
   | 'Escrivão' 
   | 'Perito' 
   | 'Médico Legista' 
-  | 'Operador';
+  | 'Operador'
+  | 'Explosivista';
 
 export type TeacherSubject = 'MEAF' | 'TAP' | 'DP';
 
@@ -736,4 +738,72 @@ export interface CautelaMaterial {
   updatedAt?: string;
 }
 
+// =================================================================
+// MÓDULO DE EXPLOSIVOS
+// =================================================================
+export type ExplosivoStatus = 
+  | 'Disponível' 
+  | 'Em Uso' 
+  | 'Em Uso/Operação' 
+  | 'Consumido / Detonado' 
+  | 'Vencido' 
+  | 'Em Quarentena' 
+  | 'Quarentena/Perícia' 
+  | 'Descartado';
+
+export type TipoMovimentacaoExplosivo = 
+  | 'Entrada' 
+  | 'Saída'
+  | 'Saída / Cautela' 
+  | 'Consumo Operacional' 
+  | 'Consumo/Treinamento'
+  | 'Instrução / Treinamento' 
+  | 'Destruição Técnica' 
+  | 'Descarte/Destruição'
+  | 'Transferência';
+
+export interface Explosivo {
+  id: string;
+  nome: string;
+  tipo: string;
+  subtipo?: string;
+  quantidade: number;
+  unidadeMedida: string;
+  lote: string;
+  fabricante: string;
+  dataFabricacao?: string;
+  dataValidade?: string;
+  classeRisco: string;
+  localArmazenamento: string;
+  status: ExplosivoStatus;
+  departmentId: string;
+  unitId: string;
+  observacoes?: string;
+  dataCriacao?: string;
+  createdAt?: string;
+}
+
+export interface MovimentacaoExplosivo {
+  id: string;
+  explosivoId: string;
+  nomeExplosivo?: string;
+  explosivoNome?: string;
+  tipoMovimentacao: TipoMovimentacaoExplosivo;
+  quantidade: number;
+  unidadeMedida: string;
+  motivo: string;
+  responsavelNome: string;
+  responsavelMasp?: string;
+  responsavelId?: string;
+  localOrigemDestino?: string;
+  dataMovimentacao: string;
+  departmentId?: string;
+  unitId?: string;
+  observacoes?: string;
+}
+
+export const isUserExplosivista = (user?: User | null): boolean => {
+  if (!user) return false;
+  return user.role === 'Explosivista' || (Boolean(user.cargo) && user.cargo.toLowerCase().includes('explosivista'));
+};
 

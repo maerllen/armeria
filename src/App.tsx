@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType } from './types';
+import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, isUserExplosivista } from './types';
 import { storage } from './services/storage';
 import { Navbar } from './components/BarraNavegacao';
 import { Sidebar } from './components/BarraLateral';
@@ -13,6 +13,7 @@ import { UserModule } from './components/ModuloUsuarios';
 import { VaultModule } from './components/ModuloCofre';
 import { AmmunitionModule } from './components/ModuloMunicao';
 import { WeaponModule } from './components/ModuloArmas';
+import { ModuloExplosivos } from './components/ModuloExplosivos';
 import { MovementModule } from './components/ModuloMovimentacoes';
 import { ReportModule } from './components/ModuloRelatorios';
 import { MaterialModule } from './components/ModuloMateriais';
@@ -22,7 +23,7 @@ import { MobileClassModule } from './components/ModuloAulaMobile';
 import { CalendarModule } from './components/ModuloCalendario';
 import { CertificateVerificationModule } from './components/ModuloVerificacaoCertificados';
 import { PublicCertificateValidator } from './components/ValidadorPublicoCertificado';
-import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock } from 'lucide-react';
+import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 
 export default function App() {
@@ -99,6 +100,17 @@ export default function App() {
   // Security guard: ensure active module is accessible by current user
   useEffect(() => {
     if (!currentUser) return;
+
+    // Explosivista restriction: strictly only 'meu-perfil', 'explosivos', 'armas', 'municoes'
+    const isExplosivista = isUserExplosivista(currentUser);
+    if (isExplosivista) {
+      const allowedForExplosivista: ModuleType[] = ['meu-perfil', 'explosivos', 'armas', 'municoes'];
+      if (!allowedForExplosivista.includes(activeModule)) {
+        setActiveModule('explosivos');
+      }
+      return;
+    }
+
     const isUserGeral = currentUser.role === 'Geral';
     const isUserProfessor = Boolean(
       currentUser.isTeacher ||
@@ -341,6 +353,16 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               departments={departments}
               units={units}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'explosivos' && (
+            <ModuloExplosivos
+              currentUser={currentUser}
+              departments={departments}
+              units={units}
+              users={allUsers}
               onRefresh={refreshData}
             />
           )}

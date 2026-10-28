@@ -88,12 +88,13 @@ export const UserModule: React.FC<UserModuleProps> = ({
     'Escrivão',
     'Perito',
     'Médico Legista',
-    'Operador'
+    'Operador',
+    'Explosivista'
   ];
 
   const rolesList: UserRole[] = (editingUser && editingUser.role === 'Geral')
-    ? ['Geral', 'Administrador', 'Armeiro', 'Policial']
-    : ['Administrador', 'Armeiro', 'Policial'];
+    ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista']
+    : ['Administrador', 'Armeiro', 'Policial', 'Explosivista'];
 
   // Filtered units based on selected department in form
   const availableUnitsForForm = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));

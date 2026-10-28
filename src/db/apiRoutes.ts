@@ -6282,6 +6282,374 @@ apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) 
   }
 });
 
+// =================================================================
+// ROTAS DO MÓDULO DE EXPLOSIVOS
+// =================================================================
+apiRouter.get('/explosivos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { departamentoId, unidadeId } = req.query;
+    let query = `
+      SELECT 
+        ID_EXPLOSIVOS as id,
+        NOME_EXPLOSIVOS as nome,
+        TIPO_EXPLOSIVOS as tipo,
+        SUBTIPO_EXPLOSIVOS as subtipo,
+        QUANTIDADE_EXPLOSIVOS as quantidade,
+        UNIDADE_MEDIDA_EXPLOSIVOS as unidadeMedida,
+        LOTE_EXPLOSIVOS as lote,
+        FABRICANTE_EXPLOSIVOS as fabricante,
+        DATA_FABRICACAO_EXPLOSIVOS as dataFabricacao,
+        DATA_VALIDADE_EXPLOSIVOS as dataValidade,
+        CLASSE_RISCO_EXPLOSIVOS as classeRisco,
+        LOCAL_ARMAZENAMENTO_EXPLOSIVOS as localArmazenamento,
+        STATUS_EXPLOSIVOS as status,
+        DEPARTAMENTO_ID_EXPLOSIVOS as departmentId,
+        UNIDADE_ID_EXPLOSIVOS as unitId,
+        OBSERVACOES_EXPLOSIVOS as observacoes,
+        DATA_CRIACAO_EXPLOSIVOS as createdAt
+      FROM EXPLOSIVOS
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (departamentoId && departamentoId !== 'ALL') {
+      query += ' AND DEPARTAMENTO_ID_EXPLOSIVOS = ?';
+      params.push(departamentoId);
+    }
+    if (unidadeId && unidadeId !== 'ALL') {
+      query += ' AND UNIDADE_ID_EXPLOSIVOS = ?';
+      params.push(unidadeId);
+    }
+    query += ' ORDER BY NOME_EXPLOSIVOS ASC';
+
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      quantidade: Number(r.quantidade || 0),
+      dataFabricacao: r.dataFabricacao ? (r.dataFabricacao instanceof Date ? r.dataFabricacao.toISOString().split('T')[0] : String(r.dataFabricacao).substring(0, 10)) : undefined,
+      dataValidade: r.dataValidade ? (r.dataValidade instanceof Date ? r.dataValidade.toISOString().split('T')[0] : String(r.dataValidade).substring(0, 10)) : undefined
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    console.error('Error fetching explosivos:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/explosivos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const {
+      id,
+      nome,
+      tipo,
+      subtipo,
+      quantidade,
+      unidadeMedida,
+      lote,
+      fabricante,
+      dataFabricacao,
+      dataValidade,
+      classeRisco,
+      localArmazenamento,
+      status,
+      departmentId,
+      unitId,
+      observacoes,
+      actor
+    } = req.body;
+
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'Nome do explosivo é obrigatório.' });
+    }
+    if (!tipo || !tipo.trim()) {
+      return res.status(400).json({ error: 'Tipo/categoria do explosivo é obrigatório.' });
+    }
+    if (!lote || !lote.trim()) {
+      return res.status(400).json({ error: 'Lote de fabricação é obrigatório.' });
+    }
+    if (!localArmazenamento || !localArmazenamento.trim()) {
+      return res.status(400).json({ error: 'Local de armazenamento/paiol é obrigatório.' });
+    }
+
+    const qty = parseFloat(quantidade) || 0;
+    const finalId = id || `exp-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+    const [existing]: any = await pool.query('SELECT ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?', [finalId]);
+    if (existing && existing.length > 0) {
+      await pool.query(
+        `UPDATE EXPLOSIVOS SET
+          NOME_EXPLOSIVOS = ?,
+          TIPO_EXPLOSIVOS = ?,
+          SUBTIPO_EXPLOSIVOS = ?,
+          QUANTIDADE_EXPLOSIVOS = ?,
+          UNIDADE_MEDIDA_EXPLOSIVOS = ?,
+          LOTE_EXPLOSIVOS = ?,
+          FABRICANTE_EXPLOSIVOS = ?,
+          DATA_FABRICACAO_EXPLOSIVOS = ?,
+          DATA_VALIDADE_EXPLOSIVOS = ?,
+          CLASSE_RISCO_EXPLOSIVOS = ?,
+          LOCAL_ARMAZENAMENTO_EXPLOSIVOS = ?,
+          STATUS_EXPLOSIVOS = ?,
+          DEPARTAMENTO_ID_EXPLOSIVOS = ?,
+          UNIDADE_ID_EXPLOSIVOS = ?,
+          OBSERVACOES_EXPLOSIVOS = ?
+        WHERE ID_EXPLOSIVOS = ?`,
+        [
+          nome.trim(),
+          tipo.trim(),
+          subtipo?.trim() || null,
+          qty,
+          unidadeMedida || 'unidades',
+          lote.trim(),
+          fabricante?.trim() || null,
+          dataFabricacao || null,
+          dataValidade || null,
+          classeRisco?.trim() || '1.1D',
+          localArmazenamento.trim(),
+          status || 'Disponível',
+          departmentId || null,
+          unitId || null,
+          observacoes?.trim() || null,
+          finalId
+        ]
+      );
+
+      await insertAuditLog(
+        'Explosivos',
+        'Editar',
+        `Atualizado material explosivo: "${nome.trim()}" (Lote: ${lote.trim()})`,
+        actor,
+        req.ip
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO EXPLOSIVOS (
+          ID_EXPLOSIVOS, NOME_EXPLOSIVOS, TIPO_EXPLOSIVOS, SUBTIPO_EXPLOSIVOS,
+          QUANTIDADE_EXPLOSIVOS, UNIDADE_MEDIDA_EXPLOSIVOS, LOTE_EXPLOSIVOS,
+          FABRICANTE_EXPLOSIVOS, DATA_FABRICACAO_EXPLOSIVOS, DATA_VALIDADE_EXPLOSIVOS,
+          CLASSE_RISCO_EXPLOSIVOS, LOCAL_ARMAZENAMENTO_EXPLOSIVOS, STATUS_EXPLOSIVOS,
+          DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS, OBSERVACOES_EXPLOSIVOS,
+          DATA_CRIACAO_EXPLOSIVOS
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          finalId,
+          nome.trim(),
+          tipo.trim(),
+          subtipo?.trim() || null,
+          qty,
+          unidadeMedida || 'unidades',
+          lote.trim(),
+          fabricante?.trim() || null,
+          dataFabricacao || null,
+          dataValidade || null,
+          classeRisco?.trim() || '1.1D',
+          localArmazenamento.trim(),
+          status || 'Disponível',
+          departmentId || null,
+          unitId || null,
+          observacoes?.trim() || null
+        ]
+      );
+
+      await insertAuditLog(
+        'Explosivos',
+        'Criar',
+        `Cadastrado novo material explosivo: "${nome.trim()}" (Qtd: ${qty} ${unidadeMedida || 'unidades'})`,
+        actor,
+        req.ip
+      );
+    }
+
+    return res.json({ success: true, id: finalId });
+  } catch (err: any) {
+    console.error('Error saving explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor;
+    const pool = getPool();
+
+    const [rows]: any = await pool.query('SELECT NOME_EXPLOSIVOS as nome, LOTE_EXPLOSIVOS as lote FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?', [id]);
+    const exp = rows && rows.length > 0 ? rows[0] : null;
+
+    await pool.query('DELETE FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?', [id]);
+
+    await insertAuditLog(
+      'Explosivos',
+      'Excluir',
+      `Excluído registro de explosivo: "${exp?.nome || id}" (Lote: ${exp?.lote || 'N/A'})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/movimentacoes-explosivos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { explosivoId, departamentoId, unidadeId } = req.query;
+    let query = `
+      SELECT 
+        ID_MOVIMENTACOES_EXPLOSIVOS as id,
+        EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS as explosivoId,
+        NOME_EXPLOSIVO_MOVIMENTACOES_EXPLOSIVOS as explosivoNome,
+        TIPO_MOVIMENTACAO_EXPLOSIVOS as tipoMovimentacao,
+        QUANTIDADE_MOVIMENTACOES_EXPLOSIVOS as quantidade,
+        UNIDADE_MEDIDA_MOVIMENTACOES_EXPLOSIVOS as unidadeMedida,
+        MOTIVO_MOVIMENTACOES_EXPLOSIVOS as motivo,
+        RESPONSAVEL_NOME_MOVIMENTACOES_EXPLOSIVOS as responsavelNome,
+        RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS as responsavelMasp,
+        RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS as responsavelId,
+        LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS as localOrigemDestino,
+        DATA_MOVIMENTACAO_EXPLOSIVOS as dataMovimentacao,
+        DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS as departmentId,
+        UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS as unitId,
+        OBSERVACOES_MOVIMENTACOES_EXPLOSIVOS as observacoes
+      FROM MOVIMENTACOES_EXPLOSIVOS
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+    if (explosivoId) {
+      query += ' AND EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      params.push(explosivoId);
+    }
+    if (departamentoId && departamentoId !== 'ALL') {
+      query += ' AND DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      params.push(departamentoId);
+    }
+    if (unidadeId && unidadeId !== 'ALL') {
+      query += ' AND UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      params.push(unidadeId);
+    }
+    query += ' ORDER BY DATA_MOVIMENTACAO_EXPLOSIVOS DESC';
+
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      quantidade: Number(r.quantidade || 0)
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    console.error('Error fetching movimentacoes_explosivos:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const {
+      explosivoId,
+      tipoMovimentacao,
+      quantidade,
+      motivo,
+      responsavelNome,
+      responsavelMasp,
+      responsavelId,
+      localOrigemDestino,
+      dataMovimentacao,
+      observacoes,
+      actor
+    } = req.body;
+
+    if (!explosivoId) {
+      return res.status(400).json({ error: 'Selecione o material explosivo.' });
+    }
+    if (!tipoMovimentacao) {
+      return res.status(400).json({ error: 'Informe o tipo de movimentação.' });
+    }
+    const qty = parseFloat(quantidade);
+    if (isNaN(qty) || qty <= 0) {
+      return res.status(400).json({ error: 'Informe uma quantidade válida maior que zero.' });
+    }
+    if (!responsavelNome || !responsavelNome.trim()) {
+      return res.status(400).json({ error: 'Informe o policial ou armeiro responsável.' });
+    }
+
+    const [expRows]: any = await pool.query(
+      'SELECT NOME_EXPLOSIVOS, QUANTIDADE_EXPLOSIVOS, UNIDADE_MEDIDA_EXPLOSIVOS, DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?',
+      [explosivoId]
+    );
+    if (!expRows || expRows.length === 0) {
+      return res.status(404).json({ error: 'Explosivo não encontrado no sistema.' });
+    }
+
+    const exp = expRows[0];
+    const currentQty = Number(exp.QUANTIDADE_EXPLOSIVOS || 0);
+
+    const isOutflow = tipoMovimentacao === 'Saída / Cautela' || tipoMovimentacao === 'Consumo Operacional' || tipoMovimentacao === 'Destruição Técnica' || tipoMovimentacao === 'Instrução / Treinamento';
+    if (isOutflow && currentQty < qty) {
+      return res.status(400).json({ error: `Estoque insuficiente de explosivo. Disponível: ${currentQty} ${exp.UNIDADE_MEDIDA_EXPLOSIVOS}, Solicitado: ${qty}.` });
+    }
+
+    const newQty = isOutflow ? Math.max(0, currentQty - qty) : currentQty + qty;
+    const movId = `mve-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+
+    await pool.query(
+      `INSERT INTO MOVIMENTACOES_EXPLOSIVOS (
+        ID_MOVIMENTACOES_EXPLOSIVOS,
+        EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS,
+        NOME_EXPLOSIVO_MOVIMENTACOES_EXPLOSIVOS,
+        TIPO_MOVIMENTACAO_EXPLOSIVOS,
+        QUANTIDADE_MOVIMENTACOES_EXPLOSIVOS,
+        UNIDADE_MEDIDA_MOVIMENTACOES_EXPLOSIVOS,
+        MOTIVO_MOVIMENTACOES_EXPLOSIVOS,
+        RESPONSAVEL_NOME_MOVIMENTACOES_EXPLOSIVOS,
+        RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS,
+        RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS,
+        LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS,
+        DATA_MOVIMENTACAO_EXPLOSIVOS,
+        DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS,
+        UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS,
+        OBSERVACOES_MOVIMENTACOES_EXPLOSIVOS
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        movId,
+        explosivoId,
+        exp.NOME_EXPLOSIVOS,
+        tipoMovimentacao,
+        qty,
+        exp.UNIDADE_MEDIDA_EXPLOSIVOS,
+        motivo || 'Operação Especial',
+        responsavelNome.trim(),
+        responsavelMasp?.trim() || null,
+        responsavelId || null,
+        localOrigemDestino?.trim() || null,
+        dataMovimentacao || new Date(),
+        exp.DEPARTAMENTO_ID_EXPLOSIVOS,
+        exp.UNIDADE_ID_EXPLOSIVOS,
+        observacoes?.trim() || null
+      ]
+    );
+
+    await pool.query('UPDATE EXPLOSIVOS SET QUANTIDADE_EXPLOSIVOS = ? WHERE ID_EXPLOSIVOS = ?', [newQty, explosivoId]);
+
+    await insertAuditLog(
+      'Explosivos',
+      'Movimentação',
+      `Movimentação "${tipoMovimentacao}" de ${qty} ${exp.UNIDADE_MEDIDA_EXPLOSIVOS} de "${exp.NOME_EXPLOSIVOS}". Novo estoque: ${newQty}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, id: movId, newQuantity: newQty });
+  } catch (err: any) {
+    console.error('Error saving movimentacao_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 
 

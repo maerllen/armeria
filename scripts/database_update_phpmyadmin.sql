@@ -168,6 +168,62 @@ SELECT
   `ARMAS`.`DATA_CRIACAO_ARMAS` AS `data_criacao` 
 FROM `ARMAS`;
 
+-- ------------------------------------------------------------------------------
+-- 7. TABELA DE EXPLOSIVOS E DETONANTES (`EXPLOSIVOS`)
+-- Cadastro completo de altos e baixos explosivos, iniciadores e acessórios
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `EXPLOSIVOS` (
+  `ID` VARCHAR(64) NOT NULL,
+  `NOME` VARCHAR(255) NOT NULL,
+  `TIPO` VARCHAR(128) NOT NULL,
+  `SUBTIPO` VARCHAR(128) DEFAULT NULL,
+  `QUANTIDADE` DECIMAL(12,3) NOT NULL DEFAULT 0.000,
+  `UNIDADE_MEDIDA` VARCHAR(32) NOT NULL DEFAULT 'kg',
+  `LOTE` VARCHAR(128) NOT NULL,
+  `FABRICANTE` VARCHAR(255) NOT NULL,
+  `DATA_FABRICACAO` DATE DEFAULT NULL,
+  `DATA_VALIDADE` DATE DEFAULT NULL,
+  `CLASSE_RISCO` VARCHAR(128) NOT NULL DEFAULT '1.1D',
+  `LOCAL_ARMAZENAMENTO` VARCHAR(255) NOT NULL,
+  `STATUS` ENUM('Disponível', 'Em Uso/Operação', 'Vencido', 'Quarentena/Perícia', 'Descartado') NOT NULL DEFAULT 'Disponível',
+  `DEPARTAMENTO_ID` VARCHAR(64) NOT NULL,
+  `UNIDADE_ID` VARCHAR(64) NOT NULL,
+  `OBSERVACOES` TEXT DEFAULT NULL,
+  `DATA_CRIACAO` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ID`),
+  KEY `idx_explosivos_dept` (`DEPARTAMENTO_ID`),
+  KEY `idx_explosivos_unidade` (`UNIDADE_ID`),
+  KEY `idx_explosivos_tipo` (`TIPO`),
+  KEY `idx_explosivos_status` (`STATUS`),
+  KEY `idx_explosivos_lote` (`LOTE`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------------------------
+-- 8. TABELA DE MOVIMENTAÇÕES DE EXPLOSIVOS (`MOVIMENTACOES_EXPLOSIVOS`)
+-- Livro de registro auditável de entradas, saídas, consumo e destruição
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `MOVIMENTACOES_EXPLOSIVOS` (
+  `ID` VARCHAR(64) NOT NULL,
+  `EXPLOSIVO_ID` VARCHAR(64) NOT NULL,
+  `NOME_EXPLOSIVO` VARCHAR(255) NOT NULL,
+  `TIPO_MOVIMENTACAO` ENUM('Entrada', 'Saída', 'Consumo/Treinamento', 'Descarte/Destruição', 'Transferência') NOT NULL,
+  `QUANTIDADE` DECIMAL(12,3) NOT NULL,
+  `UNIDADE_MEDIDA` VARCHAR(32) NOT NULL DEFAULT 'kg',
+  `MOTIVO` VARCHAR(255) NOT NULL,
+  `RESPONSAVEL_NOME` VARCHAR(255) NOT NULL,
+  `RESPONSAVEL_MASP` VARCHAR(64) NOT NULL,
+  `RESPONSAVEL_ID` VARCHAR(64) DEFAULT NULL,
+  `LOCAL_ORIGEM_DESTINO` VARCHAR(255) DEFAULT NULL,
+  `DATA_MOVIMENTACAO` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `DEPARTAMENTO_ID` VARCHAR(64) NOT NULL,
+  `UNIDADE_ID` VARCHAR(64) NOT NULL,
+  `OBSERVACOES` TEXT DEFAULT NULL,
+  PRIMARY KEY (`ID`),
+  KEY `idx_mov_exp_item` (`EXPLOSIVO_ID`),
+  KEY `idx_mov_exp_tipo` (`TIPO_MOVIMENTACAO`),
+  KEY `idx_mov_exp_data` (`DATA_MOVIMENTACAO`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==============================================================================
