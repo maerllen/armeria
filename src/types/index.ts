@@ -836,3 +836,78 @@ export const isUserExplosivista = (user?: User | null): boolean => {
   return user.role === 'Explosivista' || (Boolean(user.cargo) && user.cargo.toLowerCase().includes('explosivista'));
 };
 
+export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
+  if (!user) return ['meu-perfil'];
+
+  // 1. Geral
+  if (user.role === 'Geral') {
+    return [
+      'meu-perfil',
+      'explosivos',
+      'armas',
+      'municoes',
+      'unidade',
+      'usuarios',
+      'cofre',
+      'movimentacoes',
+      'materiais',
+      'iniciar-aula-mobile',
+      'cursos',
+      'ensino-continuado',
+      'gerencia-cursos',
+      'calendario',
+      'certificados',
+      'relatorio'
+    ];
+  }
+
+  // 2. Explosivista
+  if (isUserExplosivista(user)) {
+    return [
+      'meu-perfil',
+      'explosivos',
+      'armas',
+      'municoes',
+      'usuarios',
+      'cofre'
+    ];
+  }
+
+  // 3. Administrativo (Administrador)
+  if (user.role === 'Administrador' || (user.role as string) === 'Administrativo') {
+    return [
+      'meu-perfil',
+      'explosivos',
+      'armas',
+      'municoes',
+      'unidade',
+      'usuarios',
+      'cofre',
+      'movimentacoes',
+      'materiais',
+      'relatorio'
+    ];
+  }
+
+  // 4. Armeiro
+  if (user.role === 'Armeiro') {
+    return [
+      'meu-perfil',
+      'explosivos',
+      'armas',
+      'municoes',
+      'usuarios',
+      'cofre',
+      'movimentacoes',
+      'materiais',
+      'relatorio'
+    ];
+  }
+
+  // 5. Policial
+  return [
+    'meu-perfil',
+    'movimentacoes'
+  ];
+};
+

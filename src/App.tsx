@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, isUserExplosivista } from './types';
+import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser } from './types';
 import { storage } from './services/storage';
 import { Navbar } from './components/BarraNavegacao';
 import { Sidebar } from './components/BarraLateral';
@@ -97,35 +97,12 @@ export default function App() {
     refreshData();
   }, [isMobileUrlMode]);
 
-  // Security guard: ensure active module is accessible by current user
+  // Security guard: ensure active module is strictly accessible by current user's role
   useEffect(() => {
     if (!currentUser) return;
-
-    // Explosivista restriction: strictly only 'meu-perfil', 'explosivos', 'armas', 'municoes'
-    const isExplosivista = isUserExplosivista(currentUser);
-    if (isExplosivista) {
-      const allowedForExplosivista: ModuleType[] = ['meu-perfil', 'explosivos', 'armas', 'municoes'];
-      if (!allowedForExplosivista.includes(activeModule)) {
-        setActiveModule('explosivos');
-      }
-      return;
-    }
-
-    const isUserGeral = currentUser.role === 'Geral';
-    const isUserProfessor = Boolean(
-      currentUser.isTeacher ||
-      currentUser.teacherSubject ||
-      currentUser.professorSigla ||
-      currentUser.professor_sigla ||
-      isUserGeral
-    );
-
-    if (activeModule === 'iniciar-aula-mobile' && !isUserGeral) {
-      setActiveModule('meu-perfil');
-    } else if (activeModule === 'certificados' && !isUserGeral) {
-      setActiveModule('meu-perfil');
-    } else if (activeModule === 'calendario' && !isUserProfessor) {
-      setActiveModule('meu-perfil');
+    const allowed = getAllowedModulesForUser(currentUser);
+    if (!allowed.includes(activeModule)) {
+      setActiveModule(allowed[0] || 'meu-perfil');
     }
   }, [currentUser, activeModule]);
 

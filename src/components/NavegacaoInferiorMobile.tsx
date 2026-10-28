@@ -1,5 +1,5 @@
 import React from 'react';
-import { ModuleType, User as UserType, isUserExplosivista } from '../types';
+import { ModuleType, User as UserType, getAllowedModulesForUser } from '../types';
 import { User, Crosshair, Disc, ArrowRightLeft, Smartphone, Menu, Bomb } from 'lucide-react';
 
 interface MobileBottomNavProps {
@@ -17,78 +17,43 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenMobileMenu,
   pendingMovementsCount = 0
 }) => {
-  const isGeral = currentUser?.role === 'Geral';
-  const isArmeiro = currentUser?.role === 'Armeiro';
-  const isExplosivista = isUserExplosivista(currentUser);
+  const allowedModules = getAllowedModulesForUser(currentUser);
 
-  const quickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number; visible?: boolean }[] = isExplosivista
-    ? [
-        {
-          id: 'meu-perfil',
-          label: 'Perfil',
-          icon: User,
-          visible: true
-        },
-        {
-          id: 'explosivos',
-          label: 'Explosivos',
-          icon: Bomb,
-          visible: true
-        },
-        {
-          id: 'armas',
-          label: 'Armas',
-          icon: Crosshair,
-          visible: true
-        },
-        {
-          id: 'municoes',
-          label: 'Munições',
-          icon: Disc,
-          visible: true
-        }
-      ]
-    : [
-        {
-          id: 'meu-perfil',
-          label: 'Perfil',
-          icon: User,
-          visible: true
-        },
-        {
-          id: 'armas',
-          label: 'Armas',
-          icon: Crosshair,
-          visible: true
-        },
-        {
-          id: 'municoes',
-          label: 'Munições',
-          icon: Disc,
-          visible: true
-        },
-        {
-          id: 'explosivos',
-          label: 'Explosivos',
-          icon: Bomb,
-          visible: isGeral || isArmeiro
-        },
-        {
-          id: 'movimentacoes',
-          label: 'Movimentações',
-          icon: ArrowRightLeft,
-          visible: true,
-          badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
-        },
-        {
-          id: 'iniciar-aula-mobile',
-          label: 'Aula',
-          icon: Smartphone,
-          visible: isGeral
-        }
-      ];
+  const allQuickTabs: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; badge?: number }[] = [
+    {
+      id: 'meu-perfil',
+      label: 'Perfil',
+      icon: User
+    },
+    {
+      id: 'explosivos',
+      label: 'Explosivos',
+      icon: Bomb
+    },
+    {
+      id: 'armas',
+      label: 'Armas',
+      icon: Crosshair
+    },
+    {
+      id: 'municoes',
+      label: 'Munições',
+      icon: Disc
+    },
+    {
+      id: 'movimentacoes',
+      label: 'Movimentações',
+      icon: ArrowRightLeft,
+      badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
+    },
+    {
+      id: 'iniciar-aula-mobile',
+      label: 'Aula',
+      icon: Smartphone
+    }
+  ];
 
-  const visibleTabs = quickTabs.filter(tab => tab.visible !== false);
+  const visibleTabs = allQuickTabs.filter(tab => allowedModules.includes(tab.id));
 
   return (
     <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around shadow-2xl print:hidden">

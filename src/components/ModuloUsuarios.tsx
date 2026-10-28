@@ -92,7 +92,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     'Explosivista'
   ];
 
-  const rolesList: UserRole[] = (editingUser && editingUser.role === 'Geral')
+  const rolesList: UserRole[] = (isGeral || (editingUser && editingUser.role === 'Geral'))
     ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista']
     : ['Administrador', 'Armeiro', 'Policial', 'Explosivista'];
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { User as UserType, Department, ModuleType, isUserExplosivista } from '../types';
+import { User as UserType, Department, ModuleType, getAllowedModulesForUser } from '../types';
 import {
   User,
   Building2,
@@ -42,121 +42,106 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile = false,
   onCloseMobile
 }) => {
-  const userRole = currentUser?.role || 'Policial';
-  const isGeral = userRole === 'Geral';
-  const isExplosivista = isUserExplosivista(currentUser);
-  const userDept = departments.find(d => d.id === currentUser?.departmentId);
-  const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
-  const isProfessorAcadepol = Boolean(
-    currentUser?.isTeacher ||
-    currentUser?.teacherSubject ||
-    currentUser?.professorSigla ||
-    currentUser?.professor_sigla ||
-    isGeral ||
-    (isAcademiaDept && (userRole === 'Administrador' || userRole === 'Armeiro'))
-  );
-  const canManageCourses = userRole === 'Geral' || 
-    ((userRole === 'Administrador' || userRole === 'Armeiro') && isAcademiaDept) ||
-    isProfessorAcadepol;
+  const allowedModules = getAllowedModulesForUser(currentUser);
 
-  // Se for Explosivista, ele visualiza estritamente apenas: Explosivos, Armas, Munições e Meu Perfil
+  // Lista dos 16 módulos do sistema na ordem exata solicitada
   const navItems: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; visible: boolean; badge?: number }[] = [
     {
       id: 'meu-perfil',
       label: 'Meu Perfil',
       icon: User,
-      visible: true
+      visible: allowedModules.includes('meu-perfil')
     },
     {
       id: 'explosivos',
       label: 'Explosivos',
       icon: Bomb,
-      visible: isExplosivista || isGeral || userRole === 'Armeiro' || userRole === 'Administrador'
+      visible: allowedModules.includes('explosivos')
     },
     {
       id: 'armas',
       label: 'Armas',
       icon: Crosshair,
-      visible: true
+      visible: allowedModules.includes('armas')
     },
     {
       id: 'municoes',
       label: 'Munições',
       icon: Disc,
-      visible: true
+      visible: allowedModules.includes('municoes')
     },
     {
       id: 'unidade',
       label: 'Unidades e Deptos',
       icon: Building2,
-      visible: !isExplosivista
+      visible: allowedModules.includes('unidade')
     },
     {
       id: 'usuarios',
       label: 'Usuários e Cursos',
       icon: Users,
-      visible: !isExplosivista
+      visible: allowedModules.includes('usuarios')
     },
     {
       id: 'cofre',
       label: 'Locais do Cofre',
       icon: Vault,
-      visible: !isExplosivista
+      visible: allowedModules.includes('cofre')
     },
     {
       id: 'movimentacoes',
       label: 'Movimentações',
       icon: ArrowRightLeft,
-      visible: !isExplosivista,
+      visible: allowedModules.includes('movimentacoes'),
       badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
     },
     {
       id: 'materiais',
       label: 'Materiais',
       icon: Package,
-      visible: !isExplosivista
+      visible: allowedModules.includes('materiais')
     },
     {
       id: 'iniciar-aula-mobile',
       label: 'Iniciar Aula (Modo Celular)',
       icon: Smartphone,
-      visible: !isExplosivista && isGeral
+      visible: allowedModules.includes('iniciar-aula-mobile')
     },
     {
       id: 'cursos',
       label: 'Curso de Formação',
       icon: GraduationCap,
-      visible: !isExplosivista && canManageCourses
+      visible: allowedModules.includes('cursos')
     },
     {
       id: 'ensino-continuado',
       label: 'Ensino Continuado',
       icon: Award,
-      visible: !isExplosivista && canManageCourses
+      visible: allowedModules.includes('ensino-continuado')
     },
     {
       id: 'gerencia-cursos',
       label: 'Gerência de Cursos',
       icon: BookOpen,
-      visible: !isExplosivista && canManageCourses
+      visible: allowedModules.includes('gerencia-cursos')
     },
     {
       id: 'calendario',
       label: 'Calendário Curso de Formação',
       icon: Calendar,
-      visible: !isExplosivista && isProfessorAcadepol
+      visible: allowedModules.includes('calendario')
     },
     {
       id: 'certificados',
       label: 'Verificar Certificados',
       icon: ShieldCheck,
-      visible: !isExplosivista && isGeral
+      visible: allowedModules.includes('certificados')
     },
     {
       id: 'relatorio',
       label: 'Relatórios',
       icon: FileText,
-      visible: !isExplosivista && (userRole === 'Geral' || userRole === 'Administrador' || userRole === 'Armeiro')
+      visible: allowedModules.includes('relatorio')
     }
   ];
 
