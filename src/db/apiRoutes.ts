@@ -6595,7 +6595,14 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
     const exp = expRows[0];
     const currentQty = Number(exp.QUANTIDADE_EXPLOSIVOS || 0);
 
-    const isOutflow = tipoMovimentacao === 'Saída / Cautela' || tipoMovimentacao === 'Consumo Operacional' || tipoMovimentacao === 'Destruição Técnica' || tipoMovimentacao === 'Instrução / Treinamento';
+    const isOutflow = 
+      tipoMovimentacao === 'Saída' || 
+      tipoMovimentacao === 'Saída / Cautela' || 
+      tipoMovimentacao === 'Consumo Operacional' || 
+      tipoMovimentacao === 'Consumo/Treinamento' || 
+      tipoMovimentacao === 'Destruição Técnica' || 
+      tipoMovimentacao === 'Descarte/Destruição' || 
+      tipoMovimentacao === 'Instrução / Treinamento';
     if (isOutflow && currentQty < qty) {
       return res.status(400).json({ error: `Estoque insuficiente de explosivo. Disponível: ${currentQty} ${exp.UNIDADE_MEDIDA_EXPLOSIVOS}, Solicitado: ${qty}.` });
     }
@@ -6653,6 +6660,322 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
     return res.json({ success: true, id: movId, newQuantity: newQty });
   } catch (err: any) {
     console.error('Error saving movimentacao_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/tipos-explosivos', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT ID_TIPOS_EXPLOSIVOS as id, NOME_TIPOS_EXPLOSIVOS as nome, DESCRICAO_TIPOS_EXPLOSIVOS as descricao, DATA_CRIACAO_TIPOS_EXPLOSIVOS as createdAt FROM TIPOS_EXPLOSIVOS ORDER BY NOME_TIPOS_EXPLOSIVOS ASC'
+    );
+    return res.json(rows || []);
+  } catch (err: any) {
+    console.error('Error fetching tipos_explosivos:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/tipos-explosivos', async (req: Request, res: Response) => {
+  try {
+    const { nome, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do tipo de explosivo é obrigatório.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    const [existing]: any = await pool.query(
+      'SELECT ID_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE LOWER(NOME_TIPOS_EXPLOSIVOS) = LOWER(?)',
+      [cleanNome]
+    );
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: `O tipo de explosivo "${cleanNome}" já está cadastrado.` });
+    }
+
+    const id = `te-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    await pool.query(
+      'INSERT INTO TIPOS_EXPLOSIVOS (ID_TIPOS_EXPLOSIVOS, NOME_TIPOS_EXPLOSIVOS, DESCRICAO_TIPOS_EXPLOSIVOS, DATA_CRIACAO_TIPOS_EXPLOSIVOS) VALUES (?, ?, ?, NOW())',
+      [id, cleanNome, descricao?.trim() || null]
+    );
+
+    await insertAuditLog('Explosivos', 'Criar Tipo', `Cadastrado novo tipo de explosivo: "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true, id, nome: cleanNome });
+  } catch (err: any) {
+    console.error('Error creating tipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/tipos-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nome, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do tipo de explosivo é obrigatório.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    const [existing]: any = await pool.query(
+      'SELECT ID_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE LOWER(NOME_TIPOS_EXPLOSIVOS) = LOWER(?) AND ID_TIPOS_EXPLOSIVOS != ?',
+      [cleanNome, id]
+    );
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: `Já existe outro tipo de explosivo com o nome "${cleanNome}".` });
+    }
+
+    // Get old name to update cascade if used
+    const [oldRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
+    const oldNome = oldRows && oldRows.length > 0 ? oldRows[0].NOME_TIPOS_EXPLOSIVOS : null;
+
+    await pool.query(
+      'UPDATE TIPOS_EXPLOSIVOS SET NOME_TIPOS_EXPLOSIVOS = ?, DESCRICAO_TIPOS_EXPLOSIVOS = ? WHERE ID_TIPOS_EXPLOSIVOS = ?',
+      [cleanNome, descricao?.trim() || null, id]
+    );
+
+    // Update explosives using this type name
+    if (oldNome && oldNome !== cleanNome) {
+      await pool.query('UPDATE EXPLOSIVOS SET TIPO_EXPLOSIVOS = ? WHERE TIPO_EXPLOSIVOS = ?', [cleanNome, oldNome]);
+    }
+
+    await insertAuditLog('Explosivos', 'Editar Tipo', `Atualizado tipo de explosivo: "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating tipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/tipos-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [typeRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
+    if (!typeRows || typeRows.length === 0) {
+      return res.status(404).json({ error: 'Tipo de explosivo não encontrado.' });
+    }
+    const typeName = typeRows[0].NOME_TIPOS_EXPLOSIVOS;
+
+    // Check if there are explosives registered with this type
+    const [used]: any = await pool.query('SELECT ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE TIPO_EXPLOSIVOS = ? LIMIT 1', [typeName]);
+    if (used && used.length > 0) {
+      return res.status(400).json({ error: `Não é possível excluir o tipo "${typeName}" pois existem materiais explosivos cadastrados com este tipo.` });
+    }
+
+    await pool.query('DELETE FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
+    await insertAuditLog('Explosivos', 'Excluir Tipo', `Excluído tipo de explosivo: "${typeName}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting tipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- SUBTIPOS DE EXPLOSIVOS ---
+apiRouter.get('/subtipos-explosivos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { tipoId, tipoNome } = req.query;
+    let query = 'SELECT ID_SUBTIPOS_EXPLOSIVOS as id, TIPO_ID_SUBTIPOS_EXPLOSIVOS as tipoId, TIPO_NOME_SUBTIPOS_EXPLOSIVOS as tipoNome, NOME_SUBTIPOS_EXPLOSIVOS as nome, DESCRICAO_SUBTIPOS_EXPLOSIVOS as descricao, DATA_CRIACAO_SUBTIPOS_EXPLOSIVOS as createdAt FROM SUBTIPOS_EXPLOSIVOS WHERE 1=1';
+    const params: any[] = [];
+    if (tipoId) {
+      query += ' AND TIPO_ID_SUBTIPOS_EXPLOSIVOS = ?';
+      params.push(tipoId);
+    }
+    if (tipoNome) {
+      query += ' AND LOWER(TIPO_NOME_SUBTIPOS_EXPLOSIVOS) = LOWER(?)';
+      params.push(tipoNome);
+    }
+    query += ' ORDER BY NOME_SUBTIPOS_EXPLOSIVOS ASC';
+    const [rows]: any = await pool.query(query, params);
+    return res.json(rows || []);
+  } catch (err: any) {
+    console.error('Error fetching subtipos_explosivos:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/subtipos-explosivos', async (req: Request, res: Response) => {
+  try {
+    const { tipoId, tipoNome, nome, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do subtipo de explosivo é obrigatório.' });
+    }
+    if (!tipoId && !tipoNome) {
+      return res.status(400).json({ error: 'Selecione o tipo de explosivo ao qual este subtipo pertence.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    let resolvedTipoId = tipoId;
+    let resolvedTipoNome = tipoNome;
+
+    if (!resolvedTipoNome && resolvedTipoId) {
+      const [tRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [resolvedTipoId]);
+      if (tRows && tRows.length > 0) resolvedTipoNome = tRows[0].NOME_TIPOS_EXPLOSIVOS;
+    } else if (!resolvedTipoId && resolvedTipoNome) {
+      const [tRows]: any = await pool.query('SELECT ID_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE LOWER(NOME_TIPOS_EXPLOSIVOS) = LOWER(?)', [resolvedTipoNome]);
+      if (tRows && tRows.length > 0) resolvedTipoId = tRows[0].ID_TIPOS_EXPLOSIVOS;
+      else resolvedTipoId = `te-${Date.now()}`;
+    }
+
+    const id = `sub-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    await pool.query(
+      'INSERT INTO SUBTIPOS_EXPLOSIVOS (ID_SUBTIPOS_EXPLOSIVOS, TIPO_ID_SUBTIPOS_EXPLOSIVOS, TIPO_NOME_SUBTIPOS_EXPLOSIVOS, NOME_SUBTIPOS_EXPLOSIVOS, DESCRICAO_SUBTIPOS_EXPLOSIVOS, DATA_CRIACAO_SUBTIPOS_EXPLOSIVOS) VALUES (?, ?, ?, ?, ?, NOW())',
+      [id, resolvedTipoId, resolvedTipoNome || '', cleanNome, descricao?.trim() || null]
+    );
+
+    await insertAuditLog('Explosivos', 'Criar Subtipo', `Cadastrado subtipo "${cleanNome}" para o tipo "${resolvedTipoNome}"`, actor, req.ip);
+    return res.json({ success: true, id, nome: cleanNome });
+  } catch (err: any) {
+    console.error('Error creating subtipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/subtipos-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { tipoId, tipoNome, nome, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do subtipo de explosivo é obrigatório.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    let resolvedTipoId = tipoId;
+    let resolvedTipoNome = tipoNome;
+
+    if (!resolvedTipoNome && resolvedTipoId) {
+      const [tRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [resolvedTipoId]);
+      if (tRows && tRows.length > 0) resolvedTipoNome = tRows[0].NOME_TIPOS_EXPLOSIVOS;
+    }
+
+    await pool.query(
+      'UPDATE SUBTIPOS_EXPLOSIVOS SET TIPO_ID_SUBTIPOS_EXPLOSIVOS = COALESCE(?, TIPO_ID_SUBTIPOS_EXPLOSIVOS), TIPO_NOME_SUBTIPOS_EXPLOSIVOS = COALESCE(?, TIPO_NOME_SUBTIPOS_EXPLOSIVOS), NOME_SUBTIPOS_EXPLOSIVOS = ?, DESCRICAO_SUBTIPOS_EXPLOSIVOS = ? WHERE ID_SUBTIPOS_EXPLOSIVOS = ?',
+      [resolvedTipoId || null, resolvedTipoNome || null, cleanNome, descricao?.trim() || null, id]
+    );
+
+    await insertAuditLog('Explosivos', 'Editar Subtipo', `Atualizado subtipo de explosivo: "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating subtipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/subtipos-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [subRows]: any = await pool.query('SELECT NOME_SUBTIPOS_EXPLOSIVOS FROM SUBTIPOS_EXPLOSIVOS WHERE ID_SUBTIPOS_EXPLOSIVOS = ?', [id]);
+    const subName = subRows && subRows.length > 0 ? subRows[0].NOME_SUBTIPOS_EXPLOSIVOS : id;
+
+    await pool.query('DELETE FROM SUBTIPOS_EXPLOSIVOS WHERE ID_SUBTIPOS_EXPLOSIVOS = ?', [id]);
+    await insertAuditLog('Explosivos', 'Excluir Subtipo', `Excluído subtipo de explosivo: "${subName}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting subtipo_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- FABRICANTES DE EXPLOSIVOS ---
+apiRouter.get('/fabricantes-explosivos', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT ID_FABRICANTES_EXPLOSIVOS as id, NOME_FABRICANTES_EXPLOSIVOS as nome, PAIS_FABRICANTES_EXPLOSIVOS as pais, DESCRICAO_FABRICANTES_EXPLOSIVOS as descricao, DATA_CRIACAO_FABRICANTES_EXPLOSIVOS as createdAt FROM FABRICANTES_EXPLOSIVOS ORDER BY NOME_FABRICANTES_EXPLOSIVOS ASC'
+    );
+    return res.json(rows || []);
+  } catch (err: any) {
+    console.error('Error fetching fabricantes_explosivos:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/fabricantes-explosivos', async (req: Request, res: Response) => {
+  try {
+    const { nome, pais, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do fabricante é obrigatório.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    const [existing]: any = await pool.query(
+      'SELECT ID_FABRICANTES_EXPLOSIVOS FROM FABRICANTES_EXPLOSIVOS WHERE LOWER(NOME_FABRICANTES_EXPLOSIVOS) = LOWER(?)',
+      [cleanNome]
+    );
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: `O fabricante "${cleanNome}" já está cadastrado.` });
+    }
+
+    const id = `fab-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    await pool.query(
+      'INSERT INTO FABRICANTES_EXPLOSIVOS (ID_FABRICANTES_EXPLOSIVOS, NOME_FABRICANTES_EXPLOSIVOS, PAIS_FABRICANTES_EXPLOSIVOS, DESCRICAO_FABRICANTES_EXPLOSIVOS, DATA_CRIACAO_FABRICANTES_EXPLOSIVOS) VALUES (?, ?, ?, ?, NOW())',
+      [id, cleanNome, pais?.trim() || 'Brasil', descricao?.trim() || null]
+    );
+
+    await insertAuditLog('Explosivos', 'Criar Fabricante', `Cadastrado fabricante de explosivos: "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true, id, nome: cleanNome });
+  } catch (err: any) {
+    console.error('Error creating fabricante_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/fabricantes-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nome, pais, descricao, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do fabricante é obrigatório.' });
+    }
+    const cleanNome = nome.trim();
+    const pool = getPool();
+
+    const [existing]: any = await pool.query(
+      'SELECT ID_FABRICANTES_EXPLOSIVOS FROM FABRICANTES_EXPLOSIVOS WHERE LOWER(NOME_FABRICANTES_EXPLOSIVOS) = LOWER(?) AND ID_FABRICANTES_EXPLOSIVOS != ?',
+      [cleanNome, id]
+    );
+    if (existing && existing.length > 0) {
+      return res.status(400).json({ error: `Já existe outro fabricante com o nome "${cleanNome}".` });
+    }
+
+    await pool.query(
+      'UPDATE FABRICANTES_EXPLOSIVOS SET NOME_FABRICANTES_EXPLOSIVOS = ?, PAIS_FABRICANTES_EXPLOSIVOS = ?, DESCRICAO_FABRICANTES_EXPLOSIVOS = ? WHERE ID_FABRICANTES_EXPLOSIVOS = ?',
+      [cleanNome, pais?.trim() || 'Brasil', descricao?.trim() || null, id]
+    );
+
+    await insertAuditLog('Explosivos', 'Editar Fabricante', `Atualizado fabricante de explosivos: "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error updating fabricante_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/fabricantes-explosivos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [fabRows]: any = await pool.query('SELECT NOME_FABRICANTES_EXPLOSIVOS FROM FABRICANTES_EXPLOSIVOS WHERE ID_FABRICANTES_EXPLOSIVOS = ?', [id]);
+    const fabName = fabRows && fabRows.length > 0 ? fabRows[0].NOME_FABRICANTES_EXPLOSIVOS : id;
+
+    await pool.query('DELETE FROM FABRICANTES_EXPLOSIVOS WHERE ID_FABRICANTES_EXPLOSIVOS = ?', [id]);
+    await insertAuditLog('Explosivos', 'Excluir Fabricante', `Excluído fabricante de explosivos: "${fabName}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error deleting fabricante_explosivo:', err);
     return res.status(500).json({ error: err.message });
   }
 });

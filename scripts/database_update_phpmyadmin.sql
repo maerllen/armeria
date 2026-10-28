@@ -237,6 +237,88 @@ CREATE TABLE IF NOT EXISTS `MOVIMENTACOES_EXPLOSIVOS` (
   KEY `idx_mov_exp_data` (`DATA_MOVIMENTACAO_EXPLOSIVOS`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------------------------------------
+-- 10. TABELA DE TIPOS DE EXPLOSIVOS (`TIPOS_EXPLOSIVOS`)
+-- Cadastro gerenciável de tipos e classes de materiais explosivos
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `TIPOS_EXPLOSIVOS` (
+  `ID_TIPOS_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `NOME_TIPOS_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `DESCRICAO_TIPOS_EXPLOSIVOS` TEXT DEFAULT NULL,
+  `DATA_CRIACAO_TIPOS_EXPLOSIVOS` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ID_TIPOS_EXPLOSIVOS`),
+  UNIQUE KEY `uq_tipo_exp_nome` (`NOME_TIPOS_EXPLOSIVOS`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Carga inicial de tipos padrão de explosivos
+INSERT IGNORE INTO `TIPOS_EXPLOSIVOS` (`ID_TIPOS_EXPLOSIVOS`, `NOME_TIPOS_EXPLOSIVOS`, `DESCRICAO_TIPOS_EXPLOSIVOS`) VALUES
+('te-1', 'Alto Explosivo (Detonante)', 'Explosivos secundários de alta velocidade de detonação (C-4, PETN, TNT, Dinamite, Emulsão)'),
+('te-2', 'Baixo Explosivo (Deflagrante/Pólvora)', 'Substâncias que queimam em velocidade subsônica (Pólvora negra, pólvoras sem fumaça)'),
+('te-3', 'Iniciador / Detonador', 'Acessórios de iniciação sensíveis (Espoletas elétricas, não elétricas, acendedores)'),
+('te-4', 'Granada / Dispositivo Tático', 'Artefatos manufaturados com carga de efeito moral, lacrimogêneo ou fragmentação'),
+('te-5', 'Acessório de Demolição / Linha de Fogo', 'Cordel detonante, estopim lento, boosters, tubos de choque, retardadores'),
+('te-6', 'Material Pirotécnico / Sinalização', 'Foguetes de sinalização, artifícios iluminativos e pirotécnicos');
+
+-- ------------------------------------------------------------------------------
+-- 11. TABELA DE SUBTIPOS DE EXPLOSIVOS (`SUBTIPOS_EXPLOSIVOS`)
+-- Cadastro gerenciável de subtipos vinculados a um tipo específico
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `SUBTIPOS_EXPLOSIVOS` (
+  `ID_SUBTIPOS_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `TIPO_ID_SUBTIPOS_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `TIPO_NOME_SUBTIPOS_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `NOME_SUBTIPOS_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `DESCRICAO_SUBTIPOS_EXPLOSIVOS` TEXT DEFAULT NULL,
+  `DATA_CRIACAO_SUBTIPOS_EXPLOSIVOS` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ID_SUBTIPOS_EXPLOSIVOS`),
+  KEY `idx_subtipo_tipo` (`TIPO_ID_SUBTIPOS_EXPLOSIVOS`),
+  KEY `idx_subtipo_tipo_nome` (`TIPO_NOME_SUBTIPOS_EXPLOSIVOS`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Carga inicial de subtipos padrão vinculados
+INSERT IGNORE INTO `SUBTIPOS_EXPLOSIVOS` (`ID_SUBTIPOS_EXPLOSIVOS`, `TIPO_ID_SUBTIPOS_EXPLOSIVOS`, `TIPO_NOME_SUBTIPOS_EXPLOSIVOS`, `NOME_SUBTIPOS_EXPLOSIVOS`, `DESCRICAO_SUBTIPOS_EXPLOSIVOS`) VALUES
+('sub-1', 'te-1', 'Alto Explosivo (Detonante)', 'C-4 / Composição C-4 Plastificada', 'Carga de corte e demolição especial'),
+('sub-2', 'te-1', 'Alto Explosivo (Detonante)', 'Emulsão Encartuchada Britex / Semigelatina', 'Emulsão de alta densidade encartuchada'),
+('sub-3', 'te-1', 'Alto Explosivo (Detonante)', 'TNT (Trinitrotolueno) em Bloco', 'Blocos de demolição militar padrão'),
+('sub-4', 'te-1', 'Alto Explosivo (Detonante)', 'PETN / Tetranitrato de Pentaeritritol', 'Cargas de corte linear e booster'),
+('sub-5', 'te-2', 'Baixo Explosivo (Deflagrante/Pólvora)', 'Pólvora Química Sem Fumaça (Smokeless)', 'Propelente de queima progressiva'),
+('sub-6', 'te-2', 'Baixo Explosivo (Deflagrante/Pólvora)', 'Pólvora Negra Graus 2Fa / 3Fa', 'Para acionamentos específicos e efeitos'),
+('sub-7', 'te-3', 'Iniciador / Detonador', 'Espoleta Elétrica Instantânea nº 8', 'Detonador de fio metálico sensível'),
+('sub-8', 'te-3', 'Iniciador / Detonador', 'Espoleta Não-Elétrica (Tubo de Choque)', 'Acionamento por onda de choque de baixa energia'),
+('sub-9', 'te-3', 'Iniciador / Detonador', 'Estopim Lento / Tubo de Ignifugação', 'Acionamento de segurança temporizado'),
+('sub-10', 'te-4', 'Granada / Dispositivo Tático', 'Granada de Efeito Moral / Luz e Som', 'Dispositivo de atordoamento tático'),
+('sub-11', 'te-4', 'Granada / Dispositivo Tático', 'Granada Lacrimogênea CS/OC', 'Artefato fumígeno incapacitante'),
+('sub-12', 'te-5', 'Acessório de Demolição / Linha de Fogo', 'Cordel Detonante NP-10 (10g/m)', 'Linha de fogo para detonação simultânea'),
+('sub-13', 'te-5', 'Acessório de Demolição / Linha de Fogo', 'Booster / Reforçador de Pentolita 150g', 'Reforçador para detonação em massa');
+
+-- ------------------------------------------------------------------------------
+-- 12. TABELA DE FABRICANTES DE EXPLOSIVOS (`FABRICANTES_EXPLOSIVOS`)
+-- Cadastro homologado de indústrias e fornecedores bélicos / pirotécnicos
+-- ------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `FABRICANTES_EXPLOSIVOS` (
+  `ID_FABRICANTES_EXPLOSIVOS` VARCHAR(64) NOT NULL,
+  `NOME_FABRICANTES_EXPLOSIVOS` VARCHAR(128) NOT NULL,
+  `PAIS_FABRICANTES_EXPLOSIVOS` VARCHAR(64) DEFAULT 'Brasil',
+  `DESCRICAO_FABRICANTES_EXPLOSIVOS` TEXT DEFAULT NULL,
+  `DATA_CRIACAO_FABRICANTES_EXPLOSIVOS` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`ID_FABRICANTES_EXPLOSIVOS`),
+  UNIQUE KEY `uq_fab_nome` (`NOME_FABRICANTES_EXPLOSIVOS`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Carga inicial de fabricantes homologados
+INSERT IGNORE INTO `FABRICANTES_EXPLOSIVOS` (`ID_FABRICANTES_EXPLOSIVOS`, `NOME_FABRICANTES_EXPLOSIVOS`, `PAIS_FABRICANTES_EXPLOSIVOS`, `DESCRICAO_FABRICANTES_EXPLOSIVOS`) VALUES
+('fab-1', 'IMBEL (Indústria de Material Bélico do Brasil)', 'Brasil', 'Fabricante nacional militar de explosivos e espoletas'),
+('fab-2', 'CBC (Companhia Brasileira de Cartuchos)', 'Brasil', 'Fabricante de munições, pólvoras e dispositivos'),
+('fab-3', 'Britanite / Enaex Brasil', 'Brasil', 'Fabricante de emulsões encartuchadas e cordéis detonantes'),
+('fab-4', 'Condor Tecnologias Não Letais', 'Brasil', 'Fabricante de granadas táticas e pirotécnicos de sinalização'),
+('fab-5', 'Austin Powder Brasil', 'Brasil', 'Fabricante de explosivos industriais e iniciadores'),
+('fab-6', 'Maxam Brasil', 'Brasil', 'Fabricante de sistemas de iniciação e altos explosivos'),
+('fab-7', 'Nitroquímica / Outro Fornecedor Homologado', 'Brasil', 'Fornecedor certificado pelo Exército Brasileiro');
+
+-- Atualização dos status suportados em EXPLOSIVOS
+ALTER TABLE `EXPLOSIVOS` 
+  MODIFY COLUMN `STATUS_EXPLOSIVOS` ENUM('Operacional', 'Instrução', 'Destruição', 'Disponível', 'Em Uso/Operação', 'Vencido', 'Quarentena/Perícia', 'Descartado') NOT NULL DEFAULT 'Operacional';
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==============================================================================

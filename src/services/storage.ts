@@ -34,6 +34,9 @@ import {
   WeaponShotRecord,
   Explosivo,
   MovimentacaoExplosivo,
+  TipoExplosivo,
+  SubtipoExplosivo,
+  FabricanteExplosivo,
   isUserExplosivista
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
@@ -68,6 +71,9 @@ export interface AppState {
   cautelasMateriais: CautelaMaterial[];
   explosivos: Explosivo[];
   movimentacoesExplosivos: MovimentacaoExplosivo[];
+  tiposExplosivos: TipoExplosivo[];
+  subtiposExplosivos: SubtipoExplosivo[];
+  fabricantesExplosivos: FabricanteExplosivo[];
 }
 
 class StorageService {
@@ -100,7 +106,10 @@ class StorageService {
     materiais: [],
     cautelasMateriais: [],
     explosivos: [],
-    movimentacoesExplosivos: []
+    movimentacoesExplosivos: [],
+    tiposExplosivos: [],
+    subtiposExplosivos: [],
+    fabricantesExplosivos: []
   };
 
   constructor() {
@@ -146,7 +155,10 @@ class StorageService {
         materiaisRes,
         cautelasMateriaisRes,
         explosivosRes,
-        movimentacoesExplosivosRes
+        movimentacoesExplosivosRes,
+        tiposExplosivosRes,
+        subtiposExplosivosRes,
+        fabricantesExplosivosRes
       ] = await Promise.all([
         fetch('/api/users').then(r => r.ok ? r.json() : []),
         fetch('/api/departments').then(r => r.ok ? r.json() : []),
@@ -175,7 +187,10 @@ class StorageService {
         fetch('/api/materiais').then(r => r.ok ? r.json() : []),
         fetch('/api/cautelas-materiais').then(r => r.ok ? r.json() : []),
         fetch('/api/explosivos').then(r => r.ok ? r.json() : []),
-        fetch('/api/movimentacoes-explosivos').then(r => r.ok ? r.json() : [])
+        fetch('/api/movimentacoes-explosivos').then(r => r.ok ? r.json() : []),
+        fetch('/api/tipos-explosivos').then(r => r.ok ? r.json() : []),
+        fetch('/api/subtipos-explosivos').then(r => r.ok ? r.json() : []),
+        fetch('/api/fabricantes-explosivos').then(r => r.ok ? r.json() : [])
       ]);
 
       this.state.users = usersRes || [];
@@ -206,6 +221,9 @@ class StorageService {
       this.state.cautelasMateriais = cautelasMateriaisRes || [];
       this.state.explosivos = explosivosRes || [];
       this.state.movimentacoesExplosivos = movimentacoesExplosivosRes || [];
+      this.state.tiposExplosivos = tiposExplosivosRes || [];
+      this.state.subtiposExplosivos = subtiposExplosivosRes || [];
+      this.state.fabricantesExplosivos = fabricantesExplosivosRes || [];
 
 
       // Refresh current user reference if logged in
@@ -2092,12 +2110,32 @@ class StorageService {
     }
   }
 
-  public getMovimentacoesExplosivos(explosivoId?: string): MovimentacaoExplosivo[] {
+  public getMovimentacoesExplosivos(userOrExplosivoId?: User | string | null, optionalExplosivoId?: string): MovimentacaoExplosivo[] {
     const list = this.state.movimentacoesExplosivos || [];
-    if (explosivoId) {
-      return list.filter(m => m.explosivoId === explosivoId);
+    let targetExplosivoId: string | undefined = undefined;
+    let actor: User | null = null;
+
+    if (typeof userOrExplosivoId === 'string') {
+      targetExplosivoId = userOrExplosivoId;
+    } else if (userOrExplosivoId && typeof userOrExplosivoId === 'object' && ('role' in userOrExplosivoId || 'id' in userOrExplosivoId)) {
+      actor = userOrExplosivoId as User;
+      targetExplosivoId = optionalExplosivoId;
     }
-    return list;
+
+    let filtered = list;
+    if (targetExplosivoId) {
+      filtered = filtered.filter(m => m.explosivoId === targetExplosivoId);
+    }
+
+    if (actor && actor.role !== 'Geral' && actor.role !== 'Administrador') {
+      if (actor.unitId) {
+        filtered = filtered.filter(m => !m.unitId || m.unitId === actor.unitId);
+      } else if (actor.departmentId) {
+        filtered = filtered.filter(m => !m.departmentId || m.departmentId === actor.departmentId);
+      }
+    }
+
+    return filtered;
   }
 
   public async saveMovimentacaoExplosivo(mov: Partial<MovimentacaoExplosivo>): Promise<{ success: boolean; id?: string; newQuantity?: number; error?: string }> {
@@ -2109,8 +2147,158 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
+
+      const movRecord: MovimentacaoExplosivo = {
+        id: data.id || mov.id || `mov-exp-${Date.now()}`,
+        explosivoId: mov.explosivoId || '',
+        nomeExplosivo: mov.nomeExplosivo || mov.explosivoNome || '',
+        tipoMovimentacao: (mov.tipoMovimentacao as any) || 'Saída',
+        quantidade: Number(mov.quantidade || 0),
+        unidadeMedida: mov.unidadeMedida || 'kg',
+        motivo: mov.motivo || '',
+        responsavelNome: mov.responsavelNome || '',
+        responsavelMasp: mov.responsavelMasp || '',
+        responsavelId: mov.responsavelId || '',
+        localOrigemDestino: mov.localOrigemDestino || '',
+        dataMovimentacao: mov.dataMovimentacao || new Date().toISOString(),
+        departmentId: mov.departmentId || '',
+        unitId: mov.unitId || '',
+        observacoes: mov.observacoes || ''
+      };
+
+      this.state.movimentacoesExplosivos = [
+        movRecord,
+        ...(this.state.movimentacoesExplosivos || []).filter(m => m.id !== movRecord.id)
+      ];
+
       await this.refreshFromServer();
       return { success: true, id: data.id, newQuantity: data.newQuantity };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getTiposExplosivos(): TipoExplosivo[] {
+    return this.state.tiposExplosivos || [];
+  }
+
+  public async saveTipoExplosivo(tipo: Partial<TipoExplosivo>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const isEdit = Boolean(tipo.id);
+      const url = isEdit ? `/api/tipos-explosivos/${tipo.id}` : '/api/tipos-explosivos';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...tipo, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteTipoExplosivo(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/tipos-explosivos/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getSubtiposExplosivos(tipoIdOrNome?: string): SubtipoExplosivo[] {
+    const all = this.state.subtiposExplosivos || [];
+    if (!tipoIdOrNome) return all;
+    const search = tipoIdOrNome.toLowerCase().trim();
+    return all.filter(s => 
+      (s.tipoId && s.tipoId.toLowerCase() === search) || 
+      (s.tipoNome && s.tipoNome.toLowerCase() === search)
+    );
+  }
+
+  public async saveSubtipoExplosivo(subtipo: Partial<SubtipoExplosivo>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const isEdit = Boolean(subtipo.id);
+      const url = isEdit ? `/api/subtipos-explosivos/${subtipo.id}` : '/api/subtipos-explosivos';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...subtipo, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteSubtipoExplosivo(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/subtipos-explosivos/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public getFabricantesExplosivos(): FabricanteExplosivo[] {
+    return this.state.fabricantesExplosivos || [];
+  }
+
+  public async saveFabricanteExplosivo(fab: Partial<FabricanteExplosivo>): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const isEdit = Boolean(fab.id);
+      const url = isEdit ? `/api/fabricantes-explosivos/${fab.id}` : '/api/fabricantes-explosivos';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...fab, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteFabricanteExplosivo(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/fabricantes-explosivos/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
     }

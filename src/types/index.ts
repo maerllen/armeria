@@ -741,7 +741,34 @@ export interface CautelaMaterial {
 // =================================================================
 // MÓDULO DE EXPLOSIVOS
 // =================================================================
+export interface TipoExplosivo {
+  id: string;
+  nome: string;
+  descricao?: string;
+  createdAt?: string;
+}
+
+export interface SubtipoExplosivo {
+  id: string;
+  tipoId: string;
+  tipoNome: string;
+  nome: string;
+  descricao?: string;
+  createdAt?: string;
+}
+
+export interface FabricanteExplosivo {
+  id: string;
+  nome: string;
+  pais?: string;
+  descricao?: string;
+  createdAt?: string;
+}
+
 export type ExplosivoStatus = 
+  | 'Operacional' 
+  | 'Instrução' 
+  | 'Destruição' 
   | 'Disponível' 
   | 'Em Uso' 
   | 'Em Uso/Operação' 

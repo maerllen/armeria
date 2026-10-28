@@ -8,6 +8,9 @@ import {
   MovimentacaoExplosivo,
   ExplosivoStatus,
   TipoMovimentacaoExplosivo,
+  TipoExplosivo,
+  SubtipoExplosivo,
+  FabricanteExplosivo,
   isUserExplosivista
 } from '../types';
 import { storage } from '../services/storage';
@@ -39,7 +42,12 @@ import {
   FileText,
   Boxes,
   Vault,
-  FolderPlus
+  FolderPlus,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Factory,
+  Tag
 } from 'lucide-react';
 
 interface ModuloExplosivosProps {
@@ -72,11 +80,9 @@ const CLASSES_RISCO = [
 const UNIDADES_MEDIDA = ['kg', 'g', 'un', 'm', 'caixas', 'cartuchos', 'litros'];
 
 const STATUS_OPCOES: ExplosivoStatus[] = [
-  'Disponível',
-  'Em Uso/Operação',
-  'Vencido',
-  'Quarentena/Perícia',
-  'Descartado'
+  'Operacional',
+  'Instrução',
+  'Destruição'
 ];
 
 export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
@@ -133,6 +139,34 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [selectedItemDetail, setSelectedItemDetail] = useState<Explosivo | null>(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState<Explosivo | null>(null);
 
+  // Explosive Types, Subtypes & Manufacturers State & Modal
+  const [tiposExplosivos, setTiposExplosivos] = useState<TipoExplosivo[]>(() => storage.getTiposExplosivos());
+  const [subtiposExplosivos, setSubtiposExplosivos] = useState<SubtipoExplosivo[]>(() => storage.getSubtiposExplosivos());
+  const [fabricantesExplosivos, setFabricantesExplosivos] = useState<FabricanteExplosivo[]>(() => storage.getFabricantesExplosivos());
+  
+  const [showTipoModal, setShowTipoModal] = useState(false);
+  const [cadastrosTab, setCadastrosTab] = useState<'tipos' | 'subtipos' | 'fabricantes'>('tipos');
+  
+  // Tipo form
+  const [editingTipo, setEditingTipo] = useState<TipoExplosivo | null>(null);
+  const [tipoNomeInput, setTipoNomeInput] = useState('');
+  const [tipoDescInput, setTipoDescInput] = useState('');
+  const [isSubmittingTipo, setIsSubmittingTipo] = useState(false);
+
+  // Subtipo form
+  const [editingSubtipo, setEditingSubtipo] = useState<SubtipoExplosivo | null>(null);
+  const [subtipoTipoIdInput, setSubtipoTipoIdInput] = useState('');
+  const [subtipoNomeInput, setSubtipoNomeInput] = useState('');
+  const [subtipoDescInput, setSubtipoDescInput] = useState('');
+  const [isSubmittingSubtipo, setIsSubmittingSubtipo] = useState(false);
+
+  // Fabricante form
+  const [editingFabricante, setEditingFabricante] = useState<FabricanteExplosivo | null>(null);
+  const [fabricanteNomeInput, setFabricanteNomeInput] = useState('');
+  const [fabricantePaisInput, setFabricantePaisInput] = useState('Brasil');
+  const [fabricanteDescInput, setFabricanteDescInput] = useState('');
+  const [isSubmittingFabricante, setIsSubmittingFabricante] = useState(false);
+
   // Quick Create Vault Space Modal
   const [showCreateVaultModal, setShowCreateVaultModal] = useState(false);
   const [newVaultCode, setNewVaultCode] = useState('');
@@ -157,7 +191,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [formClasseRisco, setFormClasseRisco] = useState(CLASSES_RISCO[0]);
   const [formLocalArmazenamento, setFormLocalArmazenamento] = useState('');
   const [formCofreId, setFormCofreId] = useState('');
-  const [formStatus, setFormStatus] = useState<ExplosivoStatus>('Disponível');
+  const [formStatus, setFormStatus] = useState<ExplosivoStatus>('Operacional');
   const [formDeptId, setFormDeptId] = useState(currentUser.departmentId || '');
   const [formUnitId, setFormUnitId] = useState(currentUser.unitId || '');
   const [formObservacoes, setFormObservacoes] = useState('');
@@ -174,30 +208,101 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [movOrigemDestino, setMovOrigemDestino] = useState('');
   const [movObservacoes, setMovObservacoes] = useState('');
 
+  // Collapsible History Section (inicia oculto igual aos cofres e munições)
+  const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
+  const [colFilterData, setColFilterData] = useState('');
+  const [colFilterTipo, setColFilterTipo] = useState('');
+  const [colFilterExplosivo, setColFilterExplosivo] = useState('');
+  const [colFilterQtd, setColFilterQtd] = useState('');
+  const [colFilterMotivo, setColFilterMotivo] = useState('');
+  const [colFilterPolicial, setColFilterPolicial] = useState('');
+  const [colFilterLocal, setColFilterLocal] = useState('');
+
   // Sync with storage on mount or refresh
-  const reloadData = () => {
+  const reloadData = async () => {
     setExplosivos(storage.getExplosivos(currentUser));
     setMovimentacoes(storage.getMovimentacoesExplosivos(currentUser));
     setAllVaults(storage.getVaultSpaces(currentUser));
+    setTiposExplosivos(storage.getTiposExplosivos());
+    setSubtiposExplosivos(storage.getSubtiposExplosivos());
+    setFabricantesExplosivos(storage.getFabricantesExplosivos());
+
+    try {
+      const [resMovs, resTipos, resSubtipos, resFabricantes] = await Promise.all([
+        fetch('/api/movimentacoes-explosivos'),
+        fetch('/api/tipos-explosivos'),
+        fetch('/api/subtipos-explosivos'),
+        fetch('/api/fabricantes-explosivos')
+      ]);
+      if (resMovs.ok) {
+        const data = await resMovs.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setMovimentacoes(data);
+        }
+      }
+      if (resTipos.ok) {
+        const tiposData = await resTipos.json();
+        if (Array.isArray(tiposData) && tiposData.length > 0) {
+          setTiposExplosivos(tiposData);
+        }
+      }
+      if (resSubtipos.ok) {
+        const subtiposData = await resSubtipos.json();
+        if (Array.isArray(subtiposData) && subtiposData.length > 0) {
+          setSubtiposExplosivos(subtiposData);
+        }
+      }
+      if (resFabricantes.ok) {
+        const fabData = await resFabricantes.json();
+        if (Array.isArray(fabData) && fabData.length > 0) {
+          setFabricantesExplosivos(fabData);
+        }
+      }
+    } catch {
+      // fallback to storage
+    }
   };
 
   useEffect(() => {
     reloadData();
   }, [currentUser, propVaultSpaces]);
 
-  // Scoped vault spaces for the active unit/form unit
+  // Dynamic available explosive types
+  const tiposDisponiveis = useMemo(() => {
+    if (tiposExplosivos && tiposExplosivos.length > 0) {
+      return tiposExplosivos;
+    }
+    return TIPOS_EXPLOSIVOS.map((nome, idx) => ({
+      id: `te-default-${idx}`,
+      nome,
+      descricao: ''
+    }));
+  }, [tiposExplosivos]);
+
+  // Scoped vault spaces for the active unit/form unit - STRICTLY EXPLOSIVOS
   const activeUnitIdForVaults = formUnitId || (selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
 
   const availableVaultsForUnit = useMemo(() => {
     if (!activeUnitIdForVaults || activeUnitIdForVaults === 'ALL') {
-      return allVaults;
+      return allVaults.filter(v => v.type === 'EXPLOSIVOS');
     }
-    return allVaults.filter(v => v.unitId === activeUnitIdForVaults);
+    return allVaults.filter(v => v.unitId === activeUnitIdForVaults && v.type === 'EXPLOSIVOS');
   }, [allVaults, activeUnitIdForVaults]);
 
   const explosiveVaultSpaces = useMemo(() => {
     return availableVaultsForUnit.filter(v => v.type === 'EXPLOSIVOS');
   }, [availableVaultsForUnit]);
+
+  // Cascading subtipos: only options matching the chosen formTipo
+  const subtiposDisponiveisParaTipo = useMemo(() => {
+    if (!formTipo) return [];
+    const chosenTipoNorm = formTipo.toLowerCase().trim();
+    const matchingTipoObj = tiposDisponiveis.find(t => t.nome.toLowerCase().trim() === chosenTipoNorm);
+    return subtiposExplosivos.filter(s => {
+      const sTipoNomeNorm = (s.tipoNome || '').toLowerCase().trim();
+      return sTipoNomeNorm === chosenTipoNorm || (matchingTipoObj && s.tipoId === matchingTipoObj.id);
+    });
+  }, [formTipo, subtiposExplosivos, tiposDisponiveis]);
 
   // Filtered Explosives list
   const filteredExplosivos = useMemo(() => {
@@ -246,14 +351,263 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     const totalItens = filteredExplosivos.length;
     const altosExplosivos = filteredExplosivos.filter(e => e.tipo.includes('Alto Explosivo')).length;
     const iniciadores = filteredExplosivos.filter(e => e.tipo.includes('Iniciador') || e.tipo.includes('Granada')).length;
-    const disponiveis = filteredExplosivos.filter(e => e.status === 'Disponível').length;
+    const operacionais = filteredExplosivos.filter(e => e.status === 'Operacional').length;
+    const instrucao = filteredExplosivos.filter(e => e.status === 'Instrução').length;
+    const destruicao = filteredExplosivos.filter(e => e.status === 'Destruição').length;
     const vencidos = filteredExplosivos.filter(e => {
       if (!e.dataValidade) return false;
       return new Date(e.dataValidade) < new Date();
     }).length;
 
-    return { totalItens, altosExplosivos, iniciadores, disponiveis, vencidos };
+    return { totalItens, altosExplosivos, iniciadores, operacionais, instrucao, destruicao, vencidos };
   }, [filteredExplosivos]);
+
+  // Filtered movements for the Collapsible History table
+  const filteredMovements = useMemo(() => {
+    return movimentacoes.filter(m => {
+      // Dept filter
+      if (selectedDeptId !== 'ALL' && m.departmentId && m.departmentId !== selectedDeptId) {
+        return false;
+      }
+      // Unit filter
+      if (selectedUnitId !== 'ALL' && m.unitId && m.unitId !== selectedUnitId) {
+        return false;
+      }
+      // Column filter - Data
+      if (colFilterData && !formatTimestamp(m.dataMovimentacao).toLowerCase().includes(colFilterData.toLowerCase())) {
+        return false;
+      }
+      // Column filter - Tipo
+      if (colFilterTipo && colFilterTipo !== 'TODOS' && m.tipoMovimentacao !== colFilterTipo) {
+        return false;
+      }
+      // Column filter - Nome Explosivo
+      if (colFilterExplosivo) {
+        const query = colFilterExplosivo.toLowerCase();
+        const nome = (m.nomeExplosivo || m.explosivoNome || '').toLowerCase();
+        if (!nome.includes(query)) return false;
+      }
+      // Column filter - Qtd
+      if (colFilterQtd && !String(m.quantidade).includes(colFilterQtd)) {
+        return false;
+      }
+      // Column filter - Motivo
+      if (colFilterMotivo && !m.motivo.toLowerCase().includes(colFilterMotivo.toLowerCase())) {
+        return false;
+      }
+      // Column filter - Policial
+      if (colFilterPolicial) {
+        const query = colFilterPolicial.toLowerCase();
+        const nome = (m.responsavelNome || '').toLowerCase();
+        const masp = (m.responsavelMasp || '').toLowerCase();
+        if (!nome.includes(query) && !masp.includes(query)) return false;
+      }
+      // Column filter - Local
+      if (colFilterLocal && !(m.localOrigemDestino || '').toLowerCase().includes(colFilterLocal.toLowerCase())) {
+        return false;
+      }
+      return true;
+    });
+  }, [movimentacoes, selectedDeptId, selectedUnitId, colFilterData, colFilterTipo, colFilterExplosivo, colFilterQtd, colFilterMotivo, colFilterPolicial, colFilterLocal]);
+
+  // Handlers for Explosive Type Management
+  const handleSaveTipo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tipoNomeInput.trim()) {
+      setErrorMsg('Informe o nome do tipo de explosivo.');
+      return;
+    }
+
+    setIsSubmittingTipo(true);
+    setErrorMsg('');
+    try {
+      if (editingTipo) {
+        const res = await storage.saveTipoExplosivo({
+          id: editingTipo.id,
+          nome: tipoNomeInput.trim(),
+          descricao: tipoDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao atualizar tipo de explosivo.');
+        setSuccessMsg(`Tipo de explosivo "${tipoNomeInput.trim()}" atualizado com sucesso!`);
+      } else {
+        const res = await storage.saveTipoExplosivo({
+          nome: tipoNomeInput.trim(),
+          descricao: tipoDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao cadastrar tipo de explosivo.');
+        setSuccessMsg(`Tipo de explosivo "${tipoNomeInput.trim()}" cadastrado com sucesso!`);
+        // Auto select newly registered type in the explosive form
+        setFormTipo(tipoNomeInput.trim());
+      }
+
+      setTipoNomeInput('');
+      setTipoDescInput('');
+      setEditingTipo(null);
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar tipo de explosivo.');
+    } finally {
+      setIsSubmittingTipo(false);
+    }
+  };
+
+  const handleDeleteTipo = async (tipo: TipoExplosivo) => {
+    if (!window.confirm(`Deseja realmente excluir o tipo de explosivo "${tipo.nome}"?`)) return;
+    setErrorMsg('');
+    try {
+      const res = await storage.deleteTipoExplosivo(tipo.id);
+      if (!res.success) throw new Error(res.error || 'Erro ao excluir tipo de explosivo.');
+      setSuccessMsg(`Tipo de explosivo "${tipo.nome}" excluído com sucesso.`);
+      if (editingTipo?.id === tipo.id) {
+        setEditingTipo(null);
+        setTipoNomeInput('');
+        setTipoDescInput('');
+      }
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir tipo de explosivo.');
+    }
+  };
+
+  // Handlers for Subtype Management
+  const handleSaveSubtipo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!subtipoNomeInput.trim()) {
+      setErrorMsg('Informe o nome do subtipo de explosivo.');
+      return;
+    }
+    if (!subtipoTipoIdInput) {
+      setErrorMsg('Selecione o Tipo de Explosivo ao qual este subtipo pertence.');
+      return;
+    }
+
+    const linkedTipoObj = tiposDisponiveis.find(t => t.id === subtipoTipoIdInput || t.nome === subtipoTipoIdInput);
+    const linkedTipoNome = linkedTipoObj ? linkedTipoObj.nome : formTipo;
+
+    setIsSubmittingSubtipo(true);
+    setErrorMsg('');
+    try {
+      if (editingSubtipo) {
+        const res = await storage.saveSubtipoExplosivo({
+          id: editingSubtipo.id,
+          tipoId: linkedTipoObj ? linkedTipoObj.id : subtipoTipoIdInput,
+          tipoNome: linkedTipoNome,
+          nome: subtipoNomeInput.trim(),
+          descricao: subtipoDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao atualizar subtipo.');
+        setSuccessMsg(`Subtipo "${subtipoNomeInput.trim()}" atualizado com sucesso!`);
+      } else {
+        const res = await storage.saveSubtipoExplosivo({
+          tipoId: linkedTipoObj ? linkedTipoObj.id : subtipoTipoIdInput,
+          tipoNome: linkedTipoNome,
+          nome: subtipoNomeInput.trim(),
+          descricao: subtipoDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao cadastrar subtipo.');
+        setSuccessMsg(`Subtipo "${subtipoNomeInput.trim()}" cadastrado com sucesso para "${linkedTipoNome}"!`);
+        // If this matches current formTipo, auto-select it
+        if (formTipo === linkedTipoNome) {
+          setFormSubtipo(subtipoNomeInput.trim());
+        }
+      }
+
+      setSubtipoNomeInput('');
+      setSubtipoDescInput('');
+      setEditingSubtipo(null);
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar subtipo de explosivo.');
+    } finally {
+      setIsSubmittingSubtipo(false);
+    }
+  };
+
+  const handleDeleteSubtipo = async (sub: SubtipoExplosivo) => {
+    if (!window.confirm(`Deseja realmente excluir o subtipo "${sub.nome}"?`)) return;
+    setErrorMsg('');
+    try {
+      const res = await storage.deleteSubtipoExplosivo(sub.id);
+      if (!res.success) throw new Error(res.error || 'Erro ao excluir subtipo.');
+      setSuccessMsg(`Subtipo "${sub.nome}" excluído com sucesso.`);
+      if (editingSubtipo?.id === sub.id) {
+        setEditingSubtipo(null);
+        setSubtipoNomeInput('');
+        setSubtipoDescInput('');
+      }
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir subtipo.');
+    }
+  };
+
+  // Handlers for Manufacturer Management
+  const handleSaveFabricante = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!fabricanteNomeInput.trim()) {
+      setErrorMsg('Informe o nome do fabricante de explosivos.');
+      return;
+    }
+
+    setIsSubmittingFabricante(true);
+    setErrorMsg('');
+    try {
+      if (editingFabricante) {
+        const res = await storage.saveFabricanteExplosivo({
+          id: editingFabricante.id,
+          nome: fabricanteNomeInput.trim(),
+          pais: fabricantePaisInput.trim(),
+          descricao: fabricanteDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao atualizar fabricante.');
+        setSuccessMsg(`Fabricante "${fabricanteNomeInput.trim()}" atualizado com sucesso!`);
+      } else {
+        const res = await storage.saveFabricanteExplosivo({
+          nome: fabricanteNomeInput.trim(),
+          pais: fabricantePaisInput.trim(),
+          descricao: fabricanteDescInput.trim()
+        });
+        if (!res.success) throw new Error(res.error || 'Erro ao cadastrar fabricante.');
+        setSuccessMsg(`Fabricante "${fabricanteNomeInput.trim()}" cadastrado com sucesso!`);
+        // Auto select in form
+        setFormFabricante(fabricanteNomeInput.trim());
+      }
+
+      setFabricanteNomeInput('');
+      setFabricantePaisInput('Brasil');
+      setFabricanteDescInput('');
+      setEditingFabricante(null);
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar fabricante.');
+    } finally {
+      setIsSubmittingFabricante(false);
+    }
+  };
+
+  const handleDeleteFabricante = async (fab: FabricanteExplosivo) => {
+    if (!window.confirm(`Deseja realmente excluir o fabricante "${fab.nome}"?`)) return;
+    setErrorMsg('');
+    try {
+      const res = await storage.deleteFabricanteExplosivo(fab.id);
+      if (!res.success) throw new Error(res.error || 'Erro ao excluir fabricante.');
+      setSuccessMsg(`Fabricante "${fab.nome}" excluído com sucesso.`);
+      if (editingFabricante?.id === fab.id) {
+        setEditingFabricante(null);
+        setFabricanteNomeInput('');
+        setFabricanteDescInput('');
+      }
+      await reloadData();
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao excluir fabricante.');
+    }
+  };
 
   // Handlers for Item Modal
   const handleOpenItemModal = (item?: Explosivo) => {
@@ -283,23 +637,24 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     } else {
       setEditingItem(null);
       setFormNome('');
-      setFormTipo(TIPOS_EXPLOSIVOS[0]);
+      const defaultTipo = tiposDisponiveis[0]?.nome || TIPOS_EXPLOSIVOS[0];
+      setFormTipo(defaultTipo);
       setFormSubtipo('');
       setFormQuantidade(1);
       setFormUnidadeMedida('kg');
       setFormLote('');
-      setFormFabricante('CBC / IMBEL / Britanite');
+      setFormFabricante(fabricantesExplosivos[0]?.nome || 'CBC');
       setFormDataFabricacao(new Date().toISOString().substring(0, 10));
       setFormDataValidade('');
       setFormClasseRisco(CLASSES_RISCO[0]);
 
-      // Select default explosive vault space if available
+      // Select default explosive vault space strictly of type 'EXPLOSIVOS'
       const expVaults = allVaults.filter(v => v.unitId === targetUnit && v.type === 'EXPLOSIVOS');
-      const defaultVault = expVaults[0] || allVaults.filter(v => v.unitId === targetUnit)[0];
+      const defaultVault = expVaults[0];
       setFormCofreId(defaultVault ? defaultVault.id : '');
       setFormLocalArmazenamento(defaultVault ? defaultVault.code : 'PAIOL-01');
 
-      setFormStatus('Disponível');
+      setFormStatus('Operacional');
       setFormDeptId(targetDept);
       setFormUnitId(targetUnit);
       setFormObservacoes('');
@@ -778,8 +1133,61 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
                 title="Cadastrar novo local no cofre para armazenar explosivos"
               >
-                <Vault className="w-4 h-4 text-amber-400" />
+                <Vault className="w-4 h-4 text-cyan-400" />
                 <span>+ Local no Cofre</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                  setCadastrosTab('tipos');
+                  setTipoNomeInput('');
+                  setTipoDescInput('');
+                  setEditingTipo(null);
+                  setShowTipoModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
+                title="Cadastrar e gerenciar tipos de materiais explosivos"
+              >
+                <Layers className="w-4 h-4 text-amber-400" />
+                <span>+ Tipos</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                  setCadastrosTab('subtipos');
+                  setSubtipoNomeInput('');
+                  setSubtipoDescInput('');
+                  setSubtipoTipoIdInput(tiposDisponiveis[0]?.id || '');
+                  setEditingSubtipo(null);
+                  setShowTipoModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
+                title="Cadastrar e gerenciar subtipos vinculados a tipos"
+              >
+                <Tag className="w-4 h-4 text-emerald-400" />
+                <span>+ Subtipos</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setErrorMsg('');
+                  setSuccessMsg('');
+                  setCadastrosTab('fabricantes');
+                  setFabricanteNomeInput('');
+                  setFabricantePaisInput('Brasil');
+                  setFabricanteDescInput('');
+                  setEditingFabricante(null);
+                  setShowTipoModal(true);
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-100 font-semibold text-xs border border-slate-700 flex items-center space-x-1.5 transition"
+                title="Cadastrar e gerenciar fabricantes de materiais explosivos"
+              >
+                <Factory className="w-4 h-4 text-cyan-400" />
+                <span>+ Fabricantes</span>
               </button>
 
               <button
@@ -872,9 +1280,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <div className="glass-card p-3 rounded-2xl border border-slate-800 col-span-2 sm:col-span-1">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>Disponíveis</span>
+            <span>Operacional</span>
           </div>
-          <p className="text-2xl font-black text-emerald-400 font-mono">{stats.disponiveis}</p>
+          <p className="text-2xl font-black text-emerald-400 font-mono">{stats.operacionais}</p>
         </div>
       </div>
 
@@ -940,8 +1348,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
             className="w-full py-2 px-3 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
           >
             <option value="TODOS">Todos os Tipos de Explosivo</option>
-            {TIPOS_EXPLOSIVOS.map(t => (
-              <option key={t} value={t}>{t}</option>
+            {tiposDisponiveis.map(t => (
+              <option key={t.id || t.nome} value={t.nome}>{t.nome}</option>
             ))}
           </select>
         </div>
@@ -953,9 +1361,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
             className="w-full py-2 px-3 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-200 focus:border-amber-400 outline-none"
           >
             <option value="TODOS">Todos os Locais no Cofre</option>
-            {availableVaultsForUnit.map(v => (
+            {explosiveVaultSpaces.map(v => (
               <option key={v.id} value={v.id}>
-                {v.code} ({v.type})
+                {v.code} (Paiol de Explosivos)
               </option>
             ))}
           </select>
@@ -1025,12 +1433,12 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                     <div className="flex flex-col items-end gap-1">
                       <span
                         className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-bold uppercase border ${
-                          item.status === 'Disponível'
+                          item.status === 'Operacional'
                             ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-                            : item.status === 'Vencido'
-                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                            : item.status === 'Quarentena/Perícia'
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            : item.status === 'Instrução'
+                            ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30'
+                            : item.status === 'Destruição'
+                            ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
                             : 'bg-slate-700/50 text-slate-300 border-slate-600'
                         }`}
                       >
@@ -1158,6 +1566,243 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         </div>
       )}
 
+      {/* Histórico Geral de Movimentação de Explosivos (Inicia oculto igual aos cofres e munições) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
+        
+        {/* Accordion Header (idêntico à div dos cofres e munições) */}
+        <div
+          onClick={() => setIsHistoryExpanded(!isHistoryExpanded)}
+          className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
+        >
+          <div className="flex items-center space-x-3">
+            <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center space-x-2">
+                <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                  HISTÓRICO
+                </span>
+                <h2 className="text-base font-bold text-slate-100">
+                  Histórico de Movimentação de Explosivos
+                </h2>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                {filteredMovements.length} registro(s) de movimentação de explosivos
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-3">
+            <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
+              {filteredMovements.length} Registros
+            </span>
+
+            <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
+              {isHistoryExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5 text-slate-400" />}
+            </div>
+          </div>
+        </div>
+
+        {/* Content Body - Inicia oculto e só abre ao selecionar a div, igual aos cofres */}
+        {isHistoryExpanded && (
+          <div className="p-6 bg-slate-950/40 border-t border-slate-800/60 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-xs text-slate-400">
+                Filtre por qualquer coluna abaixo para localizar registros específicos:
+              </div>
+              <div className="flex items-center space-x-2">
+                {(colFilterData || colFilterTipo || colFilterExplosivo || colFilterQtd || colFilterMotivo || colFilterPolicial || colFilterLocal) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setColFilterData('');
+                      setColFilterTipo('');
+                      setColFilterExplosivo('');
+                      setColFilterQtd('');
+                      setColFilterMotivo('');
+                      setColFilterPolicial('');
+                      setColFilterLocal('');
+                    }}
+                    className="text-xs text-amber-400 hover:underline font-medium flex items-center space-x-1"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Limpar Filtros</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handlePrintHistory}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center space-x-1.5 transition"
+                >
+                  <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Imprimir Relatório</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-2.5 px-3 min-w-[130px]">
+                      <div className="space-y-1">
+                        <span>Data / Hora</span>
+                        <input
+                          type="text"
+                          value={colFilterData}
+                          onChange={(e) => setColFilterData(e.target.value)}
+                          placeholder="Filtrar..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[110px]">
+                      <div className="space-y-1">
+                        <span>Operação</span>
+                        <select
+                          value={colFilterTipo}
+                          onChange={(e) => setColFilterTipo(e.target.value)}
+                          className="w-full px-1.5 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 font-normal outline-none"
+                        >
+                          <option value="">Todas</option>
+                          <option value="Entrada">Entrada</option>
+                          <option value="Saída">Saída</option>
+                          <option value="Consumo/Treinamento">Consumo/Treinamento</option>
+                          <option value="Descarte/Destruição">Descarte/Destruição</option>
+                          <option value="Transferência">Transferência</option>
+                        </select>
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[160px]">
+                      <div className="space-y-1">
+                        <span>Explosivo</span>
+                        <input
+                          type="text"
+                          value={colFilterExplosivo}
+                          onChange={(e) => setColFilterExplosivo(e.target.value)}
+                          placeholder="Filtrar nome..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[90px] text-center">
+                      <div className="space-y-1">
+                        <span>Qtd</span>
+                        <input
+                          type="text"
+                          value={colFilterQtd}
+                          onChange={(e) => setColFilterQtd(e.target.value)}
+                          placeholder="Qtd..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none text-center"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[170px]">
+                      <div className="space-y-1">
+                        <span>Finalidade / Motivo</span>
+                        <input
+                          type="text"
+                          value={colFilterMotivo}
+                          onChange={(e) => setColFilterMotivo(e.target.value)}
+                          placeholder="Motivo..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[160px]">
+                      <div className="space-y-1">
+                        <span>Responsável</span>
+                        <input
+                          type="text"
+                          value={colFilterPolicial}
+                          onChange={(e) => setColFilterPolicial(e.target.value)}
+                          placeholder="Policial/MASP..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
+                    <th className="py-2.5 px-3 min-w-[140px]">
+                      <div className="space-y-1">
+                        <span>Origem / Destino</span>
+                        <input
+                          type="text"
+                          value={colFilterLocal}
+                          onChange={(e) => setColFilterLocal(e.target.value)}
+                          placeholder="Local..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 font-mono">
+                  {filteredMovements.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="text-center py-8 text-slate-500 italic font-sans">
+                        Nenhuma movimentação de explosivos encontrada para os critérios selecionados.
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMovements.map(m => {
+                      const isEntry = m.tipoMovimentacao === 'Entrada';
+                      const isConsumption = m.tipoMovimentacao === 'Consumo/Treinamento';
+                      const isDestruction = m.tipoMovimentacao === 'Descarte/Destruição';
+
+                      return (
+                        <tr key={m.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-3 text-slate-300 text-[11px]">
+                            {formatTimestamp(m.dataMovimentacao)}
+                          </td>
+                          <td className="py-3 px-3">
+                            <span
+                              className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase border ${
+                                isEntry
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                  : isConsumption
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                  : isDestruction
+                                  ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                                  : 'bg-red-500/10 text-red-400 border-red-500/30'
+                              }`}
+                            >
+                              {m.tipoMovimentacao}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 font-sans font-bold text-slate-100">
+                            {m.nomeExplosivo || m.explosivoNome}
+                          </td>
+                          <td className="py-3 px-3 text-center font-bold text-amber-400">
+                            {isEntry ? '+' : '-'}{m.quantidade} {m.unidadeMedida}
+                          </td>
+                          <td className="py-3 px-3 font-sans text-slate-300">
+                            <div>{m.motivo}</div>
+                            {m.observacoes && (
+                              <div className="text-[10px] text-slate-500 italic mt-0.5 truncate max-w-xs" title={m.observacoes}>
+                                "{m.observacoes}"
+                              </div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-sans text-slate-300">
+                            <div className="font-semibold text-slate-200">{m.responsavelNome}</div>
+                            {m.responsavelMasp && (
+                              <div className="text-[10px] text-slate-500 font-mono">MASP: {m.responsavelMasp}</div>
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-sans text-slate-400 text-[11px]">
+                            {m.localOrigemDestino || '-'}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Modal Cadastrar / Editar Explosivo */}
       {showItemModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
@@ -1196,34 +1841,101 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
-                {/* 2. Tipo de Explosivo */}
+                {/* 2. Tipo de Explosivo - Selectlist Obrigatória */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Tipo de Explosivo *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Tipo de Explosivo *
+                    </label>
+                    {canManageExplosives && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCadastrosTab('tipos');
+                          setTipoNomeInput('');
+                          setTipoDescInput('');
+                          setEditingTipo(null);
+                          setShowTipoModal(true);
+                        }}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1"
+                        title="Cadastrar novo tipo de explosivo no sistema"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Cadastrar Tipo</span>
+                      </button>
+                    )}
+                  </div>
                   <select
+                    required
                     value={formTipo}
-                    onChange={(e) => setFormTipo(e.target.value)}
+                    onChange={(e) => {
+                      const newTipo = e.target.value;
+                      setFormTipo(newTipo);
+                      // Clear subtipo when type changes
+                      setFormSubtipo('');
+                    }}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
                   >
-                    {TIPOS_EXPLOSIVOS.map(t => (
-                      <option key={t} value={t}>{t}</option>
+                    <option value="">Selecione o Tipo de Explosivo...</option>
+                    {tiposDisponiveis.map(t => (
+                      <option key={t.id || t.nome} value={t.nome}>
+                        {t.nome}
+                      </option>
                     ))}
                   </select>
                 </div>
 
-                {/* Subtipo */}
+                {/* Subtipo de Explosivo - Selectlist em Cascata vinculada ao Tipo */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Subtipo / Especificação Técnica
-                  </label>
-                  <input
-                    type="text"
-                    value={formSubtipo}
-                    onChange={(e) => setFormSubtipo(e.target.value)}
-                    placeholder="Ex: RDX/Plastificante, NP-10, Eletro-Eletrônica"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
-                  />
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Subtipo de Explosivo *
+                    </label>
+                    {canManageExplosives && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCadastrosTab('subtipos');
+                          setSubtipoNomeInput('');
+                          setSubtipoDescInput('');
+                          const matchedTipo = tiposDisponiveis.find(t => t.nome === formTipo);
+                          setSubtipoTipoIdInput(matchedTipo ? matchedTipo.id : (tiposDisponiveis[0]?.id || ''));
+                          setEditingSubtipo(null);
+                          setShowTipoModal(true);
+                        }}
+                        className="text-[11px] text-emerald-400 hover:text-emerald-300 font-semibold flex items-center space-x-1"
+                        title="Cadastrar novo subtipo de explosivo"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Cadastrar Subtipo</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {!formTipo ? (
+                    <div className="px-3 py-2 bg-slate-950/80 border border-dashed border-amber-500/40 rounded-xl text-xs text-amber-400/90 italic flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>Escolha o Tipo de Explosivo primeiro para ver os subtipos disponíveis</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={formSubtipo}
+                      onChange={(e) => setFormSubtipo(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
+                    >
+                      <option value="">Selecione o Subtipo de Explosivo...</option>
+                      {subtiposDisponiveisParaTipo.map(s => (
+                        <option key={s.id} value={s.nome}>
+                          {s.nome}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  {formTipo && subtiposDisponiveisParaTipo.length === 0 && (
+                    <span className="text-[10px] text-amber-400/80 mt-1 block">
+                      Nenhum subtipo cadastrado para "{formTipo}". Clique em "+ Cadastrar Subtipo".
+                    </span>
+                  )}
                 </div>
 
                 {/* 3. Quantidade */}
@@ -1258,12 +1970,12 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   </select>
                 </div>
 
-                {/* 5. Local do Cofre (com opção de criar local para armazenar explosivos) */}
+                {/* 5. Local do Cofre - SOMENTE LOCAIS PARA ARMAZENAMENTO DE EXPLOSIVOS */}
                 <div className="sm:col-span-2 p-3 bg-slate-950/70 border border-amber-500/20 rounded-xl space-y-2">
                   <div className="flex items-center justify-between">
                     <label className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
                       <Vault className="w-4 h-4 text-amber-400" />
-                      Local do Cofre para Armazenar Explosivos *
+                      Local do Cofre para Armazenar Explosivos (Exclusivo Paiol) *
                     </label>
 
                     <button
@@ -1295,7 +2007,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                             return;
                           }
                           setFormCofreId(val);
-                          const found = availableVaultsForUnit.find(v => v.id === val);
+                          const found = explosiveVaultSpaces.find(v => v.id === val);
                           if (found) {
                             setFormLocalArmazenamento(found.code);
                           }
@@ -1303,24 +2015,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                         className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
                       >
                         <option value="">Selecione o local no cofre cadastrado...</option>
-                        {explosiveVaultSpaces.length > 0 && (
-                          <optgroup label="Cofres / Paióis de Explosivos">
-                            {explosiveVaultSpaces.map(v => (
-                              <option key={v.id} value={v.id}>
-                                {v.code} (Paiol de Explosivos)
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
-                        {availableVaultsForUnit.filter(v => v.type !== 'EXPLOSIVOS').length > 0 && (
-                          <optgroup label="Outros Espaços de Armazenamento no Cofre">
-                            {availableVaultsForUnit.filter(v => v.type !== 'EXPLOSIVOS').map(v => (
-                              <option key={v.id} value={v.id}>
-                                {v.code} ({v.type})
-                              </option>
-                            ))}
-                          </optgroup>
-                        )}
+                        {explosiveVaultSpaces.map(v => (
+                          <option key={v.id} value={v.id}>
+                            {v.code} (Paiol de Explosivos)
+                          </option>
+                        ))}
                         <option value="__CREATE_NEW__">+ Criar Novo Local para Armazenar Explosivos...</option>
                       </select>
                     </div>
@@ -1337,11 +2036,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                     </div>
                   </div>
                   <span className="text-[10px] text-slate-400 block">
-                    Defina o espaço físico seguro onde o material ficará custodiado dentro da unidade policial.
+                    Somente locais cadastrados para armazenamento de explosivos estão visíveis para seleção.
                   </span>
                 </div>
 
-                {/* Lote e Fabricante */}
+                {/* Lote e Fabricante (Fabricante em Selectlist) */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Número do Lote
@@ -1356,16 +2055,42 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Fabricante
-                  </label>
-                  <input
-                    type="text"
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-semibold text-slate-300">
+                      Fabricante *
+                    </label>
+                    {canManageExplosives && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setCadastrosTab('fabricantes');
+                          setFabricanteNomeInput('');
+                          setFabricantePaisInput('Brasil');
+                          setFabricanteDescInput('');
+                          setEditingFabricante(null);
+                          setShowTipoModal(true);
+                        }}
+                        className="text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold flex items-center space-x-1"
+                        title="Cadastrar novo fabricante de explosivos"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Cadastrar Fabricante</span>
+                      </button>
+                    )}
+                  </div>
+                  <select
+                    required
                     value={formFabricante}
                     onChange={(e) => setFormFabricante(e.target.value)}
-                    placeholder="Ex: Britanite, IMBEL, CBC, Condor"
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
-                  />
+                  >
+                    <option value="">Selecione o Fabricante...</option>
+                    {fabricantesExplosivos.map(f => (
+                      <option key={f.id} value={f.nome}>
+                        {f.nome} {f.pais ? `(${f.pais})` : ''}
+                      </option>
+                    ))}
+                  </select>
                 </div>
 
                 {/* Datas */}
@@ -1393,7 +2118,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   />
                 </div>
 
-                {/* Classe de Risco e Status */}
+                {/* Classe de Risco e Status (Renomeado para Status com: Operacional, Instrução, Destruição) */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Classe de Risco (ONU / Transporte)
@@ -1411,7 +2136,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Status Operacional
+                    Status *
                   </label>
                   <select
                     value={formStatus}
@@ -1723,16 +2448,44 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Origem / Destino / Local da Ação
-                </label>
-                <input
-                  type="text"
-                  value={movOrigemDestino}
-                  onChange={(e) => setMovOrigemDestino(e.target.value)}
-                  placeholder="Ex: Estande de Demolição Santa Luzia, Mandado Judicial"
-                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
-                />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Origem / Destino / Local da Ação
+                  </label>
+                  {explosiveVaultSpaces.length > 0 && (
+                    <span className="text-[10px] text-cyan-400 font-mono flex items-center gap-1">
+                      <Vault className="w-3 h-3" />
+                      Locais de Explosivos
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  {explosiveVaultSpaces.length > 0 && (
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          setMovOrigemDestino(e.target.value);
+                        }
+                      }}
+                      className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-300 focus:border-amber-400 outline-none font-mono"
+                    >
+                      <option value="">Selecione um local no cofre (Paiol) ou digite abaixo...</option>
+                      {explosiveVaultSpaces.map(v => (
+                        <option key={v.id} value={`Paiol ${v.code}`}>
+                          {v.code} (Armazenamento de Explosivos)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                  <input
+                    type="text"
+                    value={movOrigemDestino}
+                    onChange={(e) => setMovOrigemDestino(e.target.value)}
+                    placeholder="Ex: Paiol PAIOL-01, Estande de Demolição Santa Luzia, Mandado Judicial"
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
+                  />
+                </div>
               </div>
 
               <div>
@@ -1896,6 +2649,19 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 </div>
 
                 <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => {
+                      const it = historyItem;
+                      setHistoryItem(null);
+                      setColFilterExplosivo(it.nome);
+                      setIsHistoryExpanded(true);
+                    }}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 flex items-center space-x-1.5 transition"
+                    title="Ver histórico deste item na tabela expansível da página"
+                  >
+                    <Boxes className="w-3.5 h-3.5 text-amber-400" />
+                    <span className="hidden sm:inline">Ver na Tabela</span>
+                  </button>
                   <button
                     onClick={() => handlePrintItemHistory(historyItem)}
                     className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 flex items-center space-x-1.5 transition"
@@ -2173,6 +2939,562 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                   Fechar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Gerenciar / Cadastrar Tipos, Subtipos & Fabricantes de Explosivos */}
+      {showTipoModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="glass-card bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl animate-fade-in my-auto">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base sm:text-lg font-bold text-slate-100">
+                    Cadastros do Módulo de Explosivos
+                  </h2>
+                  <p className="text-xs text-slate-400">
+                    Gerencie Tipos, Subtipos vinculados e Fabricantes para as selectlists do sistema
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowTipoModal(false);
+                  setEditingTipo(null);
+                  setEditingSubtipo(null);
+                  setEditingFabricante(null);
+                }}
+                className="text-slate-400 hover:text-slate-200 transition p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="px-4 sm:px-6 pt-3 border-b border-slate-800/80 flex items-center space-x-2">
+              <button
+                type="button"
+                onClick={() => setCadastrosTab('tipos')}
+                className={`px-3 py-2 text-xs font-bold rounded-t-xl transition flex items-center space-x-1.5 border-b-2 ${
+                  cadastrosTab === 'tipos'
+                    ? 'border-amber-400 text-amber-300 bg-amber-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Tipos de Explosivo</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 ml-1">
+                  {tiposDisponiveis.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setCadastrosTab('subtipos');
+                  if (!subtipoTipoIdInput && tiposDisponiveis.length > 0) {
+                    setSubtipoTipoIdInput(tiposDisponiveis[0].id);
+                  }
+                }}
+                className={`px-3 py-2 text-xs font-bold rounded-t-xl transition flex items-center space-x-1.5 border-b-2 ${
+                  cadastrosTab === 'subtipos'
+                    ? 'border-emerald-400 text-emerald-300 bg-emerald-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Tag className="w-3.5 h-3.5" />
+                <span>Subtipos (Vinculados)</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 ml-1">
+                  {subtiposExplosivos.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setCadastrosTab('fabricantes')}
+                className={`px-3 py-2 text-xs font-bold rounded-t-xl transition flex items-center space-x-1.5 border-b-2 ${
+                  cadastrosTab === 'fabricantes'
+                    ? 'border-cyan-400 text-cyan-300 bg-cyan-500/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/40'
+                }`}
+              >
+                <Factory className="w-3.5 h-3.5" />
+                <span>Fabricantes</span>
+                <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-slate-800 text-slate-300 ml-1">
+                  {fabricantesExplosivos.length}
+                </span>
+              </button>
+            </div>
+
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-6">
+              {/* TAB 1: TIPOS DE EXPLOSIVO */}
+              {cadastrosTab === 'tipos' && (
+                <>
+                  <form onSubmit={handleSaveTipo} className="p-4 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-amber-400 font-mono">
+                        {editingTipo ? 'Editar Tipo Selecionado' : 'Cadastrar Novo Tipo'}
+                      </span>
+                      {editingTipo && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingTipo(null);
+                            setTipoNomeInput('');
+                            setTipoDescInput('');
+                          }}
+                          className="text-[11px] text-slate-400 hover:text-slate-200 underline"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Nome do Tipo de Explosivo *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={tipoNomeInput}
+                        onChange={(e) => setTipoNomeInput(e.target.value)}
+                        placeholder="Ex: Alto Explosivo (Detonante), Carga Moldada, Booster, Emulsão Encartuchada"
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none placeholder-slate-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Descrição / Finalidade Técnica
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={tipoDescInput}
+                        onChange={(e) => setTipoDescInput(e.target.value)}
+                        placeholder="Descrição da aplicação, comportamento de queima ou detonação..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none placeholder-slate-500"
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingTipo}
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+                      >
+                        {isSubmittingTipo ? (
+                          <span>Gravando...</span>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>{editingTipo ? 'Atualizar Tipo' : 'Salvar Tipo de Explosivo'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* List of Registered Types */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Tipos Cadastrados no Banco de Dados
+                      </span>
+                      <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20">
+                        {tiposDisponiveis.length} Tipos
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {tiposDisponiveis.map(t => (
+                        <div
+                          key={t.id}
+                          className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3 hover:border-slate-700 transition"
+                        >
+                          <div className="space-y-0.5 flex-1 min-w-0">
+                            <span className="text-xs font-bold text-slate-100 truncate block">
+                              {t.nome}
+                            </span>
+                            {t.descricao && (
+                              <p className="text-[11px] text-slate-400 truncate">
+                                {t.descricao}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center space-x-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTipo(t);
+                                setTipoNomeInput(t.nome);
+                                setTipoDescInput(t.descricao || '');
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition"
+                              title="Editar Nome / Descrição"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteTipo(t)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                              title="Excluir Tipo"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* TAB 2: SUBTIPOS DE EXPLOSIVO (VINCULADOS A UM TIPO) */}
+              {cadastrosTab === 'subtipos' && (
+                <>
+                  <form onSubmit={handleSaveSubtipo} className="p-4 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 font-mono">
+                        {editingSubtipo ? 'Editar Subtipo Selecionado' : 'Cadastrar Novo Subtipo Vinculado'}
+                      </span>
+                      {editingSubtipo && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingSubtipo(null);
+                            setSubtipoNomeInput('');
+                            setSubtipoDescInput('');
+                          }}
+                          className="text-[11px] text-slate-400 hover:text-slate-200 underline"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Tipo de Explosivo Vinculado *
+                        </label>
+                        <select
+                          required
+                          value={subtipoTipoIdInput}
+                          onChange={(e) => setSubtipoTipoIdInput(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-emerald-400 outline-none"
+                        >
+                          <option value="">Selecione o Tipo de Explosivo...</option>
+                          {tiposDisponiveis.map(t => (
+                            <option key={t.id} value={t.id}>
+                              {t.nome}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Nome do Subtipo *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={subtipoNomeInput}
+                          onChange={(e) => setSubtipoNomeInput(e.target.value)}
+                          placeholder="Ex: RDX / C-4, Emulsão Encartuchada, Eletro-Eletrônica"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-emerald-400 outline-none placeholder-slate-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Descrição / Especificação Técnica
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={subtipoDescInput}
+                        onChange={(e) => setSubtipoDescInput(e.target.value)}
+                        placeholder="Composição química, velocidade de detonação (m/s), sensibilidade..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-emerald-400 outline-none placeholder-slate-500"
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingSubtipo}
+                        className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs transition disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+                      >
+                        {isSubmittingSubtipo ? (
+                          <span>Gravando...</span>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>{editingSubtipo ? 'Atualizar Subtipo' : 'Salvar Subtipo'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* List of Registered Subtypes */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Subtipos Cadastrados no Banco de Dados
+                      </span>
+                      <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded-full border border-emerald-500/20">
+                        {subtiposExplosivos.length} Subtipos
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {subtiposExplosivos.length === 0 ? (
+                        <div className="p-6 text-center text-slate-500 italic text-xs">
+                          Nenhum subtipo cadastrado. Cadastre o primeiro no formulário acima.
+                        </div>
+                      ) : (
+                        subtiposExplosivos.map(s => (
+                          <div
+                            key={s.id}
+                            className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3 hover:border-slate-700 transition"
+                          >
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-slate-100">
+                                  {s.nome}
+                                </span>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                                  {s.tipoNome || 'Tipo não identificado'}
+                                </span>
+                              </div>
+                              {s.descricao && (
+                                <p className="text-[11px] text-slate-400 truncate">
+                                  {s.descricao}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center space-x-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingSubtipo(s);
+                                  setSubtipoTipoIdInput(s.tipoId);
+                                  setSubtipoNomeInput(s.nome);
+                                  setSubtipoDescInput(s.descricao || '');
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-emerald-400 hover:bg-slate-800 transition"
+                                title="Editar Subtipo"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSubtipo(s)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                                title="Excluir Subtipo"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+
+              {/* TAB 3: FABRICANTES DE EXPLOSIVOS */}
+              {cadastrosTab === 'fabricantes' && (
+                <>
+                  <form onSubmit={handleSaveFabricante} className="p-4 bg-slate-950/70 border border-slate-800/90 rounded-2xl space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono">
+                        {editingFabricante ? 'Editar Fabricante Selecionado' : 'Cadastrar Novo Fabricante'}
+                      </span>
+                      {editingFabricante && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingFabricante(null);
+                            setFabricanteNomeInput('');
+                            setFabricantePaisInput('Brasil');
+                            setFabricanteDescInput('');
+                          }}
+                          className="text-[11px] text-slate-400 hover:text-slate-200 underline"
+                        >
+                          Cancelar Edição
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          Nome do Fabricante *
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          value={fabricanteNomeInput}
+                          onChange={(e) => setFabricanteNomeInput(e.target.value)}
+                          placeholder="Ex: Britanite, IMBEL, CBC, Condor, Austin Powder"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-cyan-400 outline-none placeholder-slate-500"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 mb-1">
+                          País de Origem
+                        </label>
+                        <input
+                          type="text"
+                          value={fabricantePaisInput}
+                          onChange={(e) => setFabricantePaisInput(e.target.value)}
+                          placeholder="Ex: Brasil, Estados Unidos, Espanha"
+                          className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-cyan-400 outline-none placeholder-slate-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Descrição / Dados Complementares
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={fabricanteDescInput}
+                        onChange={(e) => setFabricanteDescInput(e.target.value)}
+                        placeholder="Contatos comerciais, licença DFPC/Exército, certificados..."
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-cyan-400 outline-none placeholder-slate-500"
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-1">
+                      <button
+                        type="submit"
+                        disabled={isSubmittingFabricante}
+                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl text-xs transition disabled:opacity-50 flex items-center space-x-1.5 shadow-sm"
+                      >
+                        {isSubmittingFabricante ? (
+                          <span>Gravando...</span>
+                        ) : (
+                          <>
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>{editingFabricante ? 'Atualizar Fabricante' : 'Salvar Fabricante'}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+
+                  {/* List of Registered Manufacturers */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                        Fabricantes Cadastrados no Banco de Dados
+                      </span>
+                      <span className="text-xs font-mono font-bold text-cyan-400 bg-cyan-500/10 px-2.5 py-0.5 rounded-full border border-cyan-500/20">
+                        {fabricantesExplosivos.length} Fabricantes
+                      </span>
+                    </div>
+
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {fabricantesExplosivos.length === 0 ? (
+                        <div className="p-6 text-center text-slate-500 italic text-xs">
+                          Nenhum fabricante cadastrado. Cadastre o primeiro no formulário acima.
+                        </div>
+                      ) : (
+                        fabricantesExplosivos.map(f => (
+                          <div
+                            key={f.id}
+                            className="p-3 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between gap-3 hover:border-slate-700 transition"
+                          >
+                            <div className="space-y-1 flex-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <span className="text-xs font-bold text-slate-100">
+                                  {f.nome}
+                                </span>
+                                {f.pais && (
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">
+                                    {f.pais}
+                                  </span>
+                                )}
+                              </div>
+                              {f.descricao && (
+                                <p className="text-[11px] text-slate-400 truncate">
+                                  {f.descricao}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center space-x-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingFabricante(f);
+                                  setFabricanteNomeInput(f.nome);
+                                  setFabricantePaisInput(f.pais || 'Brasil');
+                                  setFabricanteDescInput(f.descricao || '');
+                                }}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition"
+                                title="Editar Fabricante"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteFabricante(f)}
+                                className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                                title="Excluir Fabricante"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTipoModal(false);
+                  setEditingTipo(null);
+                  setEditingSubtipo(null);
+                  setEditingFabricante(null);
+                  setTipoNomeInput('');
+                  setTipoDescInput('');
+                  setSubtipoNomeInput('');
+                  setSubtipoDescInput('');
+                  setFabricanteNomeInput('');
+                  setFabricanteDescInput('');
+                }}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+              >
+                Concluir
+              </button>
             </div>
           </div>
         </div>
