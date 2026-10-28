@@ -129,6 +129,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [movementInitialItem, setMovementInitialItem] = useState<Explosivo | null>(null);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyItem, setHistoryItem] = useState<Explosivo | null>(null);
   const [selectedItemDetail, setSelectedItemDetail] = useState<Explosivo | null>(null);
   const [deleteTargetItem, setDeleteTargetItem] = useState<Explosivo | null>(null);
 
@@ -637,6 +638,102 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     printDocumentInPage(html);
   };
 
+  // Print Movement History for a Specific Explosive Item
+  const handlePrintItemHistory = (item: Explosivo) => {
+    const itemMovs = movimentacoes
+      .filter(m => m.explosivoId === item.id)
+      .sort((a, b) => new Date(b.dataMovimentacao).getTime() - new Date(a.dataMovimentacao).getTime());
+
+    const deptObj = departments.find(d => d.id === item.departmentId);
+    const unitObj = units.find(u => u.id === item.unitId);
+    const deptTitle = deptObj ? deptObj.name : 'POLÍCIA CIVIL DE MINAS GERAIS';
+    const unitTitle = unitObj ? unitObj.name : 'UNIDADE POLICIAL';
+
+    const totalEntradas = itemMovs
+      .filter(m => m.tipoMovimentacao === 'Entrada')
+      .reduce((acc, curr) => acc + curr.quantidade, 0);
+
+    const totalSaidas = itemMovs
+      .filter(m => m.tipoMovimentacao !== 'Entrada')
+      .reduce((acc, curr) => acc + curr.quantidade, 0);
+
+    const rows = itemMovs.map(m => `
+      <tr style="border-bottom: 1px solid #cbd5e1;">
+        <td style="padding: 8px; font-family: monospace;">${formatTimestamp(m.dataMovimentacao)}</td>
+        <td style="padding: 8px; font-weight: bold;">${m.tipoMovimentacao}</td>
+        <td style="padding: 8px; text-align: center; font-weight: bold; font-family: monospace;">${m.quantidade} ${m.unidadeMedida}</td>
+        <td style="padding: 8px;">${m.motivo || '-'}</td>
+        <td style="padding: 8px;">${m.responsavelNome} (MASP: ${m.responsavelMasp || '-'})</td>
+        <td style="padding: 8px;">${m.localOrigemDestino || '-'}</td>
+        <td style="padding: 8px;">${m.observacoes || '-'}</td>
+      </tr>
+    `).join('');
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 20px;">
+        <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
+          <h2 style="margin: 0; font-size: 18px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
+          <h3 style="margin: 5px 0 0; font-size: 15px; color: #334155;">HISTÓRICO INDIVIDUAL DE MOVIMENTAÇÕES DE EXPLOSIVO</h3>
+          <p style="margin: 6px 0 0; font-size: 12px; color: #64748b;">
+            <strong>Departamento:</strong> ${deptTitle} | <strong>Unidade:</strong> ${unitTitle} | <strong>Data da Emissão:</strong> ${formatTimestamp(new Date().toISOString())}
+          </p>
+        </div>
+
+        <div style="background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px; margin-bottom: 18px; font-size: 12px;">
+          <table style="width: 100%; border-collapse: collapse;">
+            <tr>
+              <td style="padding: 4px;"><strong>Material:</strong> ${item.nome}</td>
+              <td style="padding: 4px;"><strong>Tipo:</strong> ${item.tipo}</td>
+              <td style="padding: 4px;"><strong>Lote:</strong> ${item.lote}</td>
+            </tr>
+            <tr>
+              <td style="padding: 4px;"><strong>Local do Cofre:</strong> ${item.localArmazenamento}</td>
+              <td style="padding: 4px;"><strong>Classe de Risco:</strong> ${item.classeRisco}</td>
+              <td style="padding: 4px;"><strong>Saldo Atual:</strong> <span style="font-weight: bold; color: #b45309;">${item.quantidade} ${item.unidadeMedida}</span></td>
+            </tr>
+            <tr>
+              <td style="padding: 4px;"><strong>Fabricante:</strong> ${item.fabricante}</td>
+              <td style="padding: 4px;"><strong>Total Entradas Registradas:</strong> ${totalEntradas} ${item.unidadeMedida}</td>
+              <td style="padding: 4px;"><strong>Total Saídas/Consumo:</strong> ${totalSaidas} ${item.unidadeMedida}</td>
+            </tr>
+          </table>
+        </div>
+
+        <h4 style="font-size: 13px; margin: 0 0 10px; text-transform: uppercase; color: #0f172a;">Registro Cronológico das Movimentações</h4>
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+          <thead>
+            <tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8; text-align: left;">
+              <th style="padding: 6px;">Data / Hora</th>
+              <th style="padding: 6px;">Tipo Operação</th>
+              <th style="padding: 6px; text-align: center;">Qtd</th>
+              <th style="padding: 6px;">Finalidade / Motivo</th>
+              <th style="padding: 6px;">Responsável Policial</th>
+              <th style="padding: 6px;">Origem / Destino</th>
+              <th style="padding: 6px;">Observações</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows || '<tr><td colspan="7" style="text-align: center; padding: 20px;">Nenhuma movimentação registrada para este item.</td></tr>'}
+          </tbody>
+        </table>
+
+        <div style="margin-top: 50px; display: flex; justify-content: space-around; text-align: center;">
+          <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 11px;">
+            <strong>${currentUser.name}</strong><br />
+            MASP: ${currentUser.masp}<br />
+            Responsável pelo Paiol / Explosivista
+          </div>
+          <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 11px;">
+            <strong>Visto da Chefia / Armaria Central</strong><br />
+            Polícia Civil de Minas Gerais
+          </div>
+        </div>
+      </div>
+    `;
+
+    printDocumentInPage(html);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header with Title and Global Actions */}
@@ -1004,6 +1101,14 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition"
                     >
                       <Eye className="w-4 h-4" />
+                    </button>
+
+                    <button
+                      onClick={() => setHistoryItem(item)}
+                      title="Histórico de Movimentações deste Explosivo"
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition group"
+                    >
+                      <History className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
                     </button>
 
                     {canManageExplosives && (
@@ -1663,7 +1768,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         </div>
       )}
 
-      {/* Modal Histórico de Movimentações */}
+      {/* Modal Histórico Geral de Movimentações */}
       {showHistoryModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
           <div className="glass-card bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl animate-fade-in my-auto">
@@ -1751,6 +1856,233 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal Histórico Específico de um Explosivo Selecionado na DIV */}
+      {historyItem && (() => {
+        const itemMovs = movimentacoes
+          .filter(m => m.explosivoId === historyItem.id)
+          .sort((a, b) => new Date(b.dataMovimentacao).getTime() - new Date(a.dataMovimentacao).getTime());
+
+        const totalEntradas = itemMovs
+          .filter(m => m.tipoMovimentacao === 'Entrada')
+          .reduce((acc, curr) => acc + curr.quantidade, 0);
+
+        const totalSaidas = itemMovs
+          .filter(m => m.tipoMovimentacao !== 'Entrada')
+          .reduce((acc, curr) => acc + curr.quantidade, 0);
+
+        return (
+          <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+            <div className="glass-card bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl animate-fade-in my-auto">
+              <div className="p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/20 rounded-xl text-cyan-400">
+                    <History className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <h2 className="text-base sm:text-lg font-bold text-slate-100">
+                        Histórico do Explosivo: <span className="text-amber-400">{historyItem.nome}</span>
+                      </h2>
+                    </div>
+                    <p className="text-xs text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                      <span>Lote: <strong className="text-slate-200 font-mono">{historyItem.lote}</strong></span>
+                      <span>•</span>
+                      <span>Local no Cofre: <strong className="text-cyan-300 font-mono">{historyItem.localArmazenamento}</strong></span>
+                      <span>•</span>
+                      <span>Saldo Atual: <strong className="text-amber-400 font-mono">{historyItem.quantidade} {historyItem.unidadeMedida}</strong></span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handlePrintItemHistory(historyItem)}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold border border-slate-700 flex items-center space-x-1.5 transition"
+                    title="Imprimir Histórico deste Explosivo"
+                  >
+                    <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                    <span className="hidden sm:inline">Imprimir Histórico</span>
+                  </button>
+                  <button
+                    onClick={() => setHistoryItem(null)}
+                    className="text-slate-400 hover:text-slate-200 transition p-1"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* KPI Banner for this specific explosive */}
+              <div className="p-4 bg-slate-950/60 border-b border-slate-800/80 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-medium uppercase">Saldo Atual</span>
+                  <p className="text-lg font-black text-amber-400 font-mono">
+                    {historyItem.quantidade} <span className="text-xs text-slate-300">{historyItem.unidadeMedida}</span>
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-medium uppercase">Total Entradas</span>
+                  <p className="text-lg font-black text-emerald-400 font-mono">
+                    +{totalEntradas} <span className="text-xs text-slate-300">{historyItem.unidadeMedida}</span>
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-medium uppercase">Total Saídas/Consumo</span>
+                  <p className="text-lg font-black text-rose-400 font-mono">
+                    -{totalSaidas} <span className="text-xs text-slate-300">{historyItem.unidadeMedida}</span>
+                  </p>
+                </div>
+
+                <div className="p-2.5 bg-slate-900/90 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-400 block font-medium uppercase">Movimentações</span>
+                  <p className="text-lg font-black text-cyan-400 font-mono">
+                    {itemMovs.length} <span className="text-xs text-slate-400 font-normal">registros</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Action shortcuts */}
+              {canManageExplosives && (
+                <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-800 flex items-center justify-between text-xs">
+                  <span className="text-slate-400">Deseja lançar uma nova movimentação para este item?</span>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => {
+                        const it = historyItem;
+                        setHistoryItem(null);
+                        handleOpenMovementModal(it, 'Entrada');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 text-xs font-bold border border-emerald-500/30 transition flex items-center space-x-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Nova Entrada</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        const it = historyItem;
+                        setHistoryItem(null);
+                        handleOpenMovementModal(it, 'Saída');
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 text-xs font-bold border border-amber-500/30 transition flex items-center space-x-1"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>Nova Saída / Consumo</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Movements List for this Item */}
+              <div className="p-4 sm:p-6 overflow-y-auto space-y-3">
+                {itemMovs.length === 0 ? (
+                  <div className="text-center py-12 glass-card rounded-2xl border border-slate-800 p-6 space-y-3">
+                    <History className="w-10 h-10 text-slate-600 mx-auto" />
+                    <h3 className="text-sm font-bold text-slate-300">Nenhuma movimentação registrada para este explosivo</h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Este material ainda não possui histórico de entrada, saída, consumo operacional ou descarte cadastrado no sistema.
+                    </p>
+                    {canManageExplosives && (
+                      <button
+                        onClick={() => {
+                          const it = historyItem;
+                          setHistoryItem(null);
+                          handleOpenMovementModal(it, 'Saída');
+                        }}
+                        className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition inline-flex items-center space-x-1.5"
+                      >
+                        <ArrowRightLeft className="w-4 h-4" />
+                        <span>Registrar Primeira Movimentação</span>
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  itemMovs.map(m => {
+                    const isEntry = m.tipoMovimentacao === 'Entrada';
+                    const isConsumption = m.tipoMovimentacao === 'Consumo/Treinamento';
+                    const isDestruction = m.tipoMovimentacao === 'Descarte/Destruição';
+
+                    return (
+                      <div
+                        key={m.id}
+                        className="p-3.5 bg-slate-950/80 border border-slate-800/90 rounded-xl flex flex-col sm:flex-row sm:items-start justify-between gap-3 hover:border-slate-700 transition"
+                      >
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span
+                              className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold font-mono uppercase border ${
+                                isEntry
+                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                  : isConsumption
+                                  ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                  : isDestruction
+                                  ? 'bg-purple-500/10 text-purple-400 border-purple-500/30'
+                                  : 'bg-red-500/10 text-red-400 border-red-500/30'
+                              }`}
+                            >
+                              {m.tipoMovimentacao}
+                            </span>
+
+                            <span className="text-sm font-black text-amber-400 font-mono">
+                              {isEntry ? '+' : '-'}{m.quantidade} {m.unidadeMedida}
+                            </span>
+
+                            <span className="text-xs text-slate-400">
+                              • Local no Cofre: <strong className="text-cyan-300 font-mono">{historyItem.localArmazenamento}</strong>
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-slate-300">
+                            <strong>Finalidade / Motivo:</strong> {m.motivo}
+                          </div>
+
+                          {m.localOrigemDestino && (
+                            <div className="text-xs text-slate-400">
+                              <strong>Origem / Destino:</strong> {m.localOrigemDestino}
+                            </div>
+                          )}
+
+                          <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 pt-1">
+                            <UserCheck className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>
+                              Policial Responsável: <strong className="text-slate-200">{m.responsavelNome}</strong>
+                              {m.responsavelMasp && <span className="font-mono text-slate-400"> (MASP: {m.responsavelMasp})</span>}
+                            </span>
+                          </div>
+
+                          {m.observacoes && (
+                            <div className="text-[11px] text-slate-400 bg-slate-900/60 p-2 rounded-lg border border-slate-800/80 italic mt-1">
+                              "{m.observacoes}"
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="sm:text-right shrink-0">
+                          <span className="text-[11px] text-slate-400 font-mono block">
+                            {formatTimestamp(m.dataMovimentacao)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="p-4 border-t border-slate-800 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setHistoryItem(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal Detalhes do Explosivo */}
       {selectedItemDetail && (
