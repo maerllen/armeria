@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser } from './types';
+import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser, getSystemLogo } from './types';
 import { storage } from './services/storage';
 import { Navbar } from './components/BarraNavegacao';
 import { Sidebar } from './components/BarraLateral';
@@ -181,6 +181,14 @@ export default function App() {
 
   const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
 
+  const userDepartment = currentUser?.departmentId 
+    ? (departments.find(d => d.id === currentUser.departmentId) || storage.getAllDepartments().find(d => d.id === currentUser.departmentId) || null)
+    : null;
+  const userUnit = currentUser?.unitId 
+    ? (units.find(u => u.id === currentUser.unitId) || storage.getAllUnits().find(u => u.id === currentUser.unitId) || null)
+    : null;
+  const currentLogo = getSystemLogo(userUnit, userDepartment);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
@@ -194,6 +202,9 @@ export default function App() {
         onSetDeviceMode={setDeviceMode}
         isMobileMenuOpen={isMobileMenuOpen}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        logoUrl={currentLogo}
+        departmentName={userDepartment?.name}
+        unitName={userUnit?.name}
       />
 
       <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden relative">

@@ -58,10 +58,13 @@ export interface User {
   createdAt: string;
 }
 
+export const DEFAULT_SYSTEM_LOGO = '/assets/aistudio/Distintivo_da_Pol_cia_Civil_de_Minas_Gerais_15bab05c.png';
+
 export interface Department {
   id: string;
   name: string;
   code: string;
+  logoUrl?: string;
   createdAt: string;
 }
 
@@ -69,7 +72,24 @@ export interface Unit {
   id: string;
   name: string;
   departmentId: string;
+  logoUrl?: string;
   createdAt: string;
+}
+
+/**
+ * Retorna a logo a ser exibida seguindo a hierarquia do sistema:
+ * 1. Logo da Unidade (caso cadastrada)
+ * 2. Logo do Departamento (caso a unidade não tenha logo)
+ * 3. Logo Padrão (Distintivo PCMG, caso o departamento não tenha logo)
+ */
+export function getSystemLogo(unit?: Unit | null, department?: Department | null): string {
+  if (unit?.logoUrl && unit.logoUrl.trim()) {
+    return unit.logoUrl.trim();
+  }
+  if (department?.logoUrl && department.logoUrl.trim()) {
+    return department.logoUrl.trim();
+  }
+  return DEFAULT_SYSTEM_LOGO;
 }
 
 export interface AvailableWeaponType {

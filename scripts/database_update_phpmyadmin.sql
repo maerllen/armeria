@@ -335,6 +335,16 @@ INSERT IGNORE INTO `FABRICANTES_EXPLOSIVOS` (`ID_FABRICANTES_EXPLOSIVOS`, `NOME_
 ALTER TABLE `EXPLOSIVOS` 
   MODIFY COLUMN `STATUS_EXPLOSIVOS` ENUM('Operacional', 'Instrução', 'Destruição', 'Disponível', 'Em Uso/Operação', 'Vencido', 'Quarentena/Perícia', 'Descartado') NOT NULL DEFAULT 'Operacional';
 
+-- ------------------------------------------------------------------------------
+-- 13. LOGOS PERSONALIZADAS DE DEPARTAMENTOS E UNIDADES
+-- Adiciona suporte a logotipos em DEPARTAMENTOS e UNIDADES
+-- ------------------------------------------------------------------------------
+ALTER TABLE `DEPARTAMENTOS`
+  ADD COLUMN IF NOT EXISTS `LOGO_URL_DEPARTAMENTOS` LONGTEXT DEFAULT NULL AFTER `CODIGO_DEPARTAMENTOS`;
+
+ALTER TABLE `UNIDADES`
+  ADD COLUMN IF NOT EXISTS `LOGO_URL_UNIDADES` LONGTEXT DEFAULT NULL AFTER `NOME_UNIDADES`;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==============================================================================

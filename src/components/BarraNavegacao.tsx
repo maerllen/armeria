@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User } from '../types';
+import { User, DEFAULT_SYSTEM_LOGO } from '../types';
 import { formatMasp } from '../utils/masks';
 import { Shield, LogOut, KeyRound, Smartphone, Monitor, Menu, X, ChevronDown } from 'lucide-react';
 import { DeviceInfo, DeviceMode } from '../utils/deviceDetection';
@@ -14,6 +14,9 @@ interface NavbarProps {
   onSetDeviceMode?: (mode: DeviceMode) => void;
   isMobileMenuOpen?: boolean;
   onToggleMobileMenu?: () => void;
+  logoUrl?: string;
+  departmentName?: string;
+  unitName?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -23,7 +26,10 @@ export const Navbar: React.FC<NavbarProps> = ({
   deviceInfo,
   onSetDeviceMode,
   isMobileMenuOpen,
-  onToggleMobileMenu
+  onToggleMobileMenu,
+  logoUrl,
+  departmentName,
+  unitName
 }) => {
   const [showDeviceMenu, setShowDeviceMenu] = useState(false);
 
@@ -35,12 +41,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         return 'bg-cyan-950/80 text-cyan-300 border-cyan-500/50';
       case 'Armeiro':
         return 'bg-amber-950/80 text-amber-300 border-amber-500/50';
+      case 'Explosivista':
+        return 'bg-rose-950/80 text-rose-300 border-rose-500/50';
       default:
         return 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
     }
   };
 
   const isMobile = deviceInfo?.isMobile ?? false;
+  const activeLogo = (logoUrl && logoUrl.trim()) ? logoUrl.trim() : DEFAULT_SYSTEM_LOGO;
 
   return (
     <header className="glass border-b border-slate-800/80 text-slate-100 sticky top-0 z-30 shadow-2xl backdrop-blur-md print:hidden">
@@ -61,9 +70,15 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <div className="shrink-0 flex items-center justify-center">
             <img
-              src="/assets/aistudio/Emblema_COE_com_Espada_Central_ea3304f9.png"
-              alt="COE PCMG"
+              src={activeLogo}
+              alt="Logo do Sistema"
               className="w-10 h-10 object-contain rounded-full bg-slate-950 p-0.5 border border-amber-500/40 shadow-md shadow-amber-500/10"
+              onError={(e) => {
+                // If custom logo fails to load, gracefully fallback to default
+                if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
+                  e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
+                }
+              }}
             />
           </div>
           <div>
@@ -73,8 +88,8 @@ export const Navbar: React.FC<NavbarProps> = ({
                 POLÍCIA CIVIL
               </span>
             </div>
-            <p className="text-[11px] text-slate-400 hidden sm:block font-sans">
-              Gestão de Materiais Bélicos • COE PCMG
+            <p className="text-[11px] text-slate-400 hidden sm:block font-sans truncate max-w-[320px]">
+              Gestão de Materiais Bélicos {unitName ? `• ${unitName}` : departmentName ? `• ${departmentName}` : ''}
             </p>
           </div>
         </div>

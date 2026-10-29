@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, UserCargo, Department, Unit, Course } from '../types';
+import { User, UserCargo, Department, Unit, Course, getSystemLogo, DEFAULT_SYSTEM_LOGO } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
 import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette } from 'lucide-react';
@@ -89,8 +89,17 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
       {/* Module Title Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">
-          <div className="p-3.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-2xl">
-            <UserIcon className="w-8 h-8" />
+          <div className="relative shrink-0">
+            <img
+              src={getSystemLogo(unit, dept)}
+              alt="Logo da Unidade / Departamento"
+              className="w-14 h-14 object-contain rounded-2xl bg-slate-950 p-1 border border-amber-500/30 shadow-md shadow-amber-500/5"
+              onError={(e) => {
+                if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
+                  e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
+                }
+              }}
+            />
           </div>
           <div>
             <h1 className="text-2xl font-bold text-slate-100">{activeUser.name}</h1>

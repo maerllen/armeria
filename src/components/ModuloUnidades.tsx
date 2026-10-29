@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { User, Department, Unit } from '../types';
+import { User, Department, Unit, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../types';
 import { storage } from '../services/storage';
-import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building } from 'lucide-react';
+import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 
 interface UnitModuleProps {
@@ -28,8 +28,10 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   // Form states
   const [deptName, setDeptName] = useState('');
   const [deptCode, setDeptCode] = useState('');
+  const [deptLogoUrl, setDeptLogoUrl] = useState('');
   const [unitName, setUnitName] = useState('');
   const [selectedDeptId, setSelectedDeptId] = useState('');
+  const [unitLogoUrl, setUnitLogoUrl] = useState('');
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -37,6 +39,25 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
   const isPolicial = currentUser.role === 'Policial';
+
+  // Helper for reading image files as Base64 Data URL
+  const handleImageUpload = (file: File, setter: (val: string) => void) => {
+    if (!file.type.startsWith('image/')) {
+      setErrorMsg('Por favor, selecione um arquivo de imagem válido (PNG, JPG, SVG, WebP).');
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      setErrorMsg('A imagem deve ter no máximo 2MB.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      if (typeof event.target?.result === 'string') {
+        setter(event.target.result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   // Filter departments & units based on user profile
   const visibleDepts = isGeral
@@ -56,10 +77,12 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
       setEditingDept(dept);
       setDeptName(dept.name);
       setDeptCode(dept.code);
+      setDeptLogoUrl(dept.logoUrl || '');
     } else {
       setEditingDept(null);
       setDeptName('');
       setDeptCode('');
+      setDeptLogoUrl('');
     }
     setShowDeptModal(true);
   };
@@ -71,10 +94,10 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
     try {
       if (editingDept) {
-        await storage.updateDepartment(editingDept.id, deptName.trim(), deptCode.trim());
+        await storage.updateDepartment(editingDept.id, deptName.trim(), deptCode.trim(), deptLogoUrl.trim() || undefined);
         setSuccessMsg('Departamento atualizado com sucesso.');
       } else {
-        await storage.addDepartment({ name: deptName.trim(), code: deptCode.trim() });
+        await storage.addDepartment({ name: deptName.trim(), code: deptCode.trim(), logoUrl: deptLogoUrl.trim() || undefined });
         setSuccessMsg('Novo departamento cadastrado com sucesso.');
       }
       setShowDeptModal(false);
@@ -99,11 +122,13 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
       setEditingUnit(unit);
       setUnitName(unit.name);
       setSelectedDeptId(unit.departmentId);
+      setUnitLogoUrl(unit.logoUrl || '');
     } else {
       setEditingUnit(null);
       setUnitName('');
       // If Admin or Armeiro, auto select their department
       setSelectedDeptId(isAdminOrArmeiro ? currentUser.departmentId : (departments[0]?.id || ''));
+      setUnitLogoUrl('');
     }
     setShowUnitModal(true);
   };
@@ -120,10 +145,10 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
     try {
       if (editingUnit) {
-        await storage.updateUnit(editingUnit.id, unitName.trim(), selectedDeptId);
+        await storage.updateUnit(editingUnit.id, unitName.trim(), selectedDeptId, unitLogoUrl.trim() || undefined);
         setSuccessMsg('Unidade atualizada com sucesso.');
       } else {
-        await storage.addUnit({ name: unitName.trim(), departmentId: selectedDeptId });
+        await storage.addUnit({ name: unitName.trim(), departmentId: selectedDeptId, logoUrl: unitLogoUrl.trim() || undefined });
         setSuccessMsg('Nova unidade cadastrada com sucesso.');
       }
       setShowUnitModal(false);
@@ -266,16 +291,34 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   onClick={() => toggleDeptExpand(dept.id)}
                   className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
                 >
-                  <div className="flex items-center space-x-3">
-                    <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
-                      <Building className="w-5 h-5" />
+                  <div className="flex items-center space-x-3.5">
+                    <div className="relative shrink-0">
+                      <img
+                        src={dept.logoUrl && dept.logoUrl.trim() ? dept.logoUrl.trim() : DEFAULT_SYSTEM_LOGO}
+                        alt={`Logo ${dept.name}`}
+                        className="w-11 h-11 object-contain rounded-xl bg-slate-950 p-1 border border-amber-500/30 shadow-md shadow-amber-500/5"
+                        onError={(e) => {
+                          if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
+                            e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
+                          }
+                        }}
+                      />
                     </div>
                     <div>
-                      <div className="flex items-center space-x-2">
+                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                         <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
                           {dept.code}
                         </span>
                         <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
+                        {dept.logoUrl && dept.logoUrl.trim() ? (
+                          <span className="text-[10px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-medium">
+                            Logo Própria
+                          </span>
+                        ) : (
+                          <span className="text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700 font-medium">
+                            Logo Padrão
+                          </span>
+                        )}
                       </div>
                       <p className="text-[11px] text-slate-400 mt-0.5">
                         {deptUnits.length} unidade(s) cadastrada(s)
@@ -321,6 +364,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                         {deptUnits.map((unit) => {
                           const unitUserCount = storage.getAllUsers().filter(u => u.unitId === unit.id).length;
                           const unitWeaponCount = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.unitId === unit.id).length;
+                          const effectiveUnitLogo = getSystemLogo(unit, dept);
 
                           return (
                             <div
@@ -329,7 +373,28 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                             >
                               <div>
                                 <div className="flex items-start justify-between">
-                                  <h3 className="font-bold text-slate-200 text-sm">{unit.name}</h3>
+                                  <div className="flex items-center space-x-2.5">
+                                    <img
+                                      src={effectiveUnitLogo}
+                                      alt={`Logo ${unit.name}`}
+                                      className="w-9 h-9 object-contain rounded-lg bg-slate-950 p-1 border border-slate-700 shadow-sm shrink-0"
+                                      onError={(e) => {
+                                        if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
+                                          e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
+                                        }
+                                      }}
+                                    />
+                                    <div>
+                                      <h3 className="font-bold text-slate-200 text-sm">{unit.name}</h3>
+                                      <span className="text-[10px] text-slate-400 block">
+                                        {unit.logoUrl && unit.logoUrl.trim()
+                                          ? '★ Logo Exclusiva'
+                                          : dept.logoUrl && dept.logoUrl.trim()
+                                          ? '↳ Herdada do Depto'
+                                          : '↳ Logo Padrão'}
+                                      </span>
+                                    </div>
+                                  </div>
                                   {!isPolicial && (
                                     <div className="flex items-center space-x-1">
                                       <button
@@ -351,7 +416,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                                     </div>
                                   )}
                                 </div>
-                                <p className="text-[11px] text-slate-400 mt-1">
+                                <p className="text-[11px] text-slate-400 mt-2">
                                   Pertence a: <span className="text-slate-300 font-semibold">{dept.name}</span>
                                 </p>
                               </div>
@@ -407,6 +472,51 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
                   required
                 />
+              </div>
+
+              {/* Logo do Departamento */}
+              <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                  Logo do Departamento (Opcional)
+                </label>
+                <p className="text-[11px] text-slate-400">
+                  Caso não envie uma imagem, será utilizada a <strong>Logo Padrão</strong> (Distintivo PCMG).
+                </p>
+
+                <div className="flex items-center space-x-3 pt-1">
+                  <div className="relative shrink-0">
+                    <img
+                      src={deptLogoUrl && deptLogoUrl.trim() ? deptLogoUrl.trim() : DEFAULT_SYSTEM_LOGO}
+                      alt="Prévia Logo"
+                      className="w-14 h-14 object-contain rounded-xl bg-slate-900 p-1 border border-amber-500/40 shadow-inner"
+                    />
+                  </div>
+                  <div className="flex-1 space-y-1.5">
+                    <label className="inline-flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer transition">
+                      <Upload className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Selecionar Imagem...</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleImageUpload(file, setDeptLogoUrl);
+                        }}
+                      />
+                    </label>
+
+                    {deptLogoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setDeptLogoUrl('')}
+                        className="block text-[11px] text-red-400 hover:text-red-300 underline"
+                      >
+                        Remover Logo (Usar Logo Padrão)
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
 
               <div className="pt-2 flex justify-end space-x-3">
@@ -473,6 +583,67 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   required
                 />
               </div>
+
+              {/* Logo da Unidade */}
+              {(() => {
+                const currentDept = departments.find(d => d.id === selectedDeptId);
+                const inheritedLogo = currentDept?.logoUrl && currentDept.logoUrl.trim()
+                  ? currentDept.logoUrl.trim()
+                  : DEFAULT_SYSTEM_LOGO;
+                const activeUnitPreview = unitLogoUrl && unitLogoUrl.trim()
+                  ? unitLogoUrl.trim()
+                  : inheritedLogo;
+
+                return (
+                  <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl space-y-2.5">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Logo da Unidade (Opcional)
+                    </label>
+                    <p className="text-[11px] text-slate-400">
+                      Se não tiver logo própria, herdará a logo do <strong>{currentDept?.name || 'Departamento'}</strong>, ou a <strong>Logo Padrão</strong>.
+                    </p>
+
+                    <div className="flex items-center space-x-3 pt-1">
+                      <div className="relative shrink-0">
+                        <img
+                          src={activeUnitPreview}
+                          alt="Prévia Logo da Unidade"
+                          className="w-14 h-14 object-contain rounded-xl bg-slate-900 p-1 border border-amber-500/40 shadow-inner"
+                        />
+                      </div>
+                      <div className="flex-1 space-y-1.5">
+                        <label className="inline-flex items-center space-x-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-lg border border-slate-700 cursor-pointer transition">
+                          <Upload className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Selecionar Imagem...</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleImageUpload(file, setUnitLogoUrl);
+                            }}
+                          />
+                        </label>
+
+                        {unitLogoUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setUnitLogoUrl('')}
+                            className="block text-[11px] text-red-400 hover:text-red-300 underline"
+                          >
+                            Remover Logo (Herdar do Departamento)
+                          </button>
+                        ) : (
+                          <span className="block text-[10px] text-slate-400 italic">
+                            {currentDept?.logoUrl ? 'Atualmente herdando logo do departamento' : 'Atualmente usando logo padrão'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2 flex justify-end space-x-3">
                 <button

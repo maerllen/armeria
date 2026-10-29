@@ -396,7 +396,7 @@ class StorageService {
     return this.state.departments.filter(d => d.id === actor.departmentId);
   }
 
-  public async addDepartment(data: { name: string; code: string }): Promise<Department> {
+  public async addDepartment(data: { name: string; code: string; logoUrl?: string }): Promise<Department> {
     const res = await fetch('/api/departments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -408,11 +408,11 @@ class StorageService {
     return dept;
   }
 
-  public async updateDepartment(id: string, name: string, code: string): Promise<Department> {
+  public async updateDepartment(id: string, name: string, code: string, logoUrl?: string): Promise<Department> {
     const res = await fetch(`/api/departments/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, code, actor: this.state.currentUser })
+      body: JSON.stringify({ name, code, logoUrl, actor: this.state.currentUser })
     });
     const dept = await res.json();
     if (!res.ok) throw new Error(dept.error || 'Erro ao atualizar departamento.');
@@ -447,7 +447,7 @@ class StorageService {
     return this.state.units.filter(u => u.id === actor.unitId);
   }
 
-  public async addUnit(data: { name: string; departmentId: string }): Promise<Unit> {
+  public async addUnit(data: { name: string; departmentId: string; logoUrl?: string }): Promise<Unit> {
     const res = await fetch('/api/units', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -459,11 +459,11 @@ class StorageService {
     return unit;
   }
 
-  public async updateUnit(id: string, name: string, departmentId: string): Promise<Unit> {
+  public async updateUnit(id: string, name: string, departmentId: string, logoUrl?: string): Promise<Unit> {
     const res = await fetch(`/api/units/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, departmentId, actor: this.state.currentUser })
+      body: JSON.stringify({ name, departmentId, logoUrl, actor: this.state.currentUser })
     });
     const unit = await res.json();
     if (!res.ok) throw new Error(unit.error || 'Erro ao atualizar unidade.');

@@ -218,7 +218,7 @@ apiRouter.post('/auth/change-password', async (req: Request, res: Response) => {
 apiRouter.get('/departments', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT ID_DEPARTAMENTOS as id, NOME_DEPARTAMENTOS as name, CODIGO_DEPARTAMENTOS as code, DATA_CRIACAO_DEPARTAMENTOS as createdAt FROM DEPARTAMENTOS ORDER BY DATA_CRIACAO_DEPARTAMENTOS ASC');
+    const [rows]: any = await pool.query('SELECT ID_DEPARTAMENTOS as id, NOME_DEPARTAMENTOS as name, CODIGO_DEPARTAMENTOS as code, LOGO_URL_DEPARTAMENTOS as logoUrl, DATA_CRIACAO_DEPARTAMENTOS as createdAt FROM DEPARTAMENTOS ORDER BY DATA_CRIACAO_DEPARTAMENTOS ASC');
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -227,16 +227,16 @@ apiRouter.get('/departments', async (req: Request, res: Response) => {
 
 apiRouter.post('/departments', async (req: Request, res: Response) => {
   try {
-    const { name, code, actor } = req.body;
+    const { name, code, logoUrl, actor } = req.body;
     const pool = getPool();
     const id = `dept-${Date.now()}`;
     await pool.query(
-      'INSERT INTO DEPARTAMENTOS (ID_DEPARTAMENTOS, NOME_DEPARTAMENTOS, CODIGO_DEPARTAMENTOS, DATA_CRIACAO_DEPARTAMENTOS) VALUES (?, ?, ?, NOW())',
-      [id, name, code || '']
+      'INSERT INTO DEPARTAMENTOS (ID_DEPARTAMENTOS, NOME_DEPARTAMENTOS, CODIGO_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS, DATA_CRIACAO_DEPARTAMENTOS) VALUES (?, ?, ?, ?, NOW())',
+      [id, name, code || '', logoUrl || null]
     );
 
     await insertAuditLog('Unidade', 'Criar', `Criado departamento: ${name} (${code})`, actor, req.ip);
-    return res.json({ id, name, code, createdAt: new Date().toISOString() });
+    return res.json({ id, name, code, logoUrl: logoUrl || undefined, createdAt: new Date().toISOString() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -245,12 +245,15 @@ apiRouter.post('/departments', async (req: Request, res: Response) => {
 apiRouter.put('/departments/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, code, actor } = req.body;
+    const { name, code, logoUrl, actor } = req.body;
     const pool = getPool();
-    await pool.query('UPDATE DEPARTAMENTOS SET NOME_DEPARTAMENTOS = ?, CODIGO_DEPARTAMENTOS = ? WHERE ID_DEPARTAMENTOS = ?', [name, code, id]);
+    await pool.query(
+      'UPDATE DEPARTAMENTOS SET NOME_DEPARTAMENTOS = ?, CODIGO_DEPARTAMENTOS = ?, LOGO_URL_DEPARTAMENTOS = ? WHERE ID_DEPARTAMENTOS = ?',
+      [name, code, logoUrl !== undefined ? (logoUrl || null) : null, id]
+    );
 
     await insertAuditLog('Unidade', 'Editar', `Atualizado departamento: ${name}`, actor, req.ip);
-    return res.json({ id, name, code });
+    return res.json({ id, name, code, logoUrl: logoUrl || undefined });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -288,7 +291,7 @@ apiRouter.delete('/departments/:id', async (req: Request, res: Response) => {
 apiRouter.get('/units', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT ID_UNIDADES as id, NOME_UNIDADES as name, DEPARTAMENTO_ID_UNIDADES as departmentId, DATA_CRIACAO_UNIDADES as createdAt FROM UNIDADES ORDER BY DATA_CRIACAO_UNIDADES ASC');
+    const [rows]: any = await pool.query('SELECT ID_UNIDADES as id, NOME_UNIDADES as name, DEPARTAMENTO_ID_UNIDADES as departmentId, LOGO_URL_UNIDADES as logoUrl, DATA_CRIACAO_UNIDADES as createdAt FROM UNIDADES ORDER BY DATA_CRIACAO_UNIDADES ASC');
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -297,16 +300,16 @@ apiRouter.get('/units', async (req: Request, res: Response) => {
 
 apiRouter.post('/units', async (req: Request, res: Response) => {
   try {
-    const { name, departmentId, actor } = req.body;
+    const { name, departmentId, logoUrl, actor } = req.body;
     const pool = getPool();
     const id = `unit-${Date.now()}`;
     await pool.query(
-      'INSERT INTO UNIDADES (ID_UNIDADES, DEPARTAMENTO_ID_UNIDADES, NOME_UNIDADES, DATA_CRIACAO_UNIDADES) VALUES (?, ?, ?, NOW())',
-      [id, departmentId || null, name]
+      'INSERT INTO UNIDADES (ID_UNIDADES, DEPARTAMENTO_ID_UNIDADES, NOME_UNIDADES, LOGO_URL_UNIDADES, DATA_CRIACAO_UNIDADES) VALUES (?, ?, ?, ?, NOW())',
+      [id, departmentId || null, name, logoUrl || null]
     );
 
     await insertAuditLog('Unidade', 'Criar', `Criada unidade: ${name}`, actor, req.ip);
-    return res.json({ id, name, departmentId, createdAt: new Date().toISOString() });
+    return res.json({ id, name, departmentId, logoUrl: logoUrl || undefined, createdAt: new Date().toISOString() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -315,16 +318,20 @@ apiRouter.post('/units', async (req: Request, res: Response) => {
 apiRouter.put('/units/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, departmentId, actor } = req.body;
+    const { name, departmentId, logoUrl, actor } = req.body;
     const pool = getPool();
-    await pool.query('UPDATE UNIDADES SET NOME_UNIDADES = ?, DEPARTAMENTO_ID_UNIDADES = ? WHERE ID_UNIDADES = ?', [name, departmentId || null, id]);
+    await pool.query(
+      'UPDATE UNIDADES SET NOME_UNIDADES = ?, DEPARTAMENTO_ID_UNIDADES = ?, LOGO_URL_UNIDADES = ? WHERE ID_UNIDADES = ?',
+      [name, departmentId || null, logoUrl !== undefined ? (logoUrl || null) : null, id]
+    );
 
     await insertAuditLog('Unidade', 'Editar', `Atualizada unidade: ${name}`, actor, req.ip);
-    return res.json({ id, name, departmentId });
+    return res.json({ id, name, departmentId, logoUrl: logoUrl || undefined });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
+
 
 apiRouter.delete('/units/:id', async (req: Request, res: Response) => {
   try {

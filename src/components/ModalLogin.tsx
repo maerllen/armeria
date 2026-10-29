@@ -68,9 +68,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-6 border-b border-slate-800 text-center relative">
           <div className="inline-flex mb-3">
             <img
-              src="/assets/aistudio/Emblema_COE_com_Espada_Central_ea3304f9.png"
-              alt="COE PCMG - Armaria"
-              className="w-24 h-24 object-contain drop-shadow-xl mx-auto rounded-full bg-slate-950/80 p-1 border border-slate-700/80"
+              src="/assets/aistudio/Distintivo_da_Pol_cia_Civil_de_Minas_Gerais_15bab05c.png"
+              alt="Polícia Civil de Minas Gerais - Armaria"
+              className="w-24 h-28 object-contain drop-shadow-xl mx-auto"
             />
           </div>
           <h2 className="text-2xl font-black text-slate-100 font-mono tracking-wider">ARMARIA</h2>
