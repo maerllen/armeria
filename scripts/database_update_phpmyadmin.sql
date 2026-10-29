@@ -227,6 +227,8 @@ CREATE TABLE IF NOT EXISTS `MOVIMENTACOES_EXPLOSIVOS` (
   `RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL,
   `RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL,
   `LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(255) DEFAULT NULL,
+  `COFRE_ID_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL,
+  `LOCAL_COFRE_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(255) DEFAULT NULL,
   `DATA_MOVIMENTACAO_EXPLOSIVOS` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) NOT NULL,
   `UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) NOT NULL,
@@ -234,8 +236,15 @@ CREATE TABLE IF NOT EXISTS `MOVIMENTACOES_EXPLOSIVOS` (
   PRIMARY KEY (`ID_MOVIMENTACOES_EXPLOSIVOS`),
   KEY `idx_mov_exp_item` (`EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS`),
   KEY `idx_mov_exp_tipo` (`TIPO_MOVIMENTACAO_EXPLOSIVOS`),
+  KEY `idx_mov_exp_cofre` (`COFRE_ID_MOVIMENTACOES_EXPLOSIVOS`),
   KEY `idx_mov_exp_data` (`DATA_MOVIMENTACAO_EXPLOSIVOS`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Migração para instalações existentes de MOVIMENTACOES_EXPLOSIVOS:
+ALTER TABLE `MOVIMENTACOES_EXPLOSIVOS`
+  MODIFY COLUMN `TIPO_MOVIMENTACAO_EXPLOSIVOS` VARCHAR(64) NOT NULL DEFAULT 'Saída',
+  ADD COLUMN IF NOT EXISTS `COFRE_ID_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(64) DEFAULT NULL AFTER `LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS`,
+  ADD COLUMN IF NOT EXISTS `LOCAL_COFRE_MOVIMENTACOES_EXPLOSIVOS` VARCHAR(255) DEFAULT NULL AFTER `COFRE_ID_MOVIMENTACOES_EXPLOSIVOS`;
 
 -- ------------------------------------------------------------------------------
 -- 10. TABELA DE TIPOS DE EXPLOSIVOS (`TIPOS_EXPLOSIVOS`)
@@ -257,7 +266,14 @@ INSERT IGNORE INTO `TIPOS_EXPLOSIVOS` (`ID_TIPOS_EXPLOSIVOS`, `NOME_TIPOS_EXPLOS
 ('te-3', 'Iniciador / Detonador', 'Acessórios de iniciação sensíveis (Espoletas elétricas, não elétricas, acendedores)'),
 ('te-4', 'Granada / Dispositivo Tático', 'Artefatos manufaturados com carga de efeito moral, lacrimogêneo ou fragmentação'),
 ('te-5', 'Acessório de Demolição / Linha de Fogo', 'Cordel detonante, estopim lento, boosters, tubos de choque, retardadores'),
-('te-6', 'Material Pirotécnico / Sinalização', 'Foguetes de sinalização, artifícios iluminativos e pirotécnicos');
+('te-6', 'Material Pirotécnico / Sinalização', 'Foguetes de sinalização, artifícios iluminativos e pirotécnicos'),
+('te-default-0', 'Alto Explosivo (Detonante)', 'Explosivos secundários de alta velocidade de detonação'),
+('te-default-1', 'Baixo Explosivo (Deflagrante / Pólvora)', 'Substâncias propelentes de queima subsônica'),
+('te-default-2', 'Iniciador / Detonador / Acessório', 'Dispositivos de acionamento, espoletas e estopins'),
+('te-default-3', 'Granada / Artefato Não Letal / Tático', 'Dispositivos de efeito moral, fumígenos e lacrimogêneos'),
+('te-default-4', 'Acessório de Demolição / Cordel Detonante', 'Cordéis detonantes e linhas de fogo de demolição'),
+('te-default-5', 'Pirotécnico / Iluminação / Sinalização', 'Sinalizadores e artifícios pirotécnicos'),
+('te-default-6', 'Carga Oca / Arrombamento Tático (Breaching)', 'Cargas moldadas para entrada tática e corte');
 
 -- ------------------------------------------------------------------------------
 -- 11. TABELA DE SUBTIPOS DE EXPLOSIVOS (`SUBTIPOS_EXPLOSIVOS`)

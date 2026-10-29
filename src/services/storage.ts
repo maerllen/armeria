@@ -2138,6 +2138,17 @@ class StorageService {
     return filtered;
   }
 
+  public getMovimentacoesExplosivosByVault(vaultIdOrCode: string): MovimentacaoExplosivo[] {
+    const list = this.state.movimentacoesExplosivos || [];
+    if (!vaultIdOrCode) return list;
+    const term = vaultIdOrCode.toLowerCase().trim();
+    return list.filter(m => 
+      (m.cofreId && m.cofreId.toLowerCase() === term) ||
+      (m.localCofre && m.localCofre.toLowerCase() === term) ||
+      (m.localOrigemDestino && m.localOrigemDestino.toLowerCase().includes(term))
+    );
+  }
+
   public async saveMovimentacaoExplosivo(mov: Partial<MovimentacaoExplosivo>): Promise<{ success: boolean; id?: string; newQuantity?: number; error?: string }> {
     try {
       const res = await fetch('/api/movimentacoes-explosivos', {
@@ -2160,6 +2171,8 @@ class StorageService {
         responsavelMasp: mov.responsavelMasp || '',
         responsavelId: mov.responsavelId || '',
         localOrigemDestino: mov.localOrigemDestino || '',
+        cofreId: mov.cofreId || '',
+        localCofre: mov.localCofre || '',
         dataMovimentacao: mov.dataMovimentacao || new Date().toISOString(),
         departmentId: mov.departmentId || '',
         unitId: mov.unitId || '',

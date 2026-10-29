@@ -217,6 +217,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [colFilterMotivo, setColFilterMotivo] = useState('');
   const [colFilterPolicial, setColFilterPolicial] = useState('');
   const [colFilterLocal, setColFilterLocal] = useState('');
+  const [colFilterLocalCofre, setColFilterLocalCofre] = useState('');
 
   // Sync with storage on mount or refresh
   const reloadData = async () => {
@@ -406,9 +407,18 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       if (colFilterLocal && !(m.localOrigemDestino || '').toLowerCase().includes(colFilterLocal.toLowerCase())) {
         return false;
       }
+      // Column filter - Local no Cofre / Paiol
+      if (colFilterLocalCofre) {
+        const cTerm = colFilterLocalCofre.toLowerCase().trim();
+        const matchesCofre = 
+          (m.localCofre || '').toLowerCase().includes(cTerm) || 
+          (m.cofreId || '').toLowerCase().includes(cTerm) ||
+          (m.localOrigemDestino || '').toLowerCase().includes(cTerm);
+        if (!matchesCofre) return false;
+      }
       return true;
     });
-  }, [movimentacoes, selectedDeptId, selectedUnitId, colFilterData, colFilterTipo, colFilterExplosivo, colFilterQtd, colFilterMotivo, colFilterPolicial, colFilterLocal]);
+  }, [movimentacoes, selectedDeptId, selectedUnitId, colFilterData, colFilterTipo, colFilterExplosivo, colFilterQtd, colFilterMotivo, colFilterPolicial, colFilterLocal, colFilterLocalCofre]);
 
   // Handlers for Explosive Type Management
   const handleSaveTipo = async (e: React.FormEvent) => {
@@ -851,6 +861,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         responsavelMasp: respMasp,
         responsavelId: respId,
         localOrigemDestino: movOrigemDestino.trim(),
+        cofreId: targetItem.cofreId,
+        localCofre: targetItem.localArmazenamento,
         dataMovimentacao: new Date().toISOString(),
         departmentId: targetItem.departmentId,
         unitId: targetItem.unitId,
@@ -870,7 +882,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       await storage.saveExplosivo({
         ...targetItem,
         quantidade: newQty,
-        status: newQty === 0 ? 'Descartado' : targetItem.status
+        status: newQty === 0 ? 'Destruição' : targetItem.status
       });
 
       setShowMovementModal(false);
@@ -1467,9 +1479,20 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       <Vault className="w-4 h-4 text-cyan-400 shrink-0" />
                       <span className="text-[11px] font-semibold text-slate-400">Local do Cofre:</span>
                     </div>
-                    <span className="text-xs font-black font-mono text-cyan-300 tracking-wide bg-cyan-950/80 px-2 py-0.5 rounded-lg border border-cyan-700/50">
-                      {item.localArmazenamento || 'PAIOL-01'}
-                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setColFilterLocalCofre(item.localArmazenamento || '');
+                        setIsHistoryExpanded(true);
+                        const el = document.getElementById('secao-historico-movimentacoes');
+                        if (el) el.scrollIntoView({ behavior: 'smooth' });
+                      }}
+                      className="text-xs font-black font-mono text-cyan-300 tracking-wide bg-cyan-950/80 hover:bg-cyan-900 px-2 py-0.5 rounded-lg border border-cyan-700/50 flex items-center space-x-1.5 transition cursor-pointer"
+                      title="Ver histórico geral de todas as movimentações deste local no cofre"
+                    >
+                      <span>{item.localArmazenamento || 'PAIOL-01'}</span>
+                      <History className="w-3 h-3 text-cyan-400" />
+                    </button>
                   </div>
 
                   {/* Secondary Details Grid */}
@@ -1567,7 +1590,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       )}
 
       {/* Histórico Geral de Movimentação de Explosivos (Inicia oculto igual aos cofres e munições) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
+      <div id="secao-historico-movimentacoes" className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
         
         {/* Accordion Header (idêntico à div dos cofres e munições) */}
         <div
@@ -1612,7 +1635,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 Filtre por qualquer coluna abaixo para localizar registros específicos:
               </div>
               <div className="flex items-center space-x-2">
-                {(colFilterData || colFilterTipo || colFilterExplosivo || colFilterQtd || colFilterMotivo || colFilterPolicial || colFilterLocal) && (
+                {(colFilterData || colFilterTipo || colFilterExplosivo || colFilterQtd || colFilterMotivo || colFilterPolicial || colFilterLocal || colFilterLocalCofre) && (
                   <button
                     type="button"
                     onClick={() => {
@@ -1623,6 +1646,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       setColFilterMotivo('');
                       setColFilterPolicial('');
                       setColFilterLocal('');
+                      setColFilterLocalCofre('');
                     }}
                     className="text-xs text-amber-400 hover:underline font-medium flex items-center space-x-1"
                   >
@@ -1698,6 +1722,18 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                         />
                       </div>
                     </th>
+                    <th className="py-2.5 px-3 min-w-[120px]">
+                      <div className="space-y-1">
+                        <span>Local no Cofre</span>
+                        <input
+                          type="text"
+                          value={colFilterLocalCofre}
+                          onChange={(e) => setColFilterLocalCofre(e.target.value)}
+                          placeholder="Cofre/Paiol..."
+                          className="w-full px-2 py-1 bg-slate-900 border border-slate-700 rounded text-[11px] text-slate-200 placeholder-slate-500 font-normal outline-none"
+                        />
+                      </div>
+                    </th>
                     <th className="py-2.5 px-3 min-w-[170px]">
                       <div className="space-y-1">
                         <span>Finalidade / Motivo</span>
@@ -1722,7 +1758,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                         />
                       </div>
                     </th>
-                    <th className="py-2.5 px-3 min-w-[140px]">
+                    <th className="py-2.5 px-3 min-w-[130px]">
                       <div className="space-y-1">
                         <span>Origem / Destino</span>
                         <input
@@ -1734,20 +1770,24 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                         />
                       </div>
                     </th>
+                    <th className="py-2.5 px-3 text-center min-w-[90px]">
+                      <span>Histórico</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800 font-mono">
                   {filteredMovements.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="text-center py-8 text-slate-500 italic font-sans">
+                      <td colSpan={9} className="text-center py-8 text-slate-500 italic font-sans">
                         Nenhuma movimentação de explosivos encontrada para os critérios selecionados.
                       </td>
                     </tr>
                   ) : (
                     filteredMovements.map(m => {
                       const isEntry = m.tipoMovimentacao === 'Entrada';
-                      const isConsumption = m.tipoMovimentacao === 'Consumo/Treinamento';
-                      const isDestruction = m.tipoMovimentacao === 'Descarte/Destruição';
+                      const isConsumption = m.tipoMovimentacao === 'Consumo/Treinamento' || m.tipoMovimentacao === 'Consumo Operacional';
+                      const isDestruction = m.tipoMovimentacao === 'Descarte/Destruição' || m.tipoMovimentacao === 'Destruição Técnica';
+                      const linkedExp = explosivos.find(e => e.id === m.explosivoId);
 
                       return (
                         <tr key={m.id} className="hover:bg-slate-800/40 transition">
@@ -1775,6 +1815,15 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                           <td className="py-3 px-3 text-center font-bold text-amber-400">
                             {isEntry ? '+' : '-'}{m.quantidade} {m.unidadeMedida}
                           </td>
+                          <td className="py-3 px-3 font-sans">
+                            {m.localCofre ? (
+                              <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-lg bg-cyan-950/80 text-cyan-300 border border-cyan-800/60">
+                                {m.localCofre}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 text-[11px]">-</span>
+                            )}
+                          </td>
                           <td className="py-3 px-3 font-sans text-slate-300">
                             <div>{m.motivo}</div>
                             {m.observacoes && (
@@ -1791,6 +1840,35 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                           </td>
                           <td className="py-3 px-3 font-sans text-slate-400 text-[11px]">
                             {m.localOrigemDestino || '-'}
+                          </td>
+                          <td className="py-3 px-3 text-center font-sans">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (linkedExp) {
+                                  setHistoryItem(linkedExp);
+                                } else {
+                                  setHistoryItem({
+                                    id: m.explosivoId,
+                                    nome: m.nomeExplosivo || m.explosivoNome || 'Material Explosivo',
+                                    tipo: 'Material Explosivo',
+                                    quantidade: m.quantidade,
+                                    unidadeMedida: m.unidadeMedida,
+                                    lote: '-',
+                                    fabricante: '-',
+                                    dataFabricacao: '',
+                                    dataValidade: '',
+                                    classeRisco: '',
+                                    localArmazenamento: m.localCofre || m.localOrigemDestino || 'Paiol',
+                                    status: 'Operacional'
+                                  });
+                                }
+                              }}
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 transition"
+                              title="Visualizar histórico individual deste material"
+                            >
+                              <History className="w-4 h-4" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -2737,6 +2815,27 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                       <ArrowRightLeft className="w-3.5 h-3.5" />
                       <span>Nova Saída / Consumo</span>
                     </button>
+
+                    {historyItem.localArmazenamento && (
+                      <button
+                        onClick={() => {
+                          const local = historyItem.localArmazenamento;
+                          setHistoryItem(null);
+                          setColFilterLocalCofre(local);
+                          setColFilterExplosivo('');
+                          setIsHistoryExpanded(true);
+                          setTimeout(() => {
+                            const el = document.getElementById('secao-historico-movimentacoes');
+                            if (el) el.scrollIntoView({ behavior: 'smooth' });
+                          }, 100);
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-400 text-xs font-bold border border-cyan-500/30 transition flex items-center space-x-1"
+                        title="Ver todas as movimentações registradas neste local do cofre"
+                      >
+                        <Vault className="w-3.5 h-3.5" />
+                        <span>Ver Movimentações do Local ({historyItem.localArmazenamento})</span>
+                      </button>
+                    )}
                   </div>
                 </div>
               )}

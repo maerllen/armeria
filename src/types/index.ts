@@ -825,6 +825,8 @@ export interface MovimentacaoExplosivo {
   responsavelMasp?: string;
   responsavelId?: string;
   localOrigemDestino?: string;
+  cofreId?: string;
+  localCofre?: string;
   dataMovimentacao: string;
   departmentId?: string;
   unitId?: string;

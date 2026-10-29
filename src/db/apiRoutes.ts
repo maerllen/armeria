@@ -6505,41 +6505,49 @@ apiRouter.delete('/explosivos/:id', async (req: Request, res: Response) => {
 apiRouter.get('/movimentacoes-explosivos', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const { explosivoId, departamentoId, unidadeId } = req.query;
+    const { explosivoId, departamentoId, unidadeId, cofreId } = req.query;
     let query = `
       SELECT 
-        ID_MOVIMENTACOES_EXPLOSIVOS as id,
-        EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS as explosivoId,
-        NOME_EXPLOSIVO_MOVIMENTACOES_EXPLOSIVOS as explosivoNome,
-        TIPO_MOVIMENTACAO_EXPLOSIVOS as tipoMovimentacao,
-        QUANTIDADE_MOVIMENTACOES_EXPLOSIVOS as quantidade,
-        UNIDADE_MEDIDA_MOVIMENTACOES_EXPLOSIVOS as unidadeMedida,
-        MOTIVO_MOVIMENTACOES_EXPLOSIVOS as motivo,
-        RESPONSAVEL_NOME_MOVIMENTACOES_EXPLOSIVOS as responsavelNome,
-        RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS as responsavelMasp,
-        RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS as responsavelId,
-        LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS as localOrigemDestino,
-        DATA_MOVIMENTACAO_EXPLOSIVOS as dataMovimentacao,
-        DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS as departmentId,
-        UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS as unitId,
-        OBSERVACOES_MOVIMENTACOES_EXPLOSIVOS as observacoes
-      FROM MOVIMENTACOES_EXPLOSIVOS
+        m.ID_MOVIMENTACOES_EXPLOSIVOS as id,
+        m.EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS as explosivoId,
+        m.NOME_EXPLOSIVO_MOVIMENTACOES_EXPLOSIVOS as nomeExplosivo,
+        m.NOME_EXPLOSIVO_MOVIMENTACOES_EXPLOSIVOS as explosivoNome,
+        m.TIPO_MOVIMENTACAO_EXPLOSIVOS as tipoMovimentacao,
+        m.QUANTIDADE_MOVIMENTACOES_EXPLOSIVOS as quantidade,
+        m.UNIDADE_MEDIDA_MOVIMENTACOES_EXPLOSIVOS as unidadeMedida,
+        m.MOTIVO_MOVIMENTACOES_EXPLOSIVOS as motivo,
+        m.RESPONSAVEL_NOME_MOVIMENTACOES_EXPLOSIVOS as responsavelNome,
+        m.RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS as responsavelMasp,
+        m.RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS as responsavelId,
+        m.LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS as localOrigemDestino,
+        COALESCE(m.COFRE_ID_MOVIMENTACOES_EXPLOSIVOS, e.COFRE_ID_EXPLOSIVOS) as cofreId,
+        COALESCE(m.LOCAL_COFRE_MOVIMENTACOES_EXPLOSIVOS, e.LOCAL_ARMAZENAMENTO_EXPLOSIVOS) as localCofre,
+        m.DATA_MOVIMENTACAO_EXPLOSIVOS as dataMovimentacao,
+        m.DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS as departmentId,
+        m.UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS as unitId,
+        m.OBSERVACOES_MOVIMENTACOES_EXPLOSIVOS as observacoes
+      FROM MOVIMENTACOES_EXPLOSIVOS m
+      LEFT JOIN EXPLOSIVOS e ON m.EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS = e.ID_EXPLOSIVOS
       WHERE 1=1
     `;
     const params: any[] = [];
     if (explosivoId) {
-      query += ' AND EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      query += ' AND m.EXPLOSIVO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
       params.push(explosivoId);
     }
     if (departamentoId && departamentoId !== 'ALL') {
-      query += ' AND DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      query += ' AND m.DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
       params.push(departamentoId);
     }
     if (unidadeId && unidadeId !== 'ALL') {
-      query += ' AND UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
+      query += ' AND m.UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS = ?';
       params.push(unidadeId);
     }
-    query += ' ORDER BY DATA_MOVIMENTACAO_EXPLOSIVOS DESC';
+    if (cofreId && cofreId !== 'ALL') {
+      query += ' AND (m.COFRE_ID_MOVIMENTACOES_EXPLOSIVOS = ? OR m.LOCAL_COFRE_MOVIMENTACOES_EXPLOSIVOS = ? OR e.COFRE_ID_EXPLOSIVOS = ? OR e.LOCAL_ARMAZENAMENTO_EXPLOSIVOS = ?)';
+      params.push(cofreId, cofreId, cofreId, cofreId);
+    }
+    query += ' ORDER BY m.DATA_MOVIMENTACAO_EXPLOSIVOS DESC';
 
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
@@ -6567,6 +6575,8 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
       localOrigemDestino,
       dataMovimentacao,
       observacoes,
+      cofreId,
+      localCofre,
       actor
     } = req.body;
 
@@ -6585,7 +6595,7 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
     }
 
     const [expRows]: any = await pool.query(
-      'SELECT NOME_EXPLOSIVOS, QUANTIDADE_EXPLOSIVOS, UNIDADE_MEDIDA_EXPLOSIVOS, DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?',
+      'SELECT NOME_EXPLOSIVOS, QUANTIDADE_EXPLOSIVOS, UNIDADE_MEDIDA_EXPLOSIVOS, DEPARTAMENTO_ID_EXPLOSIVOS, UNIDADE_ID_EXPLOSIVOS, COFRE_ID_EXPLOSIVOS, LOCAL_ARMAZENAMENTO_EXPLOSIVOS FROM EXPLOSIVOS WHERE ID_EXPLOSIVOS = ?',
       [explosivoId]
     );
     if (!expRows || expRows.length === 0) {
@@ -6609,6 +6619,8 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
 
     const newQty = isOutflow ? Math.max(0, currentQty - qty) : currentQty + qty;
     const movId = `mve-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
+    const effectiveCofreId = cofreId || exp.COFRE_ID_EXPLOSIVOS || null;
+    const effectiveLocalCofre = localCofre || exp.LOCAL_ARMAZENAMENTO_EXPLOSIVOS || null;
 
     await pool.query(
       `INSERT INTO MOVIMENTACOES_EXPLOSIVOS (
@@ -6623,11 +6635,13 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
         RESPONSAVEL_MASP_MOVIMENTACOES_EXPLOSIVOS,
         RESPONSAVEL_ID_MOVIMENTACOES_EXPLOSIVOS,
         LOCAL_ORIGEM_DESTINO_MOVIMENTACOES_EXPLOSIVOS,
+        COFRE_ID_MOVIMENTACOES_EXPLOSIVOS,
+        LOCAL_COFRE_MOVIMENTACOES_EXPLOSIVOS,
         DATA_MOVIMENTACAO_EXPLOSIVOS,
         DEPARTAMENTO_ID_MOVIMENTACOES_EXPLOSIVOS,
         UNIDADE_ID_MOVIMENTACOES_EXPLOSIVOS,
         OBSERVACOES_MOVIMENTACOES_EXPLOSIVOS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         movId,
         explosivoId,
@@ -6640,6 +6654,8 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
         responsavelMasp?.trim() || null,
         responsavelId || null,
         localOrigemDestino?.trim() || null,
+        effectiveCofreId,
+        effectiveLocalCofre,
         dataMovimentacao || new Date(),
         exp.DEPARTAMENTO_ID_EXPLOSIVOS,
         exp.UNIDADE_ID_EXPLOSIVOS,
@@ -6652,7 +6668,7 @@ apiRouter.post('/movimentacoes-explosivos', async (req: Request, res: Response) 
     await insertAuditLog(
       'Explosivos',
       'Movimentação',
-      `Movimentação "${tipoMovimentacao}" de ${qty} ${exp.UNIDADE_MEDIDA_EXPLOSIVOS} de "${exp.NOME_EXPLOSIVOS}". Novo estoque: ${newQty}`,
+      `Movimentação "${tipoMovimentacao}" de ${qty} ${exp.UNIDADE_MEDIDA_EXPLOSIVOS} de "${exp.NOME_EXPLOSIVOS}". Local Cofre: ${effectiveLocalCofre || 'N/A'}. Novo estoque: ${newQty}`,
       actor,
       req.ip
     );
@@ -6730,14 +6746,25 @@ apiRouter.put('/tipos-explosivos/:id', async (req: Request, res: Response) => {
     const [oldRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
     const oldNome = oldRows && oldRows.length > 0 ? oldRows[0].NOME_TIPOS_EXPLOSIVOS : null;
 
-    await pool.query(
-      'UPDATE TIPOS_EXPLOSIVOS SET NOME_TIPOS_EXPLOSIVOS = ?, DESCRICAO_TIPOS_EXPLOSIVOS = ? WHERE ID_TIPOS_EXPLOSIVOS = ?',
-      [cleanNome, descricao?.trim() || null, id]
-    );
+    if (!oldRows || oldRows.length === 0) {
+      // If doesn't exist by id, check if it exists by matching cleanNome or upsert
+      await pool.query(
+        `INSERT INTO TIPOS_EXPLOSIVOS (ID_TIPOS_EXPLOSIVOS, NOME_TIPOS_EXPLOSIVOS, DESCRICAO_TIPOS_EXPLOSIVOS, DATA_CRIACAO_TIPOS_EXPLOSIVOS)
+         VALUES (?, ?, ?, NOW())
+         ON DUPLICATE KEY UPDATE NOME_TIPOS_EXPLOSIVOS = VALUES(NOME_TIPOS_EXPLOSIVOS), DESCRICAO_TIPOS_EXPLOSIVOS = VALUES(DESCRICAO_TIPOS_EXPLOSIVOS)`,
+        [id, cleanNome, descricao?.trim() || null]
+      );
+    } else {
+      await pool.query(
+        'UPDATE TIPOS_EXPLOSIVOS SET NOME_TIPOS_EXPLOSIVOS = ?, DESCRICAO_TIPOS_EXPLOSIVOS = ? WHERE ID_TIPOS_EXPLOSIVOS = ?',
+        [cleanNome, descricao?.trim() || null, id]
+      );
+    }
 
-    // Update explosives using this type name
+    // Update explosives and subtypes using this type name
     if (oldNome && oldNome !== cleanNome) {
       await pool.query('UPDATE EXPLOSIVOS SET TIPO_EXPLOSIVOS = ? WHERE TIPO_EXPLOSIVOS = ?', [cleanNome, oldNome]);
+      await pool.query('UPDATE SUBTIPOS_EXPLOSIVOS SET TIPO_NOME_SUBTIPOS_EXPLOSIVOS = ? WHERE TIPO_ID_SUBTIPOS_EXPLOSIVOS = ? OR TIPO_NOME_SUBTIPOS_EXPLOSIVOS = ?', [cleanNome, id, oldNome]);
     }
 
     await insertAuditLog('Explosivos', 'Editar Tipo', `Atualizado tipo de explosivo: "${cleanNome}"`, actor, req.ip);
@@ -6754,19 +6781,28 @@ apiRouter.delete('/tipos-explosivos/:id', async (req: Request, res: Response) =>
     const { actor } = req.body || {};
     const pool = getPool();
 
-    const [typeRows]: any = await pool.query('SELECT NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
+    let [typeRows]: any = await pool.query('SELECT ID_TIPOS_EXPLOSIVOS, NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
     if (!typeRows || typeRows.length === 0) {
-      return res.status(404).json({ error: 'Tipo de explosivo não encontrado.' });
+      [typeRows] = await pool.query('SELECT ID_TIPOS_EXPLOSIVOS, NOME_TIPOS_EXPLOSIVOS FROM TIPOS_EXPLOSIVOS WHERE LOWER(NOME_TIPOS_EXPLOSIVOS) = LOWER(?)', [id]);
     }
+
+    if (!typeRows || typeRows.length === 0) {
+      return res.json({ success: true, message: 'Tipo não encontrado no banco ou já removido.' });
+    }
+
+    const typeId = typeRows[0].ID_TIPOS_EXPLOSIVOS;
     const typeName = typeRows[0].NOME_TIPOS_EXPLOSIVOS;
 
     // Check if there are explosives registered with this type
-    const [used]: any = await pool.query('SELECT ID_EXPLOSIVOS FROM EXPLOSIVOS WHERE TIPO_EXPLOSIVOS = ? LIMIT 1', [typeName]);
-    if (used && used.length > 0) {
-      return res.status(400).json({ error: `Não é possível excluir o tipo "${typeName}" pois existem materiais explosivos cadastrados com este tipo.` });
+    const [used]: any = await pool.query('SELECT COUNT(*) as c FROM EXPLOSIVOS WHERE TIPO_EXPLOSIVOS = ?', [typeName]);
+    if (used && used[0]?.c > 0) {
+      return res.status(400).json({ error: `Não é possível excluir o tipo "${typeName}" pois existem ${used[0].c} material(is) cadastrado(s) com este tipo.` });
     }
 
-    await pool.query('DELETE FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [id]);
+    // Cascade remove or unlink subtipos
+    await pool.query('DELETE FROM SUBTIPOS_EXPLOSIVOS WHERE TIPO_ID_SUBTIPOS_EXPLOSIVOS = ? OR TIPO_NOME_SUBTIPOS_EXPLOSIVOS = ?', [typeId, typeName]);
+    await pool.query('DELETE FROM TIPOS_EXPLOSIVOS WHERE ID_TIPOS_EXPLOSIVOS = ?', [typeId]);
+
     await insertAuditLog('Explosivos', 'Excluir Tipo', `Excluído tipo de explosivo: "${typeName}"`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
