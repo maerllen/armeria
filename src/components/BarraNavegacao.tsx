@@ -59,18 +59,22 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           )}
 
-          <div className="bg-amber-500 p-2 rounded-xl text-slate-950 font-bold shadow-lg shadow-amber-500/20 neon-border flex items-center justify-center">
-            <Shield className="w-5 h-5" />
+          <div className="shrink-0 flex items-center justify-center">
+            <img
+              src="/assets/aistudio/Emblema_COE_com_Espada_Central_ea3304f9.png"
+              alt="COE PCMG"
+              className="w-10 h-10 object-contain rounded-full bg-slate-950 p-0.5 border border-amber-500/40 shadow-md shadow-amber-500/10"
+            />
           </div>
           <div>
             <div className="flex items-center space-x-2">
-              <span className="font-black text-lg sm:text-xl tracking-wider text-slate-100 font-mono">ARMERIA</span>
+              <span className="font-black text-lg sm:text-xl tracking-wider text-slate-100 font-mono">ARMARIA</span>
               <span className="text-[9px] sm:text-[10px] bg-amber-500/10 text-amber-400 font-semibold px-2 py-0.5 rounded border border-amber-500/30 uppercase tracking-widest font-mono">
                 POLÍCIA CIVIL
               </span>
             </div>
             <p className="text-[11px] text-slate-400 hidden sm:block font-sans">
-              Sistema de gerencia de material bélico da COE
+              Gestão de Materiais Bélicos • COE PCMG
             </p>
           </div>
         </div>

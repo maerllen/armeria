@@ -96,7 +96,7 @@ export const ManualModule: React.FC = () => {
         <body>
           <div style="border-bottom: 2px solid #000; padding-bottom: 10px; margin-bottom: 15px; text-align: center;">
             <h1 style="margin:0; font-size: 16px;">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h1>
-            <p style="margin: 2px 0 0 0; font-weight: bold; font-size: 12px;">MANUAL OPERACIONAL DO SISTEMA DE ARMERIA</p>
+            <p style="margin: 2px 0 0 0; font-weight: bold; font-size: 12px;">MANUAL OPERACIONAL DO SISTEMA DE ARMARIA</p>
           </div>
           ${contentHtml}
         </body>
@@ -180,7 +180,7 @@ export const ManualModule: React.FC = () => {
               </div>
               <div>
                 <h1 className="text-2xl font-black font-mono tracking-wider text-slate-100 print:text-black">
-                  POLÍCIA CIVIL • SISTEMA DE ARMERIA
+                  POLÍCIA CIVIL • SISTEMA DE ARMARIA
                 </h1>
                 <p className="text-xs text-amber-400 font-semibold font-mono tracking-wide">
                   MANUAL DE INSTRUÇÃO E NORMAS DE PROCEDIMENTO
@@ -420,7 +420,7 @@ export const ManualModule: React.FC = () => {
         {/* Footer info for print & PDF */}
         <div className="pt-8 border-t border-slate-800 text-center text-xs text-slate-500 print:text-gray-600 space-y-1">
           <p className="font-mono font-bold text-slate-400 print:text-black">
-            SISTEMA DE ARMERIA - POLÍCIA CIVIL DO ESTADO
+            SISTEMA DE ARMARIA - POLÍCIA CIVIL DO ESTADO
           </p>
           <p>Documento gerado eletronicamente para fins de instrução técnica e operacional.</p>
         </div>

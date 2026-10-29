@@ -50,7 +50,7 @@ export const MovementReceiptModal: React.FC<MovementReceiptModalProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • TERMO DE MOVIMENTAÇÃO DE CARGA</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • TERMO DE MOVIMENTAÇÃO DE CARGA</div>
           </div>
           <div class="reg-id">
             Nº REGISTRO<br>
@@ -154,7 +154,7 @@ export const MovementReceiptModal: React.FC<MovementReceiptModalProps> = ({
                   POLÍCIA CIVIL • ESTADO DE MINAS GERAIS
                 </h1>
                 <p className="text-[11px] font-mono text-amber-400 print:text-black font-bold">
-                  SISTEMA DE ARMERIA • TERMO DE MOVIMENTAÇÃO DE CARGA
+                  SISTEMA DE ARMARIA • TERMO DE MOVIMENTAÇÃO DE CARGA
                 </p>
               </div>
             </div>

@@ -600,7 +600,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
         <!-- Footer -->
         <div class="footer-note">
           <div>
-            SISTEMA DE ARMERIA • POLÍCIA CIVIL DE MINAS GERAIS (PCMG)
+            SISTEMA DE ARMARIA • POLÍCIA CIVIL DE MINAS GERAIS (PCMG)
           </div>
           <div>
             Página 1 de 1 • Registro de Auditoria: ${authCode}

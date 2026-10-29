@@ -58,7 +58,7 @@ export const AmmunitionReceiptModal: React.FC<AmmunitionReceiptModalProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • COMPROVANTE DE MOVIMENTAÇÃO DE MUNIÇÃO</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • COMPROVANTE DE MOVIMENTAÇÃO DE MUNIÇÃO</div>
           </div>
           <div class="reg-id">
             Nº REGISTRO<br>
@@ -154,7 +154,7 @@ export const AmmunitionReceiptModal: React.FC<AmmunitionReceiptModalProps> = ({
                   POLÍCIA CIVIL • ESTADO DE MINAS GERAIS
                 </h1>
                 <p className="text-[11px] font-mono text-amber-400 print:text-black font-bold">
-                  SISTEMA DE ARMERIA • TERMO DE {isReturnReceipt ? 'DEVOLUÇÃO DE MUNIÇÃO' : 'MOVIMENTAÇÃO DE MUNIÇÃO'}
+                  SISTEMA DE ARMARIA • TERMO DE {isReturnReceipt ? 'DEVOLUÇÃO DE MUNIÇÃO' : 'MOVIMENTAÇÃO DE MUNIÇÃO'}
                 </p>
               </div>
             </div>

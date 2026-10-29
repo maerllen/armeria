@@ -177,7 +177,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         <div className="px-3 py-1 text-[10px] font-bold text-amber-400/80 uppercase tracking-widest font-mono">
-          MÓDULOS DA ARMERIA
+          MÓDULOS DA ARMARIA
         </div>
         <nav className="space-y-1.5">
           {navItems
@@ -223,8 +223,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <ThemeToggle compact={false} />
         </div>
         <div className="text-[11px] text-slate-500 space-y-0.5">
-          <p className="font-semibold text-slate-400 font-mono">Armeria v2.0 • Polícia Civil</p>
-          <p className="text-[10px] text-slate-500">Gestão Tática de Armamento</p>
+          <p className="font-semibold text-slate-400 font-mono">Armaria v2.0 • Polícia Civil</p>
+          <p className="text-[10px] text-slate-500">Gestão Tática de Materiais Bélicos</p>
         </div>
       </div>
     </div>

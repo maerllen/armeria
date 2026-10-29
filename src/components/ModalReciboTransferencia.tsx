@@ -174,7 +174,7 @@ export function getTransferReceiptHtml(transfer: WeaponTransfer): string {
       <div class="header">
         <div>
           <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-          <div class="subtitle">SISTEMA DE ARMERIA • ${documentType}</div>
+          <div class="subtitle">SISTEMA DE ARMARIA • ${documentType}</div>
         </div>
         <div class="reg-id">
           PROTOCOLO / REGISTRO<br>

@@ -226,7 +226,7 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • TERMO DE MOVIMENTAÇÃO DE CARGA</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • TERMO DE MOVIMENTAÇÃO DE CARGA</div>
           </div>
           <div class="reg-id">
             Nº REGISTRO<br>

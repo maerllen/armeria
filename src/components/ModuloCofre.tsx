@@ -265,7 +265,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • INVENTÁRIO FÍSICO DE ESPAÇO NO COFRE</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • INVENTÁRIO FÍSICO DE ESPAÇO NO COFRE</div>
           </div>
           <div class="badge">
             CÓDIGO COFRE<br>

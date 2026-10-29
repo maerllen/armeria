@@ -66,12 +66,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
         
         {/* Header Branding */}
         <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-6 border-b border-slate-800 text-center relative">
-          <div className="inline-flex p-3 bg-amber-500 text-slate-950 rounded-xl shadow-lg mb-3">
-            <Shield className="w-8 h-8" />
+          <div className="inline-flex mb-3">
+            <img
+              src="/assets/aistudio/Emblema_COE_com_Espada_Central_ea3304f9.png"
+              alt="COE PCMG - Armaria"
+              className="w-24 h-24 object-contain drop-shadow-xl mx-auto rounded-full bg-slate-950/80 p-1 border border-slate-700/80"
+            />
           </div>
-          <h2 className="text-2xl font-black text-slate-100 font-mono tracking-wider">ARMERIA</h2>
-          <p className="text-xs text-amber-400 font-medium uppercase tracking-widest mt-1">
-            Polícia Civil • Gestão de Armas e Munições
+          <h2 className="text-2xl font-black text-slate-100 font-mono tracking-wider">ARMARIA</h2>
+          <p className="text-xs text-amber-400 font-bold uppercase tracking-widest mt-1">
+            POLÍCIA CIVIL • GESTÃO DE MATERIAIS BÉLICOS
           </p>
         </div>
 
@@ -181,17 +185,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
             <span>ENTRAR NO SISTEMA</span>
           </button>
         </form>
-
-        {/* Public Certificate Validator Shortcut */}
-        <div className="px-6 py-3 bg-slate-950/60 border-t border-slate-800/80 flex items-center justify-center">
-          <a
-            href="?validar="
-            className="text-xs text-emerald-400 hover:text-emerald-300 font-semibold flex items-center space-x-1.5 transition"
-          >
-            <ShieldCheck className="w-4 h-4" />
-            <span>Consultar Autenticidade de Certificado (Público)</span>
-          </a>
-        </div>
 
         <div className="bg-slate-950 px-6 py-4 border-t border-slate-800 text-center">
           <p className="text-[11px] text-slate-500">

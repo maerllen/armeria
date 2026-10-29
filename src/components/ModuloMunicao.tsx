@@ -522,7 +522,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • COMPROVANTE DE MOVIMENTAÇÃO DE MUNIÇÃO</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • COMPROVANTE DE MOVIMENTAÇÃO DE MUNIÇÃO</div>
           </div>
           <div class="reg-id">
             Nº REGISTRO<br>
@@ -620,7 +620,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         <div class="header">
           <div>
             <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMERIA • RELATÓRIO DE MOVIMENTAÇÕES DE MUNIÇÕES NO COFRE</div>
+            <div class="subtitle">SISTEMA DE ARMARIA • RELATÓRIO DE MOVIMENTAÇÕES DE MUNIÇÕES NO COFRE</div>
           </div>
           <div style="text-align: right; font-family: monospace; font-size: 10px;">
             Emissão: ${new Date().toLocaleString('pt-BR')}
