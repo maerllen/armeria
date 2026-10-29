@@ -215,54 +215,56 @@ export default function App() {
         {/* Main Workspace */}
         <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
-          {/* Dashboard Summary Cards */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
-            <div className="glass-card hover:border-amber-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 shrink-0">
-                <Crosshair className="w-4 h-4 sm:w-5 sm:h-5" />
+          {/* Dashboard Summary Cards (Oculto no módulo de explosivos a pedido) */}
+          {activeModule !== 'explosivos' && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
+              <div className="glass-card hover:border-amber-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+                <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 shrink-0">
+                  <Crosshair className="w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Armas em Acervo</span>
+                  <p className="text-lg sm:text-xl font-black text-slate-100 font-mono">{weapons.length}</p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Armas em Acervo</span>
-                <p className="text-lg sm:text-xl font-black text-slate-100 font-mono">{weapons.length}</p>
-              </div>
-            </div>
 
-            <div className="glass-card hover:border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2 sm:p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20 shrink-0">
-                <Disc className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div className="glass-card hover:border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+                <div className="p-2 sm:p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20 shrink-0">
+                  <Disc className="w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Munições em Estoque</span>
+                  <p className="text-lg sm:text-xl font-black text-slate-100 font-mono truncate">
+                    {ammoStocks.reduce((acc, curr) => acc + curr.quantity, 0)} <span className="text-xs text-slate-400 font-normal">un</span>
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Munições em Estoque</span>
-                <p className="text-lg sm:text-xl font-black text-slate-100 font-mono truncate">
-                  {ammoStocks.reduce((acc, curr) => acc + curr.quantity, 0)} <span className="text-xs text-slate-400 font-normal">un</span>
-                </p>
-              </div>
-            </div>
 
-            <div className="glass-card hover:border-purple-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2 sm:p-2.5 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20 shrink-0">
-                <ArrowRightLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+              <div className="glass-card hover:border-purple-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+                <div className="p-2 sm:p-2.5 bg-purple-500/10 text-purple-400 rounded-xl border border-purple-500/20 shrink-0">
+                  <ArrowRightLeft className="w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Em Trânsito</span>
+                  <p className="text-lg sm:text-xl font-black text-amber-400 font-mono">
+                    {weapons.filter(w => w.status === 'Em Trânsito').length}
+                  </p>
+                </div>
               </div>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">Em Trânsito</span>
-                <p className="text-lg sm:text-xl font-black text-amber-400 font-mono">
-                  {weapons.filter(w => w.status === 'Em Trânsito').length}
-                </p>
-              </div>
-            </div>
 
-            <div className="glass-card hover:border-emerald-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
-              <div className="p-2 sm:p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
-                <Vault className="w-4 h-4 sm:w-5 sm:h-5" />
-              </div>
-              <div className="min-w-0">
-                <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">No Cofre</span>
-                <p className="text-lg sm:text-xl font-black text-emerald-400 font-mono">
-                  {weapons.filter(w => w.status === 'No Cofre').length}
-                </p>
+              <div className="glass-card hover:border-emerald-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
+                <div className="p-2 sm:p-2.5 bg-emerald-500/10 text-emerald-400 rounded-xl border border-emerald-500/20 shrink-0">
+                  <Vault className="w-4 h-4 sm:w-5 sm:h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="text-[9px] sm:text-[10px] text-slate-400 uppercase font-semibold tracking-wider font-mono block truncate">No Cofre</span>
+                  <p className="text-lg sm:text-xl font-black text-emerald-400 font-mono">
+                    {weapons.filter(w => w.status === 'No Cofre').length}
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Module Views */}
           {activeModule === 'meu-perfil' && currentUser && (

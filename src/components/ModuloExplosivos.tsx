@@ -1260,7 +1260,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <div className="glass-card p-3 rounded-2xl border border-slate-800">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
             <Boxes className="w-4 h-4 text-amber-400" />
-            <span>Itens no Acervo</span>
+            <span>Explosivos Cadastrados</span>
           </div>
           <p className="text-2xl font-black text-slate-100 font-mono">{stats.totalItens}</p>
         </div>
@@ -1284,7 +1284,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         <div className="glass-card p-3 rounded-2xl border border-slate-800">
           <div className="flex items-center space-x-2 text-slate-400 text-xs font-medium mb-1">
             <Vault className="w-4 h-4 text-cyan-400" />
-            <span>Locais no Cofre</span>
+            <span>Paióis no Cofre</span>
           </div>
           <p className="text-2xl font-black text-cyan-400 font-mono">{explosiveVaultSpaces.length}</p>
         </div>

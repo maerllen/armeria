@@ -66,8 +66,16 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [deleteTargetUser, setDeleteTargetUser] = useState<{ type: 'user' | 'course'; id: string; name: string } | null>(null);
 
   const isGeral = currentUser.role === 'Geral';
+  const isExplosivista = currentUser.role === 'Explosivista';
+  const isAdministrador = currentUser.role === 'Administrador';
+  const isRestrictedRegistrar = isExplosivista || isAdministrador;
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
   const isPolicial = currentUser.role === 'Policial';
+
+  // Privilégio de manuseio com armas e munições
+  const currentUserCanHandleWeapons = isGeral || currentUser.role === 'Armeiro' || Boolean(currentUser.canMoveWeapons);
+  const currentUserCanHandleAmmo = isGeral || currentUser.role === 'Armeiro' || Boolean(currentUser.canMoveAmmunition);
+  const canGrantWeaponAmmoHandling = !isRestrictedRegistrar && currentUserCanHandleWeapons && currentUserCanHandleAmmo;
 
   // Check if user has rights to manage teachers
   const userDept = departments.find(d => d.id === currentUser.departmentId);
@@ -94,6 +102,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
   const rolesList: UserRole[] = (isGeral || (editingUser && editingUser.role === 'Geral'))
     ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista']
+    : isRestrictedRegistrar
+    ? ['Policial', 'Explosivista']
     : ['Administrador', 'Armeiro', 'Policial', 'Explosivista'];
 
   // Filtered units based on selected department in form
@@ -109,12 +119,12 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setPhone(usr.phone);
       setCargo(usr.cargo);
       setRole(usr.role);
-      setDeptId(usr.departmentId);
-      setUnitId(usr.unitId);
-      setCanMoveAmmo(usr.canMoveAmmunition);
-      setCanMoveWeapons(usr.canMoveWeapons);
+      setDeptId(isRestrictedRegistrar ? currentUser.departmentId : usr.departmentId);
+      setUnitId(isRestrictedRegistrar ? currentUser.unitId : usr.unitId);
+      setCanMoveAmmo(isRestrictedRegistrar ? false : usr.canMoveAmmunition);
+      setCanMoveWeapons(isRestrictedRegistrar ? false : usr.canMoveWeapons);
       setHasSystemAccess(usr.hasSystemAccess);
-      setManagementScope(usr.managementScope || 'department');
+      setManagementScope(usr.managementScope || 'unit');
       setUserCourses(usr.courses || []);
       setIsTeacher(Boolean(usr.isTeacher));
       setTeacherSubject(usr.teacherSubject || 'MEAF');
@@ -126,10 +136,12 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setPhone('');
       setCargo('Investigador');
       setRole('Policial');
-      const initialDept = isGeral ? (departments[0]?.id || '') : currentUser.departmentId;
+      const initialDept = isRestrictedRegistrar
+        ? currentUser.departmentId
+        : (isGeral ? (departments[0]?.id || '') : currentUser.departmentId);
       setDeptId(initialDept);
       const initialUnits = units.filter(u => u.departmentId === initialDept);
-      setUnitId(initialUnits[0]?.id || '');
+      setUnitId(isRestrictedRegistrar ? currentUser.unitId : (initialUnits[0]?.id || ''));
       setCanMoveAmmo(false);
       setCanMoveWeapons(false);
       setHasSystemAccess(true);
@@ -195,8 +207,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
     }
 
     try {
-      let targetDeptId = deptId;
-      let targetUnitId = unitId;
+      const targetDeptId = isRestrictedRegistrar ? currentUser.departmentId : (deptId || currentUser.departmentId);
+      const targetUnitId = isRestrictedRegistrar ? currentUser.unitId : (unitId || currentUser.unitId);
+      const finalCanMoveAmmo = isRestrictedRegistrar ? false : canMoveAmmo;
+      const finalCanMoveWeapons = isRestrictedRegistrar ? false : canMoveWeapons;
+      const finalManagementScope = isRestrictedRegistrar ? 'unit' : managementScope;
 
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
@@ -207,10 +222,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
           role,
           departmentId: targetDeptId,
           unitId: targetUnitId,
-          canMoveAmmunition: canMoveAmmo,
-          canMoveWeapons: canMoveWeapons,
+          canMoveAmmunition: finalCanMoveAmmo,
+          canMoveWeapons: finalCanMoveWeapons,
           hasSystemAccess,
-          managementScope,
+          managementScope: finalManagementScope,
           courses: userCourses,
           isTeacher,
           teacherSubject: isTeacher ? teacherSubject : undefined,
@@ -226,10 +241,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
           role,
           departmentId: targetDeptId,
           unitId: targetUnitId,
-          canMoveAmmunition: canMoveAmmo,
-          canMoveWeapons: canMoveWeapons,
+          canMoveAmmunition: finalCanMoveAmmo,
+          canMoveWeapons: finalCanMoveWeapons,
           hasSystemAccess,
-          managementScope,
+          managementScope: finalManagementScope,
           courses: userCourses,
           isTeacher,
           teacherSubject: isTeacher ? teacherSubject : undefined,
@@ -754,50 +769,70 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </select>
                 </div>
 
-                {/* Departamento */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Departamento
-                  </label>
-                  <select
-                    value={deptId}
-                    onChange={(e) => {
-                      setDeptId(e.target.value);
-                      const depUnits = units.filter(u => u.departmentId === e.target.value);
-                      setUnitId(depUnits[0]?.id || '');
-                    }}
-                    disabled={!isGeral}
-                    className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
-                      !isGeral
-                        ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
-                        : 'bg-slate-950 border-slate-700 text-slate-100'
-                    }`}
-                  >
-                    {departments.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {/* Lotação: Departamento e Unidade (Oculto para Explosivista e Administrativo, herança automática) */}
+                {isRestrictedRegistrar ? (
+                  <div className="md:col-span-2 p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1">
+                    <span className="text-xs font-semibold text-slate-300 uppercase tracking-wider block">
+                      Lotação do Policial (Departamento e Unidade)
+                    </span>
+                    <p className="text-xs text-amber-400 font-semibold flex items-center gap-1.5">
+                      <Building className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span>
+                        {departments.find(d => d.id === currentUser.departmentId)?.name || 'Departamento'} • {units.find(u => u.id === currentUser.unitId)?.name || 'Unidade'}
+                      </span>
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Usuários cadastrados por seu perfil herdam obrigatoriamente a mesma lotação de sua unidade. Apenas consultas em armas e munições serão permitidas.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {/* Departamento */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Departamento
+                      </label>
+                      <select
+                        value={deptId}
+                        onChange={(e) => {
+                          setDeptId(e.target.value);
+                          const depUnits = units.filter(u => u.departmentId === e.target.value);
+                          setUnitId(depUnits[0]?.id || '');
+                        }}
+                        disabled={!isGeral}
+                        className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
+                          !isGeral
+                            ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-950 border-slate-700 text-slate-100'
+                        }`}
+                      >
+                        {departments.map((d) => (
+                          <option key={d.id} value={d.id}>
+                            {d.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                {/* Unidade */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Unidade
-                  </label>
-                  <select
-                    value={unitId}
-                    onChange={(e) => setUnitId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                  >
-                    {availableUnitsForForm.map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                    {/* Unidade */}
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Unidade
+                      </label>
+                      <select
+                        value={unitId}
+                        onChange={(e) => setUnitId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                      >
+                        {availableUnitsForForm.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </>
+                )}
 
                 {/* Professor da Academia */}
                 {canManageTeachers && (
@@ -850,52 +885,56 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </>
                 )}
 
-                {/* Permissões Especiais */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Pode Movimentar Munições?
-                  </label>
-                  <select
-                    value={canMoveAmmo ? 'sim' : 'nao'}
-                    onChange={(e) => setCanMoveAmmo(e.target.value === 'sim')}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                  >
-                    <option value="nao">Não</option>
-                    <option value="sim">Sim</option>
-                  </select>
-                </div>
+                {/* Permissões Especiais de Manuseio com Armas e Munições (Ocultas quando o usuário não possui o privilégio ou for Explosivista/Administrativo) */}
+                {canGrantWeaponAmmoHandling && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Pode Movimentar Munições?
+                      </label>
+                      <select
+                        value={canMoveAmmo ? 'sim' : 'nao'}
+                        onChange={(e) => setCanMoveAmmo(e.target.value === 'sim')}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                      >
+                        <option value="nao">Não (Apenas Consulta)</option>
+                        <option value="sim">Sim (Movimentar/Manusear)</option>
+                      </select>
+                    </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Pode Movimentar Armas?
-                  </label>
-                  <select
-                    value={canMoveWeapons ? 'sim' : 'nao'}
-                    onChange={(e) => setCanMoveWeapons(e.target.value === 'sim')}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                  >
-                    <option value="nao">Não</option>
-                    <option value="sim">Sim</option>
-                  </select>
-                </div>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Pode Movimentar Armas?
+                      </label>
+                      <select
+                        value={canMoveWeapons ? 'sim' : 'nao'}
+                        onChange={(e) => setCanMoveWeapons(e.target.value === 'sim')}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                      >
+                        <option value="nao">Não (Apenas Consulta)</option>
+                        <option value="sim">Sim (Movimentar/Manusear)</option>
+                      </select>
+                    </div>
 
-                {/* Abrangência de Movimentação/Gestão (Armeiro / Admin) */}
-                <div className="md:col-span-2 bg-amber-950/20 border border-amber-800/40 p-3 rounded-xl">
-                  <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">
-                    Abrangência de Movimentação e Gestão (Armeiro)
-                  </label>
-                  <select
-                    value={managementScope}
-                    onChange={(e) => setManagementScope(e.target.value as 'department' | 'unit')}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-medium"
-                  >
-                    <option value="department">Departamento e todas as unidades do departamento vinculado</option>
-                    <option value="unit">Apenas a unidade específica que está vinculado</option>
-                  </select>
-                  <p className="text-[10px] text-slate-400 mt-1">
-                    Determina se o Armeiro/Usuário pode gerenciar e movimentar armas, munições, usuários e cofres em todo o departamento ou restrito à sua unidade.
-                  </p>
-                </div>
+                    {/* Abrangência de Movimentação/Gestão (Armeiro / Admin) */}
+                    <div className="md:col-span-2 bg-amber-950/20 border border-amber-800/40 p-3 rounded-xl">
+                      <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">
+                        Abrangência de Movimentação e Gestão (Armeiro)
+                      </label>
+                      <select
+                        value={managementScope}
+                        onChange={(e) => setManagementScope(e.target.value as 'department' | 'unit')}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-medium"
+                      >
+                        <option value="department">Departamento e todas as unidades do departamento vinculado</option>
+                        <option value="unit">Apenas a unidade específica que está vinculado</option>
+                      </select>
+                      <p className="text-[10px] text-slate-400 mt-1">
+                        Determina se o Armeiro/Usuário pode gerenciar e movimentar armas, munições, usuários e cofres em todo o departamento ou restrito à sua unidade.
+                      </p>
+                    </div>
+                  </>
+                )}
 
                 {/* Resetar Senha (Geral, Administrador ou Armeiro) */}
                 {canResetPassword && editingUser && (

@@ -46,7 +46,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const isGeral = currentUser.role === 'Geral';
   const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
   const isPolicial = currentUser.role === 'Policial';
-  const canManageVault = isGeral || isAdminOrArmeiro;
+  const isExplosivista = currentUser.role === 'Explosivista';
+  const canManageVault = isGeral || isAdminOrArmeiro || isExplosivista;
 
   // Visible departments based on user scope
   const visibleDepts = useMemo(() => {
@@ -89,8 +90,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setEditingVault(null);
     setCode('');
     
-    // Default to the preset, or the current active filter, or ARMAS
-    if (presetType) {
+    // Explosivista só pode criar locais vinculados a explosivos
+    if (isExplosivista) {
+      setType('EXPLOSIVOS');
+    } else if (presetType) {
       setType(presetType);
     } else if (typeFilter === 'MUNIÇÕES') {
       setType('MUNIÇÕES');
@@ -108,6 +111,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   };
 
   const handleOpenEditModal = (vault: VaultSpace) => {
+    if (isExplosivista && vault.type !== 'EXPLOSIVOS') {
+      setErrorMsg('Usuários explosivistas só podem editar locais no cofre vinculados a explosivos.');
+      return;
+    }
     setErrorMsg('');
     setEditingVault(vault);
     setCode(vault.code);
@@ -131,12 +138,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       return;
     }
 
+    if (isExplosivista && type !== 'EXPLOSIVOS') {
+      setErrorMsg('Usuários explosivistas só podem cadastrar ou alterar locais vinculados a explosivos.');
+      return;
+    }
+
     try {
       const typeLabel = type === 'ARMAS' ? 'Cofre para Armas' : type === 'MUNIÇÕES' ? 'Cofre para Munições' : 'Paiol / Cofre de Explosivos';
       if (editingVault) {
         await storage.updateVaultSpace(editingVault.id, {
           code: code.trim().toUpperCase(),
-          type,
+          type: isExplosivista ? 'EXPLOSIVOS' : type,
           departmentId: deptId,
           unitId
         });
@@ -144,7 +156,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       } else {
         await storage.addVaultSpace({
           code: code.trim().toUpperCase(),
-          type,
+          type: isExplosivista ? 'EXPLOSIVOS' : type,
           departmentId: deptId,
           unitId
         });
@@ -158,11 +170,20 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   };
 
   const handleDelete = (vault: VaultSpace) => {
+    if (isExplosivista && vault.type !== 'EXPLOSIVOS') {
+      setErrorMsg('Usuários explosivistas só podem excluir locais no cofre vinculados a explosivos.');
+      return;
+    }
     setDeleteTargetVault(vault);
   };
 
   const confirmExecuteDeleteVault = async () => {
     if (!deleteTargetVault) return;
+    if (isExplosivista && deleteTargetVault.type !== 'EXPLOSIVOS') {
+      setErrorMsg('Usuários explosivistas só podem excluir locais no cofre vinculados a explosivos.');
+      setDeleteTargetVault(null);
+      return;
+    }
     setErrorMsg('');
     setSuccessMsg('');
     try {
@@ -341,6 +362,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const isArmas = v.type === 'ARMAS';
     const isMunicoes = v.type === 'MUNIÇÕES';
     const isExplosivos = v.type === 'EXPLOSIVOS';
+    const canEditThisVault = isGeral || isAdminOrArmeiro || (isExplosivista && v.type === 'EXPLOSIVOS');
+    const canDeleteThisVault = isGeral || isAdminOrArmeiro || (isExplosivista && v.type === 'EXPLOSIVOS');
 
     return (
       <div
@@ -391,22 +414,26 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               </div>
             </div>
 
-            {canManageVault && (
+            {canManageVault && (canEditThisVault || canDeleteThisVault) && (
               <div className="flex items-center space-x-1 shrink-0">
-                <button
-                  onClick={() => handleOpenEditModal(v)}
-                  className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                  title="Editar Local do Cofre"
-                >
-                  <Edit2 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => handleDelete(v)}
-                  className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                  title="Excluir Local"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {canEditThisVault && (
+                  <button
+                    onClick={() => handleOpenEditModal(v)}
+                    className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                    title="Editar Local do Cofre"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                )}
+                {canDeleteThisVault && (
+                  <button
+                    onClick={() => handleDelete(v)}
+                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                    title="Excluir Local"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -497,20 +524,24 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
         {canManageVault && (
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              onClick={() => handleOpenModal('ARMAS')}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Cofre de Armas</span>
-            </button>
-            <button
-              onClick={() => handleOpenModal('MUNIÇÕES')}
-              className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Cofre de Munições</span>
-            </button>
+            {!isExplosivista && (
+              <button
+                onClick={() => handleOpenModal('ARMAS')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Cofre de Armas</span>
+              </button>
+            )}
+            {!isExplosivista && (
+              <button
+                onClick={() => handleOpenModal('MUNIÇÕES')}
+                className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Cofre de Munições</span>
+              </button>
+            )}
             <button
               onClick={() => handleOpenModal('EXPLOSIVOS')}
               className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
@@ -1497,61 +1528,75 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
                   Tipo de Local / Cofre
                 </label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setType('ARMAS')}
-                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                      type === 'ARMAS'
-                        ? 'bg-amber-950/70 border-amber-500 text-amber-200 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 mb-1.5">
-                      <Crosshair className={`w-4 h-4 ${type === 'ARMAS' ? 'text-amber-400' : 'text-slate-500'}`} />
-                      <span className="text-xs font-bold text-slate-100">Cofre de Armas</span>
+                {isExplosivista ? (
+                  <div className="p-3 bg-red-950/70 border border-red-500 rounded-xl flex items-center space-x-3">
+                    <div className="p-2 bg-red-500/20 text-red-400 rounded-lg">
+                      <Bomb className="w-5 h-5 text-red-400" />
                     </div>
-                    <span className="text-[10px] text-slate-400 leading-tight">
-                      Para custódia de pistolas e fuzis
-                    </span>
-                  </button>
+                    <div>
+                      <p className="text-xs font-bold text-red-200">Paiol / Cofre de Explosivos</p>
+                      <p className="text-[10px] text-slate-300">
+                        Perfil Explosivista: gerenciamento restrito a espaços para materiais explosivos.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setType('ARMAS')}
+                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                        type === 'ARMAS'
+                          ? 'bg-amber-950/70 border-amber-500 text-amber-200 shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1.5">
+                        <Crosshair className={`w-4 h-4 ${type === 'ARMAS' ? 'text-amber-400' : 'text-slate-500'}`} />
+                        <span className="text-xs font-bold text-slate-100">Cofre de Armas</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 leading-tight">
+                        Para custódia de pistolas e fuzis
+                      </span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setType('MUNIÇÕES')}
-                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                      type === 'MUNIÇÕES'
-                        ? 'bg-cyan-950/70 border-cyan-500 text-cyan-200 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 mb-1.5">
-                      <Disc className={`w-4 h-4 ${type === 'MUNIÇÕES' ? 'text-cyan-400' : 'text-slate-500'}`} />
-                      <span className="text-xs font-bold text-slate-100">Cofre de Munições</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 leading-tight">
-                      Para estocagem de cartuchos
-                    </span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setType('MUNIÇÕES')}
+                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                        type === 'MUNIÇÕES'
+                          ? 'bg-cyan-950/70 border-cyan-500 text-cyan-200 shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1.5">
+                        <Disc className={`w-4 h-4 ${type === 'MUNIÇÕES' ? 'text-cyan-400' : 'text-slate-500'}`} />
+                        <span className="text-xs font-bold text-slate-100">Cofre de Munições</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 leading-tight">
+                        Para estocagem de cartuchos
+                      </span>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setType('EXPLOSIVOS')}
-                    className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                      type === 'EXPLOSIVOS'
-                        ? 'bg-red-950/70 border-red-500 text-red-200 shadow-sm'
-                        : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 mb-1.5">
-                      <Bomb className={`w-4 h-4 ${type === 'EXPLOSIVOS' ? 'text-red-400' : 'text-slate-500'}`} />
-                      <span className="text-xs font-bold text-slate-100">Paiol / Explosivos</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 leading-tight">
-                      Para altos explosivos e espoletas
-                    </span>
-                  </button>
-                </div>
+                    <button
+                      type="button"
+                      onClick={() => setType('EXPLOSIVOS')}
+                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                        type === 'EXPLOSIVOS'
+                          ? 'bg-red-950/70 border-red-500 text-red-200 shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1.5">
+                        <Bomb className={`w-4 h-4 ${type === 'EXPLOSIVOS' ? 'text-red-400' : 'text-slate-500'}`} />
+                        <span className="text-xs font-bold text-slate-100">Paiol / Explosivos</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 leading-tight">
+                        Para altos explosivos e espoletas
+                      </span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               <div>
