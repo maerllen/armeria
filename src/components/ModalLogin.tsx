@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
 import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck, Loader2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
@@ -16,7 +16,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
   const [showDbGuide, setShowDbGuide] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  React.useEffect(() => {
+  useEffect(() => {
     if (error) {
       setIsSubmitting(false);
     }

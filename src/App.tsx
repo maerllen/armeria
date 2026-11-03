@@ -204,6 +204,21 @@ export default function App() {
     }
   };
 
+  const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
+
+  const userDepartment = currentUser?.departmentId 
+    ? (departments.find(d => d.id === currentUser.departmentId) || storage.getAllDepartments().find(d => d.id === currentUser.departmentId) || null)
+    : null;
+  const userUnit = currentUser?.unitId 
+    ? (units.find(u => u.id === currentUser.unitId) || storage.getAllUnits().find(u => u.id === currentUser.unitId) || null)
+    : null;
+  const currentLogo = getSystemLogo(userUnit, userDepartment);
+
+  // Sincroniza logo ativa com o preloader
+  useEffect(() => {
+    setLogoUrl(currentLogo);
+  }, [currentLogo, setLogoUrl]);
+
   // Se a aplicação ainda estiver inicializando os dados pela primeira vez, exibe preloader completo
   if (!isAppReady) {
     return (
@@ -271,21 +286,6 @@ export default function App() {
       </div>
     );
   }
-
-  const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
-
-  const userDepartment = currentUser?.departmentId 
-    ? (departments.find(d => d.id === currentUser.departmentId) || storage.getAllDepartments().find(d => d.id === currentUser.departmentId) || null)
-    : null;
-  const userUnit = currentUser?.unitId 
-    ? (units.find(u => u.id === currentUser.unitId) || storage.getAllUnits().find(u => u.id === currentUser.unitId) || null)
-    : null;
-  const currentLogo = getSystemLogo(userUnit, userDepartment);
-
-  // Sincroniza logo ativa com o preloader
-  useEffect(() => {
-    setLogoUrl(currentLogo);
-  }, [currentLogo, setLogoUrl]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
