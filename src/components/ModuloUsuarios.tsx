@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp, Lock } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 
 interface UserModuleProps {
@@ -66,12 +66,32 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetUser, setDeleteTargetUser] = useState<{ type: 'user' | 'course'; id: string; name: string } | null>(null);
 
-  const isGeral = currentUser.role === 'Geral';
-  const isExplosivista = currentUser.role === 'Explosivista';
-  const isAdministrador = currentUser.role === 'Administrador';
-  const isRestrictedRegistrar = isExplosivista || isAdministrador;
-  const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
-  const isPolicial = currentUser.role === 'Policial';
+  // Todos os perfis que o usuário logado possui
+  const currentUserRoles: UserRole[] = (currentUser.roles && currentUser.roles.length > 0)
+    ? currentUser.roles
+    : [currentUser.role];
+
+  const isGeral = currentUserRoles.includes('Geral') || currentUser.role === 'Geral';
+  const isExplosivista = currentUserRoles.includes('Explosivista') || currentUser.role === 'Explosivista';
+  const isAdministrador = currentUserRoles.includes('Administrador') || currentUser.role === 'Administrador';
+  const isArmeiro = currentUserRoles.includes('Armeiro') || currentUser.role === 'Armeiro';
+  const isRestrictedRegistrar = (isExplosivista || isAdministrador) && !isGeral && !isArmeiro;
+  const isAdminOrArmeiro = isAdministrador || isArmeiro;
+  const isPolicial = currentUserRoles.length === 1 && currentUserRoles[0] === 'Policial';
+
+  // Regra de autorização hierárquica solicitada:
+  // "o usuario que tem permição para cadastrar novos usuarios só poderão liberar acesso a perfis que possui"
+  // Exemplo: um armeiro que não tenha permição como administrador, não pode liberar o perfil de administrador para outros usuarios.
+  const canGrantRole = (roleToGrant: UserRole): boolean => {
+    // Policial é o acesso operacional base que qualquer cadastrador autorizado pode conferir
+    if (roleToGrant === 'Policial') return true;
+    // O perfil Geral tem permissão irrestrita no sistema
+    if (isGeral) return true;
+    // Apenas quem possui Geral pode conceder Geral
+    if (roleToGrant === 'Geral') return false;
+    // O usuário DEVE possuir o perfil em suas permissões para poder concedê-lo a terceiros
+    return currentUserRoles.includes(roleToGrant);
+  };
 
   // Privilégio de manuseio com armas e munições
   const currentUserCanHandleWeapons = isGeral || currentUser.role === 'Armeiro' || Boolean(currentUser.canMoveWeapons);
@@ -103,11 +123,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
     'Veterinário'
   ];
 
-  const rolesList: UserRole[] = (isGeral || (editingUser && (editingUser.role === 'Geral' || editingUser.roles?.includes('Geral'))))
+  const allSystemRoles: UserRole[] = isGeral
     ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista', 'operador_canino']
-    : isRestrictedRegistrar
-    ? ['Policial', 'Explosivista', 'operador_canino']
     : ['Administrador', 'Armeiro', 'Policial', 'Explosivista', 'operador_canino'];
+
+  // Para novos usuários: mostra apenas os perfis que o usuário pode conceder.
+  // Para edição: inclui também perfis preexistentes do policial para preservação visual.
+  const rolesList: UserRole[] = allSystemRoles.filter(r =>
+    canGrantRole(r) || (editingUser && (editingUser.roles?.includes(r) || editingUser.role === r))
+  );
 
   // Filtered units based on selected department in form
   const availableUnitsForForm = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
@@ -217,6 +241,18 @@ export const UserModule: React.FC<UserModuleProps> = ({
       return;
     }
 
+    // Validação estrita: O usuário só pode liberar acesso aos perfis que ele próprio possui
+    for (const r of selectedRoles) {
+      if (!canGrantRole(r)) {
+        const wasAlreadyAssigned = editingUser && (editingUser.roles?.includes(r) || editingUser.role === r);
+        if (!wasAlreadyAssigned) {
+          const label = r === 'operador_canino' ? 'Operador Canino' : r;
+          setErrorMsg(`Você não possui a permissão de "${label}" e não pode liberá-la para outros usuários.`);
+          return;
+        }
+      }
+    }
+
     const primaryRole = selectedRoles[0] || 'Policial';
 
     try {
@@ -279,9 +315,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     setDeleteTargetUser({ type: 'user', id: usr.id, name: `o policial ${usr.name} (MASP: ${formatMasp(usr.masp)})` });
   };
 
-  const isAdmin = currentUser.role === 'Administrador';
-  const isArmeiro = currentUser.role === 'Armeiro';
-  const canResetPassword = isGeral || isAdmin || isArmeiro;
+  const canResetPassword = isGeral || isAdministrador || isArmeiro;
 
   const handleResetPassword = async () => {
     if (!editingUser) return;
@@ -776,36 +810,48 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
                     {rolesList.map((r) => {
                       const isChecked = selectedRoles.includes(r);
+                      const isAllowed = canGrantRole(r);
+                      const roleLabel = r === 'operador_canino' ? 'Operador Canino' : r;
                       return (
                         <label
                           key={r}
-                          className={`flex items-center space-x-2 p-2 rounded-lg border text-xs font-semibold cursor-pointer transition ${
-                            isChecked
-                              ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
-                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                          title={!isAllowed ? `Você não possui o perfil de ${roleLabel} e não tem permissão para liberá-lo a outros usuários.` : undefined}
+                          className={`flex items-center justify-between p-2 rounded-lg border text-xs font-semibold transition ${
+                            !isAllowed
+                              ? 'bg-slate-950/40 border-slate-800/60 text-slate-500 cursor-not-allowed opacity-60'
+                              : isChecked
+                              ? 'bg-amber-500/15 border-amber-500/50 text-amber-300 cursor-pointer'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700 cursor-pointer'
                           }`}
                         >
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                const nextRoles = [...selectedRoles, r];
-                                setSelectedRoles(nextRoles);
-                                setRole(nextRoles[0]);
-                              } else {
-                                if (selectedRoles.length <= 1) {
-                                  setErrorMsg('O usuário deve possuir ao menos 1 perfil ativo.');
-                                  return;
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="checkbox"
+                              checked={isChecked}
+                              disabled={!isAllowed}
+                              onChange={(e) => {
+                                if (!isAllowed) return;
+                                if (e.target.checked) {
+                                  const nextRoles = [...selectedRoles, r];
+                                  setSelectedRoles(nextRoles);
+                                  setRole(nextRoles[0]);
+                                } else {
+                                  if (selectedRoles.length <= 1) {
+                                    setErrorMsg('O usuário deve possuir ao menos 1 perfil ativo.');
+                                    return;
+                                  }
+                                  const filtered = selectedRoles.filter(item => item !== r);
+                                  setSelectedRoles(filtered);
+                                  setRole(filtered[0]);
                                 }
-                                const filtered = selectedRoles.filter(item => item !== r);
-                                setSelectedRoles(filtered);
-                                setRole(filtered[0]);
-                              }
-                            }}
-                            className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500/20 bg-slate-950"
-                          />
-                          <span>{r === 'operador_canino' ? 'Operador Canino' : r}</span>
+                              }}
+                              className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500/20 bg-slate-950 disabled:opacity-50"
+                            />
+                            <span>{roleLabel}</span>
+                          </div>
+                          {!isAllowed && (
+                            <Lock className="w-3.5 h-3.5 text-slate-500 shrink-0" title="Perfil bloqueado: você não possui esta permissão" />
+                          )}
                         </label>
                       );
                     })}

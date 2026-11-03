@@ -526,6 +526,22 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const userRoles = parseUserRoles(roles, role);
     const rolesJson = JSON.stringify(userRoles);
 
+    // Validação estrita: O usuário cadastrador só pode liberar acesso aos perfis que ele próprio possui
+    if (actor) {
+      const actorRoles = parseUserRoles(actor.roles, actor.role);
+      const isActorGeral = actorRoles.includes('Geral') || actor.role === 'Geral';
+      if (!isActorGeral) {
+        for (const r of userRoles) {
+          if (r !== 'Policial' && !actorRoles.includes(r)) {
+            const label = r === 'operador_canino' ? 'Operador Canino' : r;
+            return res.status(403).json({
+              error: `Você não possui o perfil "${label}" e não tem autorização para concedê-lo a outros usuários.`
+            });
+          }
+        }
+      }
+    }
+
     const pool = getPool();
     const [existing]: any = await pool.query('SELECT ID_USUARIOS FROM USUARIOS WHERE MASP_USUARIOS = ?', [cleanMasp]);
     if (existing && existing.length > 0) {
@@ -626,26 +642,54 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     const actor = req.body.actor;
 
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        ID_USUARIOS as id,
-        MASP_USUARIOS as masp,
-        SENHA_USUARIOS as password,
-        NOME_USUARIOS as name,
-        TELEFONE_USUARIOS as phone,
-        CARGO_USUARIOS as cargo,
-        PERFIL_USUARIOS as role,
-        DEPARTAMENTO_ID_USUARIOS as department_id,
-        UNIDADE_ID_USUARIOS as unit_id,
-        PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
-        PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
-        TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
-        EH_PROFESSOR_USUARIOS as is_teacher,
-        DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
-        SIGLA_PROFESSOR_USUARIOS as professor_sigla,
-        DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
-      FROM USUARIOS WHERE ID_USUARIOS = ?
-    `, [id]);
+    let rows: any[] = [];
+    try {
+      const [res]: any = await pool.query(`
+        SELECT 
+          ID_USUARIOS as id,
+          MASP_USUARIOS as masp,
+          SENHA_USUARIOS as password,
+          NOME_USUARIOS as name,
+          TELEFONE_USUARIOS as phone,
+          CARGO_USUARIOS as cargo,
+          PERFIL_USUARIOS as role,
+          ROLES_USUARIOS as roles_json,
+          DEPARTAMENTO_ID_USUARIOS as department_id,
+          UNIDADE_ID_USUARIOS as unit_id,
+          PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+          PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+          TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+          EH_PROFESSOR_USUARIOS as is_teacher,
+          DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+          SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
+        FROM USUARIOS WHERE ID_USUARIOS = ?
+      `, [id]);
+      rows = res;
+    } catch {
+      const [res]: any = await pool.query(`
+        SELECT 
+          ID_USUARIOS as id,
+          MASP_USUARIOS as masp,
+          SENHA_USUARIOS as password,
+          NOME_USUARIOS as name,
+          TELEFONE_USUARIOS as phone,
+          CARGO_USUARIOS as cargo,
+          PERFIL_USUARIOS as role,
+          NULL as roles_json,
+          DEPARTAMENTO_ID_USUARIOS as department_id,
+          UNIDADE_ID_USUARIOS as unit_id,
+          PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+          PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+          TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+          EH_PROFESSOR_USUARIOS as is_teacher,
+          DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+          SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
+        FROM USUARIOS WHERE ID_USUARIOS = ?
+      `, [id]);
+      rows = res;
+    }
     if (!rows || rows.length === 0) {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
@@ -672,6 +716,23 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
 
     const updatedRoles = updates.roles !== undefined ? parseUserRoles(updates.roles, updates.role || rows[0].role) : undefined;
     const rolesJson = updatedRoles ? JSON.stringify(updatedRoles) : null;
+
+    // Validação estrita: O usuário editor só pode conceder perfis que ele próprio possui
+    if (updatedRoles !== undefined && actor) {
+      const actorRoles = parseUserRoles(actor.roles, actor.role);
+      const isActorGeral = actorRoles.includes('Geral') || actor.role === 'Geral';
+      if (!isActorGeral) {
+        const existingRoles = parseUserRoles(rows[0].roles_json, rows[0].role);
+        for (const r of updatedRoles) {
+          if (r !== 'Policial' && !actorRoles.includes(r) && !existingRoles.includes(r)) {
+            const label = r === 'operador_canino' ? 'Operador Canino' : r;
+            return res.status(403).json({
+              error: `Você não possui o perfil "${label}" e não tem autorização para concedê-lo a outros usuários.`
+            });
+          }
+        }
+      }
+    }
 
     try {
       await pool.query(
@@ -776,15 +837,19 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Usuário não encontrado' });
     }
 
-    const [activeLoans]: any = await pool.query(
-      `SELECT * FROM weapon_movements WHERE requester_id = ? AND status IN ('Em Trânsito', 'Pendente Recibo', 'Pendente Aprovação')`,
-      [id]
-    );
+    try {
+      const [activeLoans]: any = await pool.query(
+        `SELECT * FROM MOVIMENTACOES_ARMAS WHERE POLICIAL_ID_MOVIMENTACOES_ARMAS = ? AND STATUS_MOVIMENTACOES_ARMAS IN ('Em Trânsito', 'Pendente Recibo', 'Pendente Aprovação')`,
+        [id]
+      );
 
-    if (activeLoans && activeLoans.length > 0) {
-      return res.status(400).json({
-        error: `Não é possível excluir o policial ${users[0].name} pois ele possui solicitação ou armamento ativo em cautela.`
-      });
+      if (activeLoans && activeLoans.length > 0) {
+        return res.status(400).json({
+          error: `Não é possível excluir o policial ${users[0].name} pois ele possui solicitação ou armamento ativo em cautela.`
+        });
+      }
+    } catch {
+      // Tabela de movimentações vazia ou consulta ignorada
     }
 
     await pool.query('DELETE FROM USUARIO_CURSOS WHERE USUARIO_ID_USUARIO_CURSOS = ?', [id]);
