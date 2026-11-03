@@ -43,12 +43,32 @@ async function insertAuditLog(
   }
 }
 
+export function parseUserRoles(rolesRaw: any, primaryRole: string): string[] {
+  let list: string[] = [];
+  if (rolesRaw) {
+    if (Array.isArray(rolesRaw)) {
+      list = rolesRaw;
+    } else if (typeof rolesRaw === 'string') {
+      try {
+        const parsed = JSON.parse(rolesRaw);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch {
+        list = rolesRaw.split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+    }
+  }
+  if (primaryRole && !list.includes(primaryRole)) {
+    list.unshift(primaryRole);
+  }
+  return list.length > 0 ? list : [primaryRole || 'Policial'];
+}
+
 // -------------------------------------------------------------
 // AUTH & USER SESSIONS
 // -------------------------------------------------------------
 apiRouter.post('/auth/login', async (req: Request, res: Response) => {
   try {
-    const { maspDigits, passwordDigits } = req.body;
+    const { maspDigits, passwordDigits, chosenRole } = req.body;
     const cleanMasp = (maspDigits || '').replace(/\D/g, '');
     const cleanPass = (passwordDigits || '').trim();
 
@@ -56,27 +76,54 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     let pool;
     try {
       pool = getPool();
-      [rows] = await pool.query(`
-        SELECT 
-          ID_USUARIOS as id,
-          MASP_USUARIOS as masp,
-          SENHA_USUARIOS as password,
-          NOME_USUARIOS as name,
-          TELEFONE_USUARIOS as phone,
-          CARGO_USUARIOS as cargo,
-          PERFIL_USUARIOS as role,
-          DEPARTAMENTO_ID_USUARIOS as department_id,
-          UNIDADE_ID_USUARIOS as unit_id,
-          PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
-          PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
-          TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
-          EH_PROFESSOR_USUARIOS as is_teacher,
-          DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
-          SIGLA_PROFESSOR_USUARIOS as professor_sigla,
-          DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
-          DATA_CRIACAO_USUARIOS as created_at
-        FROM USUARIOS WHERE MASP_USUARIOS = ?
-      `, [cleanMasp]);
+      try {
+        [rows] = await pool.query(`
+          SELECT 
+            ID_USUARIOS as id,
+            MASP_USUARIOS as masp,
+            SENHA_USUARIOS as password,
+            NOME_USUARIOS as name,
+            TELEFONE_USUARIOS as phone,
+            CARGO_USUARIOS as cargo,
+            PERFIL_USUARIOS as role,
+            ROLES_USUARIOS as roles_json,
+            DEPARTAMENTO_ID_USUARIOS as department_id,
+            UNIDADE_ID_USUARIOS as unit_id,
+            PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+            PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+            TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+            EH_PROFESSOR_USUARIOS as is_teacher,
+            DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+            SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+            DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
+            DATA_CRIACAO_USUARIOS as created_at
+          FROM USUARIOS WHERE MASP_USUARIOS = ?
+        `, [cleanMasp]);
+      } catch (colErr) {
+        // Fallback se a coluna ROLES_USUARIOS ainda não foi criada no banco remoto
+        [rows] = await pool.query(`
+          SELECT 
+            ID_USUARIOS as id,
+            MASP_USUARIOS as masp,
+            SENHA_USUARIOS as password,
+            NOME_USUARIOS as name,
+            TELEFONE_USUARIOS as phone,
+            CARGO_USUARIOS as cargo,
+            PERFIL_USUARIOS as role,
+            NULL as roles_json,
+            DEPARTAMENTO_ID_USUARIOS as department_id,
+            UNIDADE_ID_USUARIOS as unit_id,
+            PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+            PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+            TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+            EH_PROFESSOR_USUARIOS as is_teacher,
+            DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+            SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+            DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
+            DATA_CRIACAO_USUARIOS as created_at
+          FROM USUARIOS WHERE MASP_USUARIOS = ?
+        `, [cleanMasp]);
+      }
     } catch (dbErr: any) {
       console.error('[MySQL Login Error]', dbErr);
       const isAccessDenied = dbErr.code === 'ER_ACCESS_DENIED_ERROR' || dbErr.message?.includes('Access denied');
@@ -136,6 +183,9 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     // Get user courses
     const [courses]: any = await pool.query('SELECT CURSO_ID_USUARIO_CURSOS as courseId, DATA_CONCLUSAO_USUARIO_CURSOS as completionDate, DATA_VALIDADE_USUARIO_CURSOS as expirationDate FROM USUARIO_CURSOS WHERE USUARIO_ID_USUARIO_CURSOS = ?', [dbUser.id]);
 
+    const userRoles = parseUserRoles(dbUser.roles_json, dbUser.role);
+    const activeRole = (chosenRole && userRoles.includes(chosenRole)) ? chosenRole : dbUser.role;
+
     const formattedUser = {
       id: dbUser.id,
       masp: dbUser.masp,
@@ -143,6 +193,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       phone: dbUser.phone || '',
       cargo: dbUser.cargo,
       role: dbUser.role,
+      roles: userRoles,
+      activeRole: activeRole,
       departmentId: dbUser.department_id || '',
       unitId: dbUser.unit_id || '',
       canMoveAmmunition: Boolean(dbUser.can_move_ammo),
@@ -367,27 +419,56 @@ apiRouter.delete('/units/:id', async (req: Request, res: Response) => {
 apiRouter.get('/users', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [users]: any = await pool.query(`
-      SELECT 
-        ID_USUARIOS as id,
-        MASP_USUARIOS as masp,
-        SENHA_USUARIOS as password,
-        NOME_USUARIOS as name,
-        TELEFONE_USUARIOS as phone,
-        CARGO_USUARIOS as cargo,
-        PERFIL_USUARIOS as role,
-        DEPARTAMENTO_ID_USUARIOS as department_id,
-        UNIDADE_ID_USUARIOS as unit_id,
-        PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
-        PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
-        TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
-        EH_PROFESSOR_USUARIOS as is_teacher,
-        DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
-        SIGLA_PROFESSOR_USUARIOS as professor_sigla,
-        DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
-        DATA_CRIACAO_USUARIOS as created_at
-      FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
-    `);
+    let users: any[] = [];
+    try {
+      const [rows]: any = await pool.query(`
+        SELECT 
+          ID_USUARIOS as id,
+          MASP_USUARIOS as masp,
+          SENHA_USUARIOS as password,
+          NOME_USUARIOS as name,
+          TELEFONE_USUARIOS as phone,
+          CARGO_USUARIOS as cargo,
+          PERFIL_USUARIOS as role,
+          ROLES_USUARIOS as roles_json,
+          DEPARTAMENTO_ID_USUARIOS as department_id,
+          UNIDADE_ID_USUARIOS as unit_id,
+          PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+          PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+          TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+          EH_PROFESSOR_USUARIOS as is_teacher,
+          DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+          SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
+          DATA_CRIACAO_USUARIOS as created_at
+        FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
+      `);
+      users = rows || [];
+    } catch {
+      const [rows]: any = await pool.query(`
+        SELECT 
+          ID_USUARIOS as id,
+          MASP_USUARIOS as masp,
+          SENHA_USUARIOS as password,
+          NOME_USUARIOS as name,
+          TELEFONE_USUARIOS as phone,
+          CARGO_USUARIOS as cargo,
+          PERFIL_USUARIOS as role,
+          NULL as roles_json,
+          DEPARTAMENTO_ID_USUARIOS as department_id,
+          UNIDADE_ID_USUARIOS as unit_id,
+          PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+          PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+          TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+          EH_PROFESSOR_USUARIOS as is_teacher,
+          DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+          SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
+          DATA_CRIACAO_USUARIOS as created_at
+        FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
+      `);
+      users = rows || [];
+    }
     const [userCourses]: any = await pool.query(`
       SELECT 
         ID_USUARIO_CURSOS as id,
@@ -415,6 +496,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         phone: u.phone || '',
         cargo: u.cargo,
         role: u.role,
+        roles: parseUserRoles(u.roles_json, u.role),
         departmentId: u.department_id || '',
         unitId: u.unit_id || '',
         canMoveAmmunition: Boolean(u.can_move_ammo),
@@ -438,9 +520,11 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { masp, name, phone, cargo, role, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
+    const { masp, name, phone, cargo, role, roles, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
     const siglaProf = professorSigla || professor_sigla || null;
+    const userRoles = parseUserRoles(roles, role);
+    const rolesJson = JSON.stringify(userRoles);
 
     const pool = getPool();
     const [existing]: any = await pool.query('SELECT ID_USUARIOS FROM USUARIOS WHERE MASP_USUARIOS = ?', [cleanMasp]);
@@ -450,27 +534,52 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
 
     const id = `usr-${Date.now()}`;
     const hashedDefaultPass = hashPassword(cleanMasp);
-    await pool.query(
-      `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
-      [
-        id,
-        cleanMasp,
-        hashedDefaultPass, // Encrypted default password = MASP hash
-        name,
-        phone || null,
-        cargo,
-        role,
-        departmentId || null,
-        unitId || null,
-        canMoveAmmunition ? 1 : 0,
-        canMoveWeapons ? 1 : 0,
-        hasSystemAccess ? 1 : 0,
-        isTeacher ? 1 : 0,
-        teacherSubject || null,
-        siglaProf
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        [
+          id,
+          cleanMasp,
+          hashedDefaultPass, // Encrypted default password = MASP hash
+          name,
+          phone || null,
+          cargo,
+          role,
+          rolesJson,
+          departmentId || null,
+          unitId || null,
+          canMoveAmmunition ? 1 : 0,
+          canMoveWeapons ? 1 : 0,
+          hasSystemAccess ? 1 : 0,
+          isTeacher ? 1 : 0,
+          teacherSubject || null,
+          siglaProf
+        ]
+      );
+    } catch {
+      await pool.query(
+        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        [
+          id,
+          cleanMasp,
+          hashedDefaultPass,
+          name,
+          phone || null,
+          cargo,
+          role,
+          departmentId || null,
+          unitId || null,
+          canMoveAmmunition ? 1 : 0,
+          canMoveWeapons ? 1 : 0,
+          hasSystemAccess ? 1 : 0,
+          isTeacher ? 1 : 0,
+          teacherSubject || null,
+          siglaProf
+        ]
+      );
+    }
 
     if (Array.isArray(courses)) {
       for (const c of courses) {
@@ -561,39 +670,80 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
 
     const cleanMasp = updates.masp ? updates.masp.replace(/\D/g, '') : userMasp;
 
-    await pool.query(
-      `UPDATE USUARIOS SET
-        MASP_USUARIOS = ?,
-        NOME_USUARIOS = COALESCE(?, NOME_USUARIOS),
-        TELEFONE_USUARIOS = COALESCE(?, TELEFONE_USUARIOS),
-        CARGO_USUARIOS = COALESCE(?, CARGO_USUARIOS),
-        PERFIL_USUARIOS = COALESCE(?, PERFIL_USUARIOS),
-        DEPARTAMENTO_ID_USUARIOS = COALESCE(?, DEPARTAMENTO_ID_USUARIOS),
-        UNIDADE_ID_USUARIOS = COALESCE(?, UNIDADE_ID_USUARIOS),
-        PODE_MOVER_MUNICAO_USUARIOS = COALESCE(?, PODE_MOVER_MUNICAO_USUARIOS),
-        PODE_MOVER_ARMAS_USUARIOS = COALESCE(?, PODE_MOVER_ARMAS_USUARIOS),
-        TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
-        EH_PROFESSOR_USUARIOS = COALESCE(?, EH_PROFESSOR_USUARIOS),
-        DISCIPLINA_PROFESSOR_USUARIOS = COALESCE(?, DISCIPLINA_PROFESSOR_USUARIOS),
-        SIGLA_PROFESSOR_USUARIOS = COALESCE(?, SIGLA_PROFESSOR_USUARIOS)
-       WHERE ID_USUARIOS = ?`,
-      [
-        cleanMasp,
-        updates.name ?? null,
-        updates.phone ?? null,
-        updates.cargo ?? null,
-        updates.role ?? null,
-        updates.departmentId ?? null,
-        updates.unitId ?? null,
-        updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
-        updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
-        updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
-        updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
-        updates.teacherSubject !== undefined ? updates.teacherSubject : null,
-        updates.professorSigla ?? updates.professor_sigla ?? null,
-        id
-      ]
-    );
+    const updatedRoles = updates.roles !== undefined ? parseUserRoles(updates.roles, updates.role || rows[0].role) : undefined;
+    const rolesJson = updatedRoles ? JSON.stringify(updatedRoles) : null;
+
+    try {
+      await pool.query(
+        `UPDATE USUARIOS SET
+          MASP_USUARIOS = ?,
+          NOME_USUARIOS = COALESCE(?, NOME_USUARIOS),
+          TELEFONE_USUARIOS = COALESCE(?, TELEFONE_USUARIOS),
+          CARGO_USUARIOS = COALESCE(?, CARGO_USUARIOS),
+          PERFIL_USUARIOS = COALESCE(?, PERFIL_USUARIOS),
+          ROLES_USUARIOS = COALESCE(?, ROLES_USUARIOS),
+          DEPARTAMENTO_ID_USUARIOS = COALESCE(?, DEPARTAMENTO_ID_USUARIOS),
+          UNIDADE_ID_USUARIOS = COALESCE(?, UNIDADE_ID_USUARIOS),
+          PODE_MOVER_MUNICAO_USUARIOS = COALESCE(?, PODE_MOVER_MUNICAO_USUARIOS),
+          PODE_MOVER_ARMAS_USUARIOS = COALESCE(?, PODE_MOVER_ARMAS_USUARIOS),
+          TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
+          EH_PROFESSOR_USUARIOS = COALESCE(?, EH_PROFESSOR_USUARIOS),
+          DISCIPLINA_PROFESSOR_USUARIOS = COALESCE(?, DISCIPLINA_PROFESSOR_USUARIOS),
+          SIGLA_PROFESSOR_USUARIOS = COALESCE(?, SIGLA_PROFESSOR_USUARIOS)
+         WHERE ID_USUARIOS = ?`,
+        [
+          cleanMasp,
+          updates.name ?? null,
+          updates.phone ?? null,
+          updates.cargo ?? null,
+          updates.role ?? null,
+          rolesJson,
+          updates.departmentId ?? null,
+          updates.unitId ?? null,
+          updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
+          updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
+          updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
+          updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
+          updates.teacherSubject !== undefined ? updates.teacherSubject : null,
+          updates.professorSigla ?? updates.professor_sigla ?? null,
+          id
+        ]
+      );
+    } catch {
+      await pool.query(
+        `UPDATE USUARIOS SET
+          MASP_USUARIOS = ?,
+          NOME_USUARIOS = COALESCE(?, NOME_USUARIOS),
+          TELEFONE_USUARIOS = COALESCE(?, TELEFONE_USUARIOS),
+          CARGO_USUARIOS = COALESCE(?, CARGO_USUARIOS),
+          PERFIL_USUARIOS = COALESCE(?, PERFIL_USUARIOS),
+          DEPARTAMENTO_ID_USUARIOS = COALESCE(?, DEPARTAMENTO_ID_USUARIOS),
+          UNIDADE_ID_USUARIOS = COALESCE(?, UNIDADE_ID_USUARIOS),
+          PODE_MOVER_MUNICAO_USUARIOS = COALESCE(?, PODE_MOVER_MUNICAO_USUARIOS),
+          PODE_MOVER_ARMAS_USUARIOS = COALESCE(?, PODE_MOVER_ARMAS_USUARIOS),
+          TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
+          EH_PROFESSOR_USUARIOS = COALESCE(?, EH_PROFESSOR_USUARIOS),
+          DISCIPLINA_PROFESSOR_USUARIOS = COALESCE(?, DISCIPLINA_PROFESSOR_USUARIOS),
+          SIGLA_PROFESSOR_USUARIOS = COALESCE(?, SIGLA_PROFESSOR_USUARIOS)
+         WHERE ID_USUARIOS = ?`,
+        [
+          cleanMasp,
+          updates.name ?? null,
+          updates.phone ?? null,
+          updates.cargo ?? null,
+          updates.role ?? null,
+          updates.departmentId ?? null,
+          updates.unitId ?? null,
+          updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
+          updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
+          updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
+          updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
+          updates.teacherSubject !== undefined ? updates.teacherSubject : null,
+          updates.professorSigla ?? updates.professor_sigla ?? null,
+          id
+        ]
+      );
+    }
 
     if (Array.isArray(updates.courses)) {
       await pool.query('DELETE FROM USUARIO_CURSOS WHERE USUARIO_ID_USUARIO_CURSOS = ?', [id]);
@@ -7019,6 +7169,584 @@ apiRouter.delete('/fabricantes-explosivos/:id', async (req: Request, res: Respon
     return res.json({ success: true });
   } catch (err: any) {
     console.error('Error deleting fabricante_explosivo:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================
+// MÓDULO MATERIAL VETERINÁRIO & CANIL K9
+// =============================================================
+
+// --- 1. CANIS FÍSICOS ---
+apiRouter.get('/canis-fisicos', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        ID_CANIL as id,
+        NOME_CANIL as nome,
+        IDENTIFICACAO_CANIL as identificacao,
+        CAPACIDADE_CANIL as capacidade,
+        LOCALIZACAO_CANIL as localizacao,
+        DEPARTAMENTO_ID_CANIL as departmentId,
+        UNIDADE_ID_CANIL as unitId,
+        STATUS_CANIL as status,
+        OBSERVACOES_CANIL as observacoes,
+        DATA_CRIACAO_CANIL as createdAt
+      FROM CANIS_FISICOS ORDER BY NOME_CANIL ASC
+    `);
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/canis-fisicos', async (req: Request, res: Response) => {
+  try {
+    const { nome, identificacao, capacidade, localizacao, departmentId, unitId, status, observacoes, actor } = req.body;
+    if (!nome || !nome.trim()) {
+      return res.status(400).json({ error: 'O nome do canil é obrigatório.' });
+    }
+    const pool = getPool();
+    const id = `canil-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(`
+      INSERT INTO CANIS_FISICOS (
+        ID_CANIL, NOME_CANIL, IDENTIFICACAO_CANIL, CAPACIDADE_CANIL, LOCALIZACAO_CANIL,
+        DEPARTAMENTO_ID_CANIL, UNIDADE_ID_CANIL, STATUS_CANIL, OBSERVACOES_CANIL, DATA_CRIACAO_CANIL
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      id,
+      nome.trim(),
+      identificacao?.trim() || null,
+      capacidade ? Number(capacidade) : 1,
+      localizacao?.trim() || null,
+      departmentId || null,
+      unitId || null,
+      status || 'Ativo',
+      observacoes?.trim() || null
+    ]);
+
+    await insertAuditLog('Veterinário', 'Criar Canil', `Cadastrado canil físico: ${nome}`, actor, req.ip);
+    return res.json({ id, nome, status: status || 'Ativo' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/canis-fisicos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nome, identificacao, capacidade, localizacao, departmentId, unitId, status, observacoes, actor } = req.body;
+    const pool = getPool();
+    await pool.query(`
+      UPDATE CANIS_FISICOS SET
+        NOME_CANIL = COALESCE(?, NOME_CANIL),
+        IDENTIFICACAO_CANIL = ?,
+        CAPACIDADE_CANIL = COALESCE(?, CAPACIDADE_CANIL),
+        LOCALIZACAO_CANIL = ?,
+        DEPARTAMENTO_ID_CANIL = ?,
+        UNIDADE_ID_CANIL = ?,
+        STATUS_CANIL = COALESCE(?, STATUS_CANIL),
+        OBSERVACOES_CANIL = ?
+      WHERE ID_CANIL = ?
+    `, [
+      nome?.trim() || null,
+      identificacao?.trim() || null,
+      capacidade !== undefined ? Number(capacidade) : null,
+      localizacao?.trim() || null,
+      departmentId || null,
+      unitId || null,
+      status || null,
+      observacoes?.trim() || null,
+      id
+    ]);
+
+    await insertAuditLog('Veterinário', 'Editar Canil', `Atualizado canil físico: ${nome || id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/canis-fisicos/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [dogs]: any = await pool.query('SELECT COUNT(*) as cnt FROM CACHORROS_CANIL WHERE CANIL_FISICO_ID_CACHORRO = ?', [id]);
+    if (dogs[0]?.cnt > 0) {
+      return res.status(400).json({ error: `Não é possível excluir o canil pois existem ${dogs[0].cnt} cão(es) vinculado(s) a ele.` });
+    }
+
+    await pool.query('DELETE FROM CANIS_FISICOS WHERE ID_CANIL = ?', [id]);
+    await insertAuditLog('Veterinário', 'Excluir Canil', `Excluído canil físico ID: ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 2. CACHORROS K9 ---
+apiRouter.get('/cachorros', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        c.ID_CACHORRO as id,
+        c.NOME_CACHORRO as nome,
+        c.RACA_CACHORRO as raca,
+        c.SEXO_CACHORRO as sexo,
+        DATE_FORMAT(c.DATA_NASCIMENTO_CACHORRO, '%Y-%m-%d') as dataNascimento,
+        c.MICROCHIP_CACHORRO as microchip,
+        c.PELAGEM_CACHORRO as pelagem,
+        c.ESPECIALIDADE_CACHORRO as especialidade,
+        c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
+        k.NOME_CANIL as canilFisicoNome,
+        c.STATUS_CACHORRO as status,
+        c.TIPO_VINCULO_CACHORRO as tipoVinculo,
+        c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
+        c.USUARIO_INTERNO_NOME_CACHORRO as usuarioInternoNome,
+        c.USUARIO_INTERNO_MASP_CACHORRO as usuarioInternoMasp,
+        c.USUARIO_INTERNO_CARGO_CACHORRO as usuarioInternoCargo,
+        c.RESPONSAVEL_EXTERNO_NOME_CACHORRO as responsavelExternoNome,
+        c.RESPONSAVEL_EXTERNO_DOC_CACHORRO as responsavelExternoDoc,
+        c.RESPONSAVEL_EXTERNO_TEL_CACHORRO as responsavelExternoTel,
+        c.RESPONSAVEL_EXTERNO_ORGAO_CACHORRO as responsavelExternoOrgao,
+        c.DEPARTAMENTO_ID_CACHORRO as departmentId,
+        c.UNIDADE_ID_CACHORRO as unitId,
+        c.FOTO_URL_CACHORRO as fotoUrl,
+        c.OBSERVACOES_CACHORRO as observacoes,
+        c.DATA_CRIACAO_CACHORRO as createdAt
+      FROM CACHORROS_CANIL c
+      LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
+      ORDER BY c.NOME_CACHORRO ASC
+    `);
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/cachorros', async (req: Request, res: Response) => {
+  try {
+    const dog = req.body;
+    if (!dog.nome || !dog.nome.trim()) {
+      return res.status(400).json({ error: 'O nome do cão é obrigatório.' });
+    }
+    const pool = getPool();
+    const id = `cao-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    await pool.query(`
+      INSERT INTO CACHORROS_CANIL (
+        ID_CACHORRO, NOME_CACHORRO, RACA_CACHORRO, SEXO_CACHORRO, DATA_NASCIMENTO_CACHORRO,
+        MICROCHIP_CACHORRO, PELAGEM_CACHORRO, ESPECIALIDADE_CACHORRO, CANIL_FISICO_ID_CACHORRO,
+        STATUS_CACHORRO, TIPO_VINCULO_CACHORRO, USUARIO_INTERNO_ID_CACHORRO, USUARIO_INTERNO_NOME_CACHORRO,
+        USUARIO_INTERNO_MASP_CACHORRO, USUARIO_INTERNO_CARGO_CACHORRO, RESPONSAVEL_EXTERNO_NOME_CACHORRO,
+        RESPONSAVEL_EXTERNO_DOC_CACHORRO, RESPONSAVEL_EXTERNO_TEL_CACHORRO, RESPONSAVEL_EXTERNO_ORGAO_CACHORRO,
+        DEPARTAMENTO_ID_CACHORRO, UNIDADE_ID_CACHORRO, FOTO_URL_CACHORRO, OBSERVACOES_CACHORRO, DATA_CRIACAO_CACHORRO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      id,
+      dog.nome.trim(),
+      dog.raca?.trim() || 'Pastor Belga Malinois',
+      dog.sexo || 'Macho',
+      dog.dataNascimento || null,
+      dog.microchip?.trim() || null,
+      dog.pelagem?.trim() || null,
+      dog.especialidade?.trim() || null,
+      dog.canilFisicoId || null,
+      dog.status || 'Ativo / Operacional',
+      dog.tipoVinculo || 'SISTEMA',
+      dog.usuarioInternoId || null,
+      dog.usuarioInternoNome || null,
+      dog.usuarioInternoMasp || null,
+      dog.usuarioInternoCargo || null,
+      dog.responsavelExternoNome || null,
+      dog.responsavelExternoDoc || null,
+      dog.responsavelExternoTel || null,
+      dog.responsavelExternoOrgao || null,
+      dog.departmentId || null,
+      dog.unitId || null,
+      dog.fotoUrl || null,
+      dog.observacoes || null
+    ]);
+
+    await insertAuditLog('Veterinário', 'Cadastrar Cão', `Cadastrado cão K9: ${dog.nome} (Raça: ${dog.raca})`, dog.actor, req.ip);
+    return res.json({ id, ...dog });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const dog = req.body;
+    const pool = getPool();
+
+    await pool.query(`
+      UPDATE CACHORROS_CANIL SET
+        NOME_CACHORRO = COALESCE(?, NOME_CACHORRO),
+        RACA_CACHORRO = COALESCE(?, RACA_CACHORRO),
+        SEXO_CACHORRO = COALESCE(?, SEXO_CACHORRO),
+        DATA_NASCIMENTO_CACHORRO = ?,
+        MICROCHIP_CACHORRO = ?,
+        PELAGEM_CACHORRO = ?,
+        ESPECIALIDADE_CACHORRO = ?,
+        CANIL_FISICO_ID_CACHORRO = ?,
+        STATUS_CACHORRO = COALESCE(?, STATUS_CACHORRO),
+        TIPO_VINCULO_CACHORRO = COALESCE(?, TIPO_VINCULO_CACHORRO),
+        USUARIO_INTERNO_ID_CACHORRO = ?,
+        USUARIO_INTERNO_NOME_CACHORRO = ?,
+        USUARIO_INTERNO_MASP_CACHORRO = ?,
+        USUARIO_INTERNO_CARGO_CACHORRO = ?,
+        RESPONSAVEL_EXTERNO_NOME_CACHORRO = ?,
+        RESPONSAVEL_EXTERNO_DOC_CACHORRO = ?,
+        RESPONSAVEL_EXTERNO_TEL_CACHORRO = ?,
+        RESPONSAVEL_EXTERNO_ORGAO_CACHORRO = ?,
+        DEPARTAMENTO_ID_CACHORRO = ?,
+        UNIDADE_ID_CACHORRO = ?,
+        FOTO_URL_CACHORRO = COALESCE(?, FOTO_URL_CACHORRO),
+        OBSERVACOES_CACHORRO = ?
+      WHERE ID_CACHORRO = ?
+    `, [
+      dog.nome?.trim() || null,
+      dog.raca?.trim() || null,
+      dog.sexo || null,
+      dog.dataNascimento || null,
+      dog.microchip?.trim() || null,
+      dog.pelagem?.trim() || null,
+      dog.especialidade?.trim() || null,
+      dog.canilFisicoId || null,
+      dog.status || null,
+      dog.tipoVinculo || null,
+      dog.usuarioInternoId || null,
+      dog.usuarioInternoNome || null,
+      dog.usuarioInternoMasp || null,
+      dog.usuarioInternoCargo || null,
+      dog.responsavelExternoNome || null,
+      dog.responsavelExternoDoc || null,
+      dog.responsavelExternoTel || null,
+      dog.responsavelExternoOrgao || null,
+      dog.departmentId || null,
+      dog.unitId || null,
+      dog.fotoUrl !== undefined ? dog.fotoUrl : null,
+      dog.observacoes?.trim() || null,
+      id
+    ]);
+
+    await insertAuditLog('Veterinário', 'Editar Cão', `Atualizado cadastro do cão: ${dog.nome || id}`, dog.actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/cachorros/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [movs]: any = await pool.query('SELECT COUNT(*) as cnt FROM MOVIMENTACOES_VETERINARIAS WHERE CACHORRO_ID_MOV_VET = ?', [id]);
+    if (movs[0]?.cnt > 0) {
+      return res.status(400).json({ error: `Não é possível excluir este cão pois existem ${movs[0].cnt} registro(s) de administração/movimentação veterinária vinculados a ele.` });
+    }
+
+    await pool.query('DELETE FROM CACHORROS_CANIL WHERE ID_CACHORRO = ?', [id]);
+    await insertAuditLog('Veterinário', 'Excluir Cão', `Excluído cão K9 ID: ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 3. PRODUTOS VETERINÁRIOS (REMÉDIOS, RAÇÕES, INSUMOS) ---
+apiRouter.get('/produtos-veterinarios', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        ID_PRODUTO_VET as id,
+        TIPO_PRODUTO_VET as tipo,
+        NOME_PRODUTO_VET as nome,
+        CATEGORIA_PRODUTO_VET as categoria,
+        CODIGO_BARRAS_PRODUTO_VET as codigoBarras,
+        FABRICANTE_PRODUTO_VET as fabricante,
+        LOTE_PRODUTO_VET as lote,
+        VALOR_UNITARIO_PRODUTO_VET as valorUnitario,
+        TEM_VALIDADE_PRODUTO_VET as temValidade,
+        DATE_FORMAT(DATA_VALIDADE_PRODUTO_VET, '%Y-%m-%d') as dataValidade,
+        EH_PERECIVEL_PRODUTO_VET as ehPerecivel,
+        QUANTIDADE_ESTOQUE_PRODUTO_VET as quantidadeEstoque,
+        UNIDADE_MEDIDA_PRODUTO_VET as unidadeMedida,
+        QUANTIDADE_MINIMA_PRODUTO_VET as quantidadeMinima,
+        LOCAL_GUARDA_PRODUTO_VET as localGuarda,
+        FORMA_FARMACEUTICA_PRODUTO_VET as formaFarmaceutica,
+        REGIME_CONSUMO_PRODUTO_VET as regimeConsumo,
+        INTERVALO_HORAS_PRODUTO_VET as intervaloHoras,
+        DOSAGEM_PADRAO_PRODUTO_VET as dosagemPadrao,
+        DEPARTAMENTO_ID_PRODUTO_VET as departmentId,
+        UNIDADE_ID_PRODUTO_VET as unitId,
+        OBSERVACOES_PRODUTO_VET as observacoes,
+        DATA_CRIACAO_PRODUTO_VET as createdAt
+      FROM PRODUTOS_VETERINARIOS ORDER BY NOME_PRODUTO_VET ASC
+    `);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      valorUnitario: Number(r.valorUnitario || 0),
+      quantidadeEstoque: Number(r.quantidadeEstoque || 0),
+      quantidadeMinima: Number(r.quantidadeMinima || 0),
+      intervaloHoras: r.intervaloHoras ? Number(r.intervaloHoras) : undefined,
+      temValidade: Boolean(r.temValidade),
+      ehPerecivel: Boolean(r.ehPerecivel)
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/produtos-veterinarios', async (req: Request, res: Response) => {
+  try {
+    const prod = req.body;
+    if (!prod.nome || !prod.nome.trim()) {
+      return res.status(400).json({ error: 'O nome do produto é obrigatório.' });
+    }
+    const pool = getPool();
+    const id = `prodvet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    await pool.query(`
+      INSERT INTO PRODUTOS_VETERINARIOS (
+        ID_PRODUTO_VET, TIPO_PRODUTO_VET, NOME_PRODUTO_VET, CATEGORIA_PRODUTO_VET,
+        CODIGO_BARRAS_PRODUTO_VET, FABRICANTE_PRODUTO_VET, LOTE_PRODUTO_VET, VALOR_UNITARIO_PRODUTO_VET,
+        TEM_VALIDADE_PRODUTO_VET, DATA_VALIDADE_PRODUTO_VET, EH_PERECIVEL_PRODUTO_VET,
+        QUANTIDADE_ESTOQUE_PRODUTO_VET, UNIDADE_MEDIDA_PRODUTO_VET, QUANTIDADE_MINIMA_PRODUTO_VET,
+        LOCAL_GUARDA_PRODUTO_VET, FORMA_FARMACEUTICA_PRODUTO_VET, REGIME_CONSUMO_PRODUTO_VET,
+        INTERVALO_HORAS_PRODUTO_VET, DOSAGEM_PADRAO_PRODUTO_VET, DEPARTAMENTO_ID_PRODUTO_VET,
+        UNIDADE_ID_PRODUTO_VET, OBSERVACOES_PRODUTO_VET, DATA_CRIACAO_PRODUTO_VET
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      id,
+      prod.tipo || 'REMEDIO',
+      prod.nome.trim(),
+      prod.categoria?.trim() || null,
+      prod.codigoBarras?.trim() || null,
+      prod.fabricante?.trim() || null,
+      prod.lote?.trim() || null,
+      prod.valorUnitario !== undefined ? Number(prod.valorUnitario) : 0,
+      prod.temValidade ? 1 : 0,
+      prod.temValidade && prod.dataValidade ? prod.dataValidade : null,
+      prod.ehPerecivel ? 1 : 0,
+      prod.quantidadeEstoque !== undefined ? Number(prod.quantidadeEstoque) : 0,
+      prod.unidadeMedida?.trim() || 'Unidade',
+      prod.quantidadeMinima !== undefined ? Number(prod.quantidadeMinima) : 0,
+      prod.localGuarda?.trim() || null,
+      prod.formaFarmaceutica || null,
+      prod.regimeConsumo || null,
+      prod.intervaloHoras ? Number(prod.intervaloHoras) : null,
+      prod.dosagemPadrao?.trim() || null,
+      prod.departmentId || null,
+      prod.unitId || null,
+      prod.observacoes?.trim() || null
+    ]);
+
+    await insertAuditLog('Veterinário', 'Cadastrar Produto', `Cadastrado produto veterinário: ${prod.nome} (${prod.tipo})`, prod.actor, req.ip);
+    return res.json({ id, ...prod });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/produtos-veterinarios/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const prod = req.body;
+    const pool = getPool();
+
+    await pool.query(`
+      UPDATE PRODUTOS_VETERINARIOS SET
+        TIPO_PRODUTO_VET = COALESCE(?, TIPO_PRODUTO_VET),
+        NOME_PRODUTO_VET = COALESCE(?, NOME_PRODUTO_VET),
+        CATEGORIA_PRODUTO_VET = ?,
+        CODIGO_BARRAS_PRODUTO_VET = ?,
+        FABRICANTE_PRODUTO_VET = ?,
+        LOTE_PRODUTO_VET = ?,
+        VALOR_UNITARIO_PRODUTO_VET = COALESCE(?, VALOR_UNITARIO_PRODUTO_VET),
+        TEM_VALIDADE_PRODUTO_VET = COALESCE(?, TEM_VALIDADE_PRODUTO_VET),
+        DATA_VALIDADE_PRODUTO_VET = ?,
+        EH_PERECIVEL_PRODUTO_VET = COALESCE(?, EH_PERECIVEL_PRODUTO_VET),
+        QUANTIDADE_ESTOQUE_PRODUTO_VET = COALESCE(?, QUANTIDADE_ESTOQUE_PRODUTO_VET),
+        UNIDADE_MEDIDA_PRODUTO_VET = COALESCE(?, UNIDADE_MEDIDA_PRODUTO_VET),
+        QUANTIDADE_MINIMA_PRODUTO_VET = COALESCE(?, QUANTIDADE_MINIMA_PRODUTO_VET),
+        LOCAL_GUARDA_PRODUTO_VET = ?,
+        FORMA_FARMACEUTICA_PRODUTO_VET = ?,
+        REGIME_CONSUMO_PRODUTO_VET = ?,
+        INTERVALO_HORAS_PRODUTO_VET = ?,
+        DOSAGEM_PADRAO_PRODUTO_VET = ?,
+        DEPARTAMENTO_ID_PRODUTO_VET = ?,
+        UNIDADE_ID_PRODUTO_VET = ?,
+        OBSERVACOES_PRODUTO_VET = ?
+      WHERE ID_PRODUTO_VET = ?
+    `, [
+      prod.tipo || null,
+      prod.nome?.trim() || null,
+      prod.categoria?.trim() || null,
+      prod.codigoBarras?.trim() || null,
+      prod.fabricante?.trim() || null,
+      prod.lote?.trim() || null,
+      prod.valorUnitario !== undefined ? Number(prod.valorUnitario) : null,
+      prod.temValidade !== undefined ? (prod.temValidade ? 1 : 0) : null,
+      prod.temValidade && prod.dataValidade ? prod.dataValidade : null,
+      prod.ehPerecivel !== undefined ? (prod.ehPerecivel ? 1 : 0) : null,
+      prod.quantidadeEstoque !== undefined ? Number(prod.quantidadeEstoque) : null,
+      prod.unidadeMedida?.trim() || null,
+      prod.quantidadeMinima !== undefined ? Number(prod.quantidadeMinima) : null,
+      prod.localGuarda?.trim() || null,
+      prod.formaFarmaceutica || null,
+      prod.regimeConsumo || null,
+      prod.intervaloHoras ? Number(prod.intervaloHoras) : null,
+      prod.dosagemPadrao?.trim() || null,
+      prod.departmentId || null,
+      prod.unitId || null,
+      prod.observacoes?.trim() || null,
+      id
+    ]);
+
+    await insertAuditLog('Veterinário', 'Editar Produto', `Atualizado produto: ${prod.nome || id}`, prod.actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/produtos-veterinarios/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+
+    const [movs]: any = await pool.query('SELECT COUNT(*) as cnt FROM MOVIMENTACOES_VETERINARIAS WHERE PRODUTO_ID_MOV_VET = ?', [id]);
+    if (movs[0]?.cnt > 0) {
+      return res.status(400).json({ error: `Não é possível excluir este produto pois existem ${movs[0].cnt} movimentações registradas para ele.` });
+    }
+
+    await pool.query('DELETE FROM PRODUTOS_VETERINARIOS WHERE ID_PRODUTO_VET = ?', [id]);
+    await insertAuditLog('Veterinário', 'Excluir Produto', `Excluído produto veterinário ID: ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 4. MOVIMENTAÇÕES E ADMINISTRAÇÃO VETERINÁRIA ---
+apiRouter.get('/movimentacoes-veterinarias', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        ID_MOV_VET as id,
+        PRODUTO_ID_MOV_VET as produtoId,
+        PRODUTO_NOME_MOV_VET as produtoNome,
+        TIPO_PRODUTO_MOV_VET as tipoProduto,
+        TIPO_MOVIMENTACAO_MOV_VET as tipoMovimentacao,
+        QUANTIDADE_MOV_VET as quantidade,
+        UNIDADE_MEDIDA_MOV_VET as unidadeMedida,
+        DATE_FORMAT(DATA_HORA_MOV_VET, '%Y-%m-%d %H:%i:%s') as dataHora,
+        CACHORRO_ID_MOV_VET as cachorroId,
+        CACHORRO_NOME_MOV_VET as cachorroNome,
+        CACHORRO_RACA_MOV_VET as cachorroRaca,
+        CACHORRO_MICROCHIP_MOV_VET as cachorroMicrochip,
+        CONDUTOR_NOME_MOV_VET as condutorNome,
+        CONDUTOR_MASP_MOV_VET as condutorMasp,
+        DOSAGEM_APLICADA_MOV_VET as dosagemAplicada,
+        FREQUENCIA_ADMINISTRADA_MOV_VET as frequenciaAdministrada,
+        VALOR_TOTAL_ITEM_MOV_VET as valorTotalItem,
+        MOTIVO_MOV_VET as motivo,
+        RESPONSAVEL_APLICACAO_ID_MOV_VET as responsavelAplicacaoId,
+        RESPONSAVEL_APLICACAO_NOME_MOV_VET as responsavelAplicacaoNome,
+        RESPONSAVEL_APLICACAO_MASP_MOV_VET as responsavelAplicacaoMasp,
+        DEPARTAMENTO_ID_MOV_VET as departmentId,
+        UNIDADE_ID_MOV_VET as unitId,
+        OBSERVACOES_MOV_VET as observacoes,
+        DATA_CRIACAO_MOV_VET as createdAt
+      FROM MOVIMENTACOES_VETERINARIAS ORDER BY DATA_HORA_MOV_VET DESC
+    `);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      quantidade: Number(r.quantidade || 0),
+      valorTotalItem: Number(r.valorTotalItem || 0)
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response) => {
+  try {
+    const mov = req.body;
+    if (!mov.produtoId || !mov.quantidade || Number(mov.quantidade) <= 0) {
+      return res.status(400).json({ error: 'Produto e quantidade válida são obrigatórios.' });
+    }
+    const pool = getPool();
+    const id = `movvet-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const qtd = Number(mov.quantidade);
+    const valorTotal = mov.valorTotalItem !== undefined ? Number(mov.valorTotalItem) : 0;
+
+    await pool.query(`
+      INSERT INTO MOVIMENTACOES_VETERINARIAS (
+        ID_MOV_VET, PRODUTO_ID_MOV_VET, PRODUTO_NOME_MOV_VET, TIPO_PRODUTO_MOV_VET,
+        TIPO_MOVIMENTACAO_MOV_VET, QUANTIDADE_MOV_VET, UNIDADE_MEDIDA_MOV_VET, DATA_HORA_MOV_VET,
+        CACHORRO_ID_MOV_VET, CACHORRO_NOME_MOV_VET, CACHORRO_RACA_MOV_VET, CACHORRO_MICROCHIP_MOV_VET,
+        CONDUTOR_NOME_MOV_VET, CONDUTOR_MASP_MOV_VET, DOSAGEM_APLICADA_MOV_VET, FREQUENCIA_ADMINISTRADA_MOV_VET,
+        VALOR_TOTAL_ITEM_MOV_VET, MOTIVO_MOV_VET, RESPONSAVEL_APLICACAO_ID_MOV_VET, RESPONSAVEL_APLICACAO_NOME_MOV_VET,
+        RESPONSAVEL_APLICACAO_MASP_MOV_VET, DEPARTAMENTO_ID_MOV_VET, UNIDADE_ID_MOV_VET,
+        OBSERVACOES_MOV_VET, DATA_CRIACAO_MOV_VET
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE(?, NOW()), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+    `, [
+      id,
+      mov.produtoId,
+      mov.produtoNome?.trim() || 'Produto',
+      mov.tipoProduto || 'REMEDIO',
+      mov.tipoMovimentacao || 'ADMINISTRACAO_CAO',
+      qtd,
+      mov.unidadeMedida || 'Unidade',
+      mov.dataHora || null,
+      mov.cachorroId || null,
+      mov.cachorroNome || null,
+      mov.cachorroRaca || null,
+      mov.cachorroMicrochip || null,
+      mov.condutorNome || null,
+      mov.condutorMasp || null,
+      mov.dosagemAplicada || null,
+      mov.frequenciaAdministrada || null,
+      valorTotal,
+      mov.motivo || null,
+      mov.responsavelAplicacaoId || null,
+      mov.responsavelAplicacaoNome || null,
+      mov.responsavelAplicacaoMasp || null,
+      mov.departmentId || null,
+      mov.unitId || null,
+      mov.observacoes || null
+    ]);
+
+    // Atualização automática de estoque do produto
+    if (mov.tipoMovimentacao === 'ENTRADA') {
+      await pool.query('UPDATE PRODUTOS_VETERINARIOS SET QUANTIDADE_ESTOQUE_PRODUTO_VET = QUANTIDADE_ESTOQUE_PRODUTO_VET + ? WHERE ID_PRODUTO_VET = ?', [qtd, mov.produtoId]);
+    } else {
+      // Baixa por administração, consumo ou descarte
+      await pool.query('UPDATE PRODUTOS_VETERINARIOS SET QUANTIDADE_ESTOQUE_PRODUTO_VET = GREATEST(0, QUANTIDADE_ESTOQUE_PRODUTO_VET - ?) WHERE ID_PRODUTO_VET = ?', [qtd, mov.produtoId]);
+    }
+
+    const logDetails = mov.tipoMovimentacao === 'ADMINISTRACAO_CAO'
+      ? `Administrado ${qtd} ${mov.unidadeMedida} de "${mov.produtoNome}" ao cão "${mov.cachorroNome}" (Condutor: ${mov.condutorNome || 'N/A'})`
+      : `Baixa/Movimentação (${mov.tipoMovimentacao}) de ${qtd} ${mov.unidadeMedida} do produto "${mov.produtoNome}"`;
+
+    await insertAuditLog('Veterinário', 'Movimentação / Administração', logDetails, mov.actor, req.ip);
+    return res.json({ id, ...mov });
+  } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });

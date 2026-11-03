@@ -37,7 +37,12 @@ import {
   TipoExplosivo,
   SubtipoExplosivo,
   FabricanteExplosivo,
-  isUserExplosivista
+  isUserExplosivista,
+  CanilFisico,
+  Cachorro,
+  ProdutoVeterinario,
+  MovimentacaoVeterinaria,
+  UserRole
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -74,6 +79,10 @@ export interface AppState {
   tiposExplosivos: TipoExplosivo[];
   subtiposExplosivos: SubtipoExplosivo[];
   fabricantesExplosivos: FabricanteExplosivo[];
+  canisFisicos: CanilFisico[];
+  cachorros: Cachorro[];
+  produtosVeterinarios: ProdutoVeterinario[];
+  movimentacoesVeterinarias: MovimentacaoVeterinaria[];
 }
 
 class StorageService {
@@ -109,7 +118,11 @@ class StorageService {
     movimentacoesExplosivos: [],
     tiposExplosivos: [],
     subtiposExplosivos: [],
-    fabricantesExplosivos: []
+    fabricantesExplosivos: [],
+    canisFisicos: [],
+    cachorros: [],
+    produtosVeterinarios: [],
+    movimentacoesVeterinarias: []
   };
 
   constructor() {
@@ -127,6 +140,8 @@ class StorageService {
   // --- REFRESH DATA FROM MYSQL BACKEND SERVER ---
   public async refreshFromServer(): Promise<AppState> {
     try {
+      const fetchSync = (url: string) => fetch(url, { headers: { 'x-skip-preloader': 'true' } }).then(r => r.ok ? r.json() : []);
+
       const [
         usersRes,
         deptsRes,
@@ -158,39 +173,47 @@ class StorageService {
         movimentacoesExplosivosRes,
         tiposExplosivosRes,
         subtiposExplosivosRes,
-        fabricantesExplosivosRes
+        fabricantesExplosivosRes,
+        canisFisicosRes,
+        cachorrosRes,
+        produtosVeterinariosRes,
+        movimentacoesVeterinariasRes
       ] = await Promise.all([
-        fetch('/api/users').then(r => r.ok ? r.json() : []),
-        fetch('/api/departments').then(r => r.ok ? r.json() : []),
-        fetch('/api/units').then(r => r.ok ? r.json() : []),
-        fetch('/api/vault-spaces').then(r => r.ok ? r.json() : []),
-        fetch('/api/calibers').then(r => r.ok ? r.json() : []),
-        fetch('/api/courses').then(r => r.ok ? r.json() : []),
-        fetch('/api/available-weapon-types').then(r => r.ok ? r.json() : []),
-        fetch('/api/ammo-stocks').then(r => r.ok ? r.json() : []),
-        fetch('/api/ammo-movements').then(r => r.ok ? r.json() : []),
-        fetch('/api/weapons').then(r => r.ok ? r.json() : []),
-        fetch('/api/movements').then(r => r.ok ? r.json() : []),
-        fetch('/api/audit-logs').then(r => r.ok ? r.json() : []),
-        fetch('/api/academy-courses').then(r => r.ok ? r.json() : []),
-        fetch('/api/weapon-boxes').then(r => r.ok ? r.json() : []),
-        fetch('/api/weapon-box-replacements').then(r => r.ok ? r.json() : []),
-        fetch('/api/course-classes').then(r => r.ok ? r.json() : []),
-        fetch('/api/course-movements').then(r => r.ok ? r.json() : []),
-        fetch('/api/lesson-plans').then(r => r.ok ? r.json() : []),
-        fetch('/api/calendario-aulas').then(r => r.ok ? r.json() : []),
-        fetch('/api/equipes-calendario').then(r => r.ok ? r.json() : []),
-        fetch('/api/auxiliar-tabela-equipe').then(r => r.ok ? r.json() : []),
-        fetch('/api/certificados').then(r => r.ok ? r.json() : []),
-        fetch('/api/weapon-transfers').then(r => r.ok ? r.json() : []),
-        fetch('/api/tipos-materiais').then(r => r.ok ? r.json() : []),
-        fetch('/api/materiais').then(r => r.ok ? r.json() : []),
-        fetch('/api/cautelas-materiais').then(r => r.ok ? r.json() : []),
-        fetch('/api/explosivos').then(r => r.ok ? r.json() : []),
-        fetch('/api/movimentacoes-explosivos').then(r => r.ok ? r.json() : []),
-        fetch('/api/tipos-explosivos').then(r => r.ok ? r.json() : []),
-        fetch('/api/subtipos-explosivos').then(r => r.ok ? r.json() : []),
-        fetch('/api/fabricantes-explosivos').then(r => r.ok ? r.json() : [])
+        fetchSync('/api/users'),
+        fetchSync('/api/departments'),
+        fetchSync('/api/units'),
+        fetchSync('/api/vault-spaces'),
+        fetchSync('/api/calibers'),
+        fetchSync('/api/courses'),
+        fetchSync('/api/available-weapon-types'),
+        fetchSync('/api/ammo-stocks'),
+        fetchSync('/api/ammo-movements'),
+        fetchSync('/api/weapons'),
+        fetchSync('/api/movements'),
+        fetchSync('/api/audit-logs'),
+        fetchSync('/api/academy-courses'),
+        fetchSync('/api/weapon-boxes'),
+        fetchSync('/api/weapon-box-replacements'),
+        fetchSync('/api/course-classes'),
+        fetchSync('/api/course-movements'),
+        fetchSync('/api/lesson-plans'),
+        fetchSync('/api/calendario-aulas'),
+        fetchSync('/api/equipes-calendario'),
+        fetchSync('/api/auxiliar-tabela-equipe'),
+        fetchSync('/api/certificados'),
+        fetchSync('/api/weapon-transfers'),
+        fetchSync('/api/tipos-materiais'),
+        fetchSync('/api/materiais'),
+        fetchSync('/api/cautelas-materiais'),
+        fetchSync('/api/explosivos'),
+        fetchSync('/api/movimentacoes-explosivos'),
+        fetchSync('/api/tipos-explosivos'),
+        fetchSync('/api/subtipos-explosivos'),
+        fetchSync('/api/fabricantes-explosivos'),
+        fetchSync('/api/canis-fisicos'),
+        fetchSync('/api/cachorros'),
+        fetchSync('/api/produtos-veterinarios'),
+        fetchSync('/api/movimentacoes-veterinarias')
       ]);
 
       this.state.users = usersRes || [];
@@ -224,14 +247,21 @@ class StorageService {
       this.state.tiposExplosivos = tiposExplosivosRes || [];
       this.state.subtiposExplosivos = subtiposExplosivosRes || [];
       this.state.fabricantesExplosivos = fabricantesExplosivosRes || [];
+      this.state.canisFisicos = canisFisicosRes || [];
+      this.state.cachorros = cachorrosRes || [];
+      this.state.produtosVeterinarios = produtosVeterinariosRes || [];
+      this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
 
-
-      // Refresh current user reference if logged in
+      // Refresh current user reference if logged in, keeping activeRole if user had selected one
       if (this.state.currentUser) {
         const updatedUser = this.state.users.find(u => u.id === this.state.currentUser?.id);
         if (updatedUser) {
-          this.state.currentUser = updatedUser;
-          sessionStorage.setItem('armeria_session_user', JSON.stringify(updatedUser));
+          const currentActiveRole = this.state.currentUser.activeRole || updatedUser.role;
+          this.state.currentUser = {
+            ...updatedUser,
+            activeRole: currentActiveRole
+          };
+          sessionStorage.setItem('armeria_session_user', JSON.stringify(this.state.currentUser));
         }
       }
     } catch (err) {
@@ -241,12 +271,12 @@ class StorageService {
   }
 
   // --- AUTHENTICATION ---
-  public async login(masp: string, pass: string): Promise<{ success: boolean; user: User | null; error?: string; isDbError?: boolean }> {
+  public async login(masp: string, pass: string, chosenRole?: string): Promise<{ success: boolean; user: User | null; error?: string; isDbError?: boolean }> {
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ maspDigits: masp, passwordDigits: pass })
+        body: JSON.stringify({ maspDigits: masp, passwordDigits: pass, chosenRole })
       });
 
       const data = await res.json();
@@ -2312,6 +2342,162 @@ class StorageService {
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
       return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- ROLE SWITCHING ---
+  public switchActiveRole(role: UserRole): void {
+    if (this.state.currentUser) {
+      this.state.currentUser = {
+        ...this.state.currentUser,
+        activeRole: role
+      };
+      sessionStorage.setItem('armeria_session_user', JSON.stringify(this.state.currentUser));
+    }
+  }
+
+  // --- MATERIAL VETERINÁRIO & CANIL K9 ---
+  // Canis Físicos
+  public getCanisFisicos(): CanilFisico[] {
+    return this.state.canisFisicos || [];
+  }
+
+  public async saveCanilFisico(canil: Partial<CanilFisico>): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const isEdit = Boolean(canil.id);
+      const url = isEdit ? `/api/canis-fisicos/${canil.id}` : '/api/canis-fisicos';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...canil, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id || canil.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCanilFisico(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/canis-fisicos/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Cachorros K9
+  public getCachorros(): Cachorro[] {
+    return this.state.cachorros || [];
+  }
+
+  public async saveCachorro(dog: Partial<Cachorro>): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const isEdit = Boolean(dog.id);
+      const url = isEdit ? `/api/cachorros/${dog.id}` : '/api/cachorros';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...dog, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id || dog.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteCachorro(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cachorros/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Produtos Veterinários (Remédios, Rações, Insumos)
+  public getProdutosVeterinarios(): ProdutoVeterinario[] {
+    return this.state.produtosVeterinarios || [];
+  }
+
+  public async saveProdutoVeterinario(prod: Partial<ProdutoVeterinario>): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const isEdit = Boolean(prod.id);
+      const url = isEdit ? `/api/produtos-veterinarios/${prod.id}` : '/api/produtos-veterinarios';
+      const method = isEdit ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...prod, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id || prod.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteProdutoVeterinario(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/produtos-veterinarios/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Movimentações & Administração Veterinária
+  public getMovimentacoesVeterinarias(): MovimentacaoVeterinaria[] {
+    return this.state.movimentacoesVeterinarias || [];
+  }
+
+  public async saveMovimentacaoVeterinaria(mov: Partial<MovimentacaoVeterinaria>): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch('/api/movimentacoes-veterinarias', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...mov, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
     } catch (err: any) {
       return { success: false, error: err.message };
     }

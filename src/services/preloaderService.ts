@@ -81,10 +81,14 @@ class PreloaderService {
     const id = `task-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
     this.activeTasks.set(id, { message, submessage, type });
 
-    // Atualiza a mensagem visível para o comando mais recente
-    this.currentMessage = message;
-    this.currentSubmessage = submessage;
-    this.currentType = type;
+    // Se existir alguma tarefa de 'auth' em andamento e a nova tarefa não for 'auth',
+    // preserva a mensagem de autenticação no login/logout
+    const hasActiveAuth = Array.from(this.activeTasks.values()).some(t => t.type === 'auth');
+    if (type === 'auth' || !hasActiveAuth) {
+      this.currentMessage = message;
+      this.currentSubmessage = submessage;
+      this.currentType = type;
+    }
 
     if (!this.isShowing) {
       this.isShowing = true;
@@ -110,9 +114,10 @@ class PreloaderService {
   public stop(id: string) {
     this.activeTasks.delete(id);
 
-    // Se ainda houver tarefas ativas, atualiza a mensagem com a última pendente
+    // Se ainda houver tarefas ativas, atualiza a mensagem com a última pendente (priorizando auth)
     if (this.activeTasks.size > 0) {
-      const last = Array.from(this.activeTasks.values())[this.activeTasks.size - 1];
+      const authTask = Array.from(this.activeTasks.values()).find(t => t.type === 'auth');
+      const last = authTask || Array.from(this.activeTasks.values())[this.activeTasks.size - 1];
       this.currentMessage = last.message;
       this.currentSubmessage = last.submessage;
       this.currentType = last.type;
@@ -252,14 +257,16 @@ class PreloaderService {
       let message = 'Processando comando...';
       let submessage = 'Aguarde enquanto o sistema executa a operação...';
       let shouldTriggerImmediatePreloader = false;
+      let taskType: PreloaderState['type'] = 'command';
 
-      if (isSubmit || rawText.includes('salvar') || rawText.includes('gravar')) {
+      if (rawText.includes('entrar') || rawText.includes('login') || rawText.includes('acessar')) {
+        message = 'Autenticando usuário no sistema...';
+        submessage = 'Validando credenciais na base de dados da Polícia Civil...';
+        taskType = 'auth';
+        shouldTriggerImmediatePreloader = true;
+      } else if (isSubmit || rawText.includes('salvar') || rawText.includes('gravar')) {
         message = 'Salvando alterações...';
         submessage = 'Gravando dados com segurança no sistema...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('entrar') || rawText.includes('login') || rawText.includes('acessar')) {
-        message = 'Autenticando usuário...';
-        submessage = 'Validando credenciais na Polícia Civil...';
         shouldTriggerImmediatePreloader = true;
       } else if (rawText.includes('cadastrar') || rawText.includes('adicionar') || rawText.includes('novo') || rawText.includes('nova')) {
         message = 'Processando cadastro...';
@@ -301,7 +308,7 @@ class PreloaderService {
 
       let immediateTaskId: string | null = null;
       if (shouldTriggerImmediatePreloader) {
-        immediateTaskId = this.start(message, submessage, 'command');
+        immediateTaskId = this.start(message, submessage, taskType);
       }
 
       // Desbloqueia após breve intervalo caso a ação seja síncrona ou cancelada por validação local
@@ -319,8 +326,8 @@ class PreloaderService {
     // 1. Autenticação
     if (url.includes('/api/auth/login')) {
       return {
-        message: 'Autenticando usuário...',
-        submessage: 'Verificando credenciais na base de dados da Polícia Civil...',
+        message: 'Autenticando usuário no sistema...',
+        submessage: 'Validando credenciais na base de dados da Polícia Civil...',
         type: 'auth'
       };
     }
@@ -329,6 +336,15 @@ class PreloaderService {
         message: 'Atualizando senha de acesso...',
         submessage: 'Gravando nova senha com segurança...',
         type: 'auth'
+      };
+    }
+
+    // Se for requisição GET (leitura/sincronização de dados), nunca usar mensagens de gravação
+    if (method === 'GET') {
+      return {
+        message: 'Sincronizando com o servidor...',
+        submessage: 'Carregando informações do sistema...',
+        type: 'sync'
       };
     }
 
@@ -367,7 +383,7 @@ class PreloaderService {
 
     if (url.includes('/api/tipos-explosivos')) {
       return {
-        message: method === 'DELETE' ? 'Excluindo tipo de explosivo...' : 'Salvando tipo de explosivo...',
+        message: method === 'DELETE' ? 'Excluindo tipo de explosivo...' : method === 'PUT' ? 'Atualizando tipo de explosivo...' : 'Cadastrando tipo de explosivo...',
         submessage: 'Atualizando catálogo de explosivos...',
         type: 'command'
       };
@@ -375,7 +391,7 @@ class PreloaderService {
 
     if (url.includes('/api/subtipos-explosivos')) {
       return {
-        message: method === 'DELETE' ? 'Excluindo subtipo de explosivo...' : 'Salvando subtipo de explosivo...',
+        message: method === 'DELETE' ? 'Excluindo subtipo de explosivo...' : method === 'PUT' ? 'Atualizando subtipo de explosivo...' : 'Cadastrando subtipo de explosivo...',
         submessage: 'Atualizando catálogo de explosivos...',
         type: 'command'
       };
@@ -383,7 +399,7 @@ class PreloaderService {
 
     if (url.includes('/api/fabricantes-explosivos')) {
       return {
-        message: method === 'DELETE' ? 'Excluindo fabricante...' : 'Salvando fabricante de explosivos...',
+        message: method === 'DELETE' ? 'Excluindo fabricante de explosivo...' : method === 'PUT' ? 'Atualizando fabricante de explosivo...' : 'Cadastrando fabricante de explosivos...',
         submessage: 'Atualizando cadastro de fabricantes...',
         type: 'command'
       };

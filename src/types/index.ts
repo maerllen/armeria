@@ -1,4 +1,4 @@
-export type UserRole = 'Geral' | 'Administrador' | 'Armeiro' | 'Policial' | 'Explosivista';
+export type UserRole = 'Geral' | 'Administrador' | 'Armeiro' | 'Policial' | 'Explosivista' | 'operador_canino';
 
 export type ModuleType = 
   | 'meu-perfil' 
@@ -17,7 +17,8 @@ export type ModuleType =
   | 'gerencia-cursos'
   | 'iniciar-aula-mobile'
   | 'calendario'
-  | 'certificados';
+  | 'certificados'
+  | 'veterinario';
 
 export type UserCargo = 
   | 'Delegado' 
@@ -26,7 +27,9 @@ export type UserCargo =
   | 'Perito' 
   | 'Médico Legista' 
   | 'Operador'
-  | 'Explosivista';
+  | 'Explosivista'
+  | 'Condutor de Cães'
+  | 'Veterinário';
 
 export type TeacherSubject = 'MEAF' | 'TAP' | 'DP';
 
@@ -43,6 +46,8 @@ export interface User {
   cargo: UserCargo;
   phone: string;
   role: UserRole;
+  roles?: UserRole[];
+  activeRole?: UserRole;
   departmentId: string;
   unitId: string;
   canMoveAmmunition: boolean;
@@ -853,16 +858,141 @@ export interface MovimentacaoExplosivo {
   observacoes?: string;
 }
 
+// =============================================================
+// MATERIAL VETERINÁRIO & CANIL POLICIAL K9
+// =============================================================
+
+export interface CanilFisico {
+  id: string;
+  nome: string;
+  identificacao?: string; // Ex: "Baia 01", "Box Alfa"
+  capacidade: number; // Ex: 1 cão
+  localizacao?: string; // Ex: "Sede DOE - Canil Central"
+  departmentId?: string;
+  unitId?: string;
+  status: 'Ativo' | 'Em Manutenção' | 'Inativo';
+  observacoes?: string;
+  createdAt: string;
+}
+
+export type SexoCachorro = 'Macho' | 'Fêmea';
+export type StatusCachorro = 
+  | 'Ativo / Operacional' 
+  | 'Em Treinamento' 
+  | 'Tratamento Veterinário' 
+  | 'Aposentado' 
+  | 'Baixado / Óbito';
+
+export interface Cachorro {
+  id: string;
+  nome: string;
+  raca: string;
+  sexo: SexoCachorro;
+  dataNascimento?: string;
+  microchip?: string;
+  pelagem?: string;
+  especialidade?: string; // Faro de Drogas, Detecção de Explosivos, Patrulha/Guarda, Busca e Resgate
+  canilFisicoId?: string;
+  canilFisicoNome?: string;
+  status: StatusCachorro;
+  tipoVinculo: 'SISTEMA' | 'EXTERNO';
+  // Vínculo Interno (Policial do Sistema)
+  usuarioInternoId?: string;
+  usuarioInternoNome?: string;
+  usuarioInternoMasp?: string;
+  usuarioInternoCargo?: string;
+  // Vínculo Externo (Condutor/Responsável fora do sistema)
+  responsavelExternoNome?: string;
+  responsavelExternoDoc?: string;
+  responsavelExternoTel?: string;
+  responsavelExternoOrgao?: string;
+  departmentId?: string;
+  unitId?: string;
+  fotoUrl?: string;
+  observacoes?: string;
+  createdAt: string;
+}
+
+export type TipoProdutoVet = 'REMEDIO' | 'RACAO' | 'INSUMO' | 'OUTROS';
+export type FormaFarmaceuticaVet = 'Comprimido' | 'Injeção' | 'Pomada' | 'Gotas / Líquido' | 'Spray' | 'Outro';
+export type RegimeConsumoVet = 'Dose Única' | 'Consumo Diário' | 'Uso Tópico / Contínuo';
+
+export interface ProdutoVeterinario {
+  id: string;
+  tipo: TipoProdutoVet;
+  nome: string;
+  categoria?: string;
+  codigoBarras?: string;
+  fabricante?: string;
+  lote?: string;
+  valorUnitario: number; // R$
+  temValidade: boolean;
+  dataValidade?: string;
+  ehPerecivel: boolean;
+  quantidadeEstoque: number;
+  unidadeMedida: string; // Comprimidos, Frascos, Ampolas, Kg, Doses, etc.
+  quantidadeMinima: number;
+  localGuarda?: string; // Farmácia, Depósito, Geladeira
+  // Específicos para tipo REMEDIO:
+  formaFarmaceutica?: FormaFarmaceuticaVet;
+  regimeConsumo?: RegimeConsumoVet;
+  intervaloHoras?: number; // Ex: a cada 6, 8, 12, 24 horas
+  dosagemPadrao?: string; // Ex: "1 comprimido (50mg)", "2.5 ml SC", "300g"
+  departmentId?: string;
+  unitId?: string;
+  observacoes?: string;
+  createdAt: string;
+}
+
+export type TipoMovimentacaoVet = 
+  | 'ENTRADA' 
+  | 'ADMINISTRACAO_CAO' 
+  | 'BAIXA_CONSUMO' 
+  | 'BAIXA_DESCARTE' 
+  | 'TRANSFERENCIA';
+
+export interface MovimentacaoVeterinaria {
+  id: string;
+  produtoId: string;
+  produtoNome: string;
+  tipoProduto: string;
+  tipoMovimentacao: TipoMovimentacaoVet;
+  quantidade: number;
+  unidadeMedida: string;
+  dataHora: string; // ISO ou DD/MM/AAAA HH:mm
+  // Destinação ao cão (se aplicável):
+  cachorroId?: string;
+  cachorroNome?: string;
+  cachorroRaca?: string;
+  cachorroMicrochip?: string;
+  condutorNome?: string;
+  condutorMasp?: string;
+  dosagemAplicada?: string;
+  frequenciaAdministrada?: string;
+  valorTotalItem: number; // quantidade * valorUnitario
+  motivo?: string;
+  responsavelAplicacaoId?: string;
+  responsavelAplicacaoNome?: string;
+  responsavelAplicacaoMasp?: string;
+  departmentId?: string;
+  unitId?: string;
+  observacoes?: string;
+  createdAt: string;
+}
+
 export const isUserExplosivista = (user?: User | null): boolean => {
   if (!user) return false;
-  return user.role === 'Explosivista' || (Boolean(user.cargo) && user.cargo.toLowerCase().includes('explosivista'));
+  const role = user.activeRole || user.role;
+  return role === 'Explosivista' || (Boolean(user.cargo) && user.cargo.toLowerCase().includes('explosivista'));
 };
 
 export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (!user) return ['meu-perfil'];
 
+  const role = user.activeRole || user.role;
+
   // 1. Geral
-  if (user.role === 'Geral') {
+  if (role === 'Geral') {
     return [
       'meu-perfil',
       'explosivos',
@@ -879,27 +1009,15 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'gerencia-cursos',
       'calendario',
       'certificados',
+      'veterinario',
       'relatorio'
     ];
   }
 
-  // 2. Explosivista
-  if (isUserExplosivista(user)) {
+  // 2. Armeiro
+  if (role === 'Armeiro') {
     return [
       'meu-perfil',
-      'explosivos',
-      'armas',
-      'municoes',
-      'usuarios',
-      'cofre'
-    ];
-  }
-
-  // 3. Administrativo (Administrador)
-  if (user.role === 'Administrador' || (user.role as string) === 'Administrativo') {
-    return [
-      'meu-perfil',
-      'explosivos',
       'armas',
       'municoes',
       'unidade',
@@ -911,22 +1029,41 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     ];
   }
 
-  // 4. Armeiro
-  if (user.role === 'Armeiro') {
+  // 3. Administrador
+  if (role === 'Administrador' || (role as string) === 'Administrativo') {
     return [
       'meu-perfil',
       'explosivos',
       'armas',
       'municoes',
+      'unidade',
       'usuarios',
       'cofre',
-      'movimentacoes',
       'materiais',
       'relatorio'
     ];
   }
 
-  // 5. Policial
+  // 4. Explosivista
+  if (role === 'Explosivista' || isUserExplosivista(user)) {
+    return [
+      'meu-perfil',
+      'explosivos',
+      'unidade',
+      'cofre',
+      'relatorio'
+    ];
+  }
+
+  // 5. Operador Canino
+  if (role === 'operador_canino') {
+    return [
+      'meu-perfil',
+      'veterinario'
+    ];
+  }
+
+  // 6. Policial (padrão)
   return [
     'meu-perfil',
     'movimentacoes'

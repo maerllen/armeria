@@ -39,6 +39,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [phone, setPhone] = useState('');
   const [cargo, setCargo] = useState<UserCargo>('Investigador');
   const [role, setRole] = useState<UserRole>('Policial');
+  const [selectedRoles, setSelectedRoles] = useState<UserRole[]>(['Policial']);
   const [deptId, setDeptId] = useState('');
   const [unitId, setUnitId] = useState('');
   const [canMoveAmmo, setCanMoveAmmo] = useState(false);
@@ -97,14 +98,16 @@ export const UserModule: React.FC<UserModuleProps> = ({
     'Perito',
     'Médico Legista',
     'Operador',
-    'Explosivista'
+    'Explosivista',
+    'Condutor de Cães',
+    'Veterinário'
   ];
 
-  const rolesList: UserRole[] = (isGeral || (editingUser && editingUser.role === 'Geral'))
-    ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista']
+  const rolesList: UserRole[] = (isGeral || (editingUser && (editingUser.role === 'Geral' || editingUser.roles?.includes('Geral'))))
+    ? ['Geral', 'Administrador', 'Armeiro', 'Policial', 'Explosivista', 'operador_canino']
     : isRestrictedRegistrar
-    ? ['Policial', 'Explosivista']
-    : ['Administrador', 'Armeiro', 'Policial', 'Explosivista'];
+    ? ['Policial', 'Explosivista', 'operador_canino']
+    : ['Administrador', 'Armeiro', 'Policial', 'Explosivista', 'operador_canino'];
 
   // Filtered units based on selected department in form
   const availableUnitsForForm = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
@@ -119,6 +122,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setPhone(usr.phone);
       setCargo(usr.cargo);
       setRole(usr.role);
+      const userRoles = usr.roles && usr.roles.length > 0 ? usr.roles : [usr.role];
+      setSelectedRoles(userRoles);
       setDeptId(isRestrictedRegistrar ? currentUser.departmentId : usr.departmentId);
       setUnitId(isRestrictedRegistrar ? currentUser.unitId : usr.unitId);
       setCanMoveAmmo(isRestrictedRegistrar ? false : usr.canMoveAmmunition);
@@ -136,6 +141,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setPhone('');
       setCargo('Investigador');
       setRole('Policial');
+      setSelectedRoles(['Policial']);
       const initialDept = isRestrictedRegistrar
         ? currentUser.departmentId
         : (isGeral ? (departments[0]?.id || '') : currentUser.departmentId);
@@ -201,10 +207,17 @@ export const UserModule: React.FC<UserModuleProps> = ({
       return;
     }
 
-    if (!editingUser && role === 'Geral') {
-      setErrorMsg('Não é permitido criar usuários com perfil Geral.');
+    if (selectedRoles.length === 0) {
+      setErrorMsg('Selecione ao menos um perfil de acesso para o policial.');
       return;
     }
+
+    if (!editingUser && selectedRoles.includes('Geral') && !isGeral) {
+      setErrorMsg('Apenas administradores com perfil Geral podem conceder o perfil Geral.');
+      return;
+    }
+
+    const primaryRole = selectedRoles[0] || 'Policial';
 
     try {
       const targetDeptId = isRestrictedRegistrar ? currentUser.departmentId : (deptId || currentUser.departmentId);
@@ -219,7 +232,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           name: name.trim(),
           phone: cleanPhone(phone),
           cargo,
-          role,
+          role: primaryRole,
+          roles: selectedRoles,
           departmentId: targetDeptId,
           unitId: targetUnitId,
           canMoveAmmunition: finalCanMoveAmmo,
@@ -238,7 +252,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           masp: cleanMaspInput,
           phone: cleanPhone(phone),
           cargo,
-          role,
+          role: primaryRole,
+          roles: selectedRoles,
           departmentId: targetDeptId,
           unitId: targetUnitId,
           canMoveAmmunition: finalCanMoveAmmo,
@@ -524,19 +539,28 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
                               {/* Role */}
                               <td className="py-3 px-4">
-                                <span
-                                  className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
-                                    usr.role === 'Geral'
-                                      ? 'bg-purple-950 text-purple-300 border-purple-800'
-                                      : usr.role === 'Administrador'
-                                      ? 'bg-blue-950 text-blue-300 border-blue-800'
-                                      : usr.role === 'Armeiro'
-                                      ? 'bg-amber-950 text-amber-300 border-amber-800'
-                                      : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                                  }`}
-                                >
-                                  {usr.role}
-                                </span>
+                                <div className="flex flex-wrap gap-1">
+                                  {(usr.roles && usr.roles.length > 0 ? usr.roles : [usr.role]).map((r) => (
+                                    <span
+                                      key={r}
+                                      className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
+                                        r === 'Geral'
+                                          ? 'bg-purple-950 text-purple-300 border-purple-800'
+                                          : r === 'Administrador'
+                                          ? 'bg-blue-950 text-blue-300 border-blue-800'
+                                          : r === 'Armeiro'
+                                          ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                          : r === 'Explosivista'
+                                          ? 'bg-orange-950 text-orange-300 border-orange-800'
+                                          : r === 'operador_canino'
+                                          ? 'bg-teal-950 text-teal-300 border-teal-800'
+                                          : 'bg-emerald-950 text-emerald-300 border-emerald-800'
+                                      }`}
+                                    >
+                                      {r === 'operador_canino' ? 'Operador Canino' : r}
+                                    </span>
+                                  ))}
+                                </div>
                                 {usr.isTeacher && (
                                   <div className="mt-1 flex flex-wrap items-center gap-1">
                                     <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
@@ -736,22 +760,56 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   />
                 </div>
 
-                {/* Perfil */}
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Perfil
-                  </label>
-                  <select
-                    value={role}
-                    onChange={(e) => setRole(e.target.value as UserRole)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                  >
-                    {rolesList.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </select>
+                {/* Perfis de Acesso (Múltiplos perfis permitidos) */}
+                <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Perfis de Acesso no Sistema (Múltiplos Permitidos)
+                    </label>
+                    <span className="text-[11px] text-amber-400 font-semibold">
+                      {selectedRoles.length} selecionado(s)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Selecione todas as funções que o policial desempenha. Ao efetuar login, o policial poderá escolher sua função ativa ou alternar a qualquer momento no menu superior.
+                  </p>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1">
+                    {rolesList.map((r) => {
+                      const isChecked = selectedRoles.includes(r);
+                      return (
+                        <label
+                          key={r}
+                          className={`flex items-center space-x-2 p-2 rounded-lg border text-xs font-semibold cursor-pointer transition ${
+                            isChecked
+                              ? 'bg-amber-500/15 border-amber-500/50 text-amber-300'
+                              : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                const nextRoles = [...selectedRoles, r];
+                                setSelectedRoles(nextRoles);
+                                setRole(nextRoles[0]);
+                              } else {
+                                if (selectedRoles.length <= 1) {
+                                  setErrorMsg('O usuário deve possuir ao menos 1 perfil ativo.');
+                                  return;
+                                }
+                                const filtered = selectedRoles.filter(item => item !== r);
+                                setSelectedRoles(filtered);
+                                setRole(filtered[0]);
+                              }
+                            }}
+                            className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500/20 bg-slate-950"
+                          />
+                          <span>{r === 'operador_canino' ? 'Operador Canino' : r}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Acesso ao Sistema */}

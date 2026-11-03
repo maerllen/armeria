@@ -4,7 +4,7 @@ import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, Chevron
 import { ThemeToggle } from './AlternadorTema';
 
 interface LoginModalProps {
-  onLoginSuccess: (maspDigits: string, passwordDigits: string) => void;
+  onLoginSuccess: (maspDigits: string, passwordDigits: string, chosenRole?: string) => void;
   onLocalFallbackLogin?: (maspDigits: string) => void;
   error?: string;
 }
@@ -12,6 +12,7 @@ interface LoginModalProps {
 export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalFallbackLogin, error }) => {
   const [maspRaw, setMaspRaw] = useState('');
   const [password, setPassword] = useState('');
+  const [selectedRole, setSelectedRole] = useState('');
   const [localError, setLocalError] = useState('');
   const [showDbGuide, setShowDbGuide] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,7 +43,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
     }
 
     setIsSubmitting(true);
-    onLoginSuccess(maspRaw, password);
+    onLoginSuccess(maspRaw, password, selectedRole || undefined);
   };
 
   const handleDemoLogin = (demoMasp: string) => {
@@ -185,6 +186,32 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
                 required
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
+              Perfil de Acesso Desejado
+            </label>
+            <div className="relative">
+              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+              </div>
+              <select
+                value={selectedRole}
+                onChange={(e) => setSelectedRole(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+              >
+                <option value="">Acesso Principal / Automático</option>
+                <option value="Geral">Geral (Acesso Completo + Material Veterinário)</option>
+                <option value="Armeiro">Armeiro (Armas, Munições, Materiais, Cofres)</option>
+                <option value="Administrador">Administrador (Cadastro e Visualização)</option>
+                <option value="Explosivista">Explosivista (Módulo de Explosivos e Cofre)</option>
+                <option value="operador_canino">Operador Canino (Material Veterinário & Cães K9)</option>
+              </select>
+            </div>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Usuários com múltiplos acessos podem escolher o papel ou alternar no topo do sistema.
+            </p>
           </div>
 
           <button

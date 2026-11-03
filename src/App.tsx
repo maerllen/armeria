@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser, getSystemLogo, DEFAULT_SYSTEM_LOGO } from './types';
 import { storage } from './services/storage';
 import { Navbar } from './components/BarraNavegacao';
@@ -23,7 +23,8 @@ import { MobileClassModule } from './components/ModuloAulaMobile';
 import { CalendarModule } from './components/ModuloCalendario';
 import { CertificateVerificationModule } from './components/ModuloVerificacaoCertificados';
 import { PublicCertificateValidator } from './components/ValidadorPublicoCertificado';
-import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb } from 'lucide-react';
+import { ModuloVeterinario } from './components/ModuloVeterinario';
+import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb, Dog } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 import { usePreloader } from './context/PreloaderContext';
 
@@ -43,6 +44,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'gerencia-cursos': 'Gerência de Cursos',
   'calendario': 'Calendário de Aulas',
   'certificados': 'Verificação de Certificados',
+  'veterinario': 'Material veterinário',
   'relatorio': 'Relatórios e Consultas',
   'manual': 'Manual do Sistema'
 };
@@ -154,11 +156,27 @@ export default function App() {
     }
   }, [currentUser, activeModule]);
 
-  const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
+  // "O usuário administrador não poderá movimentar armas, munições ou materiais, apenas cadastrar e visualizar."
+  const effectiveUser = useMemo(() => {
+    if (!currentUser) return null;
+    const role = currentUser.activeRole || currentUser.role;
+    if (role === 'Administrador' || (role as string) === 'Administrativo') {
+      return {
+        ...currentUser,
+        role: 'Administrador' as const,
+        activeRole: 'Administrador' as const,
+        canMoveWeapons: false,
+        canMoveAmmunition: false
+      };
+    }
+    return currentUser;
+  }, [currentUser]);
+
+  const handleLoginSubmit = async (maspDigits: string, passwordInput: string, chosenRole?: string) => {
     setLoginError('');
-    const taskId = showPreloader('Autenticando usuário...', 'Verificando credenciais no sistema...', 'auth');
+    const taskId = showPreloader('Autenticando usuário no sistema...', 'Validando credenciais na base de dados da Polícia Civil...', 'auth');
     try {
-      const res = await storage.login(maspDigits, passwordInput);
+      const res = await storage.login(maspDigits, passwordInput, chosenRole);
       if (!res.success || !res.user) {
         setLoginError(res.error || 'MASP ou senha incorretos.');
         return;
@@ -292,7 +310,7 @@ export default function App() {
       
       {/* Top Navigation */}
       <Navbar
-        currentUser={currentUser}
+        currentUser={effectiveUser}
         onLogout={handleLogout}
         onChangePasswordClick={() => setShowChangePasswordModal(true)}
         onUserSwitched={refreshData}
@@ -309,7 +327,7 @@ export default function App() {
         
         {/* Sidebar Navigation (Desktop & Mobile Drawer) */}
         <Sidebar
-          currentUser={currentUser}
+          currentUser={effectiveUser}
           departments={departments}
           activeModule={activeModule}
           onSelectModule={handleSelectModule}
@@ -528,6 +546,16 @@ export default function App() {
           {activeModule === 'iniciar-aula-mobile' && currentUser?.role === 'Geral' && (
             <MobileClassModule
               currentUser={currentUser}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'veterinario' && (
+            <ModuloVeterinario
+              currentUser={effectiveUser}
+              departments={departments}
+              units={units}
+              allUsers={allUsers}
               onRefresh={refreshData}
             />
           )}

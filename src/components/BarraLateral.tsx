@@ -18,7 +18,8 @@ import {
   Shield,
   ShieldCheck,
   Package,
-  Bomb
+  Bomb,
+  Dog
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 import { ThemeToggle } from './AlternadorTema';
@@ -136,6 +137,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Verificar Certificados',
       icon: ShieldCheck,
       visible: allowedModules.includes('certificados')
+    },
+    {
+      id: 'veterinario',
+      label: 'Material veterinário',
+      icon: Dog,
+      visible: allowedModules.includes('veterinario')
     },
     {
       id: 'relatorio',

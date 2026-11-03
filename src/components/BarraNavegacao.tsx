@@ -7,6 +7,8 @@ import { ThemeToggle } from './AlternadorTema';
 import { usePreloader } from '../context/PreloaderContext';
 import { PreloaderNavbarIndicator } from './PreloaderGlobal';
 
+import { storage } from '../services/storage';
+
 interface NavbarProps {
   currentUser: User | null;
   onLogout: () => void;
@@ -25,6 +27,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   currentUser,
   onLogout,
   onChangePasswordClick,
+  onUserSwitched,
   deviceInfo,
   onSetDeviceMode,
   isMobileMenuOpen,
@@ -46,8 +49,10 @@ export const Navbar: React.FC<NavbarProps> = ({
         return 'bg-amber-950/80 text-amber-300 border-amber-500/50';
       case 'Explosivista':
         return 'bg-rose-950/80 text-rose-300 border-rose-500/50';
-      default:
+      case 'operador_canino':
         return 'bg-emerald-950/80 text-emerald-300 border-emerald-500/50';
+      default:
+        return 'bg-blue-950/80 text-blue-300 border-blue-500/50';
     }
   };
 
@@ -190,9 +195,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Theme / Palette Switcher (Escura / Clara - Windows) */}
             <ThemeToggle showDropdown={true} />
 
-            {/* Current User Badge */}
-            <div className="hidden sm:flex items-center space-x-2.5 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800/80">
-              <div className="flex flex-col text-right">
+            {/* Current User Badge & Multi-Role Switcher */}
+            <div className="flex items-center space-x-2.5 bg-slate-900/80 px-2.5 sm:px-3 py-1.5 rounded-xl border border-slate-800/80">
+              <div className="hidden sm:flex flex-col text-right">
                 <span className="text-xs font-bold text-slate-100 truncate max-w-[150px]">
                   {currentUser.name}
                 </span>
@@ -200,9 +205,32 @@ export const Navbar: React.FC<NavbarProps> = ({
                   MASP: {formatMasp(currentUser.masp)}
                 </span>
               </div>
-              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase font-mono tracking-wider ${getRoleBadgeColor(currentUser.role)}`}>
-                {currentUser.role}
-              </span>
+
+              {currentUser.roles && currentUser.roles.length > 1 ? (
+                <div className="flex items-center space-x-1 bg-slate-950 px-2 py-0.5 rounded-md border border-amber-500/40">
+                  <span className="text-[9px] text-amber-400/80 font-mono font-bold uppercase hidden sm:inline">Perfil:</span>
+                  <select
+                    value={currentUser.activeRole || currentUser.role}
+                    onChange={(e) => {
+                      const newRole = e.target.value as any;
+                      storage.switchActiveRole(newRole);
+                      onUserSwitched();
+                    }}
+                    className="text-[10px] font-bold bg-transparent text-amber-400 border-0 uppercase font-mono tracking-wider focus:outline-none cursor-pointer"
+                    title="Alternar Perfil de Acesso do Usuário"
+                  >
+                    {currentUser.roles.map(r => (
+                      <option key={r} value={r} className="bg-slate-900 text-slate-100 font-sans">
+                        {r === 'operador_canino' ? 'Operador Canino' : r}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-md border uppercase font-mono tracking-wider ${getRoleBadgeColor(currentUser.activeRole || currentUser.role)}`}>
+                  {(currentUser.activeRole || currentUser.role) === 'operador_canino' ? 'Operador Canino' : (currentUser.activeRole || currentUser.role)}
+                </span>
+              )}
             </div>
 
             {/* Password Change Button */}
