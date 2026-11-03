@@ -25,9 +25,31 @@ import { CertificateVerificationModule } from './components/ModuloVerificacaoCer
 import { PublicCertificateValidator } from './components/ValidadorPublicoCertificado';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
+import { usePreloader } from './context/PreloaderContext';
+
+const moduleLabels: Record<ModuleType, string> = {
+  'meu-perfil': 'Meu Perfil',
+  'explosivos': 'Módulo de Explosivos',
+  'armas': 'Módulo de Armas',
+  'municoes': 'Módulo de Munições',
+  'unidade': 'Unidades e Departamentos',
+  'usuarios': 'Usuários e Cursos',
+  'cofre': 'Locais do Cofre',
+  'movimentacoes': 'Movimentações Bélicas',
+  'materiais': 'Módulo de Materiais',
+  'iniciar-aula-mobile': 'Modo Celular (Aula)',
+  'cursos': 'Curso de Formação',
+  'ensino-continuado': 'Ensino Continuado',
+  'gerencia-cursos': 'Gerência de Cursos',
+  'calendario': 'Calendário de Aulas',
+  'certificados': 'Verificação de Certificados',
+  'relatorio': 'Relatórios e Consultas',
+  'manual': 'Manual do Sistema'
+};
 
 export default function App() {
   const { deviceInfo, setDeviceMode } = useDeviceDetection();
+  const { showPreloader, hidePreloader, setLogoUrl } = usePreloader();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>('meu-perfil');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -94,8 +116,32 @@ export default function App() {
     if (isMobileUrlMode && currentUser?.role === 'Geral') {
       setActiveModule('iniciar-aula-mobile');
     }
-    refreshData();
   }, [isMobileUrlMode]);
+
+  // Initial Boot Preloader
+  useEffect(() => {
+    const initApp = async () => {
+      const taskId = showPreloader('Inicializando ARMARIA...', 'Carregando dados da Polícia Civil...', 'sync');
+      try {
+        await refreshData();
+      } finally {
+        hidePreloader(taskId);
+      }
+    };
+    initApp();
+  }, []);
+
+  const handleSelectModule = (mod: ModuleType) => {
+    if (mod === activeModule) {
+      setIsMobileMenuOpen(false);
+      return;
+    }
+    const label = moduleLabels[mod] || 'Módulo';
+    showPreloader(`Carregando ${label}...`, 'Preparando interface e dados...', 'module');
+    setActiveModule(mod);
+    setIsMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Security guard: ensure active module is strictly accessible by current user's role
   useEffect(() => {
@@ -108,38 +154,52 @@ export default function App() {
 
   const handleLoginSubmit = async (maspDigits: string, passwordInput: string) => {
     setLoginError('');
-    const res = await storage.login(maspDigits, passwordInput);
-    if (!res.success || !res.user) {
-      setLoginError(res.error || 'MASP ou senha incorretos.');
-      return;
-    }
+    const taskId = showPreloader('Autenticando usuário...', 'Verificando credenciais no sistema...', 'auth');
+    try {
+      const res = await storage.login(maspDigits, passwordInput);
+      if (!res.success || !res.user) {
+        setLoginError(res.error || 'MASP ou senha incorretos.');
+        return;
+      }
 
-    setCurrentUser(res.user);
-    await refreshData();
+      setCurrentUser(res.user);
+      await refreshData();
 
-    if (res.user.password === res.user.masp) {
-      setShowChangePasswordModal(true);
-    } else {
-      setShowChangePasswordModal(false);
+      if (res.user.password === res.user.masp) {
+        setShowChangePasswordModal(true);
+      } else {
+        setShowChangePasswordModal(false);
+      }
+    } finally {
+      hidePreloader(taskId);
     }
   };
 
   const handleLogout = () => {
-    storage.logout();
-    setCurrentUser(null);
-    setShowChangePasswordModal(false);
-    setLoginError('');
+    const taskId = showPreloader('Encerrando sessão...', 'Finalizando acesso seguro...', 'auth');
+    setTimeout(() => {
+      storage.logout();
+      setCurrentUser(null);
+      setShowChangePasswordModal(false);
+      setLoginError('');
+      hidePreloader(taskId);
+    }, 450);
   };
 
   const handleLocalFallbackLogin = (maspDigits: string) => {
     setLoginError('');
-    const res = storage.loginLocalFallback(maspDigits);
-    if (!res.success || !res.user) {
-      setLoginError(res.error || 'MASP não encontrado no ambiente local.');
-      return;
+    const taskId = showPreloader('Acessando ambiente local...', 'Carregando perfil de emergência...', 'auth');
+    try {
+      const res = storage.loginLocalFallback(maspDigits);
+      if (!res.success || !res.user) {
+        setLoginError(res.error || 'MASP não encontrado no ambiente local.');
+        return;
+      }
+      setCurrentUser(res.user);
+      refreshData();
+    } finally {
+      hidePreloader(taskId);
     }
-    setCurrentUser(res.user);
-    refreshData();
   };
 
   // If opening via QR Code scan or direct validation URL, show public certificate validator
@@ -189,6 +249,11 @@ export default function App() {
     : null;
   const currentLogo = getSystemLogo(userUnit, userDepartment);
 
+  // Sincroniza logo ativa com o preloader
+  useEffect(() => {
+    setLogoUrl(currentLogo);
+  }, [currentLogo, setLogoUrl]);
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
       
@@ -214,10 +279,7 @@ export default function App() {
           currentUser={currentUser}
           departments={departments}
           activeModule={activeModule}
-          onSelectModule={(mod) => {
-            setActiveModule(mod);
-            setIsMobileMenuOpen(false);
-          }}
+          onSelectModule={handleSelectModule}
           pendingMovementsCount={pendingMovementsCount}
           isOpenMobile={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
@@ -240,7 +302,7 @@ export default function App() {
               </div>
 
               <div className="glass-card hover:border-cyan-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
-                <div className="p-2 sm:p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20 shrink-0">
+                <div className="p-2 sm:p-2.5 bg-cyan-500/10 text-cyan-400 rounded-xl border border-cyan-500/20 shrink-0 flex items-center justify-center">
                   <Disc className="w-4 h-4 sm:w-5 sm:h-5" />
                 </div>
                 <div className="min-w-0">
@@ -474,10 +536,7 @@ export default function App() {
         <MobileBottomNav
           currentUser={currentUser}
           activeModule={activeModule}
-          onSelectModule={(mod) => {
-            setActiveModule(mod);
-            setIsMobileMenuOpen(false);
-          }}
+          onSelectModule={handleSelectModule}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           pendingMovementsCount={pendingMovementsCount}
         />

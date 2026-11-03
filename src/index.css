@@ -304,6 +304,49 @@ input, select, textarea, button {
   animation: pulse-subtle 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+@keyframes indeterminate-bar {
+  0% { transform: translateX(-100%); width: 40%; }
+  50% { transform: translateX(50%); width: 60%; }
+  100% { transform: translateX(200%); width: 40%; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(245, 158, 11, 0.25), 0 0 40px rgba(6, 182, 212, 0.15);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 35px rgba(245, 158, 11, 0.45), 0 0 60px rgba(6, 182, 212, 0.3);
+  }
+}
+
+.animate-spin-slow {
+  animation: spin-slow 3s linear infinite;
+}
+
+.animate-spin-reverse {
+  animation: spin-reverse 2s linear infinite;
+}
+
+.animate-indeterminate {
+  animation: indeterminate-bar 1.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
 /* Print Overrides to ensure pure white background without dark UI overlays */
 @media print {
   html, body, #root, #root > div, main, .glass, .glass-card, .glass-input {

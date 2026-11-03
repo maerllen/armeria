@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModuleType, User as UserType, getAllowedModulesForUser } from '../types';
-import { User, Crosshair, Disc, ArrowRightLeft, Smartphone, Menu, Bomb } from 'lucide-react';
+import { User, Crosshair, ArrowRightLeft, Smartphone, Menu, Bomb, Disc } from 'lucide-react';
 
 interface MobileBottomNavProps {
   currentUser?: UserType | null;

@@ -862,7 +862,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                         <div className="space-y-4">
                           <div className="flex items-center justify-between pb-2 border-b border-cyan-900/30">
                             <div className="flex items-center space-x-2.5">
-                              <div className="p-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-lg">
+                              <div className="p-1.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-lg flex items-center justify-center">
                                 <Disc className="w-4 h-4" />
                               </div>
                               <div>
@@ -975,7 +975,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-4 shrink-0">
                 <div className="flex items-center space-x-3">
-                  <div className={`p-3 rounded-xl border ${
+                  <div className={`p-3 rounded-2xl border ${
                     isArmas 
                       ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
                       : isMunicoes

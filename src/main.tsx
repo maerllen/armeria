@@ -76,12 +76,15 @@ class ErrorBoundary extends Component<Props, State> {
 }
 
 import { ThemeProvider } from './context/ThemeContext';
+import { PreloaderProvider } from './context/PreloaderContext';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <ThemeProvider>
-        <App />
+        <PreloaderProvider>
+          <App />
+        </PreloaderProvider>
       </ThemeProvider>
     </ErrorBoundary>
   </StrictMode>

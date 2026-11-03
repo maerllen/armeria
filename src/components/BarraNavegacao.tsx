@@ -4,6 +4,8 @@ import { formatMasp } from '../utils/masks';
 import { Shield, LogOut, KeyRound, Smartphone, Monitor, Menu, X, ChevronDown } from 'lucide-react';
 import { DeviceInfo, DeviceMode } from '../utils/deviceDetection';
 import { ThemeToggle } from './AlternadorTema';
+import { usePreloader } from '../context/PreloaderContext';
+import { PreloaderNavbarIndicator } from './PreloaderGlobal';
 
 interface NavbarProps {
   currentUser: User | null;
@@ -31,6 +33,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   departmentName,
   unitName
 }) => {
+  const { isLoading, message } = usePreloader();
   const [showDeviceMenu, setShowDeviceMenu] = useState(false);
 
   const getRoleBadgeColor = (role: string) => {
@@ -97,6 +100,9 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Right: Device Indicator + User info & Logout */}
         {currentUser && (
           <div className="flex items-center space-x-2 sm:space-x-3">
+
+            {/* Preloader Working Badge */}
+            <PreloaderNavbarIndicator isActive={isLoading} label={message} />
 
             {/* Device Detection Indicator & Mode Switcher */}
             {deviceInfo && onSetDeviceMode && (

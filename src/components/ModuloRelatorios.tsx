@@ -551,7 +551,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         {/* Section 2: Ammunition Movements */}
         {(activeTab === 'MUNICIONAL' || activeTab === 'TODOS') && (
           <div className="space-y-3 pt-4 border-t border-slate-800 print:border-gray-400">
-            <h3 className="text-xs font-bold text-amber-400 print:text-black uppercase tracking-wider font-mono flex items-center space-x-1">
+            <h3 className="text-xs font-bold text-amber-400 print:text-black uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Disc className="w-4 h-4 print:hidden" />
               <span>2. Saídas e Devolução de Munição ({filteredAmmoMovements.length})</span>
             </h3>
