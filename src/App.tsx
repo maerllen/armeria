@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser, getSystemLogo } from './types';
+import { User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, Weapon, Movement, AmmunitionMovement, ModuleType, getAllowedModulesForUser, getSystemLogo, DEFAULT_SYSTEM_LOGO } from './types';
 import { storage } from './services/storage';
 import { Navbar } from './components/BarraNavegacao';
 import { Sidebar } from './components/BarraLateral';
@@ -53,6 +53,7 @@ export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>('meu-perfil');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isAppReady, setIsAppReady] = useState(false);
 
   // App domain state from storage service
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -125,6 +126,7 @@ export default function App() {
       try {
         await refreshData();
       } finally {
+        setIsAppReady(true);
         hidePreloader(taskId);
       }
     };
@@ -201,6 +203,37 @@ export default function App() {
       hidePreloader(taskId);
     }
   };
+
+  // Se a aplicação ainda estiver inicializando os dados pela primeira vez, exibe preloader completo
+  if (!isAppReady) {
+    return (
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
+        <div className="text-center max-w-sm w-full space-y-6">
+          <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
+            <div className="absolute inset-0 rounded-full border-2 border-dashed border-amber-500/40 border-t-amber-400 animate-spin-slow" />
+            <div className="absolute inset-2 rounded-full border-2 border-cyan-500/40 border-b-cyan-400 animate-spin-reverse" />
+            <div className="relative w-20 h-20 rounded-full bg-slate-950 p-1.5 shadow-2xl border border-amber-500/50 flex items-center justify-center overflow-hidden">
+              <img
+                src={DEFAULT_SYSTEM_LOGO}
+                alt="Polícia Civil de Minas Gerais"
+                className="w-full h-full object-contain filter drop-shadow-md"
+              />
+            </div>
+          </div>
+          <div>
+            <span className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-bold bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30">
+              POLÍCIA CIVIL DE MINAS GERAIS
+            </span>
+            <h1 className="text-2xl font-black text-slate-100 font-mono tracking-wider mt-3">ARMARIA</h1>
+            <p className="text-xs text-slate-400 mt-1">Carregando acervo bélico e inicializando sistema...</p>
+          </div>
+          <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800 p-0.5 shadow-inner">
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-500 via-amber-300 to-cyan-500 animate-indeterminate shadow-[0_0_10px_rgba(245,158,11,0.5)]" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // If opening via QR Code scan or direct validation URL, show public certificate validator
   if (publicValidationCode !== null) {

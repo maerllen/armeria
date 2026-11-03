@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
-import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, ShieldCheck, Loader2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
 
 interface LoginModalProps {
@@ -14,6 +14,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState('');
   const [showDbGuide, setShowDbGuide] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  React.useEffect(() => {
+    if (error) {
+      setIsSubmitting(false);
+    }
+  }, [error]);
 
   const handleMaspChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     // Input accepts ONLY digits
@@ -34,10 +41,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
       return;
     }
 
+    setIsSubmitting(true);
     onLoginSuccess(maspRaw, password);
   };
 
   const handleDemoLogin = (demoMasp: string) => {
+    setIsSubmitting(true);
     setMaspRaw(demoMasp);
     setPassword(demoMasp);
     if (onLocalFallbackLogin) {
@@ -180,9 +189,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
 
           <button
             type="submit"
-            className="w-full bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-3 rounded-xl shadow-lg transition duration-200 flex items-center justify-center space-x-2 text-sm"
+            disabled={isSubmitting}
+            className="w-full bg-amber-500 hover:bg-amber-400 disabled:opacity-75 disabled:cursor-wait text-slate-950 font-bold py-3 rounded-xl shadow-lg transition duration-200 flex items-center justify-center space-x-2 text-sm"
           >
-            <span>ENTRAR NO SISTEMA</span>
+            {isSubmitting ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin text-slate-950" />
+                <span>AUTENTICANDO NO SISTEMA...</span>
+              </>
+            ) : (
+              <span>ENTRAR NO SISTEMA</span>
+            )}
           </button>
         </form>
 

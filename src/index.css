@@ -347,6 +347,28 @@ input, select, textarea, button {
   animation: pulse-glow 2s ease-in-out infinite;
 }
 
+/* Preloader & Proteção contra Cliques Duplos */
+body.is-preloader-active,
+body.is-preloader-active * {
+  cursor: wait !important;
+}
+
+body.is-preloader-active button,
+body.is-preloader-active [role="button"],
+body.is-preloader-active input[type="submit"] {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+button[data-busy="true"],
+input[type="submit"][data-busy="true"],
+[role="button"][data-busy="true"] {
+  pointer-events: none !important;
+  opacity: 0.75 !important;
+  cursor: wait !important;
+  user-select: none !important;
+}
+
 /* Print Overrides to ensure pure white background without dark UI overlays */
 @media print {
   html, body, #root, #root > div, main, .glass, .glass-card, .glass-input {
