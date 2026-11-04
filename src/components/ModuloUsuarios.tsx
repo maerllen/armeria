@@ -260,7 +260,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       const targetUnitId = isRestrictedRegistrar ? currentUser.unitId : (unitId || currentUser.unitId);
       const finalCanMoveAmmo = isRestrictedRegistrar ? false : canMoveAmmo;
       const finalCanMoveWeapons = isRestrictedRegistrar ? false : canMoveWeapons;
-      const finalManagementScope = isRestrictedRegistrar ? 'unit' : managementScope;
+      const finalManagementScope = managementScope || 'unit';
 
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
@@ -627,21 +627,27 @@ export const UserModule: React.FC<UserModuleProps> = ({
                                 </span>
                               </td>
 
-                              {/* Special Move Permissions */}
-                              <td className="py-3 px-4 space-y-1">
-                                <div className="text-[10px]">
-                                  Munição: {' '}
-                                  <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                                    {usr.canMoveAmmunition ? 'Sim' : 'Não'}
-                                  </span>
-                                </div>
-                                <div className="text-[10px]">
-                                  Armas: {' '}
-                                  <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                                    {usr.canMoveWeapons ? 'Sim' : 'Não'}
-                                  </span>
-                                </div>
-                              </td>
+                                {/* Special Move Permissions */}
+                                <td className="py-3 px-4 space-y-1">
+                                  <div className="text-[10px]">
+                                    Munição: {' '}
+                                    <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                      {usr.canMoveAmmunition ? 'Sim' : 'Não'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px]">
+                                    Armas: {' '}
+                                    <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                      {usr.canMoveWeapons ? 'Sim' : 'Não'}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10px]">
+                                    Abrangência: {' '}
+                                    <span className={`font-semibold ${usr.managementScope === 'department' ? 'text-amber-400' : 'text-slate-400'}`}>
+                                      {usr.managementScope === 'department' ? 'Departamento' : 'Unidade'}
+                                    </span>
+                                  </div>
+                                </td>
 
                               {/* Courses */}
                               <td className="py-3 px-4">
@@ -1019,26 +1025,26 @@ export const UserModule: React.FC<UserModuleProps> = ({
                         <option value="sim">Sim (Movimentar/Manusear)</option>
                       </select>
                     </div>
-
-                    {/* Abrangência de Movimentação/Gestão (Armeiro / Admin) */}
-                    <div className="md:col-span-2 bg-amber-950/20 border border-amber-800/40 p-3 rounded-xl">
-                      <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">
-                        Abrangência de Movimentação e Gestão (Armeiro)
-                      </label>
-                      <select
-                        value={managementScope}
-                        onChange={(e) => setManagementScope(e.target.value as 'department' | 'unit')}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-medium"
-                      >
-                        <option value="department">Departamento e todas as unidades do departamento vinculado</option>
-                        <option value="unit">Apenas a unidade específica que está vinculado</option>
-                      </select>
-                      <p className="text-[10px] text-slate-400 mt-1">
-                        Determina se o Armeiro/Usuário pode gerenciar e movimentar armas, munições, usuários e cofres em todo o departamento ou restrito à sua unidade.
-                      </p>
-                    </div>
                   </>
                 )}
+
+                {/* Abrangência de Movimentação e Gestão */}
+                <div className="md:col-span-2 bg-amber-950/20 border border-amber-800/40 p-3.5 rounded-xl">
+                  <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider mb-1">
+                    Abrangência de Movimentação e Gestão
+                  </label>
+                  <select
+                    value={managementScope}
+                    onChange={(e) => setManagementScope(e.target.value as 'department' | 'unit')}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-medium focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="department">Departamento e todas as unidades do departamento vinculado</option>
+                    <option value="unit">Apenas a unidade específica que está vinculado</option>
+                  </select>
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Determina se o policial/usuário possui abrangência para gerenciar e movimentar em todo o departamento ou restrito à sua unidade vinculada.
+                  </p>
+                </div>
 
                 {/* Resetar Senha (Geral, Administrador ou Armeiro) */}
                 {canResetPassword && editingUser && (

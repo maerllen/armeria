@@ -89,6 +89,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             ROLES_USUARIOS as roles_json,
             DEPARTAMENTO_ID_USUARIOS as department_id,
             UNIDADE_ID_USUARIOS as unit_id,
+            ABRANGENCIA_GESTAO_USUARIOS as management_scope,
             PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
             PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
             TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -113,6 +114,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             NULL as roles_json,
             DEPARTAMENTO_ID_USUARIOS as department_id,
             UNIDADE_ID_USUARIOS as unit_id,
+            ABRANGENCIA_GESTAO_USUARIOS as management_scope,
             PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
             PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
             TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -197,6 +199,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       activeRole: activeRole,
       departmentId: dbUser.department_id || '',
       unitId: dbUser.unit_id || '',
+      managementScope: (dbUser.management_scope as any) || 'unit',
       canMoveAmmunition: Boolean(dbUser.can_move_ammo),
       canMoveWeapons: Boolean(dbUser.can_move_weapons),
       hasSystemAccess: Boolean(dbUser.has_system_access),
@@ -433,6 +436,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           ROLES_USUARIOS as roles_json,
           DEPARTAMENTO_ID_USUARIOS as department_id,
           UNIDADE_ID_USUARIOS as unit_id,
+          ABRANGENCIA_GESTAO_USUARIOS as management_scope,
           PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
           PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
           TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -457,6 +461,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           NULL as roles_json,
           DEPARTAMENTO_ID_USUARIOS as department_id,
           UNIDADE_ID_USUARIOS as unit_id,
+          ABRANGENCIA_GESTAO_USUARIOS as management_scope,
           PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
           PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
           TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -499,6 +504,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         roles: parseUserRoles(u.roles_json, u.role),
         departmentId: u.department_id || '',
         unitId: u.unit_id || '',
+        managementScope: (u.management_scope as any) || 'unit',
         canMoveAmmunition: Boolean(u.can_move_ammo),
         canMoveWeapons: Boolean(u.can_move_weapons),
         hasSystemAccess: Boolean(u.has_system_access),
@@ -520,11 +526,12 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { masp, name, phone, cargo, role, roles, departmentId, unitId, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
+    const { masp, name, phone, cargo, role, roles, departmentId, unitId, managementScope, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
     const siglaProf = professorSigla || professor_sigla || null;
     const userRoles = parseUserRoles(roles, role);
     const rolesJson = JSON.stringify(userRoles);
+    const userScope = managementScope === 'department' ? 'department' : 'unit';
 
     // Validação estrita: O usuário cadastrador só pode liberar acesso aos perfis que ele próprio possui
     if (actor) {
@@ -552,8 +559,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const hashedDefaultPass = hashPassword(cleanMasp);
     try {
       await pool.query(
-        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -565,6 +572,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           rolesJson,
           departmentId || null,
           unitId || null,
+          userScope,
           canMoveAmmunition ? 1 : 0,
           canMoveWeapons ? 1 : 0,
           hasSystemAccess ? 1 : 0,
@@ -575,8 +583,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       );
     } catch {
       await pool.query(
-        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -587,6 +595,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           role,
           departmentId || null,
           unitId || null,
+          userScope,
           canMoveAmmunition ? 1 : 0,
           canMoveWeapons ? 1 : 0,
           hasSystemAccess ? 1 : 0,
@@ -621,6 +630,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       role,
       departmentId,
       unitId,
+      managementScope: userScope,
       canMoveAmmunition,
       canMoveWeapons,
       hasSystemAccess,
@@ -656,6 +666,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           ROLES_USUARIOS as roles_json,
           DEPARTAMENTO_ID_USUARIOS as department_id,
           UNIDADE_ID_USUARIOS as unit_id,
+          ABRANGENCIA_GESTAO_USUARIOS as management_scope,
           PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
           PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
           TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -679,6 +690,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           NULL as roles_json,
           DEPARTAMENTO_ID_USUARIOS as department_id,
           UNIDADE_ID_USUARIOS as unit_id,
+          ABRANGENCIA_GESTAO_USUARIOS as management_scope,
           PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
           PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
           TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
@@ -716,6 +728,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
 
     const updatedRoles = updates.roles !== undefined ? parseUserRoles(updates.roles, updates.role || rows[0].role) : undefined;
     const rolesJson = updatedRoles ? JSON.stringify(updatedRoles) : null;
+    const userScope = updates.managementScope !== undefined ? (updates.managementScope === 'department' ? 'department' : 'unit') : null;
 
     // Validação estrita: O usuário editor só pode conceder perfis que ele próprio possui
     if (updatedRoles !== undefined && actor) {
@@ -745,6 +758,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           ROLES_USUARIOS = COALESCE(?, ROLES_USUARIOS),
           DEPARTAMENTO_ID_USUARIOS = COALESCE(?, DEPARTAMENTO_ID_USUARIOS),
           UNIDADE_ID_USUARIOS = COALESCE(?, UNIDADE_ID_USUARIOS),
+          ABRANGENCIA_GESTAO_USUARIOS = COALESCE(?, ABRANGENCIA_GESTAO_USUARIOS),
           PODE_MOVER_MUNICAO_USUARIOS = COALESCE(?, PODE_MOVER_MUNICAO_USUARIOS),
           PODE_MOVER_ARMAS_USUARIOS = COALESCE(?, PODE_MOVER_ARMAS_USUARIOS),
           TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
@@ -761,6 +775,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           rolesJson,
           updates.departmentId ?? null,
           updates.unitId ?? null,
+          userScope,
           updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
           updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
           updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
@@ -780,6 +795,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PERFIL_USUARIOS = COALESCE(?, PERFIL_USUARIOS),
           DEPARTAMENTO_ID_USUARIOS = COALESCE(?, DEPARTAMENTO_ID_USUARIOS),
           UNIDADE_ID_USUARIOS = COALESCE(?, UNIDADE_ID_USUARIOS),
+          ABRANGENCIA_GESTAO_USUARIOS = COALESCE(?, ABRANGENCIA_GESTAO_USUARIOS),
           PODE_MOVER_MUNICAO_USUARIOS = COALESCE(?, PODE_MOVER_MUNICAO_USUARIOS),
           PODE_MOVER_ARMAS_USUARIOS = COALESCE(?, PODE_MOVER_ARMAS_USUARIOS),
           TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
@@ -795,6 +811,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           updates.role ?? null,
           updates.departmentId ?? null,
           updates.unitId ?? null,
+          userScope,
           updates.canMoveAmmunition !== undefined ? (updates.canMoveAmmunition ? 1 : 0) : null,
           updates.canMoveWeapons !== undefined ? (updates.canMoveWeapons ? 1 : 0) : null,
           updates.hasSystemAccess !== undefined ? (updates.hasSystemAccess ? 1 : 0) : null,
