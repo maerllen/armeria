@@ -739,16 +739,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
                           Tipo de Munição
                         </label>
-                        <select
+                        <input
+                          type="text"
                           value={ammoType}
                           onChange={(e) => setAmmoType(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100"
-                        >
-                          <option value="Operacional">Operacional (Gold / Hollow Point)</option>
-                          <option value="Treino">Treinamento / Ogival</option>
-                          <option value="Frangível">Frangível</option>
-                          <option value="Submunição / Específica">Específica / Outra</option>
-                        </select>
+                          placeholder="Ex: Operacional, Treino, Frangível..."
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                          required
+                        />
                       </div>
 
                       <div>

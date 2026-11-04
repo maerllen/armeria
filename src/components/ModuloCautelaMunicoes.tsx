@@ -590,16 +590,14 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
                     Tipo de Munição
                   </label>
-                  <select
+                  <input
+                    type="text"
                     value={tipoMunicao}
                     onChange={(e) => setTipoMunicao(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100"
-                  >
-                    <option value="Operacional">Operacional (Gold / Expansiva)</option>
-                    <option value="Treinamento">Treinamento / Ogival</option>
-                    <option value="Frangível">Frangível</option>
-                    <option value="Outro">Outro</option>
-                  </select>
+                    placeholder="Ex: Operacional, Treinamento, Frangível..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+                    required
+                  />
                 </div>
 
                 <div>

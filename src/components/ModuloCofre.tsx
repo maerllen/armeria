@@ -57,7 +57,13 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   // Scoped vault spaces for user
   const userScopedVaults = useMemo(() => {
     if (isGeral) return vaultSpaces;
-    if (currentUser.role === 'Administrador' || (currentUser.role === 'Armeiro' && currentUser.managementScope !== 'unit')) {
+    if (currentUser.role === 'Armeiro') {
+      return vaultSpaces.filter(v => v.unitId === currentUser.unitId && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES'));
+    }
+    if (currentUser.role === 'Explosivista') {
+      return vaultSpaces.filter(v => v.unitId === currentUser.unitId && v.type === 'EXPLOSIVOS');
+    }
+    if (currentUser.role === 'Administrador') {
       return vaultSpaces.filter(v => v.departmentId === currentUser.departmentId);
     }
     return vaultSpaces.filter(v => v.unitId === currentUser.unitId);
@@ -71,13 +77,20 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
   // Available departments & units for modal
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
-  const availableUnitsForModal = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
+  const availableUnitsForModal = isGeral 
+    ? units.filter(u => u.departmentId === (deptId || currentUser.departmentId))
+    : (currentUser.role === 'Armeiro' || currentUser.role === 'Explosivista')
+    ? units.filter(u => u.id === currentUser.unitId)
+    : units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
 
   // Available units for quick filter dropdown
   const filterUnits = useMemo(() => {
     if (isGeral) return units;
+    if (currentUser.role === 'Armeiro' || currentUser.role === 'Explosivista') {
+      return units.filter(u => u.id === currentUser.unitId);
+    }
     return units.filter(u => u.departmentId === currentUser.departmentId);
-  }, [isGeral, units, currentUser.departmentId]);
+  }, [isGeral, units, currentUser]);
 
   const toggleDeptExpand = (id: string) => {
     setExpandedDeptIds(prev =>
@@ -119,6 +132,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   };
 
   const handleOpenEditModal = (vault: VaultSpace) => {
+    if (currentUser.role === 'Armeiro' && (vault.type === 'EXPLOSIVOS' || vault.unitId !== currentUser.unitId)) {
+      setErrorMsg('Usuários armeiros só podem editar locais de armas e munições da sua própria unidade.');
+      return;
+    }
     if (isExplosivista && vault.type !== 'EXPLOSIVOS') {
       setErrorMsg('Usuários explosivistas só podem editar locais no cofre vinculados a explosivos.');
       return;
@@ -144,6 +161,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     if (!unitId) {
       setErrorMsg('Selecione uma unidade para o local do cofre.');
       return;
+    }
+
+    if (currentUser.role === 'Armeiro') {
+      if (type !== 'ARMAS' && type !== 'MUNIÇÕES') {
+        setErrorMsg('Usuários armeiros só podem cadastrar ou alterar locais vinculados a armas e munições.');
+        return;
+      }
+      if (currentUser.unitId && unitId !== currentUser.unitId) {
+        setErrorMsg('Usuários armeiros só podem criar locais do cofre na sua própria unidade.');
+        return;
+      }
     }
 
     if (isExplosivista && type !== 'EXPLOSIVOS') {
@@ -178,6 +206,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   };
 
   const handleDelete = (vault: VaultSpace) => {
+    if (currentUser.role === 'Armeiro' && (vault.type === 'EXPLOSIVOS' || vault.unitId !== currentUser.unitId)) {
+      setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições da sua própria unidade.');
+      return;
+    }
     if (isExplosivista && vault.type !== 'EXPLOSIVOS') {
       setErrorMsg('Usuários explosivistas só podem excluir locais no cofre vinculados a explosivos.');
       return;
@@ -187,6 +219,11 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
   const confirmExecuteDeleteVault = async () => {
     if (!deleteTargetVault) return;
+    if (currentUser.role === 'Armeiro' && (deleteTargetVault.type === 'EXPLOSIVOS' || deleteTargetVault.unitId !== currentUser.unitId)) {
+      setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições da sua própria unidade.');
+      setDeleteTargetVault(null);
+      return;
+    }
     if (isExplosivista && deleteTargetVault.type !== 'EXPLOSIVOS') {
       setErrorMsg('Usuários explosivistas só podem excluir locais no cofre vinculados a explosivos.');
       setDeleteTargetVault(null);
@@ -369,9 +406,14 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === v.id || e.localArmazenamento === v.code);
     const isArmas = v.type === 'ARMAS';
     const isMunicoes = v.type === 'MUNIÇÕES';
-    const isExplosivos = v.type === 'EXPLOSIVOS';
-    const canEditThisVault = isGeral || isAdminOrArmeiro || (isExplosivista && v.type === 'EXPLOSIVOS');
-    const canDeleteThisVault = isGeral || isAdminOrArmeiro || (isExplosivista && v.type === 'EXPLOSIVOS');
+    const canEditThisVault = isGeral || 
+      (currentUser.role === 'Armeiro' && v.unitId === currentUser.unitId && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+      (currentUser.role === 'Explosivista' && v.unitId === currentUser.unitId && v.type === 'EXPLOSIVOS') ||
+      currentUser.role === 'Administrador';
+    const canDeleteThisVault = isGeral || 
+      (currentUser.role === 'Armeiro' && v.unitId === currentUser.unitId && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+      (currentUser.role === 'Explosivista' && v.unitId === currentUser.unitId && v.type === 'EXPLOSIVOS') ||
+      currentUser.role === 'Administrador';
 
     return (
       <div
@@ -550,13 +592,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <span>Novo Cofre de Munições</span>
               </button>
             )}
-            <button
-              onClick={() => handleOpenModal('EXPLOSIVOS')}
-              className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Cofre de Explosivos</span>
-            </button>
+            {currentUser.role !== 'Armeiro' && (
+              <button
+                onClick={() => handleOpenModal('EXPLOSIVOS')}
+                className="bg-red-600 hover:bg-red-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Cofre de Explosivos</span>
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -640,40 +684,44 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             </button>
 
             {/* Filter: Paiol / Cofre para Explosivos */}
-            <button
-              type="button"
-              onClick={() => setTypeFilter('EXPLOSIVOS')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                typeFilter === 'EXPLOSIVOS'
-                  ? 'bg-red-950/90 text-red-300 border border-red-800 shadow-sm'
-                  : 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
-              }`}
-            >
-              <Bomb className="w-3.5 h-3.5 text-red-400" />
-              <span>Cofre de Explosivos</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
-                typeFilter === 'EXPLOSIVOS' ? 'bg-red-900/80 text-red-200' : 'bg-slate-900 text-slate-500'
-              }`}>
-                {totalExplosivos}
-              </span>
-            </button>
+            {currentUser.role !== 'Armeiro' && (
+              <button
+                type="button"
+                onClick={() => setTypeFilter('EXPLOSIVOS')}
+                className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                  typeFilter === 'EXPLOSIVOS'
+                    ? 'bg-red-950/90 text-red-300 border border-red-800 shadow-sm'
+                    : 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
+                }`}
+              >
+                <Bomb className="w-3.5 h-3.5 text-red-400" />
+                <span>Cofre de Explosivos</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                  typeFilter === 'EXPLOSIVOS' ? 'bg-red-900/80 text-red-200' : 'bg-slate-900 text-slate-500'
+                }`}>
+                  {totalExplosivos}
+                </span>
+              </button>
+            )}
 
           </div>
 
           {/* Quick Unit Filter (Optional dropdown) */}
-          <div className="flex items-center space-x-2">
-            <span className="text-[11px] text-slate-400 hidden md:inline">Filtrar por Unidade:</span>
-            <select
-              value={selectedUnitFilter}
-              onChange={(e) => setSelectedUnitFilter(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-slate-700"
-            >
-              <option value="ALL">Todas as Unidades</option>
-              {filterUnits.map(u => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
-          </div>
+          {currentUser.role !== 'Armeiro' && currentUser.role !== 'Explosivista' && (
+            <div className="flex items-center space-x-2">
+              <span className="text-[11px] text-slate-400 hidden md:inline">Filtrar por Unidade:</span>
+              <select
+                value={selectedUnitFilter}
+                onChange={(e) => setSelectedUnitFilter(e.target.value)}
+                className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-slate-700"
+              >
+                <option value="ALL">Todas as Unidades</option>
+                {filterUnits.map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {/* Search Input Bar */}
@@ -701,7 +749,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       <div className="space-y-4">
         {visibleDepts.map((dept) => {
           // Filter vaults for this department matching active filters and search term
-          const deptVaults = vaultSpaces.filter(v => {
+          const deptVaults = userScopedVaults.filter(v => {
             if (v.departmentId !== dept.id) return false;
 
             // Type filter
@@ -794,10 +842,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       <Disc className="w-3 h-3 text-cyan-400" />
                       <span>{municoesVaults.length} Munições</span>
                     </span>
-                    <span className="text-xs bg-red-950/60 text-red-300 border border-red-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
-                      <Bomb className="w-3 h-3 text-red-400" />
-                      <span>{explosivosVaults.length} Explosivos</span>
-                    </span>
+                    {currentUser.role !== 'Armeiro' && (
+                      <span className="text-xs bg-red-950/60 text-red-300 border border-red-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
+                        <Bomb className="w-3 h-3 text-red-400" />
+                        <span>{explosivosVaults.length} Explosivos</span>
+                      </span>
+                    )}
                   </div>
 
                   <span className="text-xs bg-slate-950 text-slate-200 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
@@ -910,7 +960,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       )}
 
                       {/* SECTION 3: PAIÓIS / COFRES PARA EXPLOSIVOS */}
-                      {(typeFilter === 'ALL' || typeFilter === 'EXPLOSIVOS') && (
+                      {currentUser.role !== 'Armeiro' && (typeFilter === 'ALL' || typeFilter === 'EXPLOSIVOS') && (
                         <div className="space-y-4">
                           <div className="flex items-center justify-between pb-2 border-b border-red-900/30">
                             <div className="flex items-center space-x-2.5">
@@ -1642,9 +1692,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <select
                   value={unitId}
                   onChange={(e) => setUnitId(e.target.value)}
-                  disabled={!isGeral && currentUser.managementScope === 'unit' && Boolean(currentUser.unitId)}
+                  disabled={!isGeral && (currentUser.role === 'Armeiro' || currentUser.role === 'Explosivista' || Boolean(currentUser.unitId))}
                   className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
-                    !isGeral && currentUser.managementScope === 'unit' && Boolean(currentUser.unitId)
+                    !isGeral && (currentUser.role === 'Armeiro' || currentUser.role === 'Explosivista' || Boolean(currentUser.unitId))
                       ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
                       : 'bg-slate-950 border-slate-700 text-slate-100 focus:border-amber-500'
                   }`}
@@ -1655,6 +1705,11 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     </option>
                   ))}
                 </select>
+                {currentUser.role === 'Armeiro' && (
+                  <p className="text-[10px] text-amber-400/80 mt-1">
+                    Cofre vinculado automaticamente à sua unidade de lotação.
+                  </p>
+                )}
               </div>
 
               <div className="pt-2 flex justify-end space-x-3">
