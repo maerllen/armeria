@@ -24,12 +24,16 @@ import { CalendarModule } from './components/ModuloCalendario';
 import { CertificateVerificationModule } from './components/ModuloVerificacaoCertificados';
 import { PublicCertificateValidator } from './components/ValidadorPublicoCertificado';
 import { ModuloVeterinario } from './components/ModuloVeterinario';
+import { ModuloCautelaArmas } from './components/ModuloCautelaArmas';
+import { ModuloCautelaMunicoes } from './components/ModuloCautelaMunicoes';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb, Dog } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 import { usePreloader } from './context/PreloaderContext';
 
 const moduleLabels: Record<ModuleType, string> = {
   'meu-perfil': 'Meu Perfil',
+  'cautela-armas': 'Cautela de Armas',
+  'cautela-municoes': 'Cautela de Munições',
   'explosivos': 'Módulo de Explosivos',
   'armas': 'Módulo de Armas',
   'municoes': 'Módulo de Munições',
@@ -44,7 +48,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'gerencia-cursos': 'Gerência de Cursos',
   'calendario': 'Calendário de Aulas',
   'certificados': 'Verificação de Certificados',
-  'veterinario': 'Material veterinário',
+  'veterinario': 'Material veterinário.',
   'relatorio': 'Relatórios e Consultas',
   'manual': 'Manual do Sistema'
 };
@@ -222,6 +226,38 @@ export default function App() {
 
   const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
 
+  const isArmeiroUser = effectiveUser?.role === 'Armeiro' || effectiveUser?.activeRole === 'Armeiro';
+  const isGeralUser = effectiveUser?.role === 'Geral' || effectiveUser?.activeRole === 'Geral';
+
+  const pendingWeaponCautelasCount = useMemo(() => {
+    const list = storage.getCautelasArmas();
+    if (isGeralUser) {
+      return list.filter(c => c.status === 'PENDENTE').length;
+    }
+    if (isArmeiroUser) {
+      return list.filter(c => c.status === 'PENDENTE' && (effectiveUser?.managementScope === 'department' ? c.departmentId === effectiveUser?.departmentId : c.unitId === effectiveUser?.unitId)).length;
+    }
+    return 0;
+  }, [effectiveUser, isArmeiroUser, isGeralUser]);
+
+  const pendingAmmoCautelasCount = useMemo(() => {
+    const list = storage.getCautelasMunicoes();
+    if (isGeralUser) {
+      return list.filter(c => c.status === 'PENDENTE').length;
+    }
+    if (isArmeiroUser) {
+      return list.filter(c => c.status === 'PENDENTE' && (effectiveUser?.managementScope === 'department' ? c.departmentId === effectiveUser?.departmentId : c.unitId === effectiveUser?.unitId)).length;
+    }
+    return 0;
+  }, [effectiveUser, isArmeiroUser, isGeralUser]);
+
+  const readyReceiptsCount = useMemo(() => {
+    if (!effectiveUser) return 0;
+    const armasAutorizadas = storage.getCautelasArmas().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
+    const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
+    return armasAutorizadas + municoesAutorizadas;
+  }, [effectiveUser]);
+
   const userDepartment = currentUser?.departmentId 
     ? (departments.find(d => d.id === currentUser.departmentId) || storage.getAllDepartments().find(d => d.id === currentUser.departmentId) || null)
     : null;
@@ -330,6 +366,9 @@ export default function App() {
           activeModule={activeModule}
           onSelectModule={handleSelectModule}
           pendingMovementsCount={pendingMovementsCount}
+          pendingWeaponCautelasCount={pendingWeaponCautelasCount}
+          pendingAmmoCautelasCount={pendingAmmoCautelasCount}
+          readyReceiptsCount={readyReceiptsCount}
           isOpenMobile={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
         />
@@ -399,6 +438,32 @@ export default function App() {
               onUserUpdated={refreshData}
               onRefresh={refreshData}
               onChangePasswordClick={() => setShowChangePasswordModal(true)}
+              onNavigateToModule={setActiveModule}
+            />
+          )}
+
+          {activeModule === 'cautela-armas' && effectiveUser && (
+            <ModuloCautelaArmas
+              currentUser={effectiveUser}
+              weapons={weapons}
+              ammoStocks={ammoStocks}
+              calibers={calibers}
+              vaultSpaces={vaultSpaces}
+              units={units}
+              departments={departments}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'cautela-municoes' && effectiveUser && (
+            <ModuloCautelaMunicoes
+              currentUser={effectiveUser}
+              ammoStocks={ammoStocks}
+              calibers={calibers}
+              vaultSpaces={vaultSpaces}
+              units={units}
+              departments={departments}
+              onRefresh={refreshData}
             />
           )}
 
@@ -598,6 +663,8 @@ export default function App() {
           onSelectModule={handleSelectModule}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}
           pendingMovementsCount={pendingMovementsCount}
+          pendingWeaponCautelasCount={pendingWeaponCautelasCount}
+          pendingAmmoCautelasCount={pendingAmmoCautelasCount}
         />
       )}
 

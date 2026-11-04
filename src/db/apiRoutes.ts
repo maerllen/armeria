@@ -1177,8 +1177,17 @@ apiRouter.get('/ammo-stocks', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const [rows]: any = await pool.query(`
-      SELECT id, caliber_id as caliberId, quantity, department_id as departmentId, unit_id as unitId, vault_space_id as vaultSpaceId, updated_at as updatedAt
-      FROM ammo_stocks ORDER BY updated_at DESC
+      SELECT 
+        ID_ESTOQUE_MUNICOES as id, 
+        CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, 
+        QUANTIDADE_ESTOQUE_MUNICOES as quantity, 
+        DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, 
+        UNIDADE_ID_ESTOQUE_MUNICOES as unitId, 
+        COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId,
+        TIPO_MUNICAO as tipoMunicao,
+        LOTE_MUNICAO as loteMunicao,
+        DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
+      FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
     `);
     return res.json(rows || []);
   } catch (err: any) {
@@ -1208,7 +1217,7 @@ apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
 apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { quantity, caliberId, additionalInfo, actor } = req.body;
+    const { quantity, caliberId, tipoMunicao, loteMunicao, additionalInfo, actor } = req.body;
     if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
 
     if (actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !(actor.role === 'Policial' && actor.canMoveAmmunition)) {
@@ -1235,8 +1244,8 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const cleanInfo = typeof additionalInfo === 'string' ? additionalInfo.slice(0, 500) : '';
 
     await pool.query(
-      'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
-      [newQty, newCaliberId, id]
+      'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
+      [newQty, newCaliberId, tipoMunicao || null, loteMunicao || null, id]
     );
 
     if (cleanInfo) {
@@ -7815,6 +7824,679 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
     return res.status(500).json({ error: err.message });
   }
 });
+
+// =============================================================
+// MODULO: CAUTELA DE ARMAS (ACAUTELAR_ARMAS)
+// =============================================================
+
+apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
+  try {
+    const { userId, unitId, status } = req.query;
+    const pool = getPool();
+
+    let query = `
+      SELECT 
+        ID_ACAUTELAR_ARMAS as id,
+        ARMA_ID_ACAUTELAR_ARMAS as weaponId,
+        NUMERO_SERIE_ACAUTELAR_ARMAS as weaponSerialNumber,
+        MODELO_ACAUTELAR_ARMAS as weaponModel,
+        TIPO_ARMA_ACAUTELAR_ARMAS as weaponType,
+        CALIBRE_ACAUTELAR_ARMAS as weaponCaliber,
+        QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS as magazineQuantity,
+        COFRE_ORIGEM_ID_ACAUTELAR_ARMAS as vaultSpaceId,
+        DEPARTAMENTO_ID_ACAUTELAR_ARMAS as departmentId,
+        UNIDADE_ID_ACAUTELAR_ARMAS as unitId,
+        REQUERENTE_ID_ACAUTELAR_ARMAS as requesterId,
+        REQUERENTE_NOME_ACAUTELAR_ARMAS as requesterName,
+        REQUERENTE_MASP_ACAUTELAR_ARMAS as requesterMasp,
+        REQUERENTE_CARGO_ACAUTELAR_ARMAS as requesterCargo,
+        REQUERENTE_TELEFONE_ACAUTELAR_ARMAS as requesterPhone,
+        FINALIDADE_MOTIVO_ACAUTELAR_ARMAS as reason,
+        DATA_SOLICITACAO_ACAUTELAR_ARMAS as requestDate,
+        STATUS_ACAUTELAR_ARMAS as status,
+        ARMEIRO_ID_ACAUTELAR_ARMAS as armorerId,
+        ARMEIRO_NOME_ACAUTELAR_ARMAS as armorerName,
+        ARMEIRO_MASP_ACAUTELAR_ARMAS as armorerMasp,
+        DATA_AUTORIZACAO_ACAUTELAR_ARMAS as authorizedAt,
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS as authorizationNotes,
+        CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS as linkedAmmoCautelaId,
+        DATA_DEVOLUCAO_ACAUTELAR_ARMAS as returnDate,
+        ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_ARMAS as returnArmorerId,
+        ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_ARMAS as returnArmorerName,
+        ARMEIRO_RECEBIMENTO_MASP_ACAUTELAR_ARMAS as returnArmorerMasp,
+        HOUVE_TIROS_ACAUTELAR_ARMAS as hadShots,
+        QUANTIDADE_TIROS_ACAUTELAR_ARMAS as shotsFired,
+        CONDICOES_USO_ACAUTELAR_ARMAS as condicoesUso,
+        DESCRICAO_DEFEITO_ACAUTELAR_ARMAS as defectDescription,
+        APRESENTOU_PANE_ACAUTELAR_ARMAS as hadMalfunction,
+        DESCRICAO_PANE_ACAUTELAR_ARMAS as malfunctionDescription,
+        CARREGADORES_DEVOLVIDOS_ACAUTELAR_ARMAS as returnedMagazinesCount,
+        OBSERVACOES_DEVOLUCAO_ACAUTELAR_ARMAS as returnObservations,
+        DATA_CRIACAO_ACAUTELAR_ARMAS as createdAt,
+        DATA_ATUALIZACAO_ACAUTELAR_ARMAS as updatedAt
+      FROM ACAUTELAR_ARMAS
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (userId) {
+      query += ' AND REQUERENTE_ID_ACAUTELAR_ARMAS = ?';
+      params.push(userId);
+    }
+    if (unitId) {
+      query += ' AND UNIDADE_ID_ACAUTELAR_ARMAS = ?';
+      params.push(unitId);
+    }
+    if (status) {
+      query += ' AND STATUS_ACAUTELAR_ARMAS = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY DATA_CRIACAO_ACAUTELAR_ARMAS DESC';
+
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      hadShots: Boolean(r.hadShots),
+      isWorking: r.condicoesUso !== 'Apresenta Defeito',
+      hadMalfunction: Boolean(r.hadMalfunction),
+      magazineQuantity: Number(r.magazineQuantity || 1),
+      shotsFired: Number(r.shotsFired || 0),
+      returnedMagazinesCount: Number(r.returnedMagazinesCount || 0)
+    }));
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
+  try {
+    const {
+      weaponId,
+      weaponSerialNumber,
+      weaponModel,
+      weaponType,
+      weaponCaliber,
+      magazineQuantity,
+      vaultSpaceId,
+      departmentId,
+      unitId,
+      requesterId,
+      requesterName,
+      requesterMasp,
+      requesterCargo,
+      requesterPhone,
+      reason,
+      ammunition // optional ammo request in parallel: { caliberId, caliberName, quantity, tipoMunicao, loteMunicao, vaultSpaceId, reason, seraDevolvida }
+    } = req.body;
+
+    if (!weaponId || !requesterId) {
+      return res.status(400).json({ error: 'Armamento e solicitante são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = `caut-arma-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    let ammoCautelaId: string | null = null;
+
+    if (ammunition && ammunition.quantity > 0) {
+      ammoCautelaId = `caut-mun-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      await pool.query(`
+        INSERT INTO ACAUTELAR_MUNICOES (
+          ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
+          QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+          COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
+          CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES, REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
+          REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
+          DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+          DATA_CRIACAO_ACAUTELAR_MUNICOES
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+      `, [
+        ammoCautelaId,
+        ammunition.caliberId || null,
+        ammunition.caliberName || weaponCaliber || 'Padrão',
+        parseInt(String(ammunition.quantity), 10),
+        ammunition.tipoMunicao || 'Operacional',
+        ammunition.loteMunicao || 'Lote Padrão',
+        ammunition.vaultSpaceId || vaultSpaceId || null,
+        departmentId || null,
+        unitId || null,
+        id,
+        requesterId,
+        requesterName,
+        requesterMasp,
+        requesterCargo || null,
+        ammunition.reason || reason || 'Acautelamento conjunto com armamento',
+        ammunition.seraDevolvida !== undefined ? (ammunition.seraDevolvida ? 1 : 0) : 1
+      ]);
+    }
+
+    await pool.query(`
+      INSERT INTO ACAUTELAR_ARMAS (
+        ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
+        MODELO_ACAUTELAR_ARMAS, TIPO_ARMA_ACAUTELAR_ARMAS, CALIBRE_ACAUTELAR_ARMAS,
+        QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS,
+        DEPARTAMENTO_ID_ACAUTELAR_ARMAS, UNIDADE_ID_ACAUTELAR_ARMAS,
+        REQUERENTE_ID_ACAUTELAR_ARMAS, REQUERENTE_NOME_ACAUTELAR_ARMAS,
+        REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
+        REQUERENTE_TELEFONE_ACAUTELAR_ARMAS, FINALIDADE_MOTIVO_ACAUTELAR_ARMAS,
+        DATA_SOLICITACAO_ACAUTELAR_ARMAS, STATUS_ACAUTELAR_ARMAS,
+        CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+    `, [
+      id,
+      weaponId,
+      weaponSerialNumber,
+      weaponModel,
+      weaponType || null,
+      weaponCaliber || null,
+      parseInt(String(magazineQuantity || 1), 10),
+      vaultSpaceId || null,
+      departmentId || null,
+      unitId || null,
+      requesterId,
+      requesterName,
+      requesterMasp,
+      requesterCargo || null,
+      requesterPhone || null,
+      reason || null,
+      ammoCautelaId
+    ]);
+
+    await insertAuditLog(
+      'Armas',
+      'Solicitar',
+      `Policial ${requesterName} (MASP ${requesterMasp}) solicitou cautela da arma ${weaponModel} Nº ${weaponSerialNumber}${ammoCautelaId ? ' com munições' : ''}`,
+      { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
+      req.ip
+    );
+
+    return res.json({ success: true, id, linkedAmmoCautelaId: ammoCautelaId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { armorerId, armorerName, armorerMasp, notes, actor } = req.body;
+    const pool = getPool();
+
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
+    }
+
+    const cautela = rows[0];
+    const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+
+    // 1. Atualiza status da cautela para AUTORIZADA
+    await pool.query(`
+      UPDATE ACAUTELAR_ARMAS SET
+        STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA',
+        ARMEIRO_ID_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_NOME_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_MASP_ACAUTELAR_ARMAS = ?,
+        DATA_AUTORIZACAO_ACAUTELAR_ARMAS = NOW(),
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+      WHERE ID_ACAUTELAR_ARMAS = ?
+    `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
+
+    // 2. Atualiza a arma para status 'Acautelada', mantendo a localização no cofre registrada para retorno
+    await pool.query(`
+      UPDATE ARMAS SET 
+        STATUS_ARMAS = 'Acautelada'
+      WHERE ID_ARMAS = ?
+    `, [cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+
+    // 3. Se houver cautela de munição vinculada, autoriza e deduz o estoque do cofre
+    if (cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS) {
+      const [ammoRows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS]);
+      if (ammoRows && ammoRows.length > 0) {
+        const ammoCautela = ammoRows[0];
+        await pool.query(`
+          UPDATE ACAUTELAR_MUNICOES SET
+            STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA',
+            ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
+            ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
+            ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
+            DATA_AUTORIZACAO_ACAUTELAR_MUNICOES = NOW(),
+            DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+          WHERE ID_ACAUTELAR_MUNICOES = ?
+        `, [armorer.id, armorer.name, armorer.masp, ammoCautela.ID_ACAUTELAR_MUNICOES]);
+
+        // Deduz do estoque no cofre
+        if (ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES) {
+          const qty = Number(ammoCautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+          await pool.query(`
+            UPDATE ESTOQUE_MUNICOES SET
+              QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+            WHERE COFRE_ID_ESTOQUE_MUNICOES = ? 
+              AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
+            LIMIT 1
+          `, [qty, ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+        }
+      }
+    }
+
+    await insertAuditLog(
+      'Armas',
+      'Aprovar',
+      `Armeiro ${armorer.name} (MASP ${armorer.masp}) autorizou cautela da arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} para ${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Cautela de arma autorizada com sucesso!' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { armorerId, armorerName, armorerMasp, notes, actor } = req.body;
+    const pool = getPool();
+    const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+
+    await pool.query(`
+      UPDATE ACAUTELAR_ARMAS SET
+        STATUS_ACAUTELAR_ARMAS = 'RECUSADA',
+        ARMEIRO_ID_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_NOME_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_MASP_ACAUTELAR_ARMAS = ?,
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+      WHERE ID_ACAUTELAR_ARMAS = ?
+    `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      hadShots,
+      shotsFired,
+      isWorking,
+      defectDescription,
+      hadMalfunction,
+      malfunctionDescription,
+      returnedMagazinesCount,
+      returnObservations,
+      returnArmorerId,
+      returnArmorerName,
+      returnArmorerMasp,
+      actor
+    } = req.body;
+
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
+    }
+
+    const cautela = rows[0];
+    const armorer = actor || { id: returnArmorerId, name: returnArmorerName, masp: returnArmorerMasp };
+    const condicoes = isWorking ? 'Condições de Uso' : 'Apresenta Defeito';
+    const shots = parseInt(String(shotsFired || 0), 10);
+    const mags = parseInt(String(returnedMagazinesCount || 1), 10);
+
+    // 1. Atualiza registro da cautela como DEVOLVIDA com todos os dados técnicos de uso
+    await pool.query(`
+      UPDATE ACAUTELAR_ARMAS SET
+        STATUS_ACAUTELAR_ARMAS = 'DEVOLVIDA',
+        DATA_DEVOLUCAO_ACAUTELAR_ARMAS = NOW(),
+        ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_ARMAS = ?,
+        ARMEIRO_RECEBIMENTO_MASP_ACAUTELAR_ARMAS = ?,
+        HOUVE_TIROS_ACAUTELAR_ARMAS = ?,
+        QUANTIDADE_TIROS_ACAUTELAR_ARMAS = ?,
+        CONDICOES_USO_ACAUTELAR_ARMAS = ?,
+        DESCRICAO_DEFEITO_ACAUTELAR_ARMAS = ?,
+        APRESENTOU_PANE_ACAUTELAR_ARMAS = ?,
+        DESCRICAO_PANE_ACAUTELAR_ARMAS = ?,
+        CARREGADORES_DEVOLVIDOS_ACAUTELAR_ARMAS = ?,
+        OBSERVACOES_DEVOLUCAO_ACAUTELAR_ARMAS = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+      WHERE ID_ACAUTELAR_ARMAS = ?
+    `, [
+      armorer.id,
+      armorer.name,
+      armorer.masp,
+      hadShots ? 1 : 0,
+      shots,
+      condicoes,
+      defectDescription || null,
+      hadMalfunction ? 1 : 0,
+      malfunctionDescription || null,
+      mags,
+      returnObservations || null,
+      id
+    ]);
+
+    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre'
+    const newStatus = !isWorking ? 'Manutenção' : 'No Cofre';
+    await pool.query(`
+      UPDATE ARMAS SET 
+        STATUS_ARMAS = ?
+      WHERE ID_ARMAS = ?
+    `, [newStatus, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+
+    await insertAuditLog(
+      'Armas',
+      'Devolver',
+      `Arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} devolvida por ${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}. Tiros: ${shots}. Condição: ${condicoes}. Panes: ${hadMalfunction ? 'Sim' : 'Não'}.`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Devolução de armamento registrada com sucesso!' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================
+// MODULO: CAUTELA DE MUNIÇÕES (ACAUTELAR_MUNICOES)
+// =============================================================
+
+apiRouter.get('/cautelas-municoes', async (req: Request, res: Response) => {
+  try {
+    const { userId, unitId, status } = req.query;
+    const pool = getPool();
+
+    let query = `
+      SELECT 
+        ID_ACAUTELAR_MUNICOES as id,
+        CALIBRE_ID_ACAUTELAR_MUNICOES as caliberId,
+        CALIBRE_NOME_ACAUTELAR_MUNICOES as caliberName,
+        QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES as quantity,
+        TIPO_MUNICAO_ACAUTELAR_MUNICOES as tipoMunicao,
+        LOTE_MUNICAO_ACAUTELAR_MUNICOES as loteMunicao,
+        COFRE_ID_ACAUTELAR_MUNICOES as vaultSpaceId,
+        DEPARTAMENTO_ID_ACAUTELAR_MUNICOES as departmentId,
+        UNIDADE_ID_ACAUTELAR_MUNICOES as unitId,
+        CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES as linkedWeaponCautelaId,
+        REQUERENTE_ID_ACAUTELAR_MUNICOES as requesterId,
+        REQUERENTE_NOME_ACAUTELAR_MUNICOES as requesterName,
+        REQUERENTE_MASP_ACAUTELAR_MUNICOES as requesterMasp,
+        REQUERENTE_CARGO_ACAUTELAR_MUNICOES as requesterCargo,
+        MOTIVO_USO_ACAUTELAR_MUNICOES as reason,
+        DATA_SOLICITACAO_ACAUTELAR_MUNICOES as requestDate,
+        STATUS_ACAUTELAR_MUNICOES as status,
+        ARMEIRO_ID_ACAUTELAR_MUNICOES as armorerId,
+        ARMEIRO_NOME_ACAUTELAR_MUNICOES as armorerName,
+        ARMEIRO_MASP_ACAUTELAR_MUNICOES as armorerMasp,
+        DATA_AUTORIZACAO_ACAUTELAR_MUNICOES as authorizedAt,
+        SERA_DEVOLVIDA_ACAUTELAR_MUNICOES as seraDevolvida,
+        QUANTIDADE_DEVOLVIDA_ACAUTELAR_MUNICOES as returnedQuantity,
+        DATA_DEVOLUCAO_ACAUTELAR_MUNICOES as returnedAt,
+        ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_MUNICOES as returnArmorerId,
+        ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_MUNICOES as returnArmorerName,
+        OBSERVACOES_ACAUTELAR_MUNICOES as observations,
+        DATA_CRIACAO_ACAUTELAR_MUNICOES as createdAt,
+        DATA_ATUALIZACAO_ACAUTELAR_MUNICOES as updatedAt
+      FROM ACAUTELAR_MUNICOES
+      WHERE 1=1
+    `;
+    const params: any[] = [];
+
+    if (userId) {
+      query += ' AND REQUERENTE_ID_ACAUTELAR_MUNICOES = ?';
+      params.push(userId);
+    }
+    if (unitId) {
+      query += ' AND UNIDADE_ID_ACAUTELAR_MUNICOES = ?';
+      params.push(unitId);
+    }
+    if (status) {
+      query += ' AND STATUS_ACAUTELAR_MUNICOES = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY DATA_CRIACAO_ACAUTELAR_MUNICOES DESC';
+
+    const [rows]: any = await pool.query(query, params);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      seraDevolvida: Boolean(r.seraDevolvida),
+      quantity: Number(r.quantity || 0),
+      returnedQuantity: Number(r.returnedQuantity || 0)
+    }));
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
+  try {
+    const {
+      caliberId,
+      caliberName,
+      quantity,
+      tipoMunicao,
+      loteMunicao,
+      vaultSpaceId,
+      departmentId,
+      unitId,
+      requesterId,
+      requesterName,
+      requesterMasp,
+      requesterCargo,
+      reason,
+      seraDevolvida
+    } = req.body;
+
+    const qty = parseInt(String(quantity || 0), 10);
+    if (!caliberName || qty <= 0 || !requesterId) {
+      return res.status(400).json({ error: 'Calibre, quantidade e dados do solicitante são obrigatórios.' });
+    }
+
+    const pool = getPool();
+    const id = `caut-mun-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+
+    await pool.query(`
+      INSERT INTO ACAUTELAR_MUNICOES (
+        ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
+        QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+        COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
+        REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
+        REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
+        DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+        DATA_CRIACAO_ACAUTELAR_MUNICOES
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+    `, [
+      id,
+      caliberId || null,
+      caliberName,
+      qty,
+      tipoMunicao || 'Operacional',
+      loteMunicao || 'Padrão',
+      vaultSpaceId || null,
+      departmentId || null,
+      unitId || null,
+      requesterId,
+      requesterName,
+      requesterMasp,
+      requesterCargo || null,
+      reason || 'Uso em serviço policial',
+      seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : 1
+    ]);
+
+    await insertAuditLog(
+      'Munições',
+      'Solicitar',
+      `Policial ${requesterName} (MASP ${requesterMasp}) solicitou cautela de ${qty} munições calibre ${caliberName}`,
+      { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
+      req.ip
+    );
+
+    return res.json({ success: true, id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { armorerId, armorerName, armorerMasp, vaultSpaceId, actor } = req.body;
+    const pool = getPool();
+
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de munições não encontrada.' });
+    }
+
+    const cautela = rows[0];
+    const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+    const effectiveVaultId = vaultSpaceId || cautela.COFRE_ID_ACAUTELAR_MUNICOES;
+    const qty = Number(cautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+
+    // 1. Autoriza na tabela ACAUTELAR_MUNICOES
+    await pool.query(`
+      UPDATE ACAUTELAR_MUNICOES SET
+        STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA',
+        ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
+        ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
+        ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
+        COFRE_ID_ACAUTELAR_MUNICOES = COALESCE(?, COFRE_ID_ACAUTELAR_MUNICOES),
+        DATA_AUTORIZACAO_ACAUTELAR_MUNICOES = NOW(),
+        DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+      WHERE ID_ACAUTELAR_MUNICOES = ?
+    `, [armorer.id, armorer.name, armorer.masp, effectiveVaultId, id]);
+
+    // 2. Deduz da quantidade total do local do cofre de onde a munição foi retirada
+    if (effectiveVaultId) {
+      await pool.query(`
+        UPDATE ESTOQUE_MUNICOES SET
+          QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+        WHERE COFRE_ID_ESTOQUE_MUNICOES = ? 
+          AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
+        LIMIT 1
+      `, [qty, effectiveVaultId, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+    }
+
+    await insertAuditLog(
+      'Munições',
+      'Aprovar',
+      `Armeiro ${armorer.name} (MASP ${armorer.masp}) autorizou retirada de ${qty} munições calibre ${cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES} para ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES}`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Cautela de munições autorizada com sucesso!' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-municoes/:id/recusar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { armorerId, armorerName, armorerMasp, notes, actor } = req.body;
+    const pool = getPool();
+    const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+
+    await pool.query(`
+      UPDATE ACAUTELAR_MUNICOES SET
+        STATUS_ACAUTELAR_MUNICOES = 'RECUSADA',
+        ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
+        ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
+        ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
+        OBSERVACOES_ACAUTELAR_MUNICOES = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+      WHERE ID_ACAUTELAR_MUNICOES = ?
+    `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/cautelas-municoes/:id/devolver', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      returnedQuantity,
+      returnArmorerId,
+      returnArmorerName,
+      returnArmorerMasp,
+      observations,
+      actor
+    } = req.body;
+
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de munição não encontrada.' });
+    }
+
+    const cautela = rows[0];
+    const armorer = actor || { id: returnArmorerId, name: returnArmorerName, masp: returnArmorerMasp };
+    const returnedQty = parseInt(String(returnedQuantity || 0), 10);
+    const finalStatus = returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
+
+    // 1. Atualiza registro
+    await pool.query(`
+      UPDATE ACAUTELAR_MUNICOES SET
+        STATUS_ACAUTELAR_MUNICOES = ?,
+        QUANTIDADE_DEVOLVIDA_ACAUTELAR_MUNICOES = ?,
+        DATA_DEVOLUCAO_ACAUTELAR_MUNICOES = NOW(),
+        ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_MUNICOES = ?,
+        ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_MUNICOES = ?,
+        OBSERVACOES_ACAUTELAR_MUNICOES = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+      WHERE ID_ACAUTELAR_MUNICOES = ?
+    `, [
+      finalStatus,
+      returnedQty,
+      armorer.id,
+      armorer.name,
+      observations || null,
+      id
+    ]);
+
+    // 2. Se foram devolvidas munições não deflagradas, reabastece o estoque no cofre de origem
+    if (returnedQty > 0 && cautela.COFRE_ID_ACAUTELAR_MUNICOES) {
+      await pool.query(`
+        UPDATE ESTOQUE_MUNICOES SET
+          QUANTIDADE_ESTOQUE_MUNICOES = QUANTIDADE_ESTOQUE_MUNICOES + ?,
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+        WHERE COFRE_ID_ESTOQUE_MUNICOES = ?
+          AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
+        LIMIT 1
+      `, [returnedQty, cautela.COFRE_ID_ACAUTELAR_MUNICOES, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+    }
+
+    await insertAuditLog(
+      'Munições',
+      'Devolver',
+      `Devolução de cautela de munição ${cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES}: ${returnedQty} unidades retornadas ao cofre por ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES}`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Devolução de munições concluída!' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 

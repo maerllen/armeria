@@ -93,6 +93,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     // Explosivista só pode criar locais vinculados a explosivos
     if (isExplosivista) {
       setType('EXPLOSIVOS');
+    } else if (currentUser.role === 'Armeiro') {
+      if (presetType === 'MUNIÇÕES' || typeFilter === 'MUNIÇÕES') {
+        setType('MUNIÇÕES');
+      } else {
+        setType('ARMAS');
+      }
     } else if (presetType) {
       setType(presetType);
     } else if (typeFilter === 'MUNIÇÕES') {
@@ -106,7 +112,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const initialDept = isGeral ? (departments[0]?.id || '') : currentUser.departmentId;
     setDeptId(initialDept);
     const initialUnits = units.filter(u => u.departmentId === initialDept);
-    setUnitId(initialUnits[0]?.id || '');
+    // Armeiro e Explosivista vinculam à sua unidade por padrão
+    const targetUnit = (!isGeral && currentUser.unitId) ? currentUser.unitId : (initialUnits[0]?.id || '');
+    setUnitId(targetUnit);
     setShowModal(true);
   };
 
@@ -1541,7 +1549,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div className={`grid grid-cols-1 ${currentUser.role === 'Armeiro' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2.5`}>
                     <button
                       type="button"
                       onClick={() => setType('ARMAS')}
@@ -1556,7 +1564,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                         <span className="text-xs font-bold text-slate-100">Cofre de Armas</span>
                       </div>
                       <span className="text-[10px] text-slate-400 leading-tight">
-                        Para custódia de pistolas e fuzis
+                        Para custódia de armamentos da unidade
                       </span>
                     </button>
 
@@ -1574,27 +1582,29 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                         <span className="text-xs font-bold text-slate-100">Cofre de Munições</span>
                       </div>
                       <span className="text-[10px] text-slate-400 leading-tight">
-                        Para estocagem de cartuchos
+                        Para estocagem de cartuchos da unidade
                       </span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setType('EXPLOSIVOS')}
-                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
-                        type === 'EXPLOSIVOS'
-                          ? 'bg-red-950/70 border-red-500 text-red-200 shadow-sm'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="flex items-center space-x-2 mb-1.5">
-                        <Bomb className={`w-4 h-4 ${type === 'EXPLOSIVOS' ? 'text-red-400' : 'text-slate-500'}`} />
-                        <span className="text-xs font-bold text-slate-100">Paiol / Explosivos</span>
-                      </div>
-                      <span className="text-[10px] text-slate-400 leading-tight">
-                        Para altos explosivos e espoletas
-                      </span>
-                    </button>
+                    {currentUser.role !== 'Armeiro' && (
+                      <button
+                        type="button"
+                        onClick={() => setType('EXPLOSIVOS')}
+                        className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                          type === 'EXPLOSIVOS'
+                            ? 'bg-red-950/70 border-red-500 text-red-200 shadow-sm'
+                            : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2 mb-1.5">
+                          <Bomb className={`w-4 h-4 ${type === 'EXPLOSIVOS' ? 'text-red-400' : 'text-slate-500'}`} />
+                          <span className="text-xs font-bold text-slate-100">Paiol / Explosivos</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 leading-tight">
+                          Para altos explosivos e espoletas
+                        </span>
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -1632,7 +1642,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <select
                   value={unitId}
                   onChange={(e) => setUnitId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-amber-500"
+                  disabled={!isGeral && currentUser.managementScope === 'unit' && Boolean(currentUser.unitId)}
+                  className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
+                    !isGeral && currentUser.managementScope === 'unit' && Boolean(currentUser.unitId)
+                      ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
+                      : 'bg-slate-950 border-slate-700 text-slate-100 focus:border-amber-500'
+                  }`}
                 >
                   {availableUnitsForModal.map((u) => (
                     <option key={u.id} value={u.id}>

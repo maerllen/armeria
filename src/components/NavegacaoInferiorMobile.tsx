@@ -8,6 +8,8 @@ interface MobileBottomNavProps {
   onSelectModule: (module: ModuleType) => void;
   onOpenMobileMenu: () => void;
   pendingMovementsCount?: number;
+  pendingWeaponCautelasCount?: number;
+  pendingAmmoCautelasCount?: number;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -15,7 +17,9 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   activeModule,
   onSelectModule,
   onOpenMobileMenu,
-  pendingMovementsCount = 0
+  pendingMovementsCount = 0,
+  pendingWeaponCautelasCount = 0,
+  pendingAmmoCautelasCount = 0
 }) => {
   const allowedModules = getAllowedModulesForUser(currentUser);
 
@@ -24,6 +28,18 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       id: 'meu-perfil',
       label: 'Perfil',
       icon: User
+    },
+    {
+      id: 'cautela-armas',
+      label: 'Cautela Armas',
+      icon: Crosshair,
+      badge: pendingWeaponCautelasCount > 0 ? pendingWeaponCautelasCount : undefined
+    },
+    {
+      id: 'cautela-municoes',
+      label: 'Cautela Mun.',
+      icon: Disc,
+      badge: pendingAmmoCautelasCount > 0 ? pendingAmmoCautelasCount : undefined
     },
     {
       id: 'explosivos',

@@ -42,6 +42,8 @@ import {
   Cachorro,
   ProdutoVeterinario,
   MovimentacaoVeterinaria,
+  CautelaArma,
+  CautelaMunicao,
   UserRole
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
@@ -83,6 +85,8 @@ export interface AppState {
   cachorros: Cachorro[];
   produtosVeterinarios: ProdutoVeterinario[];
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
+  cautelasArmas: CautelaArma[];
+  cautelasMunicoes: CautelaMunicao[];
 }
 
 class StorageService {
@@ -122,7 +126,9 @@ class StorageService {
     canisFisicos: [],
     cachorros: [],
     produtosVeterinarios: [],
-    movimentacoesVeterinarias: []
+    movimentacoesVeterinarias: [],
+    cautelasArmas: [],
+    cautelasMunicoes: []
   };
 
   constructor() {
@@ -177,7 +183,9 @@ class StorageService {
         canisFisicosRes,
         cachorrosRes,
         produtosVeterinariosRes,
-        movimentacoesVeterinariasRes
+        movimentacoesVeterinariasRes,
+        cautelasArmasRes,
+        cautelasMunicoesRes
       ] = await Promise.all([
         fetchSync('/api/users'),
         fetchSync('/api/departments'),
@@ -213,7 +221,9 @@ class StorageService {
         fetchSync('/api/canis-fisicos'),
         fetchSync('/api/cachorros'),
         fetchSync('/api/produtos-veterinarios'),
-        fetchSync('/api/movimentacoes-veterinarias')
+        fetchSync('/api/movimentacoes-veterinarias'),
+        fetchSync('/api/cautelas-armas'),
+        fetchSync('/api/cautelas-municoes')
       ]);
 
       this.state.users = usersRes || [];
@@ -251,6 +261,8 @@ class StorageService {
       this.state.cachorros = cachorrosRes || [];
       this.state.produtosVeterinarios = produtosVeterinariosRes || [];
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
+      this.state.cautelasArmas = cautelasArmasRes || [];
+      this.state.cautelasMunicoes = cautelasMunicoesRes || [];
 
       // Refresh current user reference if logged in, keeping activeRole if user had selected one
       if (this.state.currentUser) {
@@ -2502,6 +2514,185 @@ class StorageService {
       return { success: false, error: err.message };
     }
   }
+
+  // =========================================================
+  // CAUTELA DE ARMAS
+  // =========================================================
+  public getCautelasArmas(): CautelaArma[] {
+    return this.state.cautelasArmas || [];
+  }
+
+  public async requestCautelaArma(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch('/api/cautelas-armas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async authorizeCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-armas/${id}/autorizar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes,
+          armorerId: this.state.currentUser?.id,
+          armorerName: this.state.currentUser?.name,
+          armorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async rejectCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-armas/${id}/recusar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes,
+          armorerId: this.state.currentUser?.id,
+          armorerName: this.state.currentUser?.name,
+          armorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-armas/${id}/devolver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...returnData,
+          returnArmorerId: this.state.currentUser?.id,
+          returnArmorerName: this.state.currentUser?.name,
+          returnArmorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // =========================================================
+  // CAUTELA DE MUNIÇÕES
+  // =========================================================
+  public getCautelasMunicoes(): CautelaMunicao[] {
+    return this.state.cautelasMunicoes || [];
+  }
+
+  public async requestCautelaMunicao(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch('/api/cautelas-municoes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async authorizeCautelaMunicao(id: string, vaultSpaceId?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-municoes/${id}/autorizar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          vaultSpaceId,
+          armorerId: this.state.currentUser?.id,
+          armorerName: this.state.currentUser?.name,
+          armorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async rejectCautelaMunicao(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-municoes/${id}/recusar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          notes,
+          armorerId: this.state.currentUser?.id,
+          armorerName: this.state.currentUser?.name,
+          armorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async returnCautelaMunicao(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/cautelas-municoes/${id}/devolver`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...returnData,
+          returnArmorerId: this.state.currentUser?.id,
+          returnArmorerName: this.state.currentUser?.name,
+          returnArmorerMasp: this.state.currentUser?.masp,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
 }
 
 export const storage = new StorageService();
+

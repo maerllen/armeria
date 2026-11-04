@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, UserCargo, Department, Unit, Course, getSystemLogo, DEFAULT_SYSTEM_LOGO } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
-import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette } from 'lucide-react';
+import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, CheckCircle2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
 
 interface ProfileModuleProps {
@@ -14,6 +14,7 @@ interface ProfileModuleProps {
   onUserUpdated?: () => void;
   onRefresh?: () => void;
   onChangePasswordClick: () => void;
+  onNavigateToModule?: (mod: any) => void;
 }
 
 export const ProfileModule: React.FC<ProfileModuleProps> = ({
@@ -24,7 +25,8 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   allCourses = [],
   onUserUpdated,
   onRefresh,
-  onChangePasswordClick
+  onChangePasswordClick,
+  onNavigateToModule
 }) => {
   const activeUser = currentUser || user;
 
@@ -42,6 +44,11 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const [cargo, setCargo] = useState<UserCargo>(activeUser.cargo || 'Investigador');
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+
+  // Notificações de Cautelas Autorizadas para o usuário logado
+  const userArmasCautelas = storage.getCautelasArmas().filter(c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA');
+  const userMunicoesCautelas = storage.getCautelasMunicoes().filter(c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA');
+  const totalAutorizadas = userArmasCautelas.length + userMunicoesCautelas.length;
 
   useEffect(() => {
     if (activeUser) {
@@ -86,6 +93,46 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   return (
     <div className="space-y-6">
       
+      {/* Notificação de Cautelas Autorizadas prontas para impressão de recibo */}
+      {totalAutorizadas > 0 && (
+        <div className="bg-gradient-to-r from-emerald-950/90 to-teal-950/90 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 shadow-lg shadow-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
+          <div className="flex items-center space-x-3.5">
+            <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30 shrink-0">
+              <CheckCircle2 className="w-6 h-6" />
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-emerald-200">
+                Autorização Concluída pelo Armeiro! ({totalAutorizadas} cautela{totalAutorizadas > 1 ? 's' : ''} pronta{totalAutorizadas > 1 ? 's' : ''})
+              </h4>
+              <p className="text-xs text-emerald-300/80 mt-0.5">
+                Sua solicitação foi autorizada e liberada pela armaria. Você já pode emitir e imprimir o recibo/termo oficial.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            {userArmasCautelas.length > 0 && onNavigateToModule && (
+              <button
+                onClick={() => onNavigateToModule('cautela-armas')}
+                className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow"
+              >
+                <Crosshair className="w-3.5 h-3.5" />
+                <span>Ver Cautela de Armas ({userArmasCautelas.length})</span>
+              </button>
+            )}
+            {userMunicoesCautelas.length > 0 && onNavigateToModule && (
+              <button
+                onClick={() => onNavigateToModule('cautela-municoes')}
+                className="px-3.5 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow"
+              >
+                <Disc className="w-3.5 h-3.5" />
+                <span>Ver Cautela de Munições ({userMunicoesCautelas.length})</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Module Title Banner */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-4">

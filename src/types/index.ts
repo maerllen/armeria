@@ -2,6 +2,8 @@ export type UserRole = 'Geral' | 'Administrador' | 'Armeiro' | 'Policial' | 'Exp
 
 export type ModuleType = 
   | 'meu-perfil' 
+  | 'cautela-armas'
+  | 'cautela-municoes'
   | 'unidade' 
   | 'usuarios' 
   | 'cofre' 
@@ -140,6 +142,8 @@ export interface AmmunitionStock {
   unitId: string;
   departmentId: string;
   quantity: number;
+  tipoMunicao?: string;
+  loteMunicao?: string;
   additionalInfo?: string;
 }
 
@@ -167,7 +171,7 @@ export interface AmmunitionMovement {
   createdAt: string;
 }
 
-export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula';
+export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula' | 'Acautelada';
 
 export interface Weapon {
   id: string;
@@ -980,6 +984,85 @@ export interface MovimentacaoVeterinaria {
   createdAt: string;
 }
 
+export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'RECUSADA';
+export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA';
+
+export interface CautelaArma {
+  id: string;
+  weaponId: string;
+  weaponSerialNumber: string;
+  weaponModel: string;
+  weaponType?: string;
+  weaponCaliber?: string;
+  magazineQuantity: number;
+  vaultSpaceId?: string; // Cofre de origem para onde a arma deve voltar
+  departmentId?: string;
+  unitId?: string;
+  requesterId: string;
+  requesterName: string;
+  requesterMasp: string;
+  requesterCargo?: string;
+  requesterPhone?: string;
+  reason?: string;
+  requestDate: string;
+  status: CautelaArmaStatus;
+  armorerId?: string;
+  armorerName?: string;
+  armorerMasp?: string;
+  authorizedAt?: string;
+  authorizationNotes?: string;
+  linkedAmmoCautelaId?: string;
+  
+  // Devolução
+  returnDate?: string;
+  returnArmorerId?: string;
+  returnArmorerName?: string;
+  returnArmorerMasp?: string;
+  hadShots: boolean;
+  shotsFired: number;
+  isWorking: boolean;
+  defectDescription?: string;
+  hadMalfunction: boolean;
+  malfunctionDescription?: string;
+  returnedMagazinesCount: number;
+  returnObservations?: string;
+  
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface CautelaMunicao {
+  id: string;
+  caliberId?: string;
+  caliberName: string;
+  quantity: number;
+  tipoMunicao?: string;
+  loteMunicao?: string;
+  vaultSpaceId?: string;
+  departmentId?: string;
+  unitId?: string;
+  linkedWeaponCautelaId?: string;
+  requesterId: string;
+  requesterName: string;
+  requesterMasp: string;
+  requesterCargo?: string;
+  reason: string;
+  requestDate: string;
+  status: CautelaMunicaoStatus;
+  armorerId?: string;
+  armorerName?: string;
+  armorerMasp?: string;
+  authorizedAt?: string;
+  seraDevolvida: boolean;
+  returnedQuantity?: number;
+  returnedAt?: string;
+  returnArmorerId?: string;
+  returnArmorerName?: string;
+  observations?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export const isUserExplosivista = (user?: User | null): boolean => {
   if (!user) return false;
   const role = user.activeRole || user.role;
@@ -995,6 +1078,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'Geral') {
     return [
       'meu-perfil',
+      'cautela-armas',
+      'cautela-municoes',
       'explosivos',
       'armas',
       'municoes',
@@ -1018,6 +1103,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'Armeiro') {
     return [
       'meu-perfil',
+      'cautela-armas',
+      'cautela-municoes',
       'armas',
       'municoes',
       'unidade',
@@ -1033,6 +1120,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'Administrador' || (role as string) === 'Administrativo') {
     return [
       'meu-perfil',
+      'cautela-armas',
+      'cautela-municoes',
       'explosivos',
       'armas',
       'municoes',
@@ -1048,6 +1137,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'Explosivista') {
     return [
       'meu-perfil',
+      'cautela-armas',
+      'cautela-municoes',
       'explosivos',
       'unidade',
       'cofre',
@@ -1067,14 +1158,16 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'Policial') {
     return [
       'meu-perfil',
-      'movimentacoes'
+      'cautela-armas',
+      'cautela-municoes'
     ];
   }
 
   // Padrão de segurança
   return [
     'meu-perfil',
-    'movimentacoes'
+    'cautela-armas',
+    'cautela-municoes'
   ];
 };
 

@@ -30,6 +30,9 @@ interface SidebarProps {
   activeModule: ModuleType;
   onSelectModule: (module: ModuleType) => void;
   pendingMovementsCount?: number;
+  pendingWeaponCautelasCount?: number;
+  pendingAmmoCautelasCount?: number;
+  readyReceiptsCount?: number;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
 }
@@ -40,18 +43,46 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeModule,
   onSelectModule,
   pendingMovementsCount = 0,
+  pendingWeaponCautelasCount = 0,
+  pendingAmmoCautelasCount = 0,
+  readyReceiptsCount = 0,
   isOpenMobile = false,
   onCloseMobile
 }) => {
   const allowedModules = getAllowedModulesForUser(currentUser);
 
-  // Lista dos 16 módulos do sistema na ordem exata solicitada
-  const navItems: { id: ModuleType; label: string; icon: React.ComponentType<{ className?: string }>; visible: boolean; badge?: number }[] = [
+  // Lista dos módulos do sistema na ordem exata solicitada
+  const navItems: { 
+    id: ModuleType; 
+    label: string; 
+    icon: React.ComponentType<{ className?: string }>; 
+    visible: boolean; 
+    badge?: number;
+    hasNotification?: boolean;
+  }[] = [
     {
       id: 'meu-perfil',
       label: 'Meu Perfil',
       icon: User,
-      visible: allowedModules.includes('meu-perfil')
+      visible: allowedModules.includes('meu-perfil'),
+      hasNotification: readyReceiptsCount > 0,
+      badge: readyReceiptsCount > 0 ? readyReceiptsCount : undefined
+    },
+    {
+      id: 'cautela-armas',
+      label: 'Cautela de armas',
+      icon: Crosshair,
+      visible: allowedModules.includes('cautela-armas'),
+      hasNotification: pendingWeaponCautelasCount > 0,
+      badge: pendingWeaponCautelasCount > 0 ? pendingWeaponCautelasCount : undefined
+    },
+    {
+      id: 'cautela-municoes',
+      label: 'Cautela de munições',
+      icon: Disc,
+      visible: allowedModules.includes('cautela-municoes'),
+      hasNotification: pendingAmmoCautelasCount > 0,
+      badge: pendingAmmoCautelasCount > 0 ? pendingAmmoCautelasCount : undefined
     },
     {
       id: 'explosivos',
@@ -94,7 +125,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Movimentações',
       icon: ArrowRightLeft,
       visible: allowedModules.includes('movimentacoes'),
-      badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined
+      badge: pendingMovementsCount > 0 ? pendingMovementsCount : undefined,
+      hasNotification: pendingMovementsCount > 0
     },
     {
       id: 'materiais',
@@ -140,7 +172,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'veterinario',
-      label: 'Material veterinário',
+      label: 'Material veterinário.',
       icon: Dog,
       visible: allowedModules.includes('veterinario')
     },
@@ -202,9 +234,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       : 'text-slate-300 hover:bg-slate-800/80 hover:text-amber-400'
                   }`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
-                    <span>{item.label}</span>
+                  <div className="flex items-center space-x-2.5 min-w-0">
+                    {item.hasNotification && (
+                      <span className="relative flex h-2.5 w-2.5 shrink-0" title="Solicitação pendente de sua ação / autorização">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+                      </span>
+                    )}
+                    <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />
+                    <span className="truncate">{item.label}</span>
                   </div>
                   {item.badge !== undefined && (
                     <span
