@@ -140,8 +140,6 @@ export default function App() {
       setIsMobileMenuOpen(false);
       return;
     }
-    const label = moduleLabels[mod] || 'Módulo';
-    showPreloader(`Carregando ${label}...`, 'Preparando interface e dados...', 'module');
     setActiveModule(mod);
     setIsMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });

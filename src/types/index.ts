@@ -1045,7 +1045,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   }
 
   // 4. Explosivista
-  if (role === 'Explosivista' || isUserExplosivista(user)) {
+  if (role === 'Explosivista') {
     return [
       'meu-perfil',
       'explosivos',
@@ -1063,7 +1063,15 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     ];
   }
 
-  // 6. Policial (padrão)
+  // 6. Policial
+  if (role === 'Policial') {
+    return [
+      'meu-perfil',
+      'movimentacoes'
+    ];
+  }
+
+  // Padrão de segurança
   return [
     'meu-perfil',
     'movimentacoes'

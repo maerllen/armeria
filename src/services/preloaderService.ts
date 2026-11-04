@@ -25,7 +25,7 @@ class PreloaderService {
   private currentSubmessage = 'Aguarde enquanto o sistema executa a operação...';
   private currentType: PreloaderState['type'] = 'command';
   private startedAt = 0;
-  private readonly MIN_DISPLAY_MS = 380; // Duração mínima para evitar flashes e garantir percepção do comando
+  private readonly MIN_DISPLAY_MS = 200; // Duração mínima reduzida para evitar espera desnecessária
   private interceptorInstalled = false;
   private clickInterceptorInstalled = false;
 
@@ -201,7 +201,12 @@ class PreloaderService {
         (init.headers instanceof Headers && init.headers.get('x-skip-preloader') === 'true')
       );
 
-      if (!isApiCall || skipPreloader) {
+      // O preloader deve carregar somente o necessário para funcionar:
+      // Apenas operações de gravação/alteração (POST, PUT, PATCH, DELETE) ou login ativam o preloader de tela cheia.
+      // Requisições GET normais (leitura de dados da tela/background) não bloqueiam a interface.
+      const isMutatingOrAuth = method !== 'GET' || urlString.includes('/api/auth/login') || urlString.includes('/api/auth/change-password');
+
+      if (!isApiCall || skipPreloader || !isMutatingOrAuth) {
         return originalFetch.apply(this, [input as any, init]);
       }
 
@@ -221,7 +226,7 @@ class PreloaderService {
   /**
    * Intercepta cliques globais em botões para:
    * 1. Impedir cliques múltiplos no mesmo botão (double/triple-clicks).
-   * 2. Ativar preloader imediato no próprio tick do clique para ações.
+   * 2. Evitar disparar telas de preloader desnecessárias em cliques simples (abrir modais, filtros, abas).
    */
   private installClickInterceptor() {
     if (this.clickInterceptorInstalled || typeof window === 'undefined' || typeof document === 'undefined') return;
@@ -236,7 +241,7 @@ class PreloaderService {
       const button = target.closest('button, input[type="submit"], [role="button"]') as HTMLElement | null;
       if (!button) return;
 
-      // 1. Se o preloader já estiver visível ou botão estiver ocupado, bloqueia o clique completamente
+      // 1. Evita múltiplos cliques rápidos no mesmo botão
       if (this.isShowing || busyButtons.has(button) || button.getAttribute('data-busy') === 'true' || (button as HTMLButtonElement).disabled) {
         event.preventDefault();
         event.stopPropagation();
@@ -244,82 +249,14 @@ class PreloaderService {
         return;
       }
 
-      const buttonType = button.getAttribute('type');
-      const isSubmit = buttonType === 'submit';
-      const rawText = (button.innerText || button.getAttribute('aria-label') || button.title || '').trim().toLowerCase();
-
-      // Não bloquear botões simples de alternar tema
-      if (rawText.includes('alternar tema') || button.getAttribute('aria-label')?.includes('tema')) {
-        return;
-      }
-
-      // Identifica intenção da ação pelo texto do botão
-      let message = 'Processando comando...';
-      let submessage = 'Aguarde enquanto o sistema executa a operação...';
-      let shouldTriggerImmediatePreloader = false;
-      let taskType: PreloaderState['type'] = 'command';
-
-      if (rawText.includes('entrar') || rawText.includes('login') || rawText.includes('acessar')) {
-        message = 'Autenticando usuário no sistema...';
-        submessage = 'Validando credenciais na base de dados da Polícia Civil...';
-        taskType = 'auth';
-        shouldTriggerImmediatePreloader = true;
-      } else if (isSubmit || rawText.includes('salvar') || rawText.includes('gravar')) {
-        message = 'Salvando alterações...';
-        submessage = 'Gravando dados com segurança no sistema...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('cadastrar') || rawText.includes('adicionar') || rawText.includes('novo') || rawText.includes('nova')) {
-        message = 'Processando cadastro...';
-        submessage = 'Carregando dados e registrando no sistema...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('excluir') || rawText.includes('remover') || rawText.includes('apagar')) {
-        message = 'Processando exclusão...';
-        submessage = 'Removendo registro do sistema...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('confirmar')) {
-        message = 'Confirmando comando...';
-        submessage = 'Processando operação no sistema...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('movimentar') || rawText.includes('cautela') || rawText.includes('devolver') || rawText.includes('saída') || rawText.includes('entrada')) {
-        message = 'Processando movimentação...';
-        submessage = 'Registrando histórico e saldos bélicos...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('transferir') || rawText.includes('receber')) {
-        message = 'Processando transferência...';
-        submessage = 'Atualizando status bélico...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('filtrar') || rawText.includes('buscar') || rawText.includes('pesquisar')) {
-        message = 'Filtrando registros...';
-        submessage = 'Atualizando visualização dos dados...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (rawText.includes('imprimir') || rawText.includes('recibo') || rawText.includes('certidão') || rawText.includes('termo')) {
-        message = 'Preparando impressão...';
-        submessage = 'Formatando documento oficial...';
-        shouldTriggerImmediatePreloader = true;
-      } else if (isSubmit) {
-        message = 'Processando comando...';
-        submessage = 'Aguarde a confirmação da operação...';
-        shouldTriggerImmediatePreloader = true;
-      }
-
-      // Marca o botão como ocupado para evitar múltiplos cliques no mesmo botão
+      // Marca temporariamente para evitar duplo clique acidental
       busyButtons.add(button);
       button.setAttribute('data-busy', 'true');
-
-      let immediateTaskId: string | null = null;
-      if (shouldTriggerImmediatePreloader) {
-        immediateTaskId = this.start(message, submessage, taskType);
-      }
-
-      // Desbloqueia após breve intervalo caso a ação seja síncrona ou cancelada por validação local
       setTimeout(() => {
         busyButtons.delete(button);
         button.removeAttribute('data-busy');
-        if (immediateTaskId) {
-          this.stop(immediateTaskId);
-        }
-      }, 700);
-    }, true); // Capture phase para interceptar antes de qualquer outro handler
+      }, 350);
+    }, true);
   }
 
   private resolveMessagesForRequest(url: string, method: string): { message: string; submessage: string; type: PreloaderState['type'] } {
