@@ -49,6 +49,16 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   const [reason, setReason] = useState('Serviço Policial Operacional / Plantão');
   const [seraDevolvida, setSeraDevolvida] = useState(true);
 
+  // Armorer Direct Cautela State
+  const [isDirectCautela, setIsDirectCautela] = useState(false);
+  const [targetOfficerId, setTargetOfficerId] = useState('');
+
+  // Available officers in unit
+  const availableUnitOfficers = useMemo(() => {
+    const allUsers = storage.getUsers();
+    return allUsers.filter(u => (isGeral ? true : u.unitId === currentUser.unitId) && u.hasSystemAccess !== false);
+  }, [currentUser, isGeral]);
+
   // Modal de Devolução
   const [returningCautela, setReturningCautela] = useState<CautelaMunicao | null>(null);
   const [returnedQty, setReturnedQty] = useState<number>(0);
@@ -149,32 +159,51 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
       return;
     }
 
+    const beneficiary = (canAuthorize && isDirectCautela && targetOfficerId)
+      ? (availableUnitOfficers.find(u => u.id === targetOfficerId) || currentUser)
+      : currentUser;
+
     setIsSubmitting(true);
     try {
-      const payload = {
+      const isDirect = Boolean(canAuthorize && isDirectCautela);
+      const payload: any = {
         caliberId: selectedStock.caliberId,
         caliberName: selectedStock.caliberName,
         quantity: qty,
         tipoMunicao: tipoMunicao || selectedStock.tipoMunicao || 'Operacional',
         loteMunicao: loteMunicao || selectedStock.loteMunicao || 'Padrão',
+        fabricante: selectedStock.fabricante,
+        pesoMunicao: selectedStock.pesoMunicao,
+        anoFabricacao: selectedStock.anoFabricacao,
+        destinacao: selectedStock.destinacao,
         vaultSpaceId: selectedStock.vaultSpaceId,
-        departmentId: selectedStock.departmentId || currentUser.departmentId,
-        unitId: selectedStock.unitId || currentUser.unitId,
-        requesterId: currentUser.id,
-        requesterName: currentUser.name,
-        requesterMasp: currentUser.masp,
-        requesterCargo: currentUser.cargo,
+        departmentId: selectedStock.departmentId || beneficiary.departmentId || currentUser.departmentId,
+        unitId: selectedStock.unitId || beneficiary.unitId || currentUser.unitId,
+        requesterId: beneficiary.id,
+        requesterName: beneficiary.name,
+        requesterMasp: beneficiary.masp,
+        requesterCargo: beneficiary.cargo,
         reason: reason.trim(),
-        seraDevolvida
+        seraDevolvida,
+        directAuthorized: isDirect,
+        status: isDirect ? 'AUTORIZADA' : 'PENDENTE',
+        armorerId: isDirect ? currentUser.id : undefined,
+        armorerName: isDirect ? currentUser.name : undefined,
+        armorerMasp: isDirect ? currentUser.masp : undefined
       };
 
       const res = await storage.requestCautelaMunicao(payload);
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao solicitar cautela de munições.');
       } else {
-        setSuccessMsg(`Solicitação de ${qty} munições calibre ${selectedStock.caliberName} enviada ao armeiro da unidade com sucesso!`);
+        if (isDirect) {
+          setSuccessMsg(`Cautela de ${qty} munições calibre ${selectedStock.caliberName} autorizada diretamente para o policial ${beneficiary.name}! O saldo foi deduzido do cofre e o recibo está disponível.`);
+          setActiveTab('TODAS');
+        } else {
+          setSuccessMsg(`Solicitação de ${qty} munições calibre ${selectedStock.caliberName} enviada ao armeiro da unidade com sucesso!`);
+          setActiveTab('MINHAS');
+        }
         setSelectedStockId('');
-        setActiveTab('MINHAS');
         onRefresh();
       }
     } catch (err: any) {
@@ -514,6 +543,53 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
             </div>
 
             <form onSubmit={handleRequest} className="space-y-4">
+              {/* Opção para Armeiro acautelar diretamente para um policial */}
+              {canAuthorize && (
+                <div className="p-3.5 bg-slate-950 border border-cyan-600/50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="directCautelaMun"
+                        checked={isDirectCautela}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsDirectCautela(checked);
+                          if (checked && !targetOfficerId && availableUnitOfficers.length > 0) {
+                            setTargetOfficerId(availableUnitOfficers[0].id);
+                          }
+                        }}
+                        className="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700"
+                      />
+                      <label htmlFor="directCautelaMun" className="text-xs font-bold text-cyan-400 cursor-pointer">
+                        Acautelamento Direto pelo Armeiro (Sem solicitação prévia do policial)
+                      </label>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">Deduz do cofre e gera recibo imediato</span>
+                  </div>
+
+                  {isDirectCautela && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Selecione o Policial Beneficiário (Responsável pela Cautela) <span className="text-cyan-400">*</span>
+                      </label>
+                      <select
+                        value={targetOfficerId}
+                        onChange={(e) => setTargetOfficerId(e.target.value)}
+                        className="w-full bg-slate-900 border border-cyan-600/70 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-cyan-200 font-semibold"
+                        required
+                      >
+                        {availableUnitOfficers.map(o => (
+                          <option key={o.id} value={o.id}>
+                            {o.name} (MASP: {o.masp}) - {o.cargo || o.role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
                   1. Selecione o Calibre / Lote Disponível no Cofre ({availableUnitStocks.length} opções)
@@ -628,17 +704,28 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 />
               </div>
 
-              <div className="flex items-center space-x-2 pt-1">
-                <input
-                  type="checkbox"
-                  id="seraDevolvidaCheckMun"
-                  checked={seraDevolvida}
-                  onChange={(e) => setSeraDevolvida(e.target.checked)}
-                  className="w-4 h-4 rounded text-cyan-500 bg-slate-950 border-slate-700"
-                />
-                <label htmlFor="seraDevolvidaCheckMun" className="text-xs text-slate-200 cursor-pointer">
-                  Munições serão devolvidas se não deflagradas (reabastece o estoque do cofre após devolução)
+              {/* Destinação e Retorno ao Cofre / Baixa Definitiva */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1">
+                  Destinação e Retorno ao Cofre
                 </label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="seraDevolvidaCheckMun"
+                    checked={seraDevolvida}
+                    onChange={(e) => setSeraDevolvida(e.target.checked)}
+                    className="w-4 h-4 rounded text-cyan-500 bg-slate-900 border-slate-700"
+                  />
+                  <label htmlFor="seraDevolvidaCheckMun" className="text-xs text-slate-200 cursor-pointer font-medium">
+                    Munições serão devolvidas se não deflagradas (reabastece o estoque do cofre após devolução)
+                  </label>
+                </div>
+                {!seraDevolvida && (
+                  <div className="text-[11px] text-amber-400 bg-amber-500/10 border border-amber-500/20 p-2 rounded-lg font-mono">
+                    ⚠ <strong>Baixa Definitiva:</strong> A munição é destinada para consumo/instrução/missão e não retornará ao cofre. A dedução do estoque é permanente.
+                  </div>
+                )}
               </div>
 
               <div className="pt-4 flex justify-end space-x-3">
@@ -652,10 +739,16 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 <button
                   type="submit"
                   disabled={!selectedStockId || isSubmitting || availableUnitStocks.length === 0}
-                  className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2"
+                  className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
                 >
                   <Disc className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Enviando...' : 'Confirmar Solicitação de Munição'}</span>
+                  <span>
+                    {isSubmitting 
+                      ? 'Processando...' 
+                      : (isDirectCautela 
+                          ? 'Acautelar Munição Imediatamente (Autorização Direta do Armeiro)' 
+                          : 'Confirmar Solicitação de Munição')}
+                  </span>
                 </button>
               </div>
             </form>

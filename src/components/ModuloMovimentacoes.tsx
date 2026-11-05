@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
-import { User, Movement, Weapon, VaultSpace, Course } from '../types';
+import React, { useState, useMemo } from 'react';
+import { User, Movement, Weapon, VaultSpace, Course, WeaponTransfer, AmmoTransfer } from '../types';
 import { formatTimestamp, isCourseExpired } from '../utils/masks';
 import { storage } from '../services/storage';
-import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2, FileText, Printer } from 'lucide-react';
+import { ArrowRightLeft, Plus, CheckCircle, Clock, AlertTriangle, Shield, AlertCircle, ArrowUpRight, ArrowDownLeft, Lock, Trash2, FileText, Printer, Building2, Disc, Crosshair, X, Loader2, Check } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { MovementReceiptModal } from './ModalReciboMovimentacao';
@@ -49,6 +49,69 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   const isArmeiro = currentUser.role === 'Armeiro';
   const isAdmin = currentUser.role === 'Administrador';
   const isPolicial = currentUser.role === 'Policial';
+
+  // Pending transfers between units for receiving armorer
+  const pendingWeaponTransfers = storage.getPendingIncomingTransfers(currentUser);
+  const pendingAmmoTransfers = storage.getPendingIncomingAmmoTransfers(currentUser);
+
+  // Transfer Receipt Dialog State
+  const [receivingWeaponTransfer, setReceivingWeaponTransfer] = useState<WeaponTransfer | null>(null);
+  const [receivingAmmoTransfer, setReceivingAmmoTransfer] = useState<AmmoTransfer | null>(null);
+  const [destVaultChoiceId, setDestVaultChoiceId] = useState<string>('');
+  const [destObservation, setDestObservation] = useState<string>('');
+  const [isReceivingTransfer, setIsReceivingTransfer] = useState<boolean>(false);
+
+  const handleOpenReceiveWeapon = (t: WeaponTransfer) => {
+    setReceivingWeaponTransfer(t);
+    setReceivingAmmoTransfer(null);
+    const unitArmasVaults = vaultSpaces.filter(v => v.type === 'ARMAS' && (isGeral ? true : v.unitId === (t.destinationUnitId || currentUser.unitId)));
+    setDestVaultChoiceId(unitArmasVaults[0]?.id || vaultSpaces.find(v => v.type === 'ARMAS')?.id || '');
+    setDestObservation('');
+  };
+
+  const handleOpenReceiveAmmo = (t: AmmoTransfer) => {
+    setReceivingAmmoTransfer(t);
+    setReceivingWeaponTransfer(null);
+    const unitAmmoVaults = vaultSpaces.filter(v => v.type === 'MUNIÇÕES' && (isGeral ? true : v.unitId === (t.destinationUnitId || currentUser.unitId)));
+    setDestVaultChoiceId(unitAmmoVaults[0]?.id || vaultSpaces.find(v => v.type === 'MUNIÇÕES')?.id || '');
+    setDestObservation('');
+  };
+
+  const handleConfirmReceiveWeapon = async () => {
+    if (!receivingWeaponTransfer || !destVaultChoiceId) {
+      setErrorMsg('Selecione o local no cofre da sua unidade para armazenar as armas.');
+      return;
+    }
+    setIsReceivingTransfer(true);
+    try {
+      await storage.receiveWeaponTransfer(receivingWeaponTransfer.id, destVaultChoiceId, destObservation);
+      setSuccessMsg(`Recibo da transferência de armas confirmado com sucesso! Armamento alocado no cofre.`);
+      setReceivingWeaponTransfer(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar recibo na transferência.');
+    } finally {
+      setIsReceivingTransfer(false);
+    }
+  };
+
+  const handleConfirmReceiveAmmo = async () => {
+    if (!receivingAmmoTransfer || !destVaultChoiceId) {
+      setErrorMsg('Selecione o local no cofre da sua unidade para armazenar as munições.');
+      return;
+    }
+    setIsReceivingTransfer(true);
+    try {
+      await storage.receiveAmmoTransfer(receivingAmmoTransfer.id, destVaultChoiceId, destObservation);
+      setSuccessMsg(`Recibo da transferência de munições confirmado com sucesso! Munições incorporadas ao cofre.`);
+      setReceivingAmmoTransfer(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar recibo na transferência de munição.');
+    } finally {
+      setIsReceivingTransfer(false);
+    }
+  };
 
   const canApproveOrConfirm = isGeral || isArmeiro || isAdmin || (isPolicial && currentUser.canMoveWeapons);
 
@@ -327,6 +390,100 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
         <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
           <AlertCircle className="w-4 h-4 text-red-400" />
           <span>{errorMsg}</span>
+        </div>
+      )}
+
+      {/* Transferências Pendentes de Recibo (Armas e Munições entre Unidades) */}
+      {(pendingWeaponTransfers.length > 0 || pendingAmmoTransfers.length > 0) && (
+        <div className="bg-sky-950/40 border-2 border-sky-600/70 rounded-2xl p-5 space-y-4 shadow-xl">
+          <div className="flex items-center justify-between pb-3 border-b border-sky-800/60">
+            <div className="flex items-center space-x-2.5">
+              <div className="p-2 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30 animate-pulse">
+                <ArrowRightLeft className="w-5 h-5" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold text-sky-100 flex items-center space-x-2">
+                  <span>Transferências Pendentes de Recibo na Unidade</span>
+                  <span className="text-[10px] bg-sky-500 text-slate-950 px-2 py-0.5 rounded-full font-mono font-bold">
+                    {pendingWeaponTransfers.length + pendingAmmoTransfers.length} Pendente(s)
+                  </span>
+                </h2>
+                <p className="text-[11px] text-sky-300/80">
+                  Armas ou munições despachadas para sua unidade que aguardam confirmação de custódia e alocação no cofre
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Armas Pendentes */}
+            {pendingWeaponTransfers.map((wt) => (
+              <div key={wt.id} className="bg-slate-900/90 border border-sky-700/60 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="font-bold text-amber-400 flex items-center space-x-1">
+                      <Crosshair className="w-3.5 h-3.5" />
+                      <span>Transferência de Armas ({wt.weapons?.length || 0} arma(s))</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">Guia #{wt.id.slice(-6)}</span>
+                  </div>
+                  <div className="text-xs text-slate-300 space-y-1">
+                    <p>Origem: <strong className="text-slate-100">{wt.originUnitName || 'Unidade Remetente'}</strong> ({wt.originDepartmentName || ''})</p>
+                    <p>Transportador: <strong className="text-slate-100">{wt.receiverOrTransporterName}</strong> (MASP: {wt.receiverOrTransporterMasp})</p>
+                    <p>Motivo: <span className="text-slate-400">{wt.reason}</span></p>
+                    <div className="mt-2 pt-2 border-t border-slate-800 text-[11px] font-mono text-slate-300">
+                      Armas: {wt.weapons?.map(w => `${w.serialNumber} (${w.model || w.type})`).join(', ')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReceiveWeapon(wt)}
+                    className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center space-x-1.5 shadow"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Dar Recibo e Alocar no Cofre</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+
+            {/* Munições Pendentes */}
+            {pendingAmmoTransfers.map((at) => (
+              <div key={at.id} className="bg-slate-900/90 border border-sky-700/60 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between text-xs mb-1.5">
+                    <span className="font-bold text-emerald-400 flex items-center space-x-1">
+                      <Disc className="w-3.5 h-3.5" />
+                      <span>Transferência de Munições ({at.items?.reduce((s, i) => s + i.quantity, 0) || 0} un.)</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">Guia #{at.id.slice(-6)}</span>
+                  </div>
+                  <div className="text-xs text-slate-300 space-y-1">
+                    <p>Origem: <strong className="text-slate-100">{at.originUnitName || 'Unidade Remetente'}</strong> ({at.originDepartmentName || ''})</p>
+                    <p>Transportador: <strong className="text-slate-100">{at.receiverOrTransporterName}</strong> (MASP: {at.receiverOrTransporterMasp})</p>
+                    <p>Motivo: <span className="text-slate-400">{at.reason}</span></p>
+                    <div className="mt-2 pt-2 border-t border-slate-800 text-[11px] font-mono text-slate-300">
+                      Lotes: {at.items?.map(i => `${i.caliberName} - ${i.quantity} un (Lote: ${i.loteMunicao || 'S/L'})`).join(', ')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenReceiveAmmo(at)}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center space-x-1.5 shadow"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Dar Recibo e Alocar no Cofre</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -682,6 +839,134 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Dar Recibo em Transferência (Armas ou Munições) */}
+      {(receivingWeaponTransfer || receivingAmmoTransfer) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden space-y-4">
+            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-sky-500/10 text-sky-400 rounded-xl border border-sky-500/20">
+                  <Check className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-100">
+                    {receivingWeaponTransfer ? 'Confirmar Recibo de Armamento' : 'Confirmar Recibo de Munições'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Escolha o local no cofre da sua unidade onde o material será armazenado
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReceivingWeaponTransfer(null);
+                  setReceivingAmmoTransfer(null);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 pt-2 space-y-4">
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Origem:</span>
+                  <strong className="text-slate-200">
+                    {receivingWeaponTransfer?.originUnitName || receivingAmmoTransfer?.originUnitName}
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Transportador:</span>
+                  <strong className="text-slate-200">
+                    {receivingWeaponTransfer?.receiverOrTransporterName || receivingAmmoTransfer?.receiverOrTransporterName}
+                  </strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Itens:</span>
+                  <strong className="text-amber-400 font-mono">
+                    {receivingWeaponTransfer
+                      ? `${receivingWeaponTransfer.weapons?.length} arma(s)`
+                      : `${receivingAmmoTransfer?.items?.reduce((s, i) => s + i.quantity, 0)} munições em ${receivingAmmoTransfer?.items?.length} lote(s)`}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Escolha do cofre de destino */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>Local no Cofre de Destino (Sua Unidade) <span className="text-sky-400">*</span></span>
+                </label>
+                <select
+                  value={destVaultChoiceId}
+                  onChange={(e) => setDestVaultChoiceId(e.target.value)}
+                  className="w-full bg-slate-950 border border-sky-600/70 focus:border-sky-400 rounded-xl px-3.5 py-2.5 text-xs text-sky-200 font-mono font-bold focus:outline-none"
+                  required
+                >
+                  {vaultSpaces
+                    .filter(v => v.type === (receivingWeaponTransfer ? 'ARMAS' : 'MUNIÇÕES') && (isGeral ? true : v.unitId === (currentUser.unitId || receivingWeaponTransfer?.destinationUnitId || receivingAmmoTransfer?.destinationUnitId)))
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.code} - Cofre para {v.type} ({v.description || 'Padrão'})
+                      </option>
+                    ))}
+                </select>
+                <p className="text-[10px] text-slate-500 mt-1">
+                  Todas as especificações técnicas originais (calibre, modelo, lote, tipo, peso, etc.) são herdadas automaticamente.
+                </p>
+              </div>
+
+              {/* Observação do Armeiro Recebedor */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Observação do Recebimento (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={destObservation}
+                  onChange={(e) => setDestObservation(e.target.value)}
+                  placeholder="Ex: Recebido em perfeitas condições, conferido número de série..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              {/* Ações */}
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setReceivingWeaponTransfer(null);
+                    setReceivingAmmoTransfer(null);
+                  }}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={!destVaultChoiceId || isReceivingTransfer}
+                  onClick={receivingWeaponTransfer ? handleConfirmReceiveWeapon : handleConfirmReceiveAmmo}
+                  className="px-5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 rounded-xl transition flex items-center space-x-1.5 shadow"
+                >
+                  {isReceivingTransfer ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Processando Recibo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Dar Recibo no Sistema</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

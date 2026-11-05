@@ -1075,6 +1075,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
         const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === v.id || e.localArmazenamento === v.code);
         const vaultMovements = storage.getMovimentacoesExplosivosByVault(v.id || v.code);
+        const vaultAmmoMovements = storage.getAmmoMovements({ role: 'Geral' } as User).filter(m => m.vaultSpaceId === v.id);
+        const allCautelasMunicoes = storage.getCautelasMunicoes();
+        const vaultAmmoCautelas = allCautelasMunicoes.filter(c => c.vaultSpaceId === v.id || (!c.vaultSpaceId && c.unitId === v.unitId));
 
         const isArmas = v.type === 'ARMAS';
         const isMunicoes = v.type === 'MUNIÇÕES';
@@ -1144,20 +1147,20 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 </button>
               </div>
 
-              {/* Subtabs for Explosives Vault: Content vs Movement History */}
-              {isExplosivos && (
+              {/* Subtabs for Munições & Explosives Vault: Content vs Movement/Cautela History */}
+              {(isExplosivos || isMunicoes) && (
                 <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 shrink-0">
                   <button
                     type="button"
                     onClick={() => setVaultDetailsTab('ITEMS')}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
                       vaultDetailsTab === 'ITEMS'
-                        ? 'bg-red-950 text-red-300 border border-red-800 shadow-sm'
+                        ? (isMunicoes ? 'bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-sm' : 'bg-red-950 text-red-300 border border-red-800 shadow-sm')
                         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                     }`}
                   >
-                    <Package className="w-3.5 h-3.5 text-red-400" />
-                    <span>Materiais no Paiol ({storedExplosives.length})</span>
+                    <Package className="w-3.5 h-3.5" />
+                    <span>{isMunicoes ? `Munições no Cofre (${storedAmmo.length})` : `Materiais no Paiol (${storedExplosives.length})`}</span>
                   </button>
 
                   <button
@@ -1165,12 +1168,16 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     onClick={() => setVaultDetailsTab('HISTORICO')}
                     className={`px-3.5 py-1.5 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
                       vaultDetailsTab === 'HISTORICO'
-                        ? 'bg-cyan-950 text-cyan-300 border border-cyan-800 shadow-sm'
+                        ? 'bg-amber-950 text-amber-300 border border-amber-800 shadow-sm'
                         : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
                     }`}
                   >
-                    <History className="w-3.5 h-3.5 text-cyan-400" />
-                    <span>Histórico de Movimentações deste Local ({vaultMovements.length})</span>
+                    <History className="w-3.5 h-3.5 text-amber-400" />
+                    <span>
+                      {isMunicoes 
+                        ? `Histórico de Movimentações e Cautelas (${vaultAmmoMovements.length + vaultAmmoCautelas.length})` 
+                        : `Histórico de Movimentações deste Local (${vaultMovements.length})`}
+                    </span>
                   </button>
                 </div>
               )}
@@ -1218,46 +1225,234 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     )}
                   </>
                 ) : isMunicoes ? (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                        Conteúdo Armazenado no Espaço (Munições)
-                      </h4>
-                      <span className="text-xs font-mono font-bold text-cyan-400">
-                        {storedAmmo.length} Lote(s) / Calibre(s)
-                      </span>
-                    </div>
+                  vaultDetailsTab === 'ITEMS' ? (
+                    <>
+                      <div className="flex items-center justify-between">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Conteúdo Armazenado no Espaço (Munições)
+                        </h4>
+                        <span className="text-xs font-mono font-bold text-cyan-400">
+                          {storedAmmo.length} Lote(s) / Calibre(s)
+                        </span>
+                      </div>
 
-                    {storedAmmo.length === 0 ? (
-                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
-                        Este cofre de munições está atualmente sem munições cadastradas.
+                      {storedAmmo.length === 0 ? (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
+                          Este cofre de munições está atualmente sem munições cadastradas.
+                        </div>
+                      ) : (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                          <table className="w-full text-left text-xs text-slate-300">
+                            <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-800">
+                              <tr>
+                                <th className="py-2.5 px-3">Calibre</th>
+                                <th className="py-2.5 px-3">Fabricante / Lote</th>
+                                <th className="py-2.5 px-3">Tipo / Peso</th>
+                                <th className="py-2.5 px-3">Destinação</th>
+                                <th className="py-2.5 px-3 text-right">Quantidade</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/80">
+                              {storedAmmo.map((s) => {
+                                const cal = storage.getCalibers().find(c => c.id === s.caliberId);
+                                return (
+                                  <tr key={s.id} className="hover:bg-slate-900/50">
+                                    <td className="py-2.5 px-3 font-bold text-slate-100 font-mono">
+                                      {cal?.name || s.caliberId}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-300">
+                                      <span className="text-amber-400 font-semibold">{s.fabricante || cal?.fabricante || 'N/I'}</span>
+                                      <span className="text-slate-500 mx-1">•</span>
+                                      <span className="font-mono text-slate-200">Lote: {s.loteMunicao || 'S/L'}</span>
+                                      {s.anoFabricacao && <span className="text-slate-500 text-[10px] ml-1">({s.anoFabricacao})</span>}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-300">
+                                      <span>{s.tipoMunicao || cal?.tipo || 'Padrão'}</span>
+                                      {(s.pesoMunicao || cal?.peso) && (
+                                        <span className="text-slate-400 text-[10px] ml-1 font-mono">({s.pesoMunicao || cal?.peso})</span>
+                                      )}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-slate-400 text-[11px]">
+                                      {s.destinacao || 'Operacional'}
+                                    </td>
+                                    <td className="py-2.5 px-3 text-right font-bold font-mono text-cyan-400">
+                                      {s.quantity} un
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    /* HISTORICO DE MOVIMENTAÇÕES E CAUTELAS DO COFRE DE MUNIÇÃO */
+                    <>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <History className="w-4 h-4 text-amber-400" />
+                          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                            Histórico de Movimentações e Cautelas do Cofre ({v.code})
+                          </h4>
+                        </div>
+                        <span className="text-xs font-mono font-bold text-amber-400">
+                          {vaultAmmoMovements.length + vaultAmmoCautelas.length} Registros
+                        </span>
                       </div>
-                    ) : (
-                      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-                        <table className="w-full text-left text-xs text-slate-300">
-                          <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-800">
-                            <tr>
-                              <th className="py-2.5 px-3">Calibre</th>
-                              <th className="py-2.5 px-3">Lote</th>
-                              <th className="py-2.5 px-3 text-right">Quantidade</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/80">
-                            {storedAmmo.map((s) => {
-                              const cal = storage.getCalibers().find(c => c.id === s.caliberId);
-                              return (
-                                <tr key={s.id} className="hover:bg-slate-900/50">
-                                  <td className="py-2.5 px-3 font-bold text-slate-100">Calibre {cal?.name || s.caliberId}</td>
-                                  <td className="py-2.5 px-3 font-mono text-slate-400">{(s as any).lotNumber || 'Padrão'}</td>
-                                  <td className="py-2.5 px-3 text-right font-bold font-mono text-cyan-400">{s.quantity} un</td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </>
+
+                      {vaultAmmoMovements.length === 0 && vaultAmmoCautelas.length === 0 ? (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
+                          Nenhuma movimentação ou cautela registrada para este cofre até o momento.
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          {/* Tabela de Cautelas de Munições Vinculadas a este Cofre */}
+                          {vaultAmmoCautelas.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                                <Disc className="w-3.5 h-3.5" />
+                                <span>Cautelas de Munição ({vaultAmmoCautelas.length})</span>
+                              </div>
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                                <table className="w-full text-left text-xs text-slate-300">
+                                  <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-800">
+                                    <tr>
+                                      <th className="py-2.5 px-3">Data / Hora</th>
+                                      <th className="py-2.5 px-3">Status / Modalidade</th>
+                                      <th className="py-2.5 px-3">Calibre / Fab / Lote</th>
+                                      <th className="py-2.5 px-3 text-center">Qtd</th>
+                                      <th className="py-2.5 px-3">Policial Solicitante</th>
+                                      <th className="py-2.5 px-3">Armeiro Autorizador</th>
+                                      <th className="py-2.5 px-3">Motivo / Destino</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/80 font-mono text-[11px]">
+                                    {vaultAmmoCautelas.map((c) => {
+                                      const isDefinitive = c.seraDevolvida === false;
+                                      return (
+                                        <tr key={c.id} className="hover:bg-slate-900/50">
+                                          <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
+                                            {c.createdAt ? new Date(c.createdAt).toLocaleString('pt-BR') : 'N/A'}
+                                          </td>
+                                          <td className="py-2 px-3 whitespace-nowrap">
+                                            <div className="flex flex-col space-y-0.5">
+                                              <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border w-max ${
+                                                c.status === 'AUTORIZADA'
+                                                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                  : c.status === 'DEVOLVIDA'
+                                                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                                                  : c.status === 'RECUSADA'
+                                                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                                                  : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                                              }`}>
+                                                {c.status}
+                                              </span>
+                                              {isDefinitive ? (
+                                                <span className="text-[9px] text-red-400 font-bold">Baixa Definitiva</span>
+                                              ) : (
+                                                <span className="text-[9px] text-sky-400">Com Devolução</span>
+                                              )}
+                                            </div>
+                                          </td>
+                                          <td className="py-2 px-3">
+                                            <div className="font-bold text-amber-400">{c.caliberName}</div>
+                                            <div className="text-[10px] text-slate-400">
+                                              {c.fabricante ? `${c.fabricante} ` : ''}
+                                              {c.loteMunicao ? `(Lote: ${c.loteMunicao})` : ''}
+                                            </div>
+                                          </td>
+                                          <td className="py-2 px-3 text-center font-bold text-emerald-400">
+                                            {c.quantity} un
+                                          </td>
+                                          <td className="py-2 px-3 font-sans">
+                                            <div className="font-semibold text-slate-200">{c.requesterName || 'Policial'}</div>
+                                            <div className="text-[10px] text-slate-400 font-mono">MASP: {c.requesterMasp || 'N/A'}</div>
+                                          </td>
+                                          <td className="py-2 px-3 font-sans">
+                                            <div className="font-semibold text-slate-200">{c.armorerName || 'Aguardando'}</div>
+                                            {c.armorerMasp && <div className="text-[10px] text-slate-400 font-mono">MASP: {c.armorerMasp}</div>}
+                                          </td>
+                                          <td className="py-2 px-3 font-sans text-slate-300">
+                                            {c.reason || 'Operacional'}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Tabela de Movimentações Físicas de Estoque */}
+                          {vaultAmmoMovements.length > 0 && (
+                            <div className="space-y-2">
+                              <div className="text-[11px] font-bold text-cyan-400 uppercase tracking-wider flex items-center space-x-1.5">
+                                <History className="w-3.5 h-3.5" />
+                                <span>Movimentações de Estoque do Cofre (Entradas, Saídas e Retornos) ({vaultAmmoMovements.length})</span>
+                              </div>
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                                <table className="w-full text-left text-xs text-slate-300">
+                                  <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-800">
+                                    <tr>
+                                      <th className="py-2.5 px-3">Data / Hora</th>
+                                      <th className="py-2.5 px-3">Operação</th>
+                                      <th className="py-2.5 px-3">Calibre / Detalhes</th>
+                                      <th className="py-2.5 px-3 text-center">Quantidade</th>
+                                      <th className="py-2.5 px-3">Policial / Armeiro</th>
+                                      <th className="py-2.5 px-3">Motivo / Observação</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/80 font-mono text-[11px]">
+                                    {vaultAmmoMovements.map((m) => {
+                                      const cal = storage.getCalibers().find(c => c.id === m.caliberId);
+                                      const isEntrada = m.type === 'Entrada';
+                                      return (
+                                        <tr key={m.id} className="hover:bg-slate-900/50">
+                                          <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
+                                            {new Date(m.createdAt).toLocaleString('pt-BR')}
+                                          </td>
+                                          <td className="py-2 px-3 whitespace-nowrap">
+                                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
+                                              isEntrada
+                                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                                                : 'bg-red-500/10 text-red-400 border-red-500/30'
+                                            }`}>
+                                              {m.type}
+                                            </span>
+                                          </td>
+                                          <td className="py-2 px-3">
+                                            <div className="font-bold text-amber-400">{cal?.name || m.caliberId}</div>
+                                            {(m.fabricante || m.loteMunicao) && (
+                                              <div className="text-[10px] text-slate-400">
+                                                {m.fabricante} {m.loteMunicao ? `(Lote: ${m.loteMunicao})` : ''}
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td className={`py-2 px-3 text-center font-bold ${isEntrada ? 'text-emerald-400' : 'text-red-400'}`}>
+                                            {isEntrada ? '+' : '-'}{m.quantity} un
+                                          </td>
+                                          <td className="py-2 px-3 font-sans">
+                                            <div className="font-semibold text-slate-200">{m.responsibleName || 'Sistema'}</div>
+                                            {m.responsibleMasp && <div className="text-[10px] text-slate-400 font-mono">MASP: {m.responsibleMasp}</div>}
+                                          </td>
+                                          <td className="py-2 px-3 font-sans text-slate-300">
+                                            <div>{m.recipientOrReason}</div>
+                                            {m.observation && <div className="text-[10px] text-slate-400 italic">{m.observation}</div>}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </>
+                  )
                 ) : (
                   /* EXPLOSIVOS SECTION */
                   vaultDetailsTab === 'ITEMS' ? (

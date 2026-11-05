@@ -2,9 +2,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
+import { ModalTransferirMunicao } from './ModalTransferirMunicao';
 
 interface AmmunitionModuleProps {
   currentUser: User;
@@ -31,9 +32,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 }) => {
   const [showCaliberModal, setShowCaliberModal] = useState(false);
   const [showMovementModal, setShowMovementModal] = useState(false);
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferTargetStock, setTransferTargetStock] = useState<AmmunitionStock | null>(null);
 
-  // Caliber Form & Edit State (Inside Caliber Modal)
+  // Ammo/Caliber Form & Edit State (Inside Cadastro de Munição Modal: Fabricante, Calibre, Tipo, Peso)
+  const [caliberFabricante, setCaliberFabricante] = useState('');
   const [caliberName, setCaliberName] = useState('');
+  const [caliberTipo, setCaliberTipo] = useState('');
+  const [caliberPeso, setCaliberPeso] = useState('');
   const [editingCaliber, setEditingCaliber] = useState<Caliber | null>(null);
 
   // Ammo Movement Form
@@ -42,6 +48,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [quantity, setQuantity] = useState(100);
   const [selectedVaultId, setSelectedVaultId] = useState('');
   const [recipientOrReason, setRecipientOrReason] = useState('Curso ou Teste');
+
+  // Cascading Selection State for Entrada de Munição
+  const [entryFabricante, setEntryFabricante] = useState('');
+  const [entryTipo, setEntryTipo] = useState('');
+  const [entryPeso, setEntryPeso] = useState('');
+  const [entryLote, setEntryLote] = useState('');
+  const [entryAnoFabricacao, setEntryAnoFabricacao] = useState<number>(new Date().getFullYear());
+  const [entryDestinacao, setEntryDestinacao] = useState('Operacional');
 
   // Responsible Officer Form State
   const [responsibleType, setResponsibleType] = useState<'SISTEMA' | 'FORA_DO_SISTEMA'>('SISTEMA');
@@ -78,10 +92,16 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetAmmo, setDeleteTargetAmmo] = useState<{ type: 'caliber' | 'stock' | 'movement'; id: string; label: string } | null>(null);
 
-  // Edit Ammo Stock Modal State (substituindo exclusão permanente por alteração de informações)
+  // Edit Ammo Stock Modal State (Fabricante, Lote, Tipo, Peso, Destinação, Ano e Quantidade)
   const [editingStock, setEditingStock] = useState<{
     stock: AmmunitionStock;
     caliberId: string;
+    fabricante: string;
+    tipoMunicao: string;
+    pesoMunicao: string;
+    loteMunicao: string;
+    anoFabricacao: string | number;
+    destinacao: string;
     quantity: number;
     additionalInfo: string;
   } | null>(null);
@@ -113,8 +133,53 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const isExplosivista = isUserExplosivista(currentUser);
   const canManageStock = isGeral || isArmeiro || isAdmin || isExplosivista || (currentUser.role === 'Policial' && currentUser.canMoveAmmunition);
 
+  // User unit for restricted vault viewing
+  const userUnit = units.find(u => u.id === currentUser.unitId);
+
   // Available vault spaces for ammo: MUST BE TYPE MUNIÇÕES
   const ammoVaultSpaces = vaultSpaces.filter(v => v.type === 'MUNIÇÕES');
+
+  // Vault spaces for Entrada: visible ONLY the vaults of the user's unit
+  const entryVaultSpaces = useMemo(() => {
+    if (isGeral) return ammoVaultSpaces;
+    const targetUnitId = currentUser.unitId || userUnit?.id;
+    const unitVaults = ammoVaultSpaces.filter(v => v.unitId === targetUnitId);
+    return unitVaults.length > 0 ? unitVaults : ammoVaultSpaces;
+  }, [ammoVaultSpaces, isGeral, currentUser.unitId, userUnit]);
+
+  // Unique manufacturers from registered calibers / ammo catalog
+  const availableFabricantes = useMemo(() => {
+    const fromCalibers = calibers.map(c => c.fabricante?.trim()).filter(Boolean) as string[];
+    const set = Array.from(new Set(fromCalibers));
+    if (set.length === 0) {
+      return ['CBC', 'Magtech', 'Federal', 'Winchester', 'Sellier & Bellot', 'Fiocchi', 'Taurus'];
+    }
+    return set;
+  }, [calibers]);
+
+  // Calibers registered under the selected manufacturer
+  const availableCalibresForFabricante = useMemo(() => {
+    if (!entryFabricante) return calibers;
+    const filtered = calibers.filter(c => (c.fabricante || '').toLowerCase() === entryFabricante.toLowerCase());
+    return filtered.length > 0 ? filtered : calibers;
+  }, [calibers, entryFabricante]);
+
+  // Types registered under the selected caliber and manufacturer
+  const availableTiposForCalibre = useMemo(() => {
+    const matching = availableCalibresForFabricante.filter(c => c.id === selectedCaliberId || c.name === selectedCaliberId);
+    const tipos = Array.from(new Set(matching.map(c => c.tipo?.trim()).filter(Boolean) as string[]));
+    return tipos.length > 0 ? tipos : ['Ogival (ETOG)', 'Ponta Oca (EXPO / JHP)', 'FMJ', 'Treinamento', 'Operacional', 'Frangível', 'Traçante'];
+  }, [availableCalibresForFabricante, selectedCaliberId]);
+
+  // Weights registered under the selected caliber, manufacturer and type
+  const availablePesosForTipo = useMemo(() => {
+    const matching = availableCalibresForFabricante.filter(c => 
+      (c.id === selectedCaliberId || c.name === selectedCaliberId) &&
+      (!entryTipo || c.tipo === entryTipo)
+    );
+    const pesos = Array.from(new Set(matching.map(c => c.peso?.trim()).filter(Boolean) as string[]));
+    return pesos.length > 0 ? pesos : ['115 gr', '124 gr', '147 gr', '180 gr', '165 gr', '55 gr', '62 gr', '158 gr', '230 gr'];
+  }, [availableCalibresForFabricante, selectedCaliberId, entryTipo]);
 
   // Locations available for ammo exit: ONLY locations that possess stock of selectedCaliberId (> 0)
   // Formatted with observation instead of unit: ( L1 C1 - 5,56X45MM - SAT )
@@ -211,7 +276,20 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         setSelectedVaultId(exitStocks[0]?.vaultSpaceId || '');
       }
     } else {
-      setSelectedVaultId(matchingVaults[0]?.id || ammoVaultSpaces[0]?.id || '');
+      const initialFab = availableFabricantes[0] || 'CBC';
+      setEntryFabricante(initialFab);
+      const matchingCals = calibers.filter(c => (c.fabricante || '').toLowerCase() === initialFab.toLowerCase());
+      const firstCal = matchingCals[0] || calibers[0];
+      setSelectedCaliberId(firstCal?.id || '');
+      setEntryTipo(firstCal?.tipo || 'Operacional');
+      setEntryPeso(firstCal?.peso || '124 gr');
+      setEntryLote('');
+      setEntryAnoFabricacao(new Date().getFullYear());
+      setEntryDestinacao('Operacional');
+
+      const targetUnitId = currentUser.unitId || userUnit?.id;
+      const unitVaults = ammoVaultSpaces.filter(v => v.unitId === targetUnitId);
+      setSelectedVaultId(unitVaults[0]?.id || matchingVaults[0]?.id || ammoVaultSpaces[0]?.id || '');
     }
 
     setRecipientOrReason(type === 'Entrada' ? 'Abastecimento do Cofre' : 'Curso ou Teste');
@@ -225,30 +303,44 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setShowMovementModal(true);
   };
 
-  // Save Caliber (Only available for Geral inside modal)
+  // Save Ammo / Caliber (Cadastro de Munição: Fabricante, Calibre, Tipo, Peso)
   const handleSaveCaliber = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
     if (!caliberName.trim()) {
-      setErrorMsg('Informe o nome do calibre.');
+      setErrorMsg('Informe o calibre da munição.');
       return;
     }
 
     try {
       if (editingCaliber) {
-        await storage.updateCaliber(editingCaliber.id, caliberName.trim());
-        setSuccessMsg(`Calibre "${caliberName.trim()}" atualizado com sucesso.`);
+        await storage.updateCaliber(
+          editingCaliber.id,
+          caliberName.trim(),
+          caliberFabricante.trim() || undefined,
+          caliberTipo.trim() || undefined,
+          caliberPeso.trim() || undefined
+        );
+        setSuccessMsg(`Cadastro de munição "${caliberName.trim()}" atualizado com sucesso.`);
       } else {
-        await storage.addCaliber(caliberName.trim());
-        setSuccessMsg(`Calibre "${caliberName.trim()}" cadastrado com sucesso.`);
+        await storage.addCaliber(
+          caliberName.trim(),
+          caliberFabricante.trim() || undefined,
+          caliberTipo.trim() || undefined,
+          caliberPeso.trim() || undefined
+        );
+        setSuccessMsg(`Cadastro de munição "${caliberName.trim()}" realizado com sucesso.`);
       }
+      setCaliberFabricante('');
       setCaliberName('');
+      setCaliberTipo('');
+      setCaliberPeso('');
       setEditingCaliber(null);
       onRefresh();
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao salvar calibre.');
+      setErrorMsg(err.message || 'Erro ao salvar cadastro de munição.');
     }
   };
 
@@ -297,11 +389,17 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   };
 
-  // Open Edit Stock Modal (Substitui exclusão por alteração das informações)
+  // Open Edit Stock Modal (Alteração completa das especificações da munição)
   const handleOpenEditStock = (st: AmmunitionStock, currentObs: string) => {
     setEditingStock({
       stock: st,
       caliberId: st.caliberId,
+      fabricante: st.fabricante || '',
+      tipoMunicao: st.tipoMunicao || '',
+      pesoMunicao: st.pesoMunicao || '',
+      loteMunicao: st.loteMunicao || '',
+      anoFabricacao: st.anoFabricacao || new Date().getFullYear(),
+      destinacao: st.destinacao || 'Operacional',
       quantity: st.quantity,
       additionalInfo: currentObs || ''
     });
@@ -320,6 +418,12 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         {
           quantity: editingStock.quantity,
           caliberId: editingStock.caliberId,
+          fabricante: editingStock.fabricante || undefined,
+          tipoMunicao: editingStock.tipoMunicao || undefined,
+          pesoMunicao: editingStock.pesoMunicao || undefined,
+          loteMunicao: editingStock.loteMunicao || undefined,
+          anoFabricacao: editingStock.anoFabricacao || undefined,
+          destinacao: editingStock.destinacao || undefined,
           additionalInfo: editingStock.additionalInfo
         },
         currentUser
@@ -468,7 +572,13 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         caliberId: selectedCaliberId,
         quantity,
         vaultSpaceId: selectedVaultId,
-        recipientOrReason,
+        recipientOrReason: movementType === 'Entrada' ? (entryDestinacao ? `Entrada - ${entryDestinacao}` : recipientOrReason) : recipientOrReason,
+        fabricante: movementType === 'Entrada' ? (entryFabricante || undefined) : undefined,
+        tipoMunicao: movementType === 'Entrada' ? (entryTipo || undefined) : undefined,
+        pesoMunicao: movementType === 'Entrada' ? (entryPeso || undefined) : undefined,
+        loteMunicao: movementType === 'Entrada' ? (entryLote || undefined) : undefined,
+        anoFabricacao: movementType === 'Entrada' ? (entryAnoFabricacao || undefined) : undefined,
+        destinacao: movementType === 'Entrada' ? (entryDestinacao || undefined) : undefined,
         responsibleType,
         responsibleUserId: respUserId,
         responsibleName: respName,
@@ -797,19 +907,22 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Button Cadastrar Calibre - Opens Caliber Management Modal (Visible ONLY for Geral & Armeiro) */}
+          {/* Button Cadastro de Munição - Opens Ammo/Caliber Management Modal (Fabricante, Calibre, Tipo, Peso) */}
           {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
             <button
               onClick={() => {
                 setErrorMsg('');
+                setCaliberFabricante('');
                 setCaliberName('');
+                setCaliberTipo('');
+                setCaliberPeso('');
                 setEditingCaliber(null);
                 setShowCaliberModal(true);
               }}
               className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
             >
               <Plus className="w-4 h-4 text-amber-400" />
-              <span>Cadastrar Calibre</span>
+              <span>Cadastro de Munição</span>
             </button>
           )}
 
@@ -832,6 +945,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             >
               <ArrowUpRight className="w-4 h-4 text-slate-950" />
               <span>Saída de Munição</span>
+            </button>
+          )}
+
+          {/* Transferência de Unidade Button */}
+          {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
+            <button
+              onClick={() => {
+                setTransferTargetStock(null);
+                setShowTransferModal(true);
+              }}
+              className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              title="Transferir munições para outra unidade policial"
+            >
+              <ArrowRightLeft className="w-4 h-4 text-white" />
+              <span>Transferência de Unidade</span>
             </button>
           )}
         </div>
@@ -1016,6 +1144,40 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                 Unidade: <strong className="text-slate-200">{unit ? unit.name : ''}</strong>
                               </p>
 
+                              {/* Especificações Técnicas: Fabricante, Lote, Tipo, Peso, Destinação, Ano */}
+                              <div className="mt-2 flex flex-wrap gap-1.5 text-[10px]">
+                                {(st.fabricante || cal?.fabricante) && (
+                                  <span className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                                    Fab: <strong className="text-amber-400">{st.fabricante || cal?.fabricante}</strong>
+                                  </span>
+                                )}
+                                {st.loteMunicao && (
+                                  <span className="bg-amber-500/10 border border-amber-500/20 text-amber-300 px-2 py-0.5 rounded font-mono font-bold">
+                                    Lote: {st.loteMunicao}
+                                  </span>
+                                )}
+                                {(st.tipoMunicao || cal?.tipo) && (
+                                  <span className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                                    Tipo: <strong className="text-slate-100">{st.tipoMunicao || cal?.tipo}</strong>
+                                  </span>
+                                )}
+                                {(st.pesoMunicao || cal?.peso) && (
+                                  <span className="bg-slate-950 border border-slate-800 text-slate-300 px-2 py-0.5 rounded font-mono">
+                                    Peso: <strong className="text-slate-100">{st.pesoMunicao || cal?.peso}</strong>
+                                  </span>
+                                )}
+                                {st.destinacao && (
+                                  <span className="bg-sky-500/10 border border-sky-500/20 text-sky-300 px-2 py-0.5 rounded font-mono">
+                                    {st.destinacao}
+                                  </span>
+                                )}
+                                {st.anoFabricacao && (
+                                  <span className="bg-slate-950 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono">
+                                    Ano: {st.anoFabricacao}
+                                  </span>
+                                )}
+                              </div>
+
                               {/* Detalhes da Munição abaixo da informação da Unidade: apenas a Observação completa */}
                               <div className="mt-2.5 pt-2 border-t border-slate-800/80 space-y-1.5 text-[11px]">
                                 <div className="flex items-center justify-between text-[10px] font-mono">
@@ -1070,6 +1232,22 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                       <span>Sair</span>
                                     </button>
                                   </div>
+                                )}
+
+                                {/* Botão de Transferir munição entre unidades */}
+                                {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
+                                  <button
+                                    type="button"
+                                    disabled={st.quantity <= 0}
+                                    onClick={() => {
+                                      setTransferTargetStock(st);
+                                      setShowTransferModal(true);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-lg border border-transparent hover:border-slate-700 disabled:opacity-40 transition"
+                                    title="Transferir para outra unidade policial"
+                                  >
+                                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                                  </button>
                                 )}
 
                                 {/* Ícone de alterar informações (substituindo o antigo ícone de excluir permanentemente) */}
@@ -1390,117 +1568,288 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         )}
       </div>
 
-      {/* Modal Calibres (Exibe Calibres, com opções de edição/cadastro apenas para perfil Geral) */}
+      {/* Modal Cadastro de Munição (Fabricante, Calibre, Tipo, Peso) */}
       {showCaliberModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[92vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
-                <Disc className="w-5 h-5 text-amber-400" />
-                <span>Calibres Cadastrados no Sistema</span>
-              </h3>
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
+                  <Disc className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">
+                    Cadastro de Munição
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Especificação de Fabricante, Calibre, Tipo de Projétil e Peso
+                  </p>
+                </div>
+              </div>
               <button
                 onClick={() => {
                   setShowCaliberModal(false);
                   setEditingCaliber(null);
+                  setCaliberFabricante('');
                   setCaliberName('');
+                  setCaliberTipo('');
+                  setCaliberPeso('');
                 }}
-                className="text-slate-400 hover:text-slate-100 font-bold"
+                className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800 transition"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Form de Cadastro / Edição: VISÍVEL APENAS PARA PERFIL GERAL E ARMEIRO */}
+            {/* Form de Cadastro / Edição: VISÍVEL PARA GERAL, ARMEIRO E ADMINISTRADOR */}
             {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') ? (
               <form onSubmit={handleSaveCaliber} className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
-                  {editingCaliber ? 'Editar Calibre' : 'Cadastrar Novo Calibre'}
-                </h4>
-                <div className="flex items-center space-x-2">
-                  <input
-                    type="text"
-                    value={caliberName}
-                    onChange={(e) => setCaliberName(e.target.value)}
-                    placeholder="Ex: 5,56x45mm, .40 S&W, 9x19mm"
-                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono"
-                    required
-                  />
-                  <button
-                    type="submit"
-                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl shrink-0 shadow"
-                  >
-                    {editingCaliber ? 'Salvar' : 'Adicionar'}
-                  </button>
+                <div className="flex items-center justify-between pb-1">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                    {editingCaliber ? 'Editar Cadastro de Munição' : 'Cadastrar Nova Especificação de Munição'}
+                  </h4>
                   {editingCaliber && (
                     <button
                       type="button"
                       onClick={() => {
                         setEditingCaliber(null);
+                        setCaliberFabricante('');
                         setCaliberName('');
+                        setCaliberTipo('');
+                        setCaliberPeso('');
                       }}
-                      className="text-xs text-slate-400 hover:text-slate-200 px-2"
+                      className="text-xs text-slate-400 hover:text-slate-200 underline"
+                    >
+                      Cancelar Edição
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Fabricante */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Fabricante <span className="text-slate-500 font-normal">(ex: CBC, Federal, Magtech)</span>
+                    </label>
+                    <input
+                      type="text"
+                      list="fabricantes-sugestoes"
+                      value={caliberFabricante}
+                      onChange={(e) => setCaliberFabricante(e.target.value)}
+                      placeholder="Ex: CBC, Federal, Magtech..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                    <datalist id="fabricantes-sugestoes">
+                      <option value="CBC" />
+                      <option value="Magtech" />
+                      <option value="Federal" />
+                      <option value="Winchester" />
+                      <option value="Sellier & Bellot" />
+                      <option value="Fiocchi" />
+                      <option value="Hornady" />
+                      <option value="Speer" />
+                      <option value="Aguila" />
+                      <option value="Taurus" />
+                    </datalist>
+                  </div>
+
+                  {/* Calibre */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Calibre <span className="text-amber-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      list="calibres-sugestoes"
+                      value={caliberName}
+                      onChange={(e) => setCaliberName(e.target.value)}
+                      placeholder="Ex: 9x19mm, .40 S&W, 5,56x45mm..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono font-bold"
+                      required
+                    />
+                    <datalist id="calibres-sugestoes">
+                      <option value="9x19mm" />
+                      <option value=".40 S&W" />
+                      <option value="5,56x45mm" />
+                      <option value=".380 ACP" />
+                      <option value=".38 SPL" />
+                      <option value="12 GA" />
+                      <option value="7,62x51mm" />
+                      <option value=".45 ACP" />
+                      <option value=".357 Magnum" />
+                    </datalist>
+                  </div>
+
+                  {/* Tipo */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Tipo de Munição <span className="text-slate-500 font-normal">(ex: Ogival, FMJ, Ponta Oca)</span>
+                    </label>
+                    <input
+                      type="text"
+                      list="tipos-sugestoes"
+                      value={caliberTipo}
+                      onChange={(e) => setCaliberTipo(e.target.value)}
+                      placeholder="Ex: Ogival, Ponta Oca, FMJ, Treino..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                    <datalist id="tipos-sugestoes">
+                      <option value="Ogival (ETOG)" />
+                      <option value="Ponta Oca (EXPO / JHP)" />
+                      <option value="FMJ (Full Metal Jacket)" />
+                      <option value="Treinamento" />
+                      <option value="Operacional" />
+                      <option value="Frangível" />
+                      <option value="Traçante" />
+                      <option value="Chumbo (Balote)" />
+                    </datalist>
+                  </div>
+
+                  {/* Peso */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Peso do Projétil <span className="text-slate-500 font-normal">(ex: 115 gr, 124 gr, 180 gr)</span>
+                    </label>
+                    <input
+                      type="text"
+                      list="pesos-sugestoes"
+                      value={caliberPeso}
+                      onChange={(e) => setCaliberPeso(e.target.value)}
+                      placeholder="Ex: 115 gr, 124 gr, 147 gr, 180 gr, 55 gr..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                    />
+                    <datalist id="pesos-sugestoes">
+                      <option value="115 gr" />
+                      <option value="124 gr" />
+                      <option value="147 gr" />
+                      <option value="165 gr" />
+                      <option value="180 gr" />
+                      <option value="55 gr" />
+                      <option value="62 gr" />
+                      <option value="158 gr" />
+                      <option value="230 gr" />
+                    </datalist>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex justify-end space-x-2">
+                  {editingCaliber && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingCaliber(null);
+                        setCaliberFabricante('');
+                        setCaliberName('');
+                        setCaliberTipo('');
+                        setCaliberPeso('');
+                      }}
+                      className="text-xs text-slate-400 hover:text-slate-200 px-3 py-2 rounded-xl transition"
                     >
                       Cancelar
                     </button>
                   )}
+                  <button
+                    type="submit"
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shrink-0 shadow flex items-center space-x-1.5 transition"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{editingCaliber ? 'Salvar Alterações' : 'Cadastrar Munição'}</span>
+                  </button>
                 </div>
               </form>
             ) : (
               <p className="text-[11px] text-slate-500 italic bg-slate-950/60 p-2.5 rounded-xl border border-slate-800">
-                Apenas usuários dos perfis <strong>Geral</strong> e <strong>Armeiro</strong> possuem permissão para cadastrar, editar ou excluir calibres.
+                Apenas usuários dos perfis <strong>Geral</strong>, <strong>Armeiro</strong> e <strong>Administrador</strong> possuem permissão para cadastrar ou editar munições.
               </p>
             )}
 
-            {/* Lista de Calibres */}
-            <div className="space-y-2 max-h-60 overflow-y-auto pt-1">
-              {calibers.length === 0 ? (
-                <p className="text-xs text-slate-500 italic text-center py-4">Nenhum calibre cadastrado.</p>
-              ) : (
-                calibers.map((c) => (
-                  <div
-                    key={c.id}
-                    className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between"
-                  >
-                    <span className="font-mono font-bold text-slate-100 text-sm">{c.name}</span>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-[10px] text-slate-500 uppercase font-mono">Calibre</span>
-                      {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
-                        <>
-                          <button
-                            onClick={() => {
-                              setEditingCaliber(c);
-                              setCaliberName(c.name);
-                            }}
-                            className="p-1 text-slate-500 hover:text-amber-400 rounded transition"
-                            title="Editar Calibre"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteCaliber(c)}
-                            className="p-1 text-slate-500 hover:text-red-400 rounded transition"
-                            title="Excluir Calibre"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
+            {/* Lista de Munições Cadastradas */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-slate-400 pb-1">
+                <span className="font-bold uppercase tracking-wider">Munições Cadastradas no Catálogo</span>
+                <span className="font-mono">{calibers.length} registros</span>
+              </div>
+
+              <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                {calibers.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic text-center py-6">Nenhuma munição cadastrada.</p>
+                ) : (
+                  calibers.map((c) => (
+                    <div
+                      key={c.id}
+                      className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center justify-between hover:border-slate-700 transition"
+                    >
+                      <div className="space-y-1">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-mono font-bold text-slate-100 text-sm">{c.name}</span>
+                          {c.fabricante && (
+                            <span className="text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2 py-0.5 rounded-md">
+                              {c.fabricante}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-slate-400">
+                          {c.tipo && (
+                            <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-300">
+                              Tipo: <strong className="text-slate-100">{c.tipo}</strong>
+                            </span>
+                          )}
+                          {c.peso && (
+                            <span className="bg-slate-900 border border-slate-800 px-2 py-0.5 rounded text-slate-300 font-mono">
+                              Peso: <strong className="text-slate-100">{c.peso}</strong>
+                            </span>
+                          )}
+                          {!c.fabricante && !c.tipo && !c.peso && (
+                            <span className="text-slate-500 italic text-[10px]">Especificações não detalhadas</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-1.5 ml-3 shrink-0">
+                        {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
+                          <>
+                            <button
+                              onClick={() => {
+                                setEditingCaliber(c);
+                                setCaliberFabricante(c.fabricante || '');
+                                setCaliberName(c.name);
+                                setCaliberTipo(c.tipo || '');
+                                setCaliberPeso(c.peso || '');
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-900 rounded-lg transition"
+                              title="Editar Cadastro de Munição"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteCaliber(c)}
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-900 rounded-lg transition"
+                              title="Excluir Cadastro de Munição"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
 
-            <div className="pt-2 flex justify-end">
+            <div className="pt-2 flex justify-end border-t border-slate-800">
               <button
                 type="button"
                 onClick={() => {
                   setShowCaliberModal(false);
                   setEditingCaliber(null);
+                  setCaliberFabricante('');
                   setCaliberName('');
+                  setCaliberTipo('');
+                  setCaliberPeso('');
                 }}
-                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-xl transition"
               >
                 Fechar
               </button>
@@ -1551,99 +1900,275 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </div>
               </div>
 
-              {/* Caliber & Quantity Grid */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Calibre
-                  </label>
-                  <select
-                    value={selectedCaliberId}
-                    onChange={(e) => setSelectedCaliberId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                    required
-                  >
-                    {calibers.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              {/* If movementType === 'Entrada': Cascading selection (Fabricante -> Calibre -> Tipo -> Peso -> Lote -> Ano -> Destinação -> Qtd -> Cofre da Unidade) */}
+              {movementType === 'Entrada' ? (
+                <div className="space-y-4 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                  <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5 pb-1 border-b border-slate-800/80">
+                    <Disc className="w-4 h-4" />
+                    <span>Especificações Técnicas da Munição de Entrada</span>
+                  </div>
 
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                      Quantidade (unidades)
+                  {/* 1. Fabricante & 2. Calibre */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        1. Fabricante <span className="text-amber-400">*</span>
+                      </label>
+                      <select
+                        value={entryFabricante}
+                        onChange={(e) => {
+                          const fab = e.target.value;
+                          setEntryFabricante(fab);
+                          const matching = calibers.filter(c => (c.fabricante || '').toLowerCase() === fab.toLowerCase());
+                          const first = matching[0] || calibers[0];
+                          if (first) {
+                            setSelectedCaliberId(first.id);
+                            if (first.tipo) setEntryTipo(first.tipo);
+                            if (first.peso) setEntryPeso(first.peso);
+                          }
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-medium focus:border-amber-500"
+                        required
+                      >
+                        {availableFabricantes.map(f => (
+                          <option key={f} value={f}>{f}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        2. Calibre (Subcategoria) <span className="text-amber-400">*</span>
+                      </label>
+                      <select
+                        value={selectedCaliberId}
+                        onChange={(e) => {
+                          const cId = e.target.value;
+                          setSelectedCaliberId(cId);
+                          const cal = calibers.find(c => c.id === cId);
+                          if (cal?.tipo) setEntryTipo(cal.tipo);
+                          if (cal?.peso) setEntryPeso(cal.peso);
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-amber-300 font-mono font-bold focus:border-amber-500"
+                        required
+                      >
+                        {availableCalibresForFabricante.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} {c.tipo ? `(${c.tipo})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 3. Tipo & 4. Peso */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        3. Tipo de Munição <span className="text-amber-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        list="entry-tipos-list"
+                        value={entryTipo}
+                        onChange={(e) => setEntryTipo(e.target.value)}
+                        placeholder="Ex: Ogival, ETOG, EXPO, FMJ..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-medium focus:border-amber-500"
+                        required
+                      />
+                      <datalist id="entry-tipos-list">
+                        {availableTiposForCalibre.map(t => (
+                          <option key={t} value={t} />
+                        ))}
+                      </datalist>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        4. Peso da Munição <span className="text-amber-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        list="entry-pesos-list"
+                        value={entryPeso}
+                        onChange={(e) => setEntryPeso(e.target.value)}
+                        placeholder="Ex: 124 gr, 115 gr, 55 gr..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-medium focus:border-amber-500"
+                        required
+                      />
+                      <datalist id="entry-pesos-list">
+                        {availablePesosForTipo.map(p => (
+                          <option key={p} value={p} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </div>
+
+                  {/* 5. Lote, 6. Ano de Fabricação & 7. Destinação */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        5. Lote de Munição <span className="text-amber-400">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={entryLote}
+                        onChange={(e) => setEntryLote(e.target.value)}
+                        placeholder="Ex: CBC-2025/01"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono font-bold focus:border-amber-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        6. Ano de Fabricação
+                      </label>
+                      <select
+                        value={entryAnoFabricacao}
+                        onChange={(e) => setEntryAnoFabricacao(parseInt(e.target.value) || new Date().getFullYear())}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                      >
+                        {[2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012].map(yr => (
+                          <option key={yr} value={yr}>{yr}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        7. Destinação
+                      </label>
+                      <select
+                        value={entryDestinacao}
+                        onChange={(e) => setEntryDestinacao(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:border-amber-500"
+                      >
+                        <option value="Operacional">Operacional</option>
+                        <option value="Treinamento / Instrução">Treinamento / Instrução</option>
+                        <option value="SAT">SAT</option>
+                        <option value="Reserva Estratégica">Reserva Estratégica</option>
+                        <option value="Outros">Outros</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* 8. Quantidade & 9. Local no Cofre (Restrito à Unidade do Policial) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1 border-t border-slate-800/60">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        8. Quantidade (unidades) <span className="text-amber-400">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={quantity}
+                        onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-emerald-400 font-mono font-bold focus:border-amber-500"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1 flex items-center justify-between">
+                        <span>9. Local no Cofre</span>
+                        <span className="text-[10px] text-amber-400 font-mono">(Apenas sua unidade)</span>
+                      </label>
+                      <select
+                        value={selectedVaultId}
+                        onChange={(e) => setSelectedVaultId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                        required
+                      >
+                        {entryVaultSpaces.map((v) => {
+                          const u = units.find(unit => unit.id === v.unitId);
+                          const d = departments.find(dep => dep.id === v.departmentId);
+                          return (
+                            <option key={v.id} value={v.id}>
+                              {v.code} - {u ? u.name : 'Unidade'} ({d ? d.code : ''})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* Caliber & Quantity Grid for SAÍDA */}
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Calibre
+                      </label>
+                      <select
+                        value={selectedCaliberId}
+                        onChange={(e) => setSelectedCaliberId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
+                        required
+                      >
+                        {calibers.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                          Quantidade (unidades)
+                        </label>
+                        {selectedExitStock && (
+                          <span className="text-[11px] font-mono font-bold text-amber-400">
+                            Disponível: {selectedExitStock.quantity} un.
+                          </span>
+                        )}
+                      </div>
+                      <input
+                        type="number"
+                        min="1"
+                        max={selectedExitStock ? selectedExitStock.quantity : undefined}
+                        value={quantity}
+                        onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
+                        disabled={availableLocationsForExit.length === 0}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono disabled:opacity-50"
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  {/* Vault Location for SAÍDA */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Localização do Estoque (Cofre - Calibre - Observação)
                     </label>
-                    {movementType === 'Saída' && selectedExitStock && (
-                      <span className="text-[11px] font-mono font-bold text-amber-400">
-                        Disponível: {selectedExitStock.quantity} un.
-                      </span>
+                    {availableLocationsForExit.length === 0 ? (
+                      <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-xl text-red-300 text-xs flex items-center space-x-2.5">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                        <div>
+                          <strong className="block font-semibold">Sem estoque disponível</strong>
+                          <span>Nenhum cofre possui estoque disponível para o calibre selecionado ({calibers.find(c => c.id === selectedCaliberId)?.name || 'calibre'}).</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <select
+                        value={selectedVaultId}
+                        onChange={(e) => setSelectedVaultId(e.target.value)}
+                        className="w-full bg-slate-950 border border-amber-600/70 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-mono font-semibold"
+                        required
+                      >
+                        {availableLocationsForExit.map((loc) => (
+                          <option key={loc.vaultSpaceId} value={loc.vaultSpaceId}>
+                            {loc.formattedLabel}
+                          </option>
+                        ))}
+                      </select>
                     )}
                   </div>
-                  <input
-                    type="number"
-                    min="1"
-                    max={movementType === 'Saída' && selectedExitStock ? selectedExitStock.quantity : undefined}
-                    value={quantity}
-                    onChange={(e) => setQuantity(parseInt(e.target.value) || 0)}
-                    disabled={movementType === 'Saída' && availableLocationsForExit.length === 0}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono disabled:opacity-50"
-                    required
-                  />
-                </div>
-              </div>
-
-              {/* Vault Location */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  {movementType === 'Saída'
-                    ? 'Localização do Estoque (Cofre - Calibre - Observação)'
-                    : 'Localização no Cofre (Apenas cofres de MUNIÇÕES)'}
-                </label>
-                {movementType === 'Saída' ? (
-                  availableLocationsForExit.length === 0 ? (
-                    <div className="p-3.5 bg-red-950/40 border border-red-800/80 rounded-xl text-red-300 text-xs flex items-center space-x-2.5">
-                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                      <div>
-                        <strong className="block font-semibold">Sem estoque disponível</strong>
-                        <span>Nenhum cofre possui estoque disponível para o calibre selecionado ({calibers.find(c => c.id === selectedCaliberId)?.name || 'calibre'}).</span>
-                      </div>
-                    </div>
-                  ) : (
-                    <select
-                      value={selectedVaultId}
-                      onChange={(e) => setSelectedVaultId(e.target.value)}
-                      className="w-full bg-slate-950 border border-amber-600/70 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-mono font-semibold"
-                      required
-                    >
-                      {availableLocationsForExit.map((loc) => (
-                        <option key={loc.vaultSpaceId} value={loc.vaultSpaceId}>
-                          {loc.formattedLabel}
-                        </option>
-                      ))}
-                    </select>
-                  )
-                ) : (
-                  <select
-                    value={selectedVaultId}
-                    onChange={(e) => setSelectedVaultId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
-                    required
-                  >
-                    {ammoVaultSpaces.map((v) => {
-                      const u = units.find(unit => unit.id === v.unitId);
-                      const d = departments.find(dep => dep.id === v.departmentId);
-                      return (
-                        <option key={v.id} value={v.id}>
-                          {v.code} - {u ? u.name : 'Unidade'} ({d ? d.code : ''})
-                        </option>
-                      );
-                    })}
-                  </select>
-                )}
-              </div>
+                </>
+              )}
 
               {/* Reason */}
               <div>
@@ -1858,23 +2383,127 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             </div>
 
             <form onSubmit={handleSaveStockEdit} className="p-6 pt-2 space-y-4">
-              {/* Calibre */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Calibre <span className="text-amber-400">*</span>
-                </label>
-                <select
-                  value={editingStock.caliberId}
-                  onChange={(e) => setEditingStock({ ...editingStock, caliberId: e.target.value })}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
-                  required
-                >
-                  {calibers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
+              {/* Fabricante & Calibre */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Fabricante
+                  </label>
+                  <input
+                    type="text"
+                    list="edit-fab-list"
+                    value={editingStock.fabricante}
+                    onChange={(e) => setEditingStock({ ...editingStock, fabricante: e.target.value })}
+                    placeholder="CBC, Magtech..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                  <datalist id="edit-fab-list">
+                    {availableFabricantes.map(f => <option key={f} value={f} />)}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Calibre <span className="text-amber-400">*</span>
+                  </label>
+                  <select
+                    value={editingStock.caliberId}
+                    onChange={(e) => setEditingStock({ ...editingStock, caliberId: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono font-bold"
+                    required
+                  >
+                    {calibers.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Tipo & Peso */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Tipo de Munição
+                  </label>
+                  <input
+                    type="text"
+                    list="edit-tipos-list"
+                    value={editingStock.tipoMunicao}
+                    onChange={(e) => setEditingStock({ ...editingStock, tipoMunicao: e.target.value })}
+                    placeholder="ETOG, FMJ, EXPO..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                  <datalist id="edit-tipos-list">
+                    {availableTiposForCalibre.map(t => <option key={t} value={t} />)}
+                  </datalist>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Peso da Munição
+                  </label>
+                  <input
+                    type="text"
+                    list="edit-pesos-list"
+                    value={editingStock.pesoMunicao}
+                    onChange={(e) => setEditingStock({ ...editingStock, pesoMunicao: e.target.value })}
+                    placeholder="124 gr, 115 gr..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-medium"
+                  />
+                  <datalist id="edit-pesos-list">
+                    {availablePesosForTipo.map(p => <option key={p} value={p} />)}
+                  </datalist>
+                </div>
+              </div>
+
+              {/* Lote, Ano de Fabricação & Destinação */}
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Lote
+                  </label>
+                  <input
+                    type="text"
+                    value={editingStock.loteMunicao}
+                    onChange={(e) => setEditingStock({ ...editingStock, loteMunicao: e.target.value })}
+                    placeholder="LOTE-2025/01"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Ano Fab.
+                  </label>
+                  <select
+                    value={editingStock.anoFabricacao}
+                    onChange={(e) => setEditingStock({ ...editingStock, anoFabricacao: parseInt(e.target.value) || new Date().getFullYear() })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:outline-none focus:border-amber-500"
+                  >
+                    {[2026, 2025, 2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017, 2016, 2015, 2014, 2013, 2012].map(yr => (
+                      <option key={yr} value={yr}>{yr}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                    Destinação
+                  </label>
+                  <select
+                    value={editingStock.destinacao}
+                    onChange={(e) => setEditingStock({ ...editingStock, destinacao: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="Operacional">Operacional</option>
+                    <option value="Treinamento / Instrução">Treinamento</option>
+                    <option value="SAT">SAT</option>
+                    <option value="Reserva Estratégica">Reserva</option>
+                    <option value="Outros">Outros</option>
+                  </select>
+                </div>
               </div>
 
               {/* Quantidade */}
@@ -1899,7 +2528,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </div>
               </div>
 
-              {/* Informações adicionais (escrito Informações adicionais ao invés de Observações) */}
+              {/* Informações adicionais */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
                   Informações adicionais
@@ -1907,10 +2536,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <textarea
                   value={editingStock.additionalInfo}
                   onChange={(e) => setEditingStock({ ...editingStock, additionalInfo: e.target.value })}
-                  placeholder="Descreva informações adicionais, lote, fabricante, finalidade ou observações técnicas..."
+                  placeholder="Descreva informações adicionais, observações técnicas ou referências do lote..."
                   maxLength={500}
-                  rows={3}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500 resize-none leading-relaxed"
+                  rows={2}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 resize-none leading-relaxed"
                 />
                 <div className="flex justify-end mt-1">
                   <span className="text-[10px] text-slate-500 font-mono">
@@ -2452,6 +3081,27 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           </div>
         );
       })()}
+
+      {/* Modal Transferência de Munições entre Unidades */}
+      {showTransferModal && (
+        <ModalTransferirMunicao
+          initialStock={transferTargetStock}
+          stocks={stocks}
+          calibers={calibers}
+          departments={departments}
+          units={units}
+          vaultSpaces={vaultSpaces}
+          currentUser={currentUser}
+          onClose={() => {
+            setShowTransferModal(false);
+            setTransferTargetStock(null);
+          }}
+          onTransferSuccess={(transfer) => {
+            setSuccessMsg(`Transferência de munições registrada com sucesso (Guia nº ${transfer.id}). Aguardando confirmação do armeiro de destino.`);
+            onRefresh();
+          }}
+        />
+      )}
 
       {/* Confirm Delete Modal */}
       <ConfirmDeleteModal

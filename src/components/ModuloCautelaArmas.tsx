@@ -66,6 +66,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [ammoLot, setAmmoLot] = useState('Lote Unidade');
   const [ammoSeraDevolvida, setAmmoSeraDevolvida] = useState(true);
 
+  // Armorer Direct Cautela State (Acautelar para policial sem solicitação prévia)
+  const [isDirectCautela, setIsDirectCautela] = useState(false);
+  const [targetOfficerId, setTargetOfficerId] = useState('');
+
+  // Available officers in unit
+  const availableUnitOfficers = useMemo(() => {
+    const allUsers = storage.getUsers();
+    return allUsers.filter(u => (isGeral ? true : u.unitId === currentUser.unitId) && u.hasSystemAccess !== false);
+  }, [currentUser, isGeral]);
+
   // Modal de Detalhes / Termo de Cautela
   const [viewingCautela, setViewingCautela] = useState<CautelaArma | null>(null);
   const [notesModal, setNotesModal] = useState<{ id: string; action: 'AUTORIZAR' | 'RECUSAR' } | null>(null);
@@ -194,8 +204,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return;
     }
 
+    const beneficiary = (canAuthorize && isDirectCautela && targetOfficerId)
+      ? (availableUnitOfficers.find(u => u.id === targetOfficerId) || currentUser)
+      : currentUser;
+
     setIsSubmitting(true);
     try {
+      const isDirect = Boolean(canAuthorize && isDirectCautela);
       const payload: any = {
         weaponId: weapon.id,
         weaponSerialNumber: weapon.serialNumber,
@@ -204,20 +219,25 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         weaponCaliber: weapon.caliber,
         magazineQuantity,
         vaultSpaceId: weapon.vaultSpaceId, // Local original no cofre registrado para retorno
-        departmentId: weapon.departmentId || currentUser.departmentId,
-        unitId: weapon.unitId || currentUser.unitId,
-        requesterId: currentUser.id,
-        requesterName: currentUser.name,
-        requesterMasp: currentUser.masp,
-        requesterCargo: currentUser.cargo,
-        requesterPhone: currentUser.phone,
-        reason: reason.trim()
+        departmentId: weapon.departmentId || beneficiary.departmentId || currentUser.departmentId,
+        unitId: weapon.unitId || beneficiary.unitId || currentUser.unitId,
+        requesterId: beneficiary.id,
+        requesterName: beneficiary.name,
+        requesterMasp: beneficiary.masp,
+        requesterCargo: beneficiary.cargo,
+        requesterPhone: beneficiary.phone,
+        reason: reason.trim(),
+        directAuthorized: isDirect,
+        status: isDirect ? 'AUTORIZADA' : 'PENDENTE',
+        armorerId: isDirect ? currentUser.id : undefined,
+        armorerName: isDirect ? currentUser.name : undefined,
+        armorerMasp: isDirect ? currentUser.masp : undefined
       };
 
-      if (requestAmmoTogether && ammoQuantity > 0) {
+      if (requestAmmoTogether && Number(ammoQuantity) >= 0) {
         payload.ammunition = {
           caliberName: weapon.caliber,
-          quantity: ammoQuantity,
+          quantity: Number(ammoQuantity) || 0,
           tipoMunicao: ammoType,
           loteMunicao: ammoLot,
           vaultSpaceId: weapon.vaultSpaceId,
@@ -230,9 +250,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao registrar solicitação de cautela.');
       } else {
-        setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) enviada ao armeiro da unidade com sucesso!`);
+        if (isDirect) {
+          setSuccessMsg(`Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso para o policial ${beneficiary.name}! O recibo de cautela já pode ser impresso.`);
+          setActiveTab('TODAS');
+        } else {
+          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) enviada ao armeiro da unidade com sucesso!`);
+          setActiveTab('MINHAS');
+        }
         setSelectedWeaponId('');
-        setActiveTab('MINHAS');
         onRefresh();
       }
     } catch (err: any) {
@@ -608,6 +633,53 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </div>
 
             <form onSubmit={handleRequestCautela} className="space-y-4">
+              {/* Opção para Armeiro acautelar diretamente para um policial */}
+              {canAuthorize && (
+                <div className="p-3.5 bg-slate-950 border border-amber-600/50 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="directCautelaArma"
+                        checked={isDirectCautela}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsDirectCautela(checked);
+                          if (checked && !targetOfficerId && availableUnitOfficers.length > 0) {
+                            setTargetOfficerId(availableUnitOfficers[0].id);
+                          }
+                        }}
+                        className="w-4 h-4 rounded text-amber-500 bg-slate-900 border-slate-700"
+                      />
+                      <label htmlFor="directCautelaArma" className="text-xs font-bold text-amber-400 cursor-pointer">
+                        Acautelamento Direto pelo Armeiro (Sem solicitação prévia do policial)
+                      </label>
+                    </div>
+                    <span className="text-[10px] text-slate-400 font-mono">Gera autorização e recibo imediatos</span>
+                  </div>
+
+                  {isDirectCautela && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Selecione o Policial Beneficiário (Responsável pela Cautela) <span className="text-amber-400">*</span>
+                      </label>
+                      <select
+                        value={targetOfficerId}
+                        onChange={(e) => setTargetOfficerId(e.target.value)}
+                        className="w-full bg-slate-900 border border-amber-600/70 focus:border-amber-400 rounded-xl px-3 py-2 text-xs text-amber-200 font-semibold"
+                        required
+                      >
+                        {availableUnitOfficers.map(o => (
+                          <option key={o.id} value={o.id}>
+                            {o.name} (MASP: {o.masp}) - {o.cargo || o.role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
                   1. Selecione a Arma Disponível na Unidade ({userUnitWeapons.length} aptas)
@@ -726,12 +798,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         </label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           max="200"
                           value={ammoQuantity}
                           onChange={(e) => setAmmoQuantity(parseInt(e.target.value, 10) || 0)}
                           className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono"
-                          required
                         />
                       </div>
 
@@ -790,10 +861,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <button
                   type="submit"
                   disabled={!selectedWeaponId || isSubmitting || userUnitWeapons.length === 0}
-                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2"
+                  className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
                 >
                   <Crosshair className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Enviando...' : 'Confirmar Solicitação de Cautela'}</span>
+                  <span>
+                    {isSubmitting 
+                      ? 'Processando...' 
+                      : (isDirectCautela 
+                          ? 'Acautelar Arma Imediatamente (Autorização Direta do Armeiro)' 
+                          : 'Confirmar Solicitação de Cautela')}
+                  </span>
                 </button>
               </div>
             </form>
