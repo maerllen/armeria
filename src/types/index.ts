@@ -132,6 +132,9 @@ export interface VaultSpace {
 export interface Caliber {
   id: string;
   name: string; // e.g., "5,56x45mm", ".40 S&W", "9x19mm"
+  fabricante?: string; // Fabricante (ex: CBC, Magtech, Federal, etc.)
+  tipo?: string; // Tipo de Munição (ex: Treino, Operacional, Expansiva)
+  peso?: string; // Peso do Projétil (ex: 115 gr, 124 gr, 147 gr)
   createdAt: string;
 }
 
@@ -142,8 +145,12 @@ export interface AmmunitionStock {
   unitId: string;
   departmentId: string;
   quantity: number;
+  fabricante?: string;
   tipoMunicao?: string;
+  pesoMunicao?: string;
   loteMunicao?: string;
+  anoFabricacao?: number | string;
+  destinacao?: string;
   additionalInfo?: string;
 }
 
@@ -158,6 +165,12 @@ export interface AmmunitionMovement {
   unitId: string;
   departmentId: string;
   recipientOrReason: string; // "Curso ou Teste" | "Treinamento" | "Substituição" | "Abastecimento do Cofre" | etc.
+  fabricante?: string;
+  tipoMunicao?: string;
+  pesoMunicao?: string;
+  loteMunicao?: string;
+  anoFabricacao?: number | string;
+  destinacao?: string;
   responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
   responsibleUserId?: string;
   responsibleName?: string;
@@ -661,6 +674,9 @@ export interface WeaponTransfer {
   destinationDepartmentName: string;
   destinationUnitId: string;
   destinationUnitName: string;
+  destinationArmorerId?: string;
+  destinationArmorerName?: string;
+  destinationArmorerMasp?: string;
   destinationVaultSpaceId?: string;
   destinationVaultSpaceCode?: string;
   transferredByUserId: string;
@@ -676,6 +692,59 @@ export interface WeaponTransfer {
   totalMagazines: number;
   observation?: string;
   status: WeaponTransferStatus;
+  receivedAt?: string;
+  receivedByUserId?: string;
+  receivedByUserName?: string;
+  receivedByUserMasp?: string;
+  receivedByUserRole?: UserRole;
+  createdAt: string;
+}
+
+export interface AmmoTransferItem {
+  caliberId: string;
+  caliberName: string;
+  fabricante?: string;
+  tipoMunicao?: string;
+  pesoMunicao?: string;
+  loteMunicao?: string;
+  anoFabricacao?: number | string;
+  destinacao?: string;
+  quantity: number;
+  originVaultSpaceId?: string;
+  originVaultCode?: string;
+}
+
+export type AmmoTransferStatus = 'Pendente' | 'Recebido' | 'Cancelado';
+
+export interface AmmoTransfer {
+  id: string;
+  protocolNumber?: string;
+  transferDate: string;
+  originDepartmentId: string;
+  originDepartmentName: string;
+  originUnitId: string;
+  originUnitName: string;
+  destinationDepartmentId: string;
+  destinationDepartmentName: string;
+  destinationUnitId: string;
+  destinationUnitName: string;
+  destinationArmorerId?: string;
+  destinationArmorerName?: string;
+  destinationArmorerMasp?: string;
+  destinationVaultSpaceId?: string;
+  destinationVaultSpaceCode?: string;
+  transferredByUserId: string;
+  transferredByUserName: string;
+  transferredByUserMasp: string;
+  transferredByUserRole: UserRole;
+  receiverOrTransporterName: string;
+  receiverOrTransporterMasp: string;
+  receiverOrTransporterCargo?: string;
+  reason: string;
+  items: AmmoTransferItem[];
+  totalQuantity: number;
+  observation?: string;
+  status: AmmoTransferStatus;
   receivedAt?: string;
   receivedByUserId?: string;
   receivedByUserName?: string;
@@ -1036,8 +1105,12 @@ export interface CautelaMunicao {
   caliberId?: string;
   caliberName: string;
   quantity: number;
+  fabricante?: string;
   tipoMunicao?: string;
+  pesoMunicao?: string;
   loteMunicao?: string;
+  anoFabricacao?: number | string;
+  destinacao?: string;
   vaultSpaceId?: string;
   departmentId?: string;
   unitId?: string;

@@ -79,12 +79,24 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     return firstOther?.id || '';
   });
 
-  // Vault spaces filtered by destination unit
-  const destVaultSpaces = useMemo(() => {
-    return allVaultSpaces.filter(v => v.unitId === destUnitId);
-  }, [allVaultSpaces, destUnitId]);
+  // Destination Armorer selection - armorer of destination unit who will receive and allocate in vault
+  const availableDestArmorers = useMemo(() => {
+    const allUsers = storage.getUsers();
+    return allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
+  }, [destUnitId]);
 
-  const [destVaultSpaceId, setDestVaultSpaceId] = useState<string>(destVaultSpaces[0]?.id || '');
+  const [destArmorerId, setDestArmorerId] = useState<string>('');
+
+  React.useEffect(() => {
+    if (availableDestArmorers.length > 0) {
+      const armorer = availableDestArmorers.find(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro') ||
+                      availableDestArmorers.find(u => u.role === 'Administrador') ||
+                      availableDestArmorers[0];
+      setDestArmorerId(armorer?.id || '');
+    } else {
+      setDestArmorerId('');
+    }
+  }, [availableDestArmorers]);
 
   // Selected weapons to transfer (must belong strictly to originUnitId)
   const [selectedWeaponIds, setSelectedWeaponIds] = useState<string[]>(() => {
@@ -123,19 +135,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     const newAvailableUnits = allUnits.filter(u => (!newDeptId || u.departmentId === newDeptId) && u.id !== originUnitId);
     const firstUnit = newAvailableUnits[0]?.id || '';
     setDestUnitId(firstUnit);
-    const firstVault = allVaultSpaces.find(v => v.unitId === firstUnit)?.id || '';
-    setDestVaultSpaceId(firstVault);
   };
 
   // Handle destination unit change
   const handleDestUnitChange = (newUnitId: string) => {
     setDestUnitId(newUnitId);
-    const selectedUnit = allUnits.find(u => u.id === newUnitId);
-    if (selectedUnit && selectedUnit.departmentId && !destDeptId) {
-      // Optional auto-select or keep 'Todos'
-    }
-    const firstVault = allVaultSpaces.find(v => v.unitId === newUnitId)?.id || '';
-    setDestVaultSpaceId(firstVault);
   };
 
   // Handle origin unit change (Geral only)
@@ -147,8 +151,6 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     if (destUnitId === newOriginId && newAvailableDestUnits.length > 0) {
       const nextDest = newAvailableDestUnits[0].id;
       setDestUnitId(nextDest);
-      const firstVault = allVaultSpaces.find(v => v.unitId === nextDest)?.id || '';
-      setDestVaultSpaceId(firstVault);
     }
   };
 
@@ -228,7 +230,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
 
     const destUnitObj = allUnits.find(u => u.id === destUnitId);
     const destDeptObj = allDepartments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
-    const destVaultObj = allVaultSpaces.find(v => v.id === destVaultSpaceId);
+    const selectedArmorer = availableDestArmorers.find(u => u.id === destArmorerId);
 
     const itemsToTransfer: WeaponTransferItem[] = selectedWeaponIds.map(wId => {
       const w = weapons.find(item => item.id === wId)!;
@@ -256,8 +258,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         destinationDepartmentName: destDeptObj?.name || '',
         destinationUnitId: destUnitId,
         destinationUnitName: destUnitObj?.name || '',
-        destinationVaultSpaceId: destVaultSpaceId,
-        destinationVaultSpaceCode: destVaultObj?.code || 'Cofre Principal',
+        destinationArmorerId: selectedArmorer?.id,
+        destinationArmorerName: selectedArmorer?.name,
+        destinationArmorerMasp: selectedArmorer?.masp,
+        destinationVaultSpaceId: '',
+        destinationVaultSpaceCode: 'A definir no recebimento',
         receiverOrTransporterName: transporterName.trim(),
         receiverOrTransporterMasp: transporterMasp.trim(),
         receiverOrTransporterCargo: transporterCargo.trim(),
@@ -433,11 +438,32 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                     )}
                   </select>
                 </div>
+
+                <div>
+                  <label className="block text-xs text-slate-400 mb-1">Armeiro / Responsável Destino que irá receber *</label>
+                  <select
+                    id="transfer-dest-armorer-select"
+                    value={destArmorerId}
+                    onChange={e => setDestArmorerId(e.target.value)}
+                    required
+                    className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
+                  >
+                    {availableDestArmorers.length === 0 ? (
+                      <option value="">Nenhum armeiro/policial cadastrado nesta unidade</option>
+                    ) : (
+                      availableDestArmorers.map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} (MASP: {u.masp}) - {u.role || u.cargo || 'Policial'}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
               </div>
 
               <div className="pt-2 border-t border-slate-800/60 text-[11px] text-slate-400 flex items-center gap-1.5">
                 <Info className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span>O armeiro do destino alocará o espaço no cofre ao receber.</span>
+                <span>O armeiro do destino alocará o espaço no cofre ao receber e dar recibo no sistema.</span>
               </div>
             </div>
 

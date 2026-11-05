@@ -1135,7 +1135,22 @@ apiRouter.delete('/vault-spaces/:id', async (req: Request, res: Response) => {
 apiRouter.get('/calibers', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT ID_CALIBRES as id, NOME_CALIBRES as name, DATA_CRIACAO_CALIBRES as createdAt FROM CALIBRES ORDER BY NOME_CALIBRES ASC');
+    let rows: any;
+    try {
+      [rows] = await pool.query(`
+        SELECT 
+          ID_CALIBRES as id, 
+          NOME_CALIBRES as name, 
+          FABRICANTE_CALIBRES as fabricante,
+          TIPO_CALIBRES as tipo,
+          PESO_CALIBRES as peso,
+          DATA_CRIACAO_CALIBRES as createdAt 
+        FROM CALIBRES 
+        ORDER BY NOME_CALIBRES ASC
+      `);
+    } catch {
+      [rows] = await pool.query('SELECT ID_CALIBRES as id, NOME_CALIBRES as name, DATA_CRIACAO_CALIBRES as createdAt FROM CALIBRES ORDER BY NOME_CALIBRES ASC');
+    }
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1144,20 +1159,59 @@ apiRouter.get('/calibers', async (req: Request, res: Response) => {
 
 apiRouter.post('/calibers', async (req: Request, res: Response) => {
   try {
-    const { name, actor } = req.body;
+    const { name, fabricante, tipo, peso, actor } = req.body;
     const cleanName = (name || '').trim();
+    const cleanFab = (fabricante || '').trim() || null;
+    const cleanTipo = (tipo || '').trim() || null;
+    const cleanPeso = (peso || '').trim() || null;
     const pool = getPool();
 
-    const [existing]: any = await pool.query('SELECT ID_CALIBRES as id FROM CALIBRES WHERE LOWER(NOME_CALIBRES) = LOWER(?)', [cleanName]);
+    const [existing]: any = await pool.query(
+      'SELECT ID_CALIBRES as id FROM CALIBRES WHERE LOWER(NOME_CALIBRES) = LOWER(?) AND (LOWER(COALESCE(FABRICANTE_CALIBRES, "")) = LOWER(COALESCE(?, "")) OR ? IS NULL)',
+      [cleanName, cleanFab, cleanFab]
+    );
     if (existing && existing.length > 0) {
-      return res.status(400).json({ error: 'Este calibre já está cadastrado.' });
+      return res.status(400).json({ error: 'Este calibre/especificação de munição já está cadastrado.' });
     }
 
     const id = `cal-${Date.now()}`;
-    await pool.query('INSERT INTO CALIBRES (ID_CALIBRES, NOME_CALIBRES, DATA_CRIACAO_CALIBRES) VALUES (?, ?, NOW())', [id, cleanName]);
+    try {
+      await pool.query(
+        'INSERT INTO CALIBRES (ID_CALIBRES, NOME_CALIBRES, FABRICANTE_CALIBRES, TIPO_CALIBRES, PESO_CALIBRES, DATA_CRIACAO_CALIBRES) VALUES (?, ?, ?, ?, ?, NOW())',
+        [id, cleanName, cleanFab, cleanTipo, cleanPeso]
+      );
+    } catch {
+      await pool.query('INSERT INTO CALIBRES (ID_CALIBRES, NOME_CALIBRES, DATA_CRIACAO_CALIBRES) VALUES (?, ?, NOW())', [id, cleanName]);
+    }
 
-    await insertAuditLog('Munições', 'Criar', `Cadastrado calibre: ${cleanName}`, actor, req.ip);
-    return res.json({ id, name: cleanName, createdAt: new Date().toISOString() });
+    await insertAuditLog('Munições', 'Criar', `Cadastrada munição/calibre: ${cleanFab ? `[${cleanFab}] ` : ''}${cleanName}${cleanTipo ? ` (${cleanTipo})` : ''}`, actor, req.ip);
+    return res.json({ id, name: cleanName, fabricante: cleanFab, tipo: cleanTipo, peso: cleanPeso, createdAt: new Date().toISOString() });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/calibers/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { name, fabricante, tipo, peso, actor } = req.body;
+    const cleanName = (name || '').trim();
+    const cleanFab = (fabricante || '').trim() || null;
+    const cleanTipo = (tipo || '').trim() || null;
+    const cleanPeso = (peso || '').trim() || null;
+    const pool = getPool();
+
+    try {
+      await pool.query(
+        'UPDATE CALIBRES SET NOME_CALIBRES = ?, FABRICANTE_CALIBRES = ?, TIPO_CALIBRES = ?, PESO_CALIBRES = ? WHERE ID_CALIBRES = ?',
+        [cleanName, cleanFab, cleanTipo, cleanPeso, id]
+      );
+    } catch {
+      await pool.query('UPDATE CALIBRES SET NOME_CALIBRES = ? WHERE ID_CALIBRES = ?', [cleanName, id]);
+    }
+
+    await insertAuditLog('Munições', 'Editar', `Atualizado cadastro de munição: ${cleanName}`, actor, req.ip);
+    return res.json({ success: true, id, name: cleanName, fabricante: cleanFab, tipo: cleanTipo, peso: cleanPeso });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1193,19 +1247,40 @@ apiRouter.delete('/calibers/:id', async (req: Request, res: Response) => {
 apiRouter.get('/ammo-stocks', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        ID_ESTOQUE_MUNICOES as id, 
-        CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, 
-        QUANTIDADE_ESTOQUE_MUNICOES as quantity, 
-        DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, 
-        UNIDADE_ID_ESTOQUE_MUNICOES as unitId, 
-        COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId,
-        TIPO_MUNICAO as tipoMunicao,
-        LOTE_MUNICAO as loteMunicao,
-        DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
-      FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
-    `);
+    let rows: any;
+    try {
+      [rows] = await pool.query(`
+        SELECT 
+          ID_ESTOQUE_MUNICOES as id, 
+          CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, 
+          QUANTIDADE_ESTOQUE_MUNICOES as quantity, 
+          DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, 
+          UNIDADE_ID_ESTOQUE_MUNICOES as unitId, 
+          COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId,
+          FABRICANTE_MUNICAO as fabricante,
+          TIPO_MUNICAO as tipoMunicao,
+          PESO_MUNICAO as pesoMunicao,
+          LOTE_MUNICAO as loteMunicao,
+          ANO_FABRICACAO_MUNICAO as anoFabricacao,
+          DESTINACAO_MUNICAO as destinacao,
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
+        FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
+      `);
+    } catch {
+      [rows] = await pool.query(`
+        SELECT 
+          ID_ESTOQUE_MUNICOES as id, 
+          CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, 
+          QUANTIDADE_ESTOQUE_MUNICOES as quantity, 
+          DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, 
+          UNIDADE_ID_ESTOQUE_MUNICOES as unitId, 
+          COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId,
+          TIPO_MUNICAO as tipoMunicao,
+          LOTE_MUNICAO as loteMunicao,
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
+        FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
+      `);
+    }
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1218,7 +1293,6 @@ apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const actor = req.body?.actor;
     const pool = getPool();
 
-    // Check permissions: Geral, Armeiro or Administrador can delete
     if (actor && actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role)) {
       return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e administradores podem excluir registros de estoque de munição.' });
     }
@@ -1234,7 +1308,10 @@ apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
 apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { quantity, caliberId, tipoMunicao, loteMunicao, additionalInfo, actor } = req.body;
+    const { 
+      quantity, caliberId, fabricante, tipoMunicao, pesoMunicao, 
+      loteMunicao, anoFabricacao, destinacao, additionalInfo, actor 
+    } = req.body;
     if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
 
     if (actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !(actor.role === 'Policial' && actor.canMoveAmmunition)) {
@@ -1260,10 +1337,27 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const newCaliberId = caliberId || currentStock.caliberId;
     const cleanInfo = typeof additionalInfo === 'string' ? additionalInfo.slice(0, 500) : '';
 
-    await pool.query(
-      'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
-      [newQty, newCaliberId, tipoMunicao || null, loteMunicao || null, id]
-    );
+    try {
+      await pool.query(
+        `UPDATE ESTOQUE_MUNICOES SET 
+          QUANTIDADE_ESTOQUE_MUNICOES = ?, 
+          CALIBRE_ID_ESTOQUE_MUNICOES = ?, 
+          FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+          TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), 
+          PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+          LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), 
+          ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+          DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() 
+        WHERE ID_ESTOQUE_MUNICOES = ?`,
+        [newQty, newCaliberId, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, id]
+      );
+    } catch {
+      await pool.query(
+        'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
+        [newQty, newCaliberId, tipoMunicao || null, loteMunicao || null, id]
+      );
+    }
 
     if (cleanInfo) {
       const [lastMovs]: any = await pool.query(
@@ -1275,25 +1369,13 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
           'UPDATE MOVIMENTACOES_MUNICOES SET OBSERVACAO_MOVIMENTACOES_MUNICOES = ?, CALIBRE_ID_MOVIMENTACOES_MUNICOES = ? WHERE ID_MOVIMENTACOES_MUNICOES = ?',
           [cleanInfo, newCaliberId, lastMovs[0].id]
         );
-      } else {
-        const movId = `ammomov-${Date.now()}`;
-        await pool.query(
-          `INSERT INTO MOVIMENTACOES_MUNICOES 
-           (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
-            TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
-           VALUES (?, 'Entrada', ?, ?, ?, ?, ?, 'Ajuste de Estoque', 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
-          [
-            movId, newCaliberId, newQty, currentStock.departmentId, currentStock.unitId, currentStock.vaultSpaceId,
-            actor.id, actor.name, actor.masp, cleanInfo, actor.id, actor.name
-          ]
-        );
       }
     }
 
     await insertAuditLog(
       'Munições',
       'Editar',
-      `Alterado estoque ID ${id}: Quantidade para ${newQty}, Calibre ${newCaliberId}${cleanInfo ? ` - Informações adicionais: ${cleanInfo}` : ''}`,
+      `Alterado estoque ID ${id}: Qtd ${newQty}, Fabricante: ${fabricante || 'N/A'}, Lote: ${loteMunicao || 'N/A'}, Tipo: ${tipoMunicao || 'N/A'}`,
       actor,
       req.ip
     );
@@ -1307,17 +1389,50 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
 apiRouter.get('/ammo-movements', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        id, type, caliber_id as caliberId, quantity, department_id as departmentId, 
-        unit_id as unitId, vault_space_id as vaultSpaceId, recipient_or_reason as recipientOrReason,
-        responsible_type as responsibleType, responsible_user_id as responsibleUserId,
-        responsible_name as responsibleName, responsible_masp as responsibleMasp,
-        observation, returned_quantity as returnedQuantity, returned_at as returnedAt,
-        returned_by_user_name as returnedByUserName, user_id as userId, user_name as userName, 
-        created_at as createdAt
-      FROM ammo_movements ORDER BY created_at DESC
-    `);
+    let rows: any;
+    try {
+      [rows] = await pool.query(`
+        SELECT 
+          ID_MOVIMENTACOES_MUNICOES as id, 
+          TIPO_MOVIMENTACOES_MUNICOES as type, 
+          CALIBRE_ID_MOVIMENTACOES_MUNICOES as caliberId, 
+          QUANTIDADE_MOVIMENTACOES_MUNICOES as quantity, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES as departmentId, 
+          UNIDADE_ID_MOVIMENTACOES_MUNICOES as unitId, 
+          COFRE_ID_MOVIMENTACOES_MUNICOES as vaultSpaceId, 
+          DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES as recipientOrReason,
+          FABRICANTE_MUNICAO as fabricante,
+          TIPO_MUNICAO as tipoMunicao,
+          PESO_MUNICAO as pesoMunicao,
+          LOTE_MUNICAO as loteMunicao,
+          ANO_FABRICACAO_MUNICAO as anoFabricacao,
+          DESTINACAO_MUNICAO as destinacao,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES as responsibleType, 
+          RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES as responsibleUserId,
+          RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES as responsibleName, 
+          RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES as responsibleMasp,
+          OBSERVACAO_MOVIMENTACOES_MUNICOES as observation, 
+          QUANTIDADE_DEVOLVIDA_MOVIMENTACOES_MUNICOES as returnedQuantity, 
+          DATA_DEVOLUCAO_MOVIMENTACOES_MUNICOES as returnedAt,
+          NOME_USUARIO_RECEBIMENTO_MOVIMENTACOES_MUNICOES as returnedByUserName, 
+          USUARIO_ID_MOVIMENTACOES_MUNICOES as userId, 
+          NOME_USUARIO_MOVIMENTACOES_MUNICOES as userName, 
+          DATA_CRIACAO_MOVIMENTACOES_MUNICOES as createdAt
+        FROM MOVIMENTACOES_MUNICOES ORDER BY DATA_CRIACAO_MOVIMENTACOES_MUNICOES DESC
+      `);
+    } catch {
+      [rows] = await pool.query(`
+        SELECT 
+          id, type, caliber_id as caliberId, quantity, department_id as departmentId, 
+          unit_id as unitId, vault_space_id as vaultSpaceId, recipient_or_reason as recipientOrReason,
+          responsible_type as responsibleType, responsible_user_id as responsibleUserId,
+          responsible_name as responsibleName, responsible_masp as responsibleMasp,
+          observation, returned_quantity as returnedQuantity, returned_at as returnedAt,
+          returned_by_user_name as returnedByUserName, user_id as userId, user_name as userName, 
+          created_at as createdAt
+        FROM ammo_movements ORDER BY created_at DESC
+      `);
+    }
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1328,6 +1443,7 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
   try {
     const { 
       type, caliberId, quantity, vaultSpaceId, recipientOrReason,
+      fabricante, tipoMunicao, pesoMunicao, loteMunicao, anoFabricacao, destinacao,
       responsibleType, responsibleUserId, responsibleName, responsibleMasp,
       observation, actor 
     } = req.body;
@@ -1338,8 +1454,16 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
     if (!vaults || vaults.length === 0) return res.status(404).json({ error: 'Local do cofre não encontrado' });
     const vault = vaults[0];
 
-    // Find stock
-    const [stocks]: any = await pool.query('SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?', [vaultSpaceId, caliberId]);
+    // Find stock matching vaultSpaceId, caliberId, loteMunicao and fabricante (if provided)
+    let stockQuery = 'SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?';
+    const stockParams: any[] = [vaultSpaceId, caliberId];
+
+    if (loteMunicao) {
+      stockQuery += ' AND (LOTE_MUNICAO = ? OR LOTE_MUNICAO IS NULL)';
+      stockParams.push(loteMunicao);
+    }
+
+    const [stocks]: any = await pool.query(stockQuery, stockParams);
 
     let stockId = stocks && stocks.length > 0 ? stocks[0].id : null;
     let currentQty = stocks && stocks.length > 0 ? stocks[0].quantity : 0;
@@ -1349,37 +1473,93 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
         return res.status(400).json({ error: `Estoque insuficiente no cofre (${currentQty} disponíveis).` });
       }
       currentQty -= quantity;
-      await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ? WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+      await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
     } else {
       if (!stockId) {
         stockId = `stock-${Date.now()}`;
         currentQty = quantity;
-        await pool.query(
-          'INSERT INTO ESTOQUE_MUNICOES (ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES, DATA_ATUALIZACAO_ESTOQUE_MUNICOES) VALUES (?, ?, ?, ?, ?, ?, NOW())',
-          [stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId]
-        );
+        try {
+          await pool.query(
+            `INSERT INTO ESTOQUE_MUNICOES (
+              ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, 
+              DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES,
+              FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId,
+              fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null,
+              anoFabricacao || null, destinacao || null
+            ]
+          );
+        } catch {
+          await pool.query(
+            'INSERT INTO ESTOQUE_MUNICOES (ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES, TIPO_MUNICAO, LOTE_MUNICAO, DATA_ATUALIZACAO_ESTOQUE_MUNICOES) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+            [stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId, tipoMunicao || null, loteMunicao || null]
+          );
+        }
       } else {
         currentQty += quantity;
-        await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ? WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+        try {
+          await pool.query(
+            `UPDATE ESTOQUE_MUNICOES SET 
+              QUANTIDADE_ESTOQUE_MUNICOES = ?, 
+              FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+              TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+              PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+              LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO),
+              ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+              DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() 
+             WHERE ID_ESTOQUE_MUNICOES = ?`,
+            [currentQty, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, stockId]
+          );
+        } catch {
+          await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+        }
       }
     }
 
     const movId = `ammomov-${Date.now()}`;
     const cleanObs = (observation || '').slice(0, 500);
 
-    await pool.query(
-      `INSERT INTO MOVIMENTACOES_MUNICOES 
-       (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
-        TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        movId, type, caliberId, quantity, vault.department_id, vault.unit_id, vaultSpaceId, recipientOrReason,
-        responsibleType || 'SISTEMA', responsibleUserId || null, responsibleName || null, responsibleMasp || null,
-        cleanObs, actor.id, actor.name
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, type, caliberId, quantity, vault.department_id, vault.unit_id, vaultSpaceId, recipientOrReason,
+          fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null,
+          responsibleType || 'SISTEMA', responsibleUserId || null, responsibleName || null, responsibleMasp || null,
+          cleanObs, actor.id, actor.name
+        ]
+      );
+    } catch {
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, type, caliberId, quantity, vault.department_id, vault.unit_id, vaultSpaceId, recipientOrReason,
+          responsibleType || 'SISTEMA', responsibleUserId || null, responsibleName || null, responsibleMasp || null,
+          cleanObs, actor.id, actor.name
+        ]
+      );
+    }
 
-    await insertAuditLog('Munições', type === 'Entrada' ? 'Criar' : 'Excluir', `${type} de ${quantity} munições - Motivo/Destino: ${recipientOrReason}`, actor, req.ip);
+    await insertAuditLog(
+      'Munições', 
+      type === 'Entrada' ? 'Criar' : 'Excluir', 
+      `${type} de ${quantity} munições [${fabricante || 'Fabricante N/A'} - Lote: ${loteMunicao || 'N/A'}] - Motivo/Destino: ${recipientOrReason}`, 
+      actor, 
+      req.ip
+    );
 
     return res.json({
       id: movId,
@@ -1390,6 +1570,12 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
       unitId: vault.unit_id,
       departmentId: vault.department_id,
       recipientOrReason,
+      fabricante,
+      tipoMunicao,
+      pesoMunicao,
+      loteMunicao,
+      anoFabricacao,
+      destinacao,
       responsibleType: responsibleType || 'SISTEMA',
       responsibleUserId: responsibleUserId || null,
       responsibleName: responsibleName || null,
@@ -5148,6 +5334,9 @@ apiRouter.get('/weapon-transfers', async (req: Request, res: Response) => {
         DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS as destinationDepartmentName,
         DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS as destinationUnitId,
         DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS as destinationUnitName,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS as destinationArmorerId,
+        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS as destinationArmorerName,
+        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS as destinationArmorerMasp,
         DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS as destinationVaultSpaceId,
         DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS as destinationVaultSpaceCode,
         RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS as transferredByUserId,
@@ -5192,6 +5381,9 @@ apiRouter.get('/weapon-transfers', async (req: Request, res: Response) => {
         destinationDepartmentName: r.destinationDepartmentName,
         destinationUnitId: r.destinationUnitId,
         destinationUnitName: r.destinationUnitName,
+        destinationArmorerId: r.destinationArmorerId,
+        destinationArmorerName: r.destinationArmorerName,
+        destinationArmorerMasp: r.destinationArmorerMasp,
         destinationVaultSpaceId: r.destinationVaultSpaceId,
         destinationVaultSpaceCode: r.destinationVaultSpaceCode,
         transferredByUserId: r.transferredByUserId,
@@ -5233,6 +5425,9 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       destinationDepartmentName,
       destinationUnitId,
       destinationUnitName,
+      destinationArmorerId,
+      destinationArmorerName,
+      destinationArmorerMasp,
       destinationVaultSpaceId,
       destinationVaultSpaceCode,
       receiverOrTransporterName,
@@ -5359,6 +5554,9 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
         DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
         DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
         DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS,
+        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS,
+        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS,
         DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS,
         DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS,
         RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS,
@@ -5375,7 +5573,7 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
         OBSERVACAO_TRANSFERENCIAS_ARMAS,
         STATUS_TRANSFERENCIAS_ARMAS,
         DATA_CRIACAO_TRANSFERENCIAS_ARMAS
-      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
+      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
       [
         transferId,
         protocolNumber,
@@ -5387,6 +5585,9 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
         destinationDepartmentName || null,
         destinationUnitId || null,
         destinationUnitName || null,
+        destinationArmorerId || null,
+        destinationArmorerName || null,
+        destinationArmorerMasp || null,
         destinationVaultSpaceId || null,
         destinationVaultSpaceCode || null,
         actor.id,
@@ -5425,6 +5626,9 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       destinationDepartmentName,
       destinationUnitId,
       destinationUnitName,
+      destinationArmorerId,
+      destinationArmorerName,
+      destinationArmorerMasp,
       destinationVaultSpaceId,
       destinationVaultSpaceCode,
       transferredByUserId: actor.id,
@@ -5816,6 +6020,534 @@ apiRouter.post('/weapon-transfers/:id/undo', async (req: Request, res: Response)
 // Alias for cancel
 apiRouter.post('/weapon-transfers/:id/cancel', async (req: Request, res: Response) => {
   return (apiRouter as any).handle(Object.assign(req, { url: `/weapon-transfers/${req.params.id}/undo` }), res);
+});
+
+// -------------------------------------------------------------
+// AMMO TRANSFERS BETWEEN UNITS (TRANSFERÊNCIAS DE MUNIÇÕES)
+// Only Armeiro, Administrador, and Geral can view and transfer
+// -------------------------------------------------------------
+apiRouter.get('/ammo-transfers', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT 
+        ID_TRANSFERENCIAS_MUNICOES as id,
+        NUMERO_PROTOCOLO_TRANSFERENCIAS_MUNICOES as protocolNumber,
+        DATA_TRANSFERENCIA_TRANSFERENCIAS_MUNICOES as transferDate,
+        ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_MUNICOES as originDepartmentId,
+        ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_MUNICOES as originDepartmentName,
+        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_MUNICOES as originUnitId,
+        ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES as originUnitName,
+        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MUNICOES as destinationDepartmentId,
+        DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_MUNICOES as destinationDepartmentName,
+        DESTINO_UNIDADE_ID_TRANSFERENCIAS_MUNICOES as destinationUnitId,
+        DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES as destinationUnitName,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_MUNICOES as destinationArmorerId,
+        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_MUNICOES as destinationArmorerName,
+        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_MUNICOES as destinationArmorerMasp,
+        DESTINO_COFRE_ID_TRANSFERENCIAS_MUNICOES as destinationVaultSpaceId,
+        DESTINO_COFRE_CODIGO_TRANSFERENCIAS_MUNICOES as destinationVaultSpaceCode,
+        RESPONSAVEL_ID_TRANSFERENCIAS_MUNICOES as transferredByUserId,
+        RESPONSAVEL_NOME_TRANSFERENCIAS_MUNICOES as transferredByUserName,
+        RESPONSAVEL_MASP_TRANSFERENCIAS_MUNICOES as transferredByUserMasp,
+        RESPONSAVEL_PERFIL_TRANSFERENCIAS_MUNICOES as transferredByUserRole,
+        TRANSPORTADOR_NOME_TRANSFERENCIAS_MUNICOES as receiverOrTransporterName,
+        TRANSPORTADOR_MASP_TRANSFERENCIAS_MUNICOES as receiverOrTransporterMasp,
+        TRANSPORTADOR_CARGO_TRANSFERENCIAS_MUNICOES as receiverOrTransporterCargo,
+        MOTIVO_TRANSFERENCIAS_MUNICOES as reason,
+        MUNICOES_JSON_TRANSFERENCIAS_MUNICOES as itemsJson,
+        TOTAL_MUNICOES_TRANSFERENCIAS_MUNICOES as totalQuantity,
+        OBSERVACAO_TRANSFERENCIAS_MUNICOES as observation,
+        STATUS_TRANSFERENCIAS_MUNICOES as status,
+        RECEBIDO_EM_TRANSFERENCIAS_MUNICOES as receivedAt,
+        RECEBIDO_POR_USUARIO_ID_TRANSFERENCIAS_MUNICOES as receivedByUserId,
+        RECEBIDO_POR_NOME_TRANSFERENCIAS_MUNICOES as receivedByUserName,
+        RECEBIDO_POR_MASP_TRANSFERENCIAS_MUNICOES as receivedByUserMasp,
+        RECEBIDO_POR_PERFIL_TRANSFERENCIAS_MUNICOES as receivedByUserRole,
+        DATA_CRIACAO_TRANSFERENCIAS_MUNICOES as createdAt
+      FROM TRANSFERENCIAS_MUNICOES
+      ORDER BY DATA_TRANSFERENCIA_TRANSFERENCIAS_MUNICOES DESC
+    `);
+
+    const mapped = (rows || []).map((r: any) => {
+      let items = [];
+      try {
+        items = typeof r.itemsJson === 'string' ? JSON.parse(r.itemsJson) : (r.itemsJson || []);
+      } catch {
+        items = [];
+      }
+      return {
+        id: r.id,
+        protocolNumber: r.protocolNumber,
+        transferDate: r.transferDate,
+        originDepartmentId: r.originDepartmentId,
+        originDepartmentName: r.originDepartmentName,
+        originUnitId: r.originUnitId,
+        originUnitName: r.originUnitName,
+        destinationDepartmentId: r.destinationDepartmentId,
+        destinationDepartmentName: r.destinationDepartmentName,
+        destinationUnitId: r.destinationUnitId,
+        destinationUnitName: r.destinationUnitName,
+        destinationArmorerId: r.destinationArmorerId,
+        destinationArmorerName: r.destinationArmorerName,
+        destinationArmorerMasp: r.destinationArmorerMasp,
+        destinationVaultSpaceId: r.destinationVaultSpaceId,
+        destinationVaultSpaceCode: r.destinationVaultSpaceCode,
+        transferredByUserId: r.transferredByUserId,
+        transferredByUserName: r.transferredByUserName,
+        transferredByUserMasp: r.transferredByUserMasp,
+        transferredByUserRole: r.transferredByUserRole,
+        receiverOrTransporterName: r.receiverOrTransporterName,
+        receiverOrTransporterMasp: r.receiverOrTransporterMasp,
+        receiverOrTransporterCargo: r.receiverOrTransporterCargo,
+        reason: r.reason,
+        items,
+        totalQuantity: r.totalQuantity || (items.reduce((acc: number, it: any) => acc + (Number(it.quantity) || 0), 0)),
+        observation: r.observation,
+        status: (r.status || (r.receivedAt ? 'Recebido' : 'Pendente')),
+        receivedAt: r.receivedAt,
+        receivedByUserId: r.receivedByUserId,
+        receivedByUserName: r.receivedByUserName,
+        receivedByUserMasp: r.receivedByUserMasp,
+        receivedByUserRole: r.receivedByUserRole,
+        createdAt: r.createdAt
+      };
+    });
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/ammo-transfers', async (req: Request, res: Response) => {
+  try {
+    const {
+      originDepartmentId,
+      originDepartmentName,
+      originUnitId,
+      originUnitName,
+      destinationDepartmentId,
+      destinationDepartmentName,
+      destinationUnitId,
+      destinationUnitName,
+      destinationArmorerId,
+      destinationArmorerName,
+      destinationArmorerMasp,
+      receiverOrTransporterName,
+      receiverOrTransporterMasp,
+      receiverOrTransporterCargo,
+      reason,
+      items, // AmmoTransferItem[]
+      observation,
+      actor
+    } = req.body;
+
+    if (!actor) {
+      return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
+    }
+
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
+    if (!allowedRoles.includes(actor.role)) {
+      return res.status(403).json({ error: 'Apenas Armeiro, Administrador e perfil Geral têm permissão para transferir munições entre unidades.' });
+    }
+
+    if (actor.role !== 'Geral' && actor.unitId && originUnitId && originUnitId !== actor.unitId) {
+      return res.status(403).json({
+        error: 'Você só possui permissão para transferir munições pertencentes à sua própria unidade.'
+      });
+    }
+
+    if (!destinationUnitId) {
+      return res.status(400).json({ error: 'Selecione a unidade de destino.' });
+    }
+
+    if (originUnitId === destinationUnitId) {
+      return res.status(400).json({ error: 'A unidade de destino deve ser diferente da unidade de origem.' });
+    }
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um lote/tipo de munição para transferir.' });
+    }
+
+    if (!receiverOrTransporterName || !receiverOrTransporterName.trim()) {
+      return res.status(400).json({ error: 'Informe o nome do policial transportador/recebedor responsável.' });
+    }
+
+    if (!receiverOrTransporterMasp || !receiverOrTransporterMasp.trim()) {
+      return res.status(400).json({ error: 'Informe o MASP do policial transportador/recebedor.' });
+    }
+
+    if (!reason || !reason.trim()) {
+      return res.status(400).json({ error: 'Informe o motivo/justificativa da transferência.' });
+    }
+
+    const pool = getPool();
+    let totalQty = 0;
+
+    // Verify each item's stock and deduct from origin vault
+    for (const it of items) {
+      const q = parseInt(String(it.quantity), 10);
+      if (isNaN(q) || q <= 0) {
+        return res.status(400).json({ error: 'Quantidade de munição inválida.' });
+      }
+      totalQty += q;
+
+      if (it.originVaultSpaceId && it.caliberId) {
+        let findQuery = 'SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?';
+        const findParams: any[] = [it.originVaultSpaceId, it.caliberId];
+        if (it.loteMunicao) {
+          findQuery += ' AND (LOTE_MUNICAO = ? OR LOTE_MUNICAO IS NULL)';
+          findParams.push(it.loteMunicao);
+        }
+        const [stocks]: any = await pool.query(findQuery, findParams);
+        if (!stocks || stocks.length === 0 || Number(stocks[0].quantity) < q) {
+          const avail = stocks && stocks[0] ? Number(stocks[0].quantity) : 0;
+          return res.status(400).json({
+            error: `Estoque insuficiente para o calibre ${it.caliberName || ''} (Lote: ${it.loteMunicao || 'N/A'}). Disponível: ${avail}, Solicitado: ${q}.`
+          });
+        }
+
+        // Deduct from origin stock
+        await pool.query(
+          'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
+          [q, stocks[0].id]
+        );
+
+        // Record outgoing movement at origin
+        const movId = `ammomov-trf-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+        await pool.query(
+          `INSERT INTO MOVIMENTACOES_MUNICOES 
+           (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+            DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+            FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+            TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+            OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+           VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            movId, it.caliberId, q, originDepartmentId || null, originUnitId || null, it.originVaultSpaceId,
+            `Transferência de Unidade para ${destinationUnitName}`,
+            it.fabricante || null, it.tipoMunicao || null, it.pesoMunicao || null, it.loteMunicao || null, it.anoFabricacao || null, it.destinacao || null,
+            actor.id, actor.name, actor.masp,
+            `Em trânsito para ${destinationUnitName} via ${receiverOrTransporterName}`,
+            actor.id, actor.name
+          ]
+        );
+      }
+    }
+
+    const currentYear = new Date().getFullYear();
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const transferId = `trf-mun-${Date.now()}`;
+    const protocolNumber = `TRFMUN-${currentYear}-${randomSuffix}`;
+    const nowIso = new Date().toISOString();
+
+    await pool.query(
+      `INSERT INTO TRANSFERENCIAS_MUNICOES (
+        ID_TRANSFERENCIAS_MUNICOES,
+        NUMERO_PROTOCOLO_TRANSFERENCIAS_MUNICOES,
+        DATA_TRANSFERENCIA_TRANSFERENCIAS_MUNICOES,
+        ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_MUNICOES,
+        ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_MUNICOES,
+        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_MUNICOES,
+        ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES,
+        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MUNICOES,
+        DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_MUNICOES,
+        DESTINO_UNIDADE_ID_TRANSFERENCIAS_MUNICOES,
+        DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_MUNICOES,
+        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_MUNICOES,
+        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_MUNICOES,
+        RESPONSAVEL_ID_TRANSFERENCIAS_MUNICOES,
+        RESPONSAVEL_NOME_TRANSFERENCIAS_MUNICOES,
+        RESPONSAVEL_MASP_TRANSFERENCIAS_MUNICOES,
+        RESPONSAVEL_PERFIL_TRANSFERENCIAS_MUNICOES,
+        TRANSPORTADOR_NOME_TRANSFERENCIAS_MUNICOES,
+        TRANSPORTADOR_MASP_TRANSFERENCIAS_MUNICOES,
+        TRANSPORTADOR_CARGO_TRANSFERENCIAS_MUNICOES,
+        MOTIVO_TRANSFERENCIAS_MUNICOES,
+        MUNICOES_JSON_TRANSFERENCIAS_MUNICOES,
+        TOTAL_MUNICOES_TRANSFERENCIAS_MUNICOES,
+        OBSERVACAO_TRANSFERENCIAS_MUNICOES,
+        STATUS_TRANSFERENCIAS_MUNICOES,
+        DATA_CRIACAO_TRANSFERENCIAS_MUNICOES
+      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
+      [
+        transferId,
+        protocolNumber,
+        originDepartmentId || null,
+        originDepartmentName || null,
+        originUnitId || null,
+        originUnitName || null,
+        destinationDepartmentId || null,
+        destinationDepartmentName || null,
+        destinationUnitId || null,
+        destinationUnitName || null,
+        destinationArmorerId || null,
+        destinationArmorerName || null,
+        destinationArmorerMasp || null,
+        actor.id,
+        actor.name,
+        actor.masp,
+        actor.role,
+        receiverOrTransporterName.trim(),
+        receiverOrTransporterMasp.trim(),
+        receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
+        reason.trim(),
+        JSON.stringify(items),
+        totalQty,
+        observation ? observation.trim() : null
+      ]
+    );
+
+    await insertAuditLog(
+      'Munições',
+      'Transferência entre Unidades',
+      `Transferência de ${totalQty} munições de ${originUnitName} para ${destinationUnitName} iniciada com status Pendente. Protocolo: ${protocolNumber}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      id: transferId,
+      protocolNumber,
+      transferDate: nowIso,
+      originDepartmentId,
+      originDepartmentName,
+      originUnitId,
+      originUnitName,
+      destinationDepartmentId,
+      destinationDepartmentName,
+      destinationUnitId,
+      destinationUnitName,
+      destinationArmorerId,
+      destinationArmorerName,
+      destinationArmorerMasp,
+      items,
+      totalQuantity: totalQty,
+      status: 'Pendente' as const,
+      createdAt: nowIso
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Confirm Receipt of Transferred Ammunition at the Destination Unit
+apiRouter.post('/ammo-transfers/:id/receive', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { destinationVaultSpaceId, observation, actor } = req.body;
+
+    if (!actor) {
+      return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
+    }
+
+    if (!destinationVaultSpaceId) {
+      return res.status(400).json({ error: 'Selecione o local/cofre da sua unidade onde as munições serão armazenadas.' });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      `SELECT 
+        ID_TRANSFERENCIAS_MUNICOES as id,
+        NUMERO_PROTOCOLO_TRANSFERENCIAS_MUNICOES as numero_protocolo,
+        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_MUNICOES as origem_unidade_id,
+        ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES as origem_unidade_nome,
+        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MUNICOES as destino_departamento_id,
+        DESTINO_UNIDADE_ID_TRANSFERENCIAS_MUNICOES as destino_unidade_id,
+        DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MUNICOES as destino_unidade_nome,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_MUNICOES as destino_armeiro_id,
+        MUNICOES_JSON_TRANSFERENCIAS_MUNICOES as municoes_json,
+        TOTAL_MUNICOES_TRANSFERENCIAS_MUNICOES as total_municoes,
+        STATUS_TRANSFERENCIAS_MUNICOES as status
+      FROM TRANSFERENCIAS_MUNICOES WHERE ID_TRANSFERENCIAS_MUNICOES = ?`,
+      [id]
+    );
+
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Registro de transferência de munições não encontrado.' });
+    }
+
+    const transfer = rows[0];
+
+    if (transfer.status === 'Recebido') {
+      return res.status(400).json({ error: 'Esta transferência de munições já foi recebida e confirmada.' });
+    }
+
+    const isGeral = actor.role === 'Geral';
+    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+
+    if (!isGeral && !isDestAdmin && !isDestArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas o Armeiro, Administrador ou usuário Geral da unidade de destino podem dar recibo nas munições transferidas.'
+      });
+    }
+
+    // Verify destination vault belongs to destination unit
+    const [vaultRows]: any = await pool.query('SELECT ID_COFRES as id, CODIGO_COFRES as codigo, UNIDADE_ID_COFRES as unidade_id, DEPARTAMENTO_ID_COFRES as departamento_id FROM COFRES WHERE ID_COFRES = ?', [destinationVaultSpaceId]);
+    if (!vaultRows || vaultRows.length === 0) {
+      return res.status(404).json({ error: 'Local de cofre de destino não encontrado.' });
+    }
+    const destVault = vaultRows[0];
+
+    let itemsList: any[] = [];
+    try {
+      itemsList = typeof transfer.municoes_json === 'string' ? JSON.parse(transfer.municoes_json) : (transfer.municoes_json || []);
+    } catch {
+      itemsList = [];
+    }
+
+    // Store items into destination vault
+    for (const it of itemsList) {
+      const q = parseInt(String(it.quantity), 10);
+      if (isNaN(q) || q <= 0) continue;
+
+      let findQuery = 'SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?';
+      const findParams: any[] = [destinationVaultSpaceId, it.caliberId];
+      if (it.loteMunicao) {
+        findQuery += ' AND (LOTE_MUNICAO = ? OR LOTE_MUNICAO IS NULL)';
+        findParams.push(it.loteMunicao);
+      }
+      const [destStocks]: any = await pool.query(findQuery, findParams);
+
+      if (destStocks && destStocks.length > 0) {
+        await pool.query(
+          `UPDATE ESTOQUE_MUNICOES SET 
+            QUANTIDADE_ESTOQUE_MUNICOES = QUANTIDADE_ESTOQUE_MUNICOES + ?,
+            FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+            TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+            PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+            LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO),
+            ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+            DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+            DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+          WHERE ID_ESTOQUE_MUNICOES = ?`,
+          [q, it.fabricante || null, it.tipoMunicao || null, it.pesoMunicao || null, it.loteMunicao || null, it.anoFabricacao || null, it.destinacao || null, destStocks[0].id]
+        );
+      } else {
+        const newStockId = `stock-recv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+        await pool.query(
+          `INSERT INTO ESTOQUE_MUNICOES (
+            ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, 
+            DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES,
+            FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+            DATA_ATUALIZACAO_ESTOQUE_MUNICOES
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            newStockId, it.caliberId, q, destVault.departamento_id, destVault.unidade_id, destinationVaultSpaceId,
+            it.fabricante || null, it.tipoMunicao || null, it.pesoMunicao || null, it.loteMunicao || null, it.anoFabricacao || null, it.destinacao || null
+          ]
+        );
+      }
+
+      // Record incoming movement at destination vault
+      const movId = `ammomov-recv-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Entrada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, it.caliberId, q, destVault.departamento_id, destVault.unidade_id, destinationVaultSpaceId,
+          `Recebimento de Transferência de ${transfer.origem_unidade_nome}`,
+          it.fabricante || null, it.tipoMunicao || null, it.pesoMunicao || null, it.loteMunicao || null, it.anoFabricacao || null, it.destinacao || null,
+          actor.id, actor.name, actor.masp,
+          `Confirmado por ${actor.name} (${actor.masp}) no cofre ${destVault.codigo}`,
+          actor.id, actor.name
+        ]
+      );
+    }
+
+    // Update transfer status
+    await pool.query(
+      `UPDATE TRANSFERENCIAS_MUNICOES SET
+        STATUS_TRANSFERENCIAS_MUNICOES = 'Recebido',
+        DESTINO_COFRE_ID_TRANSFERENCIAS_MUNICOES = ?,
+        DESTINO_COFRE_CODIGO_TRANSFERENCIAS_MUNICOES = ?,
+        RECEBIDO_EM_TRANSFERENCIAS_MUNICOES = NOW(),
+        RECEBIDO_POR_USUARIO_ID_TRANSFERENCIAS_MUNICOES = ?,
+        RECEBIDO_POR_NOME_TRANSFERENCIAS_MUNICOES = ?,
+        RECEBIDO_POR_MASP_TRANSFERENCIAS_MUNICOES = ?,
+        RECEBIDO_POR_PERFIL_TRANSFERENCIAS_MUNICOES = ?,
+        OBSERVACAO_TRANSFERENCIAS_MUNICOES = COALESCE(?, OBSERVACAO_TRANSFERENCIAS_MUNICOES)
+       WHERE ID_TRANSFERENCIAS_MUNICOES = ?`,
+      [
+        destinationVaultSpaceId,
+        destVault.codigo,
+        actor.id,
+        actor.name,
+        actor.masp,
+        actor.role,
+        observation || null,
+        id
+      ]
+    );
+
+    await insertAuditLog(
+      'Munições',
+      'Confirmar Recibo de Transferência',
+      `Recibo confirmado por ${actor.name} (${actor.masp}) para ${transfer.total_municoes} munições transferidas de ${transfer.origem_unidade_nome}. Alocadas no cofre ${destVault.codigo}.`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      message: 'Munições recebidas e alocadas no cofre com sucesso!'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Undo Ammo Transfer
+apiRouter.post('/ammo-transfers/:id/undo', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body;
+    if (!actor) return res.status(401).json({ error: 'Sessão expirada.' });
+
+    const pool = getPool();
+    const [rows]: any = await pool.query('SELECT * FROM TRANSFERENCIAS_MUNICOES WHERE ID_TRANSFERENCIAS_MUNICOES = ?', [id]);
+    if (!rows || rows.length === 0) return res.status(404).json({ error: 'Transferência não encontrada.' });
+    const transfer = rows[0];
+
+    if (transfer.STATUS_TRANSFERENCIAS_MUNICOES === 'Recebido') {
+      return res.status(400).json({ error: 'Não é possível desfazer uma transferência já recebida.' });
+    }
+
+    let itemsList: any[] = [];
+    try {
+      itemsList = typeof transfer.MUNICOES_JSON_TRANSFERENCIAS_MUNICOES === 'string' 
+        ? JSON.parse(transfer.MUNICOES_JSON_TRANSFERENCIAS_MUNICOES) 
+        : (transfer.MUNICOES_JSON_TRANSFERENCIAS_MUNICOES || []);
+    } catch {
+      itemsList = [];
+    }
+
+    // Return quantities to origin stocks
+    for (const it of itemsList) {
+      const q = Number(it.quantity) || 0;
+      if (it.originVaultSpaceId && it.caliberId && q > 0) {
+        await pool.query(
+          'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = QUANTIDADE_ESTOQUE_MUNICOES + ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ? LIMIT 1',
+          [q, it.originVaultSpaceId, it.caliberId]
+        );
+      }
+    }
+
+    await pool.query("UPDATE TRANSFERENCIAS_MUNICOES SET STATUS_TRANSFERENCIAS_MUNICOES = 'Cancelado' WHERE ID_TRANSFERENCIAS_MUNICOES = ?", [id]);
+    await insertAuditLog('Munições', 'Desfazer Transferência', `Transferência de munições ${transfer.NUMERO_PROTOCOLO_TRANSFERENCIAS_MUNICOES} cancelada`, actor, req.ip);
+
+    return res.json({ success: true, message: 'Transferência de munições cancelada com sucesso.' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
 });
 
 // ===================================================================
@@ -7956,26 +8688,39 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
     const pool = getPool();
     const id = `caut-arma-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     let ammoCautelaId: string | null = null;
+    const isDirect = Boolean(req.body.directAuthorized || req.body.status === 'AUTORIZADA');
+    const armorer = req.body.armorer || req.body.actor || (isDirect ? { id: req.body.armorerId, name: req.body.armorerName, masp: req.body.armorerMasp } : null);
 
-    if (ammunition && ammunition.quantity > 0) {
+    const initialStatus = isDirect ? 'AUTORIZADA' : 'PENDENTE';
+
+    if (ammunition && Number(ammunition.quantity) > 0) {
       ammoCautelaId = `caut-mun-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+      const ammoQty = parseInt(String(ammunition.quantity), 10);
+      const seraDev = ammunition.seraDevolvida !== undefined ? (ammunition.seraDevolvida ? 1 : 0) : 1;
+
       await pool.query(`
         INSERT INTO ACAUTELAR_MUNICOES (
           ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
           QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+          FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES, PESO_MUNICAO_ACAUTELAR_MUNICOES, ANO_FABRICACAO_ACAUTELAR_MUNICOES, DESTINACAO_ACAUTELAR_MUNICOES,
           COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
           CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES, REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
           REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
           DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+          ARMEIRO_ID_ACAUTELAR_MUNICOES, ARMEIRO_NOME_ACAUTELAR_MUNICOES, ARMEIRO_MASP_ACAUTELAR_MUNICOES, DATA_AUTORIZACAO_ACAUTELAR_MUNICOES,
           DATA_CRIACAO_ACAUTELAR_MUNICOES
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, NOW())
       `, [
         ammoCautelaId,
         ammunition.caliberId || null,
         ammunition.caliberName || weaponCaliber || 'Padrão',
-        parseInt(String(ammunition.quantity), 10),
+        ammoQty,
         ammunition.tipoMunicao || 'Operacional',
         ammunition.loteMunicao || 'Lote Padrão',
+        ammunition.fabricante || null,
+        ammunition.pesoMunicao || null,
+        ammunition.anoFabricacao || null,
+        ammunition.destinacao || null,
         ammunition.vaultSpaceId || vaultSpaceId || null,
         departmentId || null,
         unitId || null,
@@ -7985,8 +8730,39 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
         requesterMasp,
         requesterCargo || null,
         ammunition.reason || reason || 'Acautelamento conjunto com armamento',
-        ammunition.seraDevolvida !== undefined ? (ammunition.seraDevolvida ? 1 : 0) : 1
+        initialStatus,
+        seraDev,
+        isDirect && armorer ? armorer.id : null,
+        isDirect && armorer ? armorer.name : null,
+        isDirect && armorer ? armorer.masp : null
       ]);
+
+      if (isDirect && (ammunition.vaultSpaceId || vaultSpaceId)) {
+        const vId = ammunition.vaultSpaceId || vaultSpaceId;
+        await pool.query(
+          'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL) LIMIT 1',
+          [ammoQty, vId, ammunition.caliberId || null, ammunition.caliberId || null]
+        );
+
+        const movId = `ammomov-caut-${Date.now()}`;
+        await pool.query(
+          `INSERT INTO MOVIMENTACOES_MUNICOES 
+           (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+            DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+            FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+            TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+            OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+           VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            movId, ammunition.caliberId || 'padrao', ammoQty, departmentId || null, unitId || null, vId,
+            `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp})`,
+            ammunition.fabricante || null, ammunition.tipoMunicao || null, ammunition.pesoMunicao || null, ammunition.loteMunicao || null, ammunition.anoFabricacao || null, ammunition.destinacao || null,
+            requesterId, requesterName, requesterMasp,
+            `Cautela direta autorizada pelo armeiro ${armorer?.name || ''}`,
+            armorer?.id || requesterId, armorer?.name || requesterName
+          ]
+        );
+      }
     }
 
     await pool.query(`
@@ -7999,8 +8775,9 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
         REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
         REQUERENTE_TELEFONE_ACAUTELAR_ARMAS, FINALIDADE_MOTIVO_ACAUTELAR_ARMAS,
         DATA_SOLICITACAO_ACAUTELAR_ARMAS, STATUS_ACAUTELAR_ARMAS,
+        ARMEIRO_ID_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS, ARMEIRO_MASP_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS,
         CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, ?, NOW())
     `, [
       id,
       weaponId,
@@ -8018,18 +8795,26 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
       requesterCargo || null,
       requesterPhone || null,
       reason || null,
+      initialStatus,
+      isDirect && armorer ? armorer.id : null,
+      isDirect && armorer ? armorer.name : null,
+      isDirect && armorer ? armorer.masp : null,
       ammoCautelaId
     ]);
 
+    if (isDirect) {
+      await pool.query("UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada' WHERE ID_ARMAS = ?", [weaponId]);
+    }
+
     await insertAuditLog(
       'Armas',
-      'Solicitar',
-      `Policial ${requesterName} (MASP ${requesterMasp}) solicitou cautela da arma ${weaponModel} Nº ${weaponSerialNumber}${ammoCautelaId ? ' com munições' : ''}`,
-      { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
+      isDirect ? 'Acautelamento Direto' : 'Solicitar',
+      `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela da'} arma ${weaponModel} Nº ${weaponSerialNumber} para ${requesterName} (MASP ${requesterMasp})`,
+      armorer || { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
       req.ip
     );
 
-    return res.json({ success: true, id, linkedAmmoCautelaId: ammoCautelaId });
+    return res.json({ success: true, id, linkedAmmoCautelaId: ammoCautelaId, status: initialStatus });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -8238,8 +9023,12 @@ apiRouter.get('/cautelas-municoes', async (req: Request, res: Response) => {
         CALIBRE_ID_ACAUTELAR_MUNICOES as caliberId,
         CALIBRE_NOME_ACAUTELAR_MUNICOES as caliberName,
         QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES as quantity,
+        FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES as fabricante,
         TIPO_MUNICAO_ACAUTELAR_MUNICOES as tipoMunicao,
+        PESO_MUNICAO_ACAUTELAR_MUNICOES as pesoMunicao,
         LOTE_MUNICAO_ACAUTELAR_MUNICOES as loteMunicao,
+        ANO_FABRICACAO_ACAUTELAR_MUNICOES as anoFabricacao,
+        DESTINACAO_ACAUTELAR_MUNICOES as destinacao,
         COFRE_ID_ACAUTELAR_MUNICOES as vaultSpaceId,
         DEPARTAMENTO_ID_ACAUTELAR_MUNICOES as departmentId,
         UNIDADE_ID_ACAUTELAR_MUNICOES as unitId,
@@ -8303,8 +9092,12 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
       caliberId,
       caliberName,
       quantity,
+      fabricante,
       tipoMunicao,
+      pesoMunicao,
       loteMunicao,
+      anoFabricacao,
+      destinacao,
       vaultSpaceId,
       departmentId,
       unitId,
@@ -8313,7 +9106,13 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
       requesterMasp,
       requesterCargo,
       reason,
-      seraDevolvida
+      seraDevolvida,
+      directAuthorized,
+      status,
+      armorerId,
+      armorerName,
+      armorerMasp,
+      actor
     } = req.body;
 
     const qty = parseInt(String(quantity || 0), 10);
@@ -8323,17 +9122,23 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
 
     const pool = getPool();
     const id = `caut-mun-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    const isDirect = Boolean(directAuthorized || status === 'AUTORIZADA');
+    const armorer = actor || (isDirect ? { id: armorerId, name: armorerName, masp: armorerMasp } : null);
+    const initialStatus = isDirect ? 'AUTORIZADA' : 'PENDENTE';
+    const isWillReturn = seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : 1;
 
     await pool.query(`
       INSERT INTO ACAUTELAR_MUNICOES (
         ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
         QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+        FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES, PESO_MUNICAO_ACAUTELAR_MUNICOES, ANO_FABRICACAO_ACAUTELAR_MUNICOES, DESTINACAO_ACAUTELAR_MUNICOES,
         COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
         REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
         REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
         DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+        ARMEIRO_ID_ACAUTELAR_MUNICOES, ARMEIRO_NOME_ACAUTELAR_MUNICOES, ARMEIRO_MASP_ACAUTELAR_MUNICOES, DATA_AUTORIZACAO_ACAUTELAR_MUNICOES,
         DATA_CRIACAO_ACAUTELAR_MUNICOES
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, NOW())
     `, [
       id,
       caliberId || null,
@@ -8341,6 +9146,10 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
       qty,
       tipoMunicao || 'Operacional',
       loteMunicao || 'Padrão',
+      fabricante || null,
+      pesoMunicao || null,
+      anoFabricacao || null,
+      destinacao || null,
       vaultSpaceId || null,
       departmentId || null,
       unitId || null,
@@ -8348,19 +9157,54 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
       requesterName,
       requesterMasp,
       requesterCargo || null,
-      reason || 'Uso em serviço policial',
-      seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : 1
+      reason || (isWillReturn ? 'Uso em serviço policial operacional' : 'Baixa Definitiva (Não retornará ao cofre)'),
+      initialStatus,
+      isWillReturn,
+      isDirect && armorer ? armorer.id : null,
+      isDirect && armorer ? armorer.name : null,
+      isDirect && armorer ? armorer.masp : null
     ]);
+
+    // If direct authorized, deduct immediately and record in vault movements
+    if (isDirect && vaultSpaceId) {
+      await pool.query(`
+        UPDATE ESTOQUE_MUNICOES SET
+          QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+        WHERE COFRE_ID_ESTOQUE_MUNICOES = ? 
+          AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
+        LIMIT 1
+      `, [qty, vaultSpaceId, caliberId, caliberId]);
+
+      const movId = `ammomov-caut-${Date.now()}`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, caliberId || 'padrao', qty, departmentId || null, unitId || null, vaultSpaceId,
+          `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp}) [${isWillReturn ? 'Com Retorno' : 'Baixa Definitiva'}]`,
+          fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null,
+          requesterId, requesterName, requesterMasp,
+          `Cautela direta autorizada pelo armeiro ${armorer?.name || ''}`,
+          armorer?.id || requesterId, armorer?.name || requesterName
+        ]
+      );
+    }
 
     await insertAuditLog(
       'Munições',
-      'Solicitar',
-      `Policial ${requesterName} (MASP ${requesterMasp}) solicitou cautela de ${qty} munições calibre ${caliberName}`,
-      { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
+      isDirect ? 'Acautelamento Direto' : 'Solicitar',
+      `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela de'} ${qty} munições calibre ${caliberName} [${fabricante || 'Fabricante N/A'} - Lote: ${loteMunicao || 'N/A'}] para ${requesterName}${isWillReturn ? '' : ' (Baixa Definitiva)'}`,
+      armorer || { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
       req.ip
     );
 
-    return res.json({ success: true, id });
+    return res.json({ success: true, id, status: initialStatus });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -8405,6 +9249,26 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
           AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
         LIMIT 1
       `, [qty, effectiveVaultId, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+
+      // 3. Registra em MOVIMENTACOES_MUNICOES para histórico completo do cofre
+      const movId = `ammomov-caut-${Date.now()}`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES || 'padrao', qty, cautela.DEPARTAMENTO_ID_ACAUTELAR_MUNICOES || null, cautela.UNIDADE_ID_ACAUTELAR_MUNICOES || null, effectiveVaultId,
+          `Cautela de Munição - Policial ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES} (MASP ${cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES})`,
+          cautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.LOTE_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.ANO_FABRICACAO_ACAUTELAR_MUNICOES || null, cautela.DESTINACAO_ACAUTELAR_MUNICOES || null,
+          cautela.REQUERENTE_ID_ACAUTELAR_MUNICOES, cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES, cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES,
+          `Autorizado pelo armeiro ${armorer.name} (${armorer.masp})`,
+          armorer.id, armorer.name
+        ]
+      );
     }
 
     await insertAuditLog(

@@ -44,6 +44,7 @@ import {
   MovimentacaoVeterinaria,
   CautelaArma,
   CautelaMunicao,
+  AmmoTransfer,
   UserRole
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
@@ -59,6 +60,7 @@ export interface AppState {
   ammoMovements: AmmunitionMovement[];
   weapons: Weapon[];
   weaponTransfers: WeaponTransfer[];
+  ammoTransfers: AmmoTransfer[];
   movements: Movement[];
   courses: Course[];
   availableWeaponTypes: AvailableWeaponType[];
@@ -101,6 +103,7 @@ class StorageService {
     ammoMovements: [],
     weapons: [],
     weaponTransfers: [],
+    ammoTransfers: [],
     movements: [],
     courses: [],
     availableWeaponTypes: [],
@@ -210,6 +213,7 @@ class StorageService {
         fetchSync('/api/auxiliar-tabela-equipe'),
         fetchSync('/api/certificados'),
         fetchSync('/api/weapon-transfers'),
+        fetchSync('/api/ammo-transfers'),
         fetchSync('/api/tipos-materiais'),
         fetchSync('/api/materiais'),
         fetchSync('/api/cautelas-materiais'),
@@ -249,6 +253,7 @@ class StorageService {
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
+      this.state.ammoTransfers = (await fetchSync('/api/ammo-transfers')) || [];
       this.state.tiposMateriais = tiposMateriaisRes || [];
       this.state.materiais = materiaisRes || [];
       this.state.cautelasMateriais = cautelasMateriaisRes || [];
@@ -702,31 +707,31 @@ class StorageService {
     return true;
   }
 
-  // --- CALIBERS ---
+  // --- CALIBERS / CADASTRO DE MUNIÇÃO ---
   public getCalibers(): Caliber[] {
     return this.state.calibers;
   }
 
-  public async addCaliber(name: string): Promise<Caliber> {
+  public async addCaliber(name: string, fabricante?: string, tipo?: string, peso?: string): Promise<Caliber> {
     const res = await fetch('/api/calibers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, actor: this.state.currentUser })
+      body: JSON.stringify({ name, fabricante, tipo, peso, actor: this.state.currentUser })
     });
     const caliber = await res.json();
-    if (!res.ok) throw new Error(caliber.error || 'Erro ao cadastrar calibre.');
+    if (!res.ok) throw new Error(caliber.error || 'Erro ao cadastrar munição/calibre.');
     await this.refreshFromServer();
     return caliber;
   }
 
-  public async updateCaliber(id: string, name: string): Promise<Caliber> {
+  public async updateCaliber(id: string, name: string, fabricante?: string, tipo?: string, peso?: string): Promise<Caliber> {
     const res = await fetch(`/api/calibers/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, actor: this.state.currentUser })
+      body: JSON.stringify({ name, fabricante, tipo, peso, actor: this.state.currentUser })
     });
     const caliber = await res.json();
-    if (!res.ok) throw new Error(caliber.error || 'Erro ao atualizar calibre.');
+    if (!res.ok) throw new Error(caliber.error || 'Erro ao atualizar munição/calibre.');
     await this.refreshFromServer();
     return caliber;
   }
@@ -770,6 +775,12 @@ class StorageService {
     quantity: number;
     vaultSpaceId: string;
     recipientOrReason: string;
+    fabricante?: string;
+    tipoMunicao?: string;
+    pesoMunicao?: string;
+    loteMunicao?: string;
+    anoFabricacao?: number | string;
+    destinacao?: string;
     responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
     responsibleUserId?: string;
     responsibleName?: string;
@@ -793,6 +804,12 @@ class StorageService {
     quantity: number;
     vaultSpaceId: string;
     recipientOrReason: string;
+    fabricante?: string;
+    tipoMunicao?: string;
+    pesoMunicao?: string;
+    loteMunicao?: string;
+    anoFabricacao?: number | string;
+    destinacao?: string;
     responsibleType?: 'SISTEMA' | 'FORA_DO_SISTEMA';
     responsibleUserId?: string;
     responsibleName?: string;
@@ -816,7 +833,17 @@ class StorageService {
 
   public async updateAmmoStock(
     id: string,
-    data: { quantity: number; caliberId?: string; additionalInfo?: string },
+    data: { 
+      quantity: number; 
+      caliberId?: string; 
+      fabricante?: string;
+      tipoMunicao?: string;
+      pesoMunicao?: string;
+      loteMunicao?: string;
+      anoFabricacao?: number | string;
+      destinacao?: string;
+      additionalInfo?: string;
+    },
     actorUser?: User
   ): Promise<boolean> {
     const actor = actorUser || this.state.currentUser;
@@ -1084,6 +1111,7 @@ class StorageService {
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
       if (actor.role === 'Geral') return true;
+      if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
       if (actor.role === 'Administrador') {
         return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
       }
@@ -1106,6 +1134,9 @@ class StorageService {
     destinationDepartmentName: string;
     destinationUnitId: string;
     destinationUnitName: string;
+    destinationArmorerId?: string;
+    destinationArmorerName?: string;
+    destinationArmorerMasp?: string;
     destinationVaultSpaceId?: string;
     destinationVaultSpaceCode?: string;
     receiverOrTransporterName: string;
@@ -1192,6 +1223,119 @@ class StorageService {
       }
       return t.originUnitId === actor.unitId;
     });
+  }
+
+  // --- AMMO TRANSFERS BETWEEN UNITS ---
+  public getAmmoTransfers(currentUser?: User | null): AmmoTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
+    if (!allowedRoles.includes(actor.role)) return [];
+
+    if (actor.role === 'Geral') return this.state.ammoTransfers;
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      return this.state.ammoTransfers.filter(
+        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+      );
+    }
+    return this.state.ammoTransfers.filter(
+      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+    );
+  }
+
+  public getPendingIncomingAmmoTransfers(currentUser?: User | null): AmmoTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const transfers = this.getAmmoTransfers(actor);
+    return transfers.filter(t => {
+      if (t.status !== 'Pendente') return false;
+      if (actor.role === 'Geral') return true;
+      if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (actor.role === 'Administrador') {
+        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      }
+      if (actor.role === 'Armeiro') {
+        if (actor.managementScope !== 'unit') {
+          return t.destinationDepartmentId === actor.departmentId;
+        }
+        return t.destinationUnitId === actor.unitId;
+      }
+      return t.destinationUnitId === actor.unitId;
+    });
+  }
+
+  public async transferAmmo(data: {
+    originDepartmentId?: string;
+    originDepartmentName?: string;
+    originUnitId?: string;
+    originUnitName?: string;
+    destinationDepartmentId: string;
+    destinationDepartmentName: string;
+    destinationUnitId: string;
+    destinationUnitName: string;
+    destinationArmorerId?: string;
+    destinationArmorerName?: string;
+    destinationArmorerMasp?: string;
+    receiverOrTransporterName: string;
+    receiverOrTransporterMasp: string;
+    receiverOrTransporterCargo?: string;
+    reason: string;
+    items: {
+      caliberId: string;
+      caliberName: string;
+      fabricante?: string;
+      tipoMunicao?: string;
+      pesoMunicao?: string;
+      loteMunicao?: string;
+      anoFabricacao?: number | string;
+      destinacao?: string;
+      quantity: number;
+      originVaultSpaceId?: string;
+      originVaultCode?: string;
+    }[];
+    observation?: string;
+  }): Promise<AmmoTransfer> {
+    const res = await fetch('/api/ammo-transfers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...data, actor: this.state.currentUser })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao realizar transferência de munições.');
+    await this.refreshFromServer();
+    return result;
+  }
+
+  public async receiveAmmoTransfer(
+    transferId: string,
+    destinationVaultSpaceId: string,
+    observation?: string
+  ): Promise<boolean> {
+    const res = await fetch(`/api/ammo-transfers/${transferId}/receive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        destinationVaultSpaceId,
+        observation,
+        actor: this.state.currentUser
+      })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao dar recibo nas munições.');
+    await this.refreshFromServer();
+    return true;
+  }
+
+  public async undoAmmoTransfer(transferId: string): Promise<boolean> {
+    const res = await fetch(`/api/ammo-transfers/${transferId}/undo`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor: this.state.currentUser })
+    });
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || 'Erro ao desfazer transferência de munições.');
+    await this.refreshFromServer();
+    return true;
   }
 
   // --- WEAPON MOVEMENTS (CAUTELAS) ---
