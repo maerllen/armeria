@@ -45,6 +45,8 @@ import {
   CautelaArma,
   CautelaMunicao,
   AmmoTransfer,
+  ExplosivoTransfer,
+  MaterialTransfer,
   UserRole
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
@@ -89,6 +91,8 @@ export interface AppState {
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
   cautelasArmas: CautelaArma[];
   cautelasMunicoes: CautelaMunicao[];
+  explosivoTransfers: ExplosivoTransfer[];
+  materialTransfers: MaterialTransfer[];
 }
 
 class StorageService {
@@ -104,6 +108,8 @@ class StorageService {
     weapons: [],
     weaponTransfers: [],
     ammoTransfers: [],
+    explosivoTransfers: [],
+    materialTransfers: [],
     movements: [],
     courses: [],
     availableWeaponTypes: [],
@@ -268,6 +274,19 @@ class StorageService {
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
+
+      try {
+        const rawExpTrf = localStorage.getItem('pcmg_explosivo_transfers');
+        this.state.explosivoTransfers = rawExpTrf ? JSON.parse(rawExpTrf) : [];
+      } catch {
+        this.state.explosivoTransfers = [];
+      }
+      try {
+        const rawMatTrf = localStorage.getItem('pcmg_material_transfers');
+        this.state.materialTransfers = rawMatTrf ? JSON.parse(rawMatTrf) : [];
+      } catch {
+        this.state.materialTransfers = [];
+      }
 
       // Refresh current user reference if logged in, keeping activeRole if user had selected one
       if (this.state.currentUser) {
@@ -1334,6 +1353,376 @@ class StorageService {
     });
     const result = await res.json();
     if (!res.ok) throw new Error(result.error || 'Erro ao desfazer transferência de munições.');
+    await this.refreshFromServer();
+    return true;
+  }
+
+  // --- EXPLOSIVO TRANSFERS BETWEEN UNITS ---
+  public getExplosivoTransfers(currentUser?: User | null): ExplosivoTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const list = this.state.explosivoTransfers || [];
+    if (actor.role === 'Geral') return list;
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      return list.filter(
+        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+      );
+    }
+    return list.filter(
+      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+    );
+  }
+
+  public getPendingIncomingExplosivoTransfers(currentUser?: User | null): ExplosivoTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const transfers = this.getExplosivoTransfers(actor);
+    return transfers.filter(t => {
+      if (t.status !== 'Pendente') return false;
+      if (actor.role === 'Geral') return true;
+      if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (actor.role === 'Administrador') {
+        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      }
+      return t.destinationUnitId === actor.unitId;
+    });
+  }
+
+  public async transferExplosivo(data: {
+    originDepartmentId?: string;
+    originDepartmentName?: string;
+    originUnitId?: string;
+    originUnitName?: string;
+    destinationDepartmentId: string;
+    destinationDepartmentName: string;
+    destinationUnitId: string;
+    destinationUnitName: string;
+    destinationArmorerId?: string;
+    destinationArmorerName?: string;
+    destinationArmorerMasp?: string;
+    receiverOrTransporterName: string;
+    receiverOrTransporterMasp: string;
+    receiverOrTransporterCargo?: string;
+    reason: string;
+    explosivoId: string;
+    quantidade: number;
+    observation?: string;
+  }): Promise<ExplosivoTransfer> {
+    const actor = this.state.currentUser;
+    if (!actor) throw new Error('Usuário não autenticado.');
+
+    const exp = this.state.explosivos.find(e => e.id === data.explosivoId);
+    if (!exp) throw new Error('Material explosivo não encontrado.');
+    if (exp.quantidade < data.quantidade) {
+      throw new Error(`Quantidade solicitada (${data.quantidade}) maior que o saldo em estoque (${exp.quantidade}).`);
+    }
+
+    const updatedQty = exp.quantidade - data.quantidade;
+    await this.saveExplosivo({
+      ...exp,
+      quantidade: updatedQty
+    });
+
+    const transferId = `TRF-EXP-${Date.now()}`;
+    const newTransfer: ExplosivoTransfer = {
+      id: transferId,
+      protocolNumber: `TRF-EXP-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      transferDate: new Date().toISOString(),
+      originDepartmentId: data.originDepartmentId || exp.departmentId || actor.departmentId || '',
+      originDepartmentName: data.originDepartmentName || this.state.departments.find(d => d.id === exp.departmentId)?.name || '',
+      originUnitId: data.originUnitId || exp.unitId || actor.unitId || '',
+      originUnitName: data.originUnitName || this.state.units.find(u => u.id === exp.unitId)?.name || '',
+      destinationDepartmentId: data.destinationDepartmentId,
+      destinationDepartmentName: data.destinationDepartmentName,
+      destinationUnitId: data.destinationUnitId,
+      destinationUnitName: data.destinationUnitName,
+      destinationArmorerId: data.destinationArmorerId,
+      destinationArmorerName: data.destinationArmorerName,
+      destinationArmorerMasp: data.destinationArmorerMasp,
+      transferredByUserId: actor.id,
+      transferredByUserName: actor.name,
+      transferredByUserMasp: actor.masp,
+      transferredByUserRole: actor.role,
+      receiverOrTransporterName: data.receiverOrTransporterName,
+      receiverOrTransporterMasp: data.receiverOrTransporterMasp,
+      receiverOrTransporterCargo: data.receiverOrTransporterCargo,
+      reason: data.reason,
+      explosivoId: exp.id,
+      nomeExplosivo: exp.nome,
+      tipoNome: exp.tipo,
+      subtipoNome: exp.subtipo,
+      quantidade: data.quantidade,
+      unidadeMedida: exp.unidadeMedida,
+      lote: exp.lote,
+      originVaultCode: exp.localArmazenamento,
+      observation: data.observation,
+      status: 'Pendente',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!this.state.explosivoTransfers) this.state.explosivoTransfers = [];
+    this.state.explosivoTransfers.unshift(newTransfer);
+    try {
+      localStorage.setItem('pcmg_explosivo_transfers', JSON.stringify(this.state.explosivoTransfers));
+    } catch {}
+
+    await this.saveMovimentacaoExplosivo({
+      explosivoId: exp.id,
+      nomeExplosivo: exp.nome,
+      tipoMovimentacao: 'Transferência',
+      quantidade: data.quantidade,
+      unidadeMedida: exp.unidadeMedida,
+      motivo: `Transferência para a unidade: ${data.destinationUnitName} (${data.reason})`,
+      responsavelNome: data.receiverOrTransporterName,
+      responsavelMasp: data.receiverOrTransporterMasp,
+      localOrigemDestino: `${data.destinationUnitName} - Destinatário: ${data.destinationArmorerName || 'Armeiro'}`,
+      dataMovimentacao: new Date().toISOString().slice(0, 10),
+      observacoes: data.observation
+    });
+
+    return newTransfer;
+  }
+
+  public async receiveExplosivoTransfer(
+    transferId: string,
+    destinationVaultSpaceId: string,
+    observation?: string
+  ): Promise<boolean> {
+    const actor = this.state.currentUser;
+    if (!actor) throw new Error('Usuário não autenticado.');
+
+    const transfer = (this.state.explosivoTransfers || []).find(t => t.id === transferId);
+    if (!transfer) throw new Error('Transferência de explosivo não encontrada.');
+    if (transfer.status !== 'Pendente') throw new Error('Esta transferência já foi recebida ou cancelada.');
+
+    const vault = this.state.vaultSpaces.find(v => v.id === destinationVaultSpaceId);
+    const vaultCode = vault ? vault.code : 'Paiol Principal';
+
+    transfer.status = 'Recebido';
+    transfer.receivedAt = new Date().toISOString();
+    transfer.receivedByUserId = actor.id;
+    transfer.receivedByUserName = actor.name;
+    transfer.receivedByUserMasp = actor.masp;
+    transfer.destinationVaultSpaceId = destinationVaultSpaceId;
+    transfer.destinationVaultSpaceCode = vaultCode;
+    if (observation) {
+      transfer.observation = (transfer.observation ? transfer.observation + ' | ' : '') + `Recibo: ${observation}`;
+    }
+
+    try {
+      localStorage.setItem('pcmg_explosivo_transfers', JSON.stringify(this.state.explosivoTransfers));
+    } catch {}
+
+    const destExp = this.state.explosivos.find(e =>
+      e.unitId === transfer.destinationUnitId &&
+      e.nome.trim().toLowerCase() === transfer.nomeExplosivo.trim().toLowerCase() &&
+      e.lote.trim().toLowerCase() === (transfer.lote || '').trim().toLowerCase()
+    );
+
+    if (destExp) {
+      await this.saveExplosivo({
+        ...destExp,
+        quantidade: destExp.quantidade + transfer.quantidade,
+        vaultSpaceId: destinationVaultSpaceId,
+        localArmazenamento: vaultCode
+      });
+    } else {
+      const originalExp = this.state.explosivos.find(e => e.id === transfer.explosivoId);
+      await this.saveExplosivo({
+        nome: transfer.nomeExplosivo,
+        tipo: transfer.tipoNome || originalExp?.tipo || 'Outros',
+        subtipo: transfer.subtipoNome || originalExp?.subtipo || '',
+        quantidade: transfer.quantidade,
+        unidadeMedida: transfer.unidadeMedida || 'kg',
+        lote: transfer.lote || 'LOTE-TRF',
+        fabricante: originalExp?.fabricante || 'CBC',
+        dataFabricacao: originalExp?.dataFabricacao,
+        dataValidade: originalExp?.dataValidade,
+        classeRisco: originalExp?.classeRisco || '1.1D',
+        localArmazenamento: vaultCode,
+        vaultSpaceId: destinationVaultSpaceId,
+        status: 'Operacional',
+        departmentId: transfer.destinationDepartmentId,
+        unitId: transfer.destinationUnitId,
+        observacoes: `Recebido via Transferência ${transfer.protocolNumber || transfer.id} da unidade ${transfer.originUnitName}`
+      });
+    }
+
+    await this.refreshFromServer();
+    return true;
+  }
+
+  // --- MATERIAL TRANSFERS BETWEEN UNITS ---
+  public getMaterialTransfers(currentUser?: User | null): MaterialTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const list = this.state.materialTransfers || [];
+    if (actor.role === 'Geral') return list;
+    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+      return list.filter(
+        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+      );
+    }
+    return list.filter(
+      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+    );
+  }
+
+  public getPendingIncomingMaterialTransfers(currentUser?: User | null): MaterialTransfer[] {
+    const actor = currentUser || this.state.currentUser;
+    if (!actor) return [];
+    const transfers = this.getMaterialTransfers(actor);
+    return transfers.filter(t => {
+      if (t.status !== 'Pendente') return false;
+      if (actor.role === 'Geral') return true;
+      if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (actor.role === 'Administrador') {
+        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      }
+      return t.destinationUnitId === actor.unitId;
+    });
+  }
+
+  public async transferMaterial(data: {
+    originDepartmentId?: string;
+    originDepartmentName?: string;
+    originUnitId?: string;
+    originUnitName?: string;
+    destinationDepartmentId: string;
+    destinationDepartmentName: string;
+    destinationUnitId: string;
+    destinationUnitName: string;
+    destinationArmorerId?: string;
+    destinationArmorerName?: string;
+    destinationArmorerMasp?: string;
+    receiverOrTransporterName: string;
+    receiverOrTransporterMasp: string;
+    receiverOrTransporterCargo?: string;
+    reason: string;
+    materialId: string;
+    quantidade: number;
+    observation?: string;
+  }): Promise<MaterialTransfer> {
+    const actor = this.state.currentUser;
+    if (!actor) throw new Error('Usuário não autenticado.');
+
+    const mat = this.state.materiais.find(m => m.id === data.materialId);
+    if (!mat) throw new Error('Material não encontrado.');
+    if (mat.quantidadeDisponivel < data.quantidade) {
+      throw new Error(`Quantidade disponível insuficiente (${mat.quantidadeDisponivel}).`);
+    }
+
+    await this.saveMaterial({
+      ...mat,
+      quantidade: Math.max(0, mat.quantidade - data.quantidade),
+      quantidadeDisponivel: Math.max(0, mat.quantidadeDisponivel - data.quantidade)
+    });
+
+    const transferId = `TRF-MAT-${Date.now()}`;
+    const newTransfer: MaterialTransfer = {
+      id: transferId,
+      protocolNumber: `TRF-MAT-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      transferDate: new Date().toISOString(),
+      originDepartmentId: data.originDepartmentId || mat.departamentoId || actor.departmentId || '',
+      originDepartmentName: data.originDepartmentName || this.state.departments.find(d => d.id === mat.departamentoId)?.name || '',
+      originUnitId: data.originUnitId || mat.unidadeId || actor.unitId || '',
+      originUnitName: data.originUnitName || this.state.units.find(u => u.id === mat.unidadeId)?.name || '',
+      destinationDepartmentId: data.destinationDepartmentId,
+      destinationDepartmentName: data.destinationDepartmentName,
+      destinationUnitId: data.destinationUnitId,
+      destinationUnitName: data.destinationUnitName,
+      destinationArmorerId: data.destinationArmorerId,
+      destinationArmorerName: data.destinationArmorerName,
+      destinationArmorerMasp: data.destinationArmorerMasp,
+      transferredByUserId: actor.id,
+      transferredByUserName: actor.name,
+      transferredByUserMasp: actor.masp,
+      transferredByUserRole: actor.role,
+      receiverOrTransporterName: data.receiverOrTransporterName,
+      receiverOrTransporterMasp: data.receiverOrTransporterMasp,
+      receiverOrTransporterCargo: data.receiverOrTransporterCargo,
+      reason: data.reason,
+      materialId: mat.id,
+      nomeMaterial: mat.nome,
+      tipoNome: mat.tipoMaterialNome,
+      numeroSerie: mat.numeroSerie,
+      quantidade: data.quantidade,
+      originVaultCode: mat.localGuarda,
+      observation: data.observation,
+      status: 'Pendente',
+      createdAt: new Date().toISOString()
+    };
+
+    if (!this.state.materialTransfers) this.state.materialTransfers = [];
+    this.state.materialTransfers.unshift(newTransfer);
+    try {
+      localStorage.setItem('pcmg_material_transfers', JSON.stringify(this.state.materialTransfers));
+    } catch {}
+
+    return newTransfer;
+  }
+
+  public async receiveMaterialTransfer(
+    transferId: string,
+    destinationVaultSpaceId: string,
+    observation?: string
+  ): Promise<boolean> {
+    const actor = this.state.currentUser;
+    if (!actor) throw new Error('Usuário não autenticado.');
+
+    const transfer = (this.state.materialTransfers || []).find(t => t.id === transferId);
+    if (!transfer) throw new Error('Transferência de material não encontrada.');
+    if (transfer.status !== 'Pendente') throw new Error('Esta transferência já foi recebida ou cancelada.');
+
+    const vault = this.state.vaultSpaces.find(v => v.id === destinationVaultSpaceId);
+    const vaultCode = vault ? vault.code : 'Armário Central';
+
+    transfer.status = 'Recebido';
+    transfer.receivedAt = new Date().toISOString();
+    transfer.receivedByUserId = actor.id;
+    transfer.receivedByUserName = actor.name;
+    transfer.receivedByUserMasp = actor.masp;
+    transfer.destinationVaultSpaceId = destinationVaultSpaceId;
+    transfer.destinationVaultSpaceCode = vaultCode;
+    if (observation) {
+      transfer.observation = (transfer.observation ? transfer.observation + ' | ' : '') + `Recibo: ${observation}`;
+    }
+
+    try {
+      localStorage.setItem('pcmg_material_transfers', JSON.stringify(this.state.materialTransfers));
+    } catch {}
+
+    const destMat = this.state.materiais.find(m =>
+      m.unidadeId === transfer.destinationUnitId &&
+      m.nome.trim().toLowerCase() === transfer.nomeMaterial.trim().toLowerCase() &&
+      (transfer.numeroSerie ? m.numeroSerie === transfer.numeroSerie : true)
+    );
+
+    if (destMat) {
+      await this.saveMaterial({
+        ...destMat,
+        quantidade: destMat.quantidade + transfer.quantidade,
+        quantidadeDisponivel: destMat.quantidadeDisponivel + transfer.quantidade,
+        localGuarda: vaultCode
+      });
+    } else {
+      const origMat = this.state.materiais.find(m => m.id === transfer.materialId);
+      await this.saveMaterial({
+        nome: transfer.nomeMaterial,
+        tipoMaterialId: origMat?.tipoMaterialId || '',
+        tipoMaterialNome: transfer.tipoNome || origMat?.tipoMaterialNome || 'Geral',
+        quantidade: transfer.quantidade,
+        quantidadeDisponivel: transfer.quantidade,
+        quantidadeEmUso: 0,
+        quantidadeConsumida: 0,
+        departamentoId: transfer.destinationDepartmentId,
+        unidadeId: transfer.destinationUnitId,
+        localGuarda: vaultCode,
+        numeroSerie: transfer.numeroSerie,
+        observacoes: `Recebido via Transferência ${transfer.protocolNumber || transfer.id} da unidade ${transfer.originUnitName}`
+      });
+    }
+
     await this.refreshFromServer();
     return true;
   }

@@ -108,9 +108,16 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
     return [];
   });
 
-  // Selection form helpers
-  const [addingStockId, setAddingStockId] = useState<string>('');
-  const [addingQuantity, setAddingQuantity] = useState<number>(50);
+  // Transporter selection: Default is destination armorer; can be any officer from origin or destination unit
+  const availableTransporters = useMemo(() => {
+    const allUsers = storage.getUsers();
+    return allUsers.filter(u => 
+      (u.unitId === originUnitId || u.unitId === destUnitId) &&
+      u.hasSystemAccess !== false
+    );
+  }, [originUnitId, destUnitId]);
+
+  const [selectedTransporterUserId, setSelectedTransporterUserId] = useState<string>('');
 
   // Transporter and transfer details
   const [transporterName, setTransporterName] = useState('');
@@ -119,21 +126,100 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
   const [reason, setReason] = useState('Remanejamento de Estoque Operacional');
   const [observation, setObservation] = useState('');
 
+  // Sync transporter with destination armorer by default
+  useEffect(() => {
+    if (destArmorerId) {
+      const arm = availableDestArmorers.find(u => u.id === destArmorerId);
+      if (arm) {
+        setSelectedTransporterUserId(arm.id);
+        setTransporterName(arm.name);
+        setTransporterMasp(arm.masp);
+        setTransporterCargo(arm.cargo || arm.role || 'Armeiro');
+      }
+    } else if (availableTransporters.length > 0 && !selectedTransporterUserId) {
+      const first = availableTransporters[0];
+      setSelectedTransporterUserId(first.id);
+      setTransporterName(first.name);
+      setTransporterMasp(first.masp);
+      setTransporterCargo(first.cargo || first.role || 'Policial');
+    }
+  }, [destArmorerId, availableDestArmorers, availableTransporters]);
+
+  // Selection form helpers (Cascata: Fabricante -> Calibre -> Locais no cofre com lote, ano e saldo -> Quantidade)
+  const availableOriginFabricantes = useMemo(() => {
+    const fabs = availableOriginStocks.map(s => {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      return (s.fabricante || cal?.fabricante || 'CBC').trim();
+    });
+    return Array.from(new Set(fabs.filter(Boolean)));
+  }, [availableOriginStocks, calibers]);
+
+  const [selectedAddFabricante, setSelectedAddFabricante] = useState<string>('');
+
+  useEffect(() => {
+    if (availableOriginFabricantes.length > 0) {
+      if (!selectedAddFabricante || !availableOriginFabricantes.includes(selectedAddFabricante)) {
+        setSelectedAddFabricante(availableOriginFabricantes[0]);
+      }
+    } else {
+      setSelectedAddFabricante('');
+    }
+  }, [availableOriginFabricantes, selectedAddFabricante]);
+
+  // Calibres disponíveis do fabricante selecionado
+  const availableOriginCalibers = useMemo(() => {
+    if (!selectedAddFabricante) return [];
+    const matching = availableOriginStocks.filter(s => {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      const fab = (s.fabricante || cal?.fabricante || 'CBC').trim();
+      return fab.toLowerCase() === selectedAddFabricante.toLowerCase();
+    });
+    const cIds = Array.from(new Set(matching.map(s => s.caliberId)));
+    return calibers.filter(c => cIds.includes(c.id));
+  }, [availableOriginStocks, selectedAddFabricante, calibers]);
+
+  const [selectedAddCaliberId, setSelectedAddCaliberId] = useState<string>('');
+
+  useEffect(() => {
+    if (availableOriginCalibers.length > 0) {
+      if (!selectedAddCaliberId || !availableOriginCalibers.some(c => c.id === selectedAddCaliberId)) {
+        setSelectedAddCaliberId(availableOriginCalibers[0].id);
+      }
+    } else {
+      setSelectedAddCaliberId('');
+    }
+  }, [availableOriginCalibers, selectedAddCaliberId]);
+
+  // Locais no cofre onde o calibre selecionado está cadastrado
+  const availableVaultStocksForSelection = useMemo(() => {
+    if (!selectedAddFabricante || !selectedAddCaliberId) return [];
+    return availableOriginStocks.filter(s => {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      const fab = (s.fabricante || cal?.fabricante || 'CBC').trim();
+      const matchFab = fab.toLowerCase() === selectedAddFabricante.toLowerCase();
+      const matchCal = s.caliberId === selectedAddCaliberId;
+      return matchFab && matchCal && s.quantity > 0;
+    });
+  }, [availableOriginStocks, selectedAddFabricante, selectedAddCaliberId, calibers]);
+
+  const [addingStockId, setAddingStockId] = useState<string>('');
+  const [addingQuantity, setAddingQuantity] = useState<number>(50);
+
+  useEffect(() => {
+    if (availableVaultStocksForSelection.length > 0) {
+      const unselected = availableVaultStocksForSelection.filter(s => !draftItems.some(d => d.stockId === s.id));
+      const target = unselected[0] || availableVaultStocksForSelection[0];
+      setAddingStockId(target.id);
+      setAddingQuantity(Math.min(50, target.quantity));
+    } else {
+      setAddingStockId('');
+    }
+  }, [availableVaultStocksForSelection, draftItems]);
+
   // Confirmation Alert Dialog State
   const [showConfirmAlert, setShowConfirmAlert] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Set default addingStockId when available stocks change
-  useEffect(() => {
-    const unselected = availableOriginStocks.filter(s => !draftItems.some(d => d.stockId === s.id));
-    if (unselected.length > 0) {
-      setAddingStockId(unselected[0].id);
-      setAddingQuantity(Math.min(50, unselected[0].quantity));
-    } else {
-      setAddingStockId('');
-    }
-  }, [availableOriginStocks, draftItems]);
 
   const handleAddDraftItem = () => {
     if (!addingStockId) return;
@@ -439,59 +525,107 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
               </div>
             ) : (
               <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 space-y-3">
-                <div className="text-xs font-bold text-slate-200">Adicionar Lote à Lista de Envio:</div>
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
-                  <div className="md:col-span-8">
+                <div className="text-xs font-bold text-slate-200">
+                  Adicionar Lote à Lista de Envio (Cascata Técnica):
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  {/* 1. Fabricante */}
+                  <div>
                     <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                      Lote de Munição Disponível
+                      1. Fabricante
+                    </label>
+                    <select
+                      value={selectedAddFabricante}
+                      onChange={(e) => setSelectedAddFabricante(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-semibold focus:border-amber-500"
+                    >
+                      {availableOriginFabricantes.length === 0 ? (
+                        <option value="">Sem fabricantes</option>
+                      ) : (
+                        availableOriginFabricantes.map(f => (
+                          <option key={f} value={f}>{f}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {/* 2. Calibre */}
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      2. Calibre daquele Fabricante
+                    </label>
+                    <select
+                      value={selectedAddCaliberId}
+                      onChange={(e) => setSelectedAddCaliberId(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono font-bold focus:border-amber-500"
+                    >
+                      {availableOriginCalibers.length === 0 ? (
+                        <option value="">Nenhum calibre</option>
+                      ) : (
+                        availableOriginCalibers.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  {/* 3. Locais no cofre onde está cadastrado */}
+                  <div className="md:col-span-2">
+                    <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                      3. Local no Cofre • Lote • Ano • Saldo Disponível
                     </label>
                     <select
                       value={addingStockId}
                       onChange={(e) => {
                         const sId = e.target.value;
                         setAddingStockId(sId);
-                        const found = availableOriginStocks.find(s => s.id === sId);
+                        const found = availableVaultStocksForSelection.find(s => s.id === sId);
                         if (found) setAddingQuantity(Math.min(50, found.quantity));
                       }}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-sky-500"
                     >
-                      <option value="">Selecione um lote...</option>
-                      {availableOriginStocks.map(st => {
-                        const cal = calibers.find(c => c.id === st.caliberId);
-                        const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
-                        const isAlreadyAdded = draftItems.some(d => d.stockId === st.id);
-                        return (
-                          <option key={st.id} value={st.id} disabled={isAlreadyAdded}>
-                            {cal?.name || st.caliberId} | Fab: {st.fabricante || cal?.fabricante || 'N/I'} | Lote: {st.loteMunicao || 'S/L'} | Cofre: {vault?.code || 'N/A'} (Saldo: {st.quantity} un.) {isAlreadyAdded ? '✓ Já Adicionado' : ''}
-                          </option>
-                        );
-                      })}
+                      {availableVaultStocksForSelection.length === 0 ? (
+                        <option value="">Nenhum cofre com este calibre no momento</option>
+                      ) : (
+                        availableVaultStocksForSelection.map(st => {
+                          const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+                          const isAlreadyAdded = draftItems.some(d => d.stockId === st.id);
+                          return (
+                            <option key={st.id} value={st.id} disabled={isAlreadyAdded}>
+                              Cofre: {vault?.code || 'Padrão'} | Lote: {st.loteMunicao || 'S/L'} | Ano: {st.anoFabricacao || 'N/A'} (Saldo: {st.quantity} un.) {isAlreadyAdded ? '✓ Já Adicionado' : ''}
+                            </option>
+                          );
+                        })
+                      )}
                     </select>
                   </div>
+                </div>
 
-                  <div className="md:col-span-2">
+                <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end pt-1 border-t border-slate-800/60">
+                  <div className="md:col-span-9">
                     <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                      Quantidade
+                      Quantidade a Transferir
                     </label>
                     <input
                       type="number"
                       min="1"
-                      max={availableOriginStocks.find(s => s.id === addingStockId)?.quantity || 999999}
+                      max={availableVaultStocksForSelection.find(s => s.id === addingStockId)?.quantity || 999999}
                       value={addingQuantity}
                       onChange={(e) => setAddingQuantity(parseInt(e.target.value) || 0)}
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-emerald-400 font-mono font-bold"
                     />
                   </div>
 
-                  <div className="md:col-span-2">
+                  <div className="md:col-span-3">
                     <button
                       type="button"
                       onClick={handleAddDraftItem}
                       disabled={!addingStockId || draftItems.some(d => d.stockId === addingStockId)}
-                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center space-x-1"
+                      className="w-full bg-sky-600 hover:bg-sky-500 disabled:opacity-40 text-white font-bold text-xs py-2 px-3 rounded-xl transition flex items-center justify-center space-x-1 shadow"
                     >
                       <Plus className="w-3.5 h-3.5" />
-                      <span>Incluir</span>
+                      <span>Incluir Lote</span>
                     </button>
                   </div>
                 </div>
@@ -575,6 +709,37 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
             <div className="flex items-center space-x-2 text-xs font-bold text-slate-200 uppercase tracking-wider">
               <UserCheck className="w-4 h-4 text-emerald-400" />
               <span>4. Responsável pelo Transporte e Justificativa</span>
+            </div>
+
+            <div>
+              <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1 flex items-center justify-between">
+                <span>Selecionar Policial Responsável pelo Transporte (Unidades Remetente / Destinatária)</span>
+                <span className="text-[10px] text-sky-400 font-mono font-normal">Padrão: Armeiro que irá receber</span>
+              </label>
+              <select
+                value={selectedTransporterUserId}
+                onChange={(e) => {
+                  const uId = e.target.value;
+                  setSelectedTransporterUserId(uId);
+                  const found = availableTransporters.find(u => u.id === uId);
+                  if (found) {
+                    setTransporterName(found.name);
+                    setTransporterMasp(found.masp);
+                    setTransporterCargo(found.cargo || found.role || 'Policial');
+                  }
+                }}
+                className="w-full bg-slate-900 border border-sky-600/60 rounded-xl px-3 py-2 text-xs text-sky-200 font-medium focus:border-sky-400"
+              >
+                {availableTransporters.map(u => {
+                  const isDest = u.unitId === destUnitId;
+                  const isArm = u.id === destArmorerId;
+                  return (
+                    <option key={u.id} value={u.id}>
+                      {u.name} (MASP: {u.masp}) - {u.cargo || u.role} [{isDest ? 'Destino' : 'Origem'}]{isArm ? ' ★ Armeiro que irá receber (Padrão)' : ''}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

@@ -376,8 +376,8 @@ export default function App() {
         {/* Main Workspace */}
         <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
-          {/* Dashboard Summary Cards (Oculto no módulo de explosivos a pedido) */}
-          {activeModule !== 'explosivos' && (
+          {/* Dashboard Summary Cards (Oculto nos módulos especificados a pedido) */}
+          {!['explosivos', 'meu-perfil', 'cautela-armas', 'cautela-municoes', 'armas', 'municoes', 'movimentacoes'].includes(activeModule) && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
               <div className="glass-card hover:border-amber-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
                 <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 shrink-0">

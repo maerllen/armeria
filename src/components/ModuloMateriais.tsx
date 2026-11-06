@@ -120,6 +120,17 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     return now.toISOString().slice(0, 16);
   });
 
+  // Form states for Transfer Modal
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferMaterialTarget, setTransferMaterialTarget] = useState<Material | null>(null);
+  const [transferQtd, setTransferQtd] = useState<number>(1);
+  const [transferDestDeptId, setTransferDestDeptId] = useState('');
+  const [transferDestUnitId, setTransferDestUnitId] = useState('');
+  const [transferDestArmorerId, setTransferDestArmorerId] = useState('');
+  const [transferTransporterId, setTransferTransporterId] = useState('');
+  const [transferReason, setTransferReason] = useState('Abastecimento de material na unidade');
+  const [transferObs, setTransferObs] = useState('');
+
   // Permission logic
   const isGeral = currentUser?.role === 'Geral';
   const isAdmin = currentUser?.role === 'Administrador';
@@ -370,6 +381,74 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     setCautelaDataRetirada(now.toISOString().slice(0, 16));
     setShowCautelaModal(true);
+  };
+
+  // Open Transfer Modal for a Material
+  const handleOpenTransfer = (mat: Material) => {
+    setTransferMaterialTarget(mat);
+    setTransferQtd(1);
+    setTransferDestDeptId(departments[0]?.id || '');
+    const firstUnits = units.filter(u => u.departmentId === (departments[0]?.id || ''));
+    setTransferDestUnitId(firstUnits[0]?.id || '');
+    setTransferDestArmorerId('');
+    setTransferTransporterId('');
+    setTransferReason('Abastecimento e suprimento de carga');
+    setTransferObs('');
+    setShowTransferModal(true);
+  };
+
+  // Submit Material Transfer
+  const handleSaveTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!transferMaterialTarget) return;
+
+    if (transferQtd <= 0 || transferQtd > transferMaterialTarget.quantidadeDisponivel) {
+      setErrorMessage(`Quantidade inválida! Disponível: ${transferMaterialTarget.quantidadeDisponivel}.`);
+      return;
+    }
+    if (!transferDestDeptId || !transferDestUnitId) {
+      setErrorMessage('Selecione o departamento e a unidade de destino.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const destDept = departments.find(d => d.id === transferDestDeptId);
+      const destUnit = units.find(u => u.id === transferDestUnitId);
+      const destArmorer = allUsers.find(u => u.id === transferDestArmorerId);
+      const transp = allUsers.find(u => u.id === transferTransporterId) || destArmorer || currentUser;
+
+      await storage.transferMaterial({
+        originDepartmentId: transferMaterialTarget.departamentoId || currentUser?.departmentId,
+        originDepartmentName: departments.find(d => d.id === transferMaterialTarget.departamentoId)?.name || currentUser?.departmentName,
+        originUnitId: transferMaterialTarget.unidadeId || currentUser?.unitId,
+        originUnitName: units.find(u => u.id === transferMaterialTarget.unidadeId)?.name || currentUser?.unitName,
+        destinationDepartmentId: transferDestDeptId,
+        destinationDepartmentName: destDept?.name || 'Departamento Destino',
+        destinationUnitId: transferDestUnitId,
+        destinationUnitName: destUnit?.name || 'Unidade Destino',
+        destinationArmorerId: destArmorer?.id,
+        destinationArmorerName: destArmorer?.name,
+        destinationArmorerMasp: destArmorer?.masp,
+        receiverOrTransporterName: transp?.name || 'Armeiro Destinatário',
+        receiverOrTransporterMasp: transp?.masp || 'N/A',
+        receiverOrTransporterCargo: transp?.cargo || transp?.role,
+        reason: transferReason,
+        materialId: transferMaterialTarget.id,
+        quantidade: transferQtd,
+        observation: transferObs
+      });
+
+      setShowTransferModal(false);
+      setSuccessMessage(`Transferência de ${transferQtd}x "${transferMaterialTarget.nome}" para a unidade ${destUnit?.name} despachada com sucesso. Aguarda recibo do armeiro de destino.`);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Erro ao realizar transferência de material.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Submit Cautela
@@ -877,6 +956,23 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                               <ArrowRightLeft className="w-3.5 h-3.5" />
                               <span>Cautelar</span>
                             </button>
+
+                            {/* Transferir Material Button (Armeiro / Admin / Geral) */}
+                            {canInsertMaterial && (
+                              <button
+                                onClick={() => handleOpenTransfer(mat)}
+                                disabled={mat.quantidadeDisponivel <= 0}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition ${
+                                  mat.quantidadeDisponivel > 0
+                                    ? 'bg-sky-500/20 hover:bg-sky-500 text-sky-300 hover:text-slate-950 border border-sky-500/30'
+                                    : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-800'
+                                }`}
+                                title="Transferir material para outra unidade"
+                              >
+                                <Building2 className="w-3.5 h-3.5" />
+                                <span>Transferir</span>
+                              </button>
+                            )}
 
                             {canInsertMaterial && (
                               <>
@@ -1887,6 +1983,198 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     : returnFoiConsumido
                     ? 'Confirmar Baixa Permanente por Consumo'
                     : 'Confirmar Devolução'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: TRANSFERÊNCIA DE MATERIAL ENTRE UNIDADES           */}
+      {/* ========================================================= */}
+      {showTransferModal && transferMaterialTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">
+                    Transferir Material para Outra Unidade
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {transferMaterialTarget.nome} ({transferMaterialTarget.tipoMaterialNome})
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowTransferModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveTransfer} className="p-6 space-y-4 text-xs">
+              
+              <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-1">
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Disponível em Estoque:</span>
+                  <strong className="text-emerald-400 font-mono text-sm">{transferMaterialTarget.quantidadeDisponivel} un.</strong>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-400">Local de Guarda Atual:</span>
+                  <span className="text-slate-200 font-mono">{transferMaterialTarget.localGuarda}</span>
+                </div>
+              </div>
+
+              {/* Quantidade a Transferir */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Quantidade a Transferir *
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max={transferMaterialTarget.quantidadeDisponivel}
+                  required
+                  value={transferQtd}
+                  onChange={(e) => setTransferQtd(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 font-mono text-sm focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              {/* Destino da Transferência */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Departamento de Destino *
+                  </label>
+                  <select
+                    value={transferDestDeptId}
+                    onChange={(e) => {
+                      setTransferDestDeptId(e.target.value);
+                      const uList = units.filter(u => u.departmentId === e.target.value);
+                      setTransferDestUnitId(uList[0]?.id || '');
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                    required
+                  >
+                    <option value="">Selecione...</option>
+                    {departments.map(d => (
+                      <option key={d.id} value={d.id}>{d.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Unidade de Destino *
+                  </label>
+                  <select
+                    value={transferDestUnitId}
+                    onChange={(e) => setTransferDestUnitId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                    required
+                  >
+                    <option value="">Selecione...</option>
+                    {units
+                      .filter(u => !transferDestDeptId || u.departmentId === transferDestDeptId)
+                      .map(u => (
+                        <option key={u.id} value={u.id}>{u.name}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Armeiro Destinatário (Receptor):
+                  </label>
+                  <select
+                    value={transferDestArmorerId}
+                    onChange={(e) => {
+                      setTransferDestArmorerId(e.target.value);
+                      if (!transferTransporterId) setTransferTransporterId(e.target.value);
+                    }}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Selecione o armeiro...</option>
+                    {allUsers
+                      .filter(u => !transferDestUnitId || u.unitId === transferDestUnitId)
+                      .map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} (MASP: {u.masp}) - {u.role}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-semibold mb-1">
+                    Policial Responsável pelo Transporte:
+                  </label>
+                  <select
+                    value={transferTransporterId}
+                    onChange={(e) => setTransferTransporterId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Selecione o transportador...</option>
+                    {allUsers.map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name} (MASP: {u.masp}) - {u.unitName || u.role}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Motivo da Transferência *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={transferReason}
+                  onChange={(e) => setTransferReason(e.target.value)}
+                  placeholder="Ex: Reforço operacional, redistribuição de acervo"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Observações de Despacho (Opcional):
+                </label>
+                <input
+                  type="text"
+                  value={transferObs}
+                  onChange={(e) => setTransferObs(e.target.value)}
+                  placeholder="Informações adicionais..."
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setShowTransferModal(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-slate-200 transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 rounded-xl transition shadow"
+                >
+                  {isSubmitting ? 'Despachando...' : 'Despachar Transferência'}
                 </button>
               </div>
             </form>

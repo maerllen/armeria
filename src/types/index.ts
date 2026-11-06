@@ -118,7 +118,7 @@ export interface Course {
   createdAt: string;
 }
 
-export type VaultSpaceType = 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS';
+export type VaultSpaceType = 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS' | 'MATERIAIS';
 
 export interface VaultSpace {
   id: string;
@@ -750,6 +750,88 @@ export interface AmmoTransfer {
   receivedByUserName?: string;
   receivedByUserMasp?: string;
   receivedByUserRole?: UserRole;
+  createdAt: string;
+}
+
+export interface ExplosivoTransfer {
+  id: string;
+  protocolNumber?: string;
+  transferDate: string;
+  originDepartmentId: string;
+  originDepartmentName: string;
+  originUnitId: string;
+  originUnitName: string;
+  destinationDepartmentId: string;
+  destinationDepartmentName: string;
+  destinationUnitId: string;
+  destinationUnitName: string;
+  destinationArmorerId?: string;
+  destinationArmorerName?: string;
+  destinationArmorerMasp?: string;
+  destinationVaultSpaceId?: string;
+  destinationVaultSpaceCode?: string;
+  transferredByUserId: string;
+  transferredByUserName: string;
+  transferredByUserMasp: string;
+  transferredByUserRole?: UserRole;
+  receiverOrTransporterName: string;
+  receiverOrTransporterMasp: string;
+  receiverOrTransporterCargo?: string;
+  reason: string;
+  explosivoId: string;
+  nomeExplosivo: string;
+  tipoNome?: string;
+  subtipoNome?: string;
+  quantidade: number;
+  unidadeMedida: string;
+  lote?: string;
+  originVaultCode?: string;
+  observation?: string;
+  status: 'Pendente' | 'Recebido' | 'Cancelado';
+  receivedAt?: string;
+  receivedByUserId?: string;
+  receivedByUserName?: string;
+  receivedByUserMasp?: string;
+  createdAt: string;
+}
+
+export interface MaterialTransfer {
+  id: string;
+  protocolNumber?: string;
+  transferDate: string;
+  originDepartmentId: string;
+  originDepartmentName: string;
+  originUnitId: string;
+  originUnitName: string;
+  destinationDepartmentId: string;
+  destinationDepartmentName: string;
+  destinationUnitId: string;
+  destinationUnitName: string;
+  destinationArmorerId?: string;
+  destinationArmorerName?: string;
+  destinationArmorerMasp?: string;
+  destinationVaultSpaceId?: string;
+  destinationVaultSpaceCode?: string;
+  transferredByUserId: string;
+  transferredByUserName: string;
+  transferredByUserMasp: string;
+  transferredByUserRole?: UserRole;
+  receiverOrTransporterName: string;
+  receiverOrTransporterMasp: string;
+  receiverOrTransporterCargo?: string;
+  reason: string;
+  materialId: string;
+  nomeMaterial: string;
+  tipoNome?: string;
+  numeroSerie?: string;
+  quantidade: number;
+  originVaultCode?: string;
+  observation?: string;
+  status: 'Pendente' | 'Recebido' | 'Cancelado';
+  receivedAt?: string;
+  receivedByUserId?: string;
+  receivedByUserName?: string;
+  receivedByUserMasp?: string;
   createdAt: string;
 }
 

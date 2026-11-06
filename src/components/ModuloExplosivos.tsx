@@ -207,6 +207,10 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   const [movCustomMasp, setMovCustomMasp] = useState('');
   const [movOrigemDestino, setMovOrigemDestino] = useState('');
   const [movObservacoes, setMovObservacoes] = useState('');
+  const [movDestDeptId, setMovDestDeptId] = useState('');
+  const [movDestUnitId, setMovDestUnitId] = useState('');
+  const [movDestArmorerId, setMovDestArmorerId] = useState('');
+  const [movTransporterId, setMovTransporterId] = useState('');
 
   // Collapsible History Section (inicia oculto igual aos cofres e munições)
   const [isHistoryExpanded, setIsHistoryExpanded] = useState(false);
@@ -820,19 +824,62 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       return;
     }
 
-    // Validation for outgoing movements
-    if ((movTipo === 'Saída' || movTipo === 'Consumo/Treinamento' || movTipo === 'Descarte/Destruição') && movQuantidade > targetItem.quantidade) {
+    // Validation for outgoing / transfer movements
+    if ((movTipo === 'Saída' || movTipo === 'Consumo/Treinamento' || movTipo === 'Descarte/Destruição' || movTipo === 'Transferência') && movQuantidade > targetItem.quantidade) {
       setErrorMsg(`Saldo insuficiente! Saldo atual no estoque: ${targetItem.quantidade} ${targetItem.unidadeMedida}.`);
       return;
     }
 
-    // Determine responsible officer
+    if (movTipo === 'Transferência') {
+      if (!movDestDeptId || !movDestUnitId) {
+        setErrorMsg('Selecione o departamento e a unidade de destino para a transferência.');
+        return;
+      }
+      try {
+        const destDept = departments.find(d => d.id === movDestDeptId);
+        const destUnit = units.find(u => u.id === movDestUnitId);
+        const destArmorer = (users || []).find(u => u.id === movDestArmorerId);
+        const transp = (users || []).find(u => u.id === movTransporterId) || destArmorer || currentUser;
+
+        await storage.transferExplosivo({
+          originDepartmentId: targetItem.departmentId || currentUser.departmentId,
+          originDepartmentName: departments.find(d => d.id === targetItem.departmentId)?.name || currentUser.departmentName,
+          originUnitId: targetItem.unitId || currentUser.unitId,
+          originUnitName: units.find(u => u.id === targetItem.unitId)?.name || currentUser.unitName,
+          destinationDepartmentId: movDestDeptId,
+          destinationDepartmentName: destDept?.name || 'Departamento Destino',
+          destinationUnitId: movDestUnitId,
+          destinationUnitName: destUnit?.name || 'Unidade Destino',
+          destinationArmorerId: destArmorer?.id,
+          destinationArmorerName: destArmorer?.name,
+          destinationArmorerMasp: destArmorer?.masp,
+          receiverOrTransporterName: transp.name,
+          receiverOrTransporterMasp: transp.masp,
+          receiverOrTransporterCargo: transp.cargo || transp.role,
+          reason: movMotivo,
+          explosivoId: targetItem.id,
+          quantidade: Number(movQuantidade),
+          observation: movObservacoes
+        });
+
+        setShowMovementModal(false);
+        setSuccessMsg(`Transferência de explosivo despachada para a unidade ${destUnit?.name}. Consta como pendente de recibo no destino.`);
+        reloadData();
+        onRefresh();
+        return;
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Erro ao realizar transferência de explosivo.');
+        return;
+      }
+    }
+
+    // Determine responsible officer for local movement
     let respNome = currentUser.name;
     let respMasp = currentUser.masp;
-    let respId = currentUser.id;
+    let respId: string | undefined = currentUser.id;
 
     if (movResponsavelTipo === 'SISTEMA') {
-      const u = users.find(usr => usr.id === movResponsavelUserId);
+      const u = (users || []).find(usr => usr.id === movResponsavelUserId);
       if (u) {
         respNome = u.name;
         respMasp = u.masp;
@@ -2525,46 +2572,100 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                 )}
               </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs font-semibold text-slate-300">
-                    Origem / Destino / Local da Ação
-                  </label>
-                  {explosiveVaultSpaces.length > 0 && (
-                    <span className="text-[10px] text-cyan-400 font-mono flex items-center gap-1">
-                      <Vault className="w-3 h-3" />
-                      Locais de Explosivos
-                    </span>
-                  )}
-                </div>
+              {/* Bloco de Destino da Transferência entre Unidades */}
+              {movTipo === 'Transferência' && (
+                <div className="p-3 bg-sky-950/40 border border-sky-800/70 rounded-xl space-y-3">
+                  <div className="text-xs font-bold text-sky-200 uppercase tracking-wider flex items-center space-x-1.5">
+                    <ArrowRightLeft className="w-4 h-4 text-sky-400" />
+                    <span>Tramitação de Destino (Transferência de Unidade)</span>
+                  </div>
 
-                <div className="space-y-1.5">
-                  {explosiveVaultSpaces.length > 0 && (
-                    <select
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          setMovOrigemDestino(e.target.value);
-                        }
-                      }}
-                      className="w-full px-3 py-1.5 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-300 focus:border-amber-400 outline-none font-mono"
-                    >
-                      <option value="">Selecione um local no cofre (Paiol) ou digite abaixo...</option>
-                      {explosiveVaultSpaces.map(v => (
-                        <option key={v.id} value={`Paiol ${v.code}`}>
-                          {v.code} (Armazenamento de Explosivos)
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  <input
-                    type="text"
-                    value={movOrigemDestino}
-                    onChange={(e) => setMovOrigemDestino(e.target.value)}
-                    placeholder="Ex: Paiol PAIOL-01, Estande de Demolição Santa Luzia, Mandado Judicial"
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
-                  />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                        Departamento de Destino *
+                      </label>
+                      <select
+                        value={movDestDeptId}
+                        onChange={(e) => {
+                          setMovDestDeptId(e.target.value);
+                          const uList = units.filter(u => u.departmentId === e.target.value);
+                          setMovDestUnitId(uList[0]?.id || '');
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 outline-none focus:border-sky-400"
+                        required
+                      >
+                        <option value="">Selecione o departamento...</option>
+                        {departments.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                        Unidade de Destino *
+                      </label>
+                      <select
+                        value={movDestUnitId}
+                        onChange={(e) => setMovDestUnitId(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 outline-none focus:border-sky-400"
+                        required
+                      >
+                        <option value="">Selecione a unidade...</option>
+                        {units
+                          .filter(u => !movDestDeptId || u.departmentId === movDestDeptId)
+                          .map(u => (
+                            <option key={u.id} value={u.id}>{u.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                        Armeiro Destinatário (Quem irá receber):
+                      </label>
+                      <select
+                        value={movDestArmorerId}
+                        onChange={(e) => {
+                          setMovDestArmorerId(e.target.value);
+                          if (!movTransporterId) setMovTransporterId(e.target.value);
+                        }}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 outline-none focus:border-sky-400"
+                      >
+                        <option value="">Selecione o armeiro destinatário...</option>
+                        {(users || [])
+                          .filter(u => (!movDestUnitId || u.unitId === movDestUnitId))
+                          .map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} (MASP: {u.masp}) - {u.role}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                        Policial Responsável pelo Transporte:
+                      </label>
+                      <select
+                        value={movTransporterId}
+                        onChange={(e) => setMovTransporterId(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-900 border border-slate-700 rounded-xl text-xs text-slate-100 outline-none focus:border-sky-400"
+                      >
+                        <option value="">Selecione o policial transportador...</option>
+                        {(users || []).map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} (MASP: {u.masp}) - {u.unitName || u.role}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">

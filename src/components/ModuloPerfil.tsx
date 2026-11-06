@@ -45,10 +45,47 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Notificações de Cautelas Autorizadas para o usuário logado
-  const userArmasCautelas = storage.getCautelasArmas().filter(c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA');
-  const userMunicoesCautelas = storage.getCautelasMunicoes().filter(c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA');
+  // Notificações de Cautelas Autorizadas para o usuário logado com dismiss no clique
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`pc_dismissed_alerts_${activeUser.id}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const userArmasCautelas = storage.getCautelasArmas().filter(
+    c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
+  );
+  const userMunicoesCautelas = storage.getCautelasMunicoes().filter(
+    c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
+  );
   const totalAutorizadas = userArmasCautelas.length + userMunicoesCautelas.length;
+
+  const handleDismissAndNavigate = (targetMod: 'cautela-armas' | 'cautela-municoes', idsToDismiss: string[]) => {
+    const updated = [...dismissedAlertIds, ...idsToDismiss];
+    setDismissedAlertIds(updated);
+    try {
+      localStorage.setItem(`pc_dismissed_alerts_${activeUser.id}`, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+    if (onNavigateToModule) {
+      onNavigateToModule(targetMod);
+    }
+  };
+
+  const handleDismissAll = () => {
+    const allIds = [...userArmasCautelas.map(c => c.id), ...userMunicoesCautelas.map(c => c.id)];
+    const updated = [...dismissedAlertIds, ...allIds];
+    setDismissedAlertIds(updated);
+    try {
+      localStorage.setItem(`pc_dismissed_alerts_${activeUser.id}`, JSON.stringify(updated));
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (activeUser) {
@@ -93,10 +130,10 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   return (
     <div className="space-y-6">
       
-      {/* Notificação de Cautelas Autorizadas prontas para impressão de recibo */}
+      {/* Notificação de Cautelas Autorizadas prontas para impressão de recibo (Some ao clicar) */}
       {totalAutorizadas > 0 && (
-        <div className="bg-gradient-to-r from-emerald-950/90 to-teal-950/90 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 shadow-lg shadow-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in">
-          <div className="flex items-center space-x-3.5">
+        <div className="bg-gradient-to-r from-emerald-950/90 to-teal-950/90 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 shadow-lg shadow-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative">
+          <div className="flex items-center space-x-3.5 pr-8 sm:pr-0">
             <div className="p-2.5 bg-emerald-500/20 text-emerald-400 rounded-xl border border-emerald-500/30 shrink-0">
               <CheckCircle2 className="w-6 h-6" />
             </div>
@@ -105,7 +142,7 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
                 Autorização Concluída pelo Armeiro! ({totalAutorizadas} cautela{totalAutorizadas > 1 ? 's' : ''} pronta{totalAutorizadas > 1 ? 's' : ''})
               </h4>
               <p className="text-xs text-emerald-300/80 mt-0.5">
-                Sua solicitação foi autorizada e liberada pela armaria. Você já pode emitir e imprimir o recibo/termo oficial.
+                Sua solicitação foi autorizada e liberada pela armaria. Clique para visualizar e imprimir o recibo.
               </p>
             </div>
           </div>
@@ -113,8 +150,9 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
           <div className="flex items-center space-x-2 shrink-0">
             {userArmasCautelas.length > 0 && onNavigateToModule && (
               <button
-                onClick={() => onNavigateToModule('cautela-armas')}
+                onClick={() => handleDismissAndNavigate('cautela-armas', userArmasCautelas.map(c => c.id))}
                 className="px-3.5 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow"
+                title="Abrir Cautela de Armas (este aviso sumirá após o clique)"
               >
                 <Crosshair className="w-3.5 h-3.5" />
                 <span>Ver Cautela de Armas ({userArmasCautelas.length})</span>
@@ -122,13 +160,21 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
             )}
             {userMunicoesCautelas.length > 0 && onNavigateToModule && (
               <button
-                onClick={() => onNavigateToModule('cautela-municoes')}
+                onClick={() => handleDismissAndNavigate('cautela-municoes', userMunicoesCautelas.map(c => c.id))}
                 className="px-3.5 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow"
+                title="Abrir Cautela de Munições (este aviso sumirá após o clique)"
               >
                 <Disc className="w-3.5 h-3.5" />
                 <span>Ver Cautela de Munições ({userMunicoesCautelas.length})</span>
               </button>
             )}
+            <button
+              onClick={handleDismissAll}
+              className="p-1.5 text-slate-400 hover:text-slate-100 hover:bg-slate-800/60 rounded-lg transition"
+              title="Dispensar aviso"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
