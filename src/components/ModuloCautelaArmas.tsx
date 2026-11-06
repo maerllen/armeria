@@ -8,7 +8,6 @@ import {
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
   ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock
 } from 'lucide-react';
-import { isCourseExpired } from '../utils/masks';
 import { printDocumentInPage } from '../utils/printHelper';
 
 interface ModuloCautelaArmasProps {
@@ -97,10 +96,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const availableAmmoForSelectedWeapon = useMemo(() => {
     if (!selectedWeapon) return [];
     const targetUnitId = selectedWeapon.unitId || currentUser.unitId;
+    const selCal = (selectedWeapon.caliber || '').toLowerCase().trim();
     return ammoStocks.filter(st => {
       const matchUnit = isGeral ? true : (st.unitId === targetUnitId);
       const cal = calibers.find(c => c.id === st.caliberId);
-      const matchCaliber = (cal && cal.name.toLowerCase() === selectedWeapon.caliber.toLowerCase()) ||
+      const calName = (cal?.name || '').toLowerCase().trim();
+      const matchCaliber = !selCal ||
+                           (cal && (calName.includes(selCal) || selCal.includes(calName))) ||
                            (st.caliberId === selectedWeapon.caliber);
       return matchUnit && matchCaliber && st.quantity > 0;
     });
@@ -187,45 +189,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'AUTORIZADA').length;
   }, [allCautelas, currentUser.id]);
 
-  // Armas disponíveis na unidade do usuário que ele é qualificado para manusear
+  // Armas disponíveis na unidade do usuário para solicitação de cautela (qualquer arma no cofre da unidade)
   const userUnitWeapons = useMemo(() => {
     const userUnitId = currentUser.unitId;
-    // Armas na mesma unidade e que estejam "No Cofre"
-    let available = weapons.filter(w => {
+    // Permite ao policial solicitar acautelamento de qualquer arma disponível no cofre de sua unidade
+    return weapons.filter(w => {
       const sameUnit = isGeral ? true : (w.unitId === userUnitId);
       return sameUnit && (w.status === 'No Cofre' || !w.status);
     });
-
-    // Se policial, filtrar pelas armas autorizadas pelos seus cursos válidos (< 2 anos)
-    if (currentUser.role === 'Policial') {
-      const userCourses = currentUser.courses || [];
-      const coursesDefs = storage.getCourses();
-
-      // Checa modelos e tipos permitidos pelos cursos não expirados
-      const allowedModels = new Set<string>();
-      const allowedTypes = new Set<string>();
-
-      userCourses.forEach(uc => {
-        if (!isCourseExpired(uc.completionDate)) {
-          const cDef = coursesDefs.find(c => c.id === uc.courseId);
-          if (cDef) {
-            cDef.allowedModels?.forEach(m => allowedModels.add(m.trim().toUpperCase()));
-            cDef.allowedWeaponTypes?.forEach(t => allowedTypes.add(t.trim().toUpperCase()));
-          }
-        }
-      });
-
-      // Se tiver cursos cadastrados, filtra por eles; caso não haja restrição estrita de cursos, permite armas convencionais
-      if (allowedModels.size > 0 || allowedTypes.size > 0) {
-        available = available.filter(w => 
-          allowedModels.has((w.model || '').trim().toUpperCase()) ||
-          allowedTypes.has((w.type || '').trim().toUpperCase())
-        );
-      }
-    }
-
-    return available;
-  }, [weapons, currentUser, isGeral]);
+  }, [weapons, currentUser.unitId, isGeral]);
 
 
   const availableAmmoInUnit = useMemo(() => {
@@ -725,7 +697,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <span>Solicitação de Cautela de Armamento Individual</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Visualização filtrada das armas disponíveis na sua unidade que você está habilitado a manusear.
+                Visualização de todas as armas disponíveis no cofre da sua unidade para solicitação de cautela.
               </p>
             </div>
 
@@ -752,13 +724,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         Acautelamento Direto pelo Armeiro (Sem solicitação prévia do policial)
                       </label>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-mono">Gera autorização e recibo imediatos</span>
+                    <span className="text-[10px] text-slate-400 font-mono">Deduz do cofre e gera recibo imediato</span>
                   </div>
 
                   {isDirectCautela && (
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                        Selecione o Policial Beneficiário (Responsável pela Cautela) <span className="text-amber-400">*</span>
+                        Selecione o Policial Beneficiário (Mesma Unidade) <span className="text-amber-400">*</span>
                       </label>
                       <select
                         value={targetOfficerId}
@@ -779,12 +751,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                  1. Selecione a Arma Disponível na Unidade ({userUnitWeapons.length} aptas)
+                  1. Selecione a Arma Disponível na Unidade ({userUnitWeapons.length} disponível{userUnitWeapons.length === 1 ? '' : 'is'})
                 </label>
                 {userUnitWeapons.length === 0 ? (
                   <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
                     <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-                    Não há armas disponíveis no cofre da sua unidade ou você não possui habilitação ativa (válida por até 2 anos) para os armamentos cadastrados.
+                    Não há armas com status "No Cofre" disponíveis na sua unidade no momento.
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">

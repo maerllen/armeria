@@ -162,12 +162,11 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
 
   // Cofres da unidade que possuem munições em estoque
   const availableUnitVaultsWithAmmo = useMemo(() => {
-    const vaultIds = new Set(availableUnitStocks.map(s => s.vaultSpaceId));
+    const vaultIds = new Set(availableUnitStocks.map(s => s.vaultSpaceId).filter(Boolean));
     const targetUnitId = currentUser.unitId;
     return vaultSpaces.filter(v => 
-      v.type === 'MUNIÇÕES' && 
       (isGeral ? true : v.unitId === targetUnitId) &&
-      vaultIds.has(v.id)
+      (vaultIds.has(v.id) || v.type === 'MUNIÇÕES')
     );
   }, [availableUnitStocks, vaultSpaces, currentUser.unitId, isGeral]);
 
@@ -178,10 +177,11 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
   }, [availableUnitVaultsWithAmmo, selectedVaultId]);
 
-  // Lotes de munição no cofre selecionado
+  // Lotes de munição no cofre selecionado (ou todos os lotes da unidade se não filtrado)
   const stocksInSelectedVault = useMemo(() => {
     if (!selectedVaultId) return availableUnitStocks;
-    return availableUnitStocks.filter(s => s.vaultSpaceId === selectedVaultId);
+    const inVault = availableUnitStocks.filter(s => s.vaultSpaceId === selectedVaultId);
+    return inVault.length > 0 ? inVault : availableUnitStocks;
   }, [availableUnitStocks, selectedVaultId]);
 
   // Sincroniza lote selecionado quando o cofre muda
@@ -697,42 +697,38 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 </div>
               )}
 
-              {/* 1. Seleção do Local no Cofre */}
+              {/* 1. Seleção do Local no Cofre / Estoque */}
               <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                    <span>1. Selecione o Local do Cofre da Unidade</span>
-                    <span className="text-[10px] text-cyan-400 font-mono font-normal">
-                      {availableUnitVaultsWithAmmo.length} cofre(s) com munições
-                    </span>
-                  </label>
-                  {availableUnitVaultsWithAmmo.length === 0 ? (
-                    <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
-                      <AlertTriangle className="w-5 h-5 text-amber-400 mx-auto mb-1.5" />
-                      Não há cofres com estoque de munições registrado na sua unidade.
-                    </div>
-                  ) : (
+                {availableUnitVaultsWithAmmo.length > 0 && (
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                      <span>1. Local do Cofre da Unidade</span>
+                      <span className="text-[10px] text-cyan-400 font-mono font-normal">
+                        {availableUnitVaultsWithAmmo.length} cofre(s) na unidade
+                      </span>
+                    </label>
                     <select
                       value={selectedVaultId}
                       onChange={(e) => setSelectedVaultId(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 font-bold focus:border-cyan-500 font-mono"
                     >
+                      <option value="">Todos os Cofres da Unidade ({availableUnitStocks.length} lote(s) disponíveis)</option>
                       {availableUnitVaultsWithAmmo.map(v => (
                         <option key={v.id} value={v.id}>
-                          {v.code}
+                          Cofre: {v.code}
                         </option>
                       ))}
                     </select>
-                  )}
-                </div>
+                  </div>
+                )}
 
-                {/* 2. Seleção de Lote / Tipo de Munição do Cofre Selecionado */}
-                {stocksInSelectedVault.length > 0 && (
+                {/* 2. Seleção de Lote / Tipo de Munição */}
+                {stocksInSelectedVault.length > 0 ? (
                   <div>
                     <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                      <span>2. Selecione o Lote e Tipo de Munição</span>
+                      <span>2. Selecione a Munição Disponível na Unidade</span>
                       <span className="text-[10px] text-cyan-400 font-mono font-normal">
-                        {stocksInSelectedVault.length} lote(s) neste cofre
+                        {stocksInSelectedVault.length} lote(s) disponível(is)
                       </span>
                     </label>
                     <select
@@ -754,13 +750,19 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                         const peso = stock.pesoMunicao || cal?.peso || 'N/I';
                         const lote = stock.loteMunicao || 'S/L';
                         const ano = stock.anoFabricacao || 'N/A';
+                        const cofre = stock.vaultCode ? `[${stock.vaultCode}] ` : '';
                         return (
                           <option key={stock.id} value={stock.id}>
-                            {stock.caliberName} • {tipo} - {peso} - Lote: {lote} - Ano: {ano} (Disponível: {stock.quantity} un.)
+                            {cofre}{stock.caliberName} • {tipo} - {peso} - Lote: {lote} - Ano: {ano} (Disponível: {stock.quantity} un.)
                           </option>
                         );
                       })}
                     </select>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
+                    <AlertTriangle className="w-5 h-5 text-amber-400 mx-auto mb-1.5" />
+                    Não há munições em estoque disponíveis no cofre da sua unidade no momento.
                   </div>
                 )}
               </div>
