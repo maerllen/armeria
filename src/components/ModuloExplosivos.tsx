@@ -225,6 +225,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
   // Sync with storage on mount or refresh
   const reloadData = async () => {
+    try {
+      await storage.refreshFromServer();
+    } catch {
+      // ignore
+    }
     setExplosivos(storage.getExplosivos(currentUser));
     setMovimentacoes(storage.getMovimentacoesExplosivos(currentUser));
     setAllVaults(storage.getVaultSpaces(currentUser));
@@ -233,33 +238,40 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     setFabricantesExplosivos(storage.getFabricantesExplosivos());
 
     try {
-      const [resMovs, resTipos, resSubtipos, resFabricantes] = await Promise.all([
+      const [resExp, resMovs, resTipos, resSubtipos, resFabricantes] = await Promise.all([
+        fetch('/api/explosivos'),
         fetch('/api/movimentacoes-explosivos'),
         fetch('/api/tipos-explosivos'),
         fetch('/api/subtipos-explosivos'),
         fetch('/api/fabricantes-explosivos')
       ]);
+      if (resExp.ok) {
+        const expData = await resExp.json();
+        if (Array.isArray(expData)) {
+          setExplosivos(expData);
+        }
+      }
       if (resMovs.ok) {
         const data = await resMovs.json();
-        if (Array.isArray(data) && data.length > 0) {
+        if (Array.isArray(data)) {
           setMovimentacoes(data);
         }
       }
       if (resTipos.ok) {
         const tiposData = await resTipos.json();
-        if (Array.isArray(tiposData) && tiposData.length > 0) {
+        if (Array.isArray(tiposData)) {
           setTiposExplosivos(tiposData);
         }
       }
       if (resSubtipos.ok) {
         const subtiposData = await resSubtipos.json();
-        if (Array.isArray(subtiposData) && subtiposData.length > 0) {
+        if (Array.isArray(subtiposData)) {
           setSubtiposExplosivos(subtiposData);
         }
       }
       if (resFabricantes.ok) {
         const fabData = await resFabricantes.json();
-        if (Array.isArray(fabData) && fabData.length > 0) {
+        if (Array.isArray(fabData)) {
           setFabricantesExplosivos(fabData);
         }
       }
@@ -284,18 +296,21 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     }));
   }, [tiposExplosivos]);
 
-  // Scoped vault spaces for the active unit/form unit - STRICTLY EXPLOSIVOS
+  // Scoped vault spaces for the active unit/form unit
   const activeUnitIdForVaults = formUnitId || (selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId);
 
   const availableVaultsForUnit = useMemo(() => {
-    if (!activeUnitIdForVaults || activeUnitIdForVaults === 'ALL') {
-      return allVaults.filter(v => v.type === 'EXPLOSIVOS');
-    }
-    return allVaults.filter(v => v.unitId === activeUnitIdForVaults && v.type === 'EXPLOSIVOS');
+    const unitVaults = (!activeUnitIdForVaults || activeUnitIdForVaults === 'ALL')
+      ? allVaults
+      : allVaults.filter(v => !v.unitId || v.unitId === activeUnitIdForVaults);
+
+    const dedicated = unitVaults.filter(v => v.type === 'EXPLOSIVOS');
+    if (dedicated.length > 0) return dedicated;
+    return unitVaults;
   }, [allVaults, activeUnitIdForVaults]);
 
   const explosiveVaultSpaces = useMemo(() => {
-    return availableVaultsForUnit.filter(v => v.type === 'EXPLOSIVOS');
+    return availableVaultsForUnit;
   }, [availableVaultsForUnit]);
 
   // Cascading subtipos: only options matching the chosen formTipo

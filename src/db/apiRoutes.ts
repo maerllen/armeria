@@ -6653,15 +6653,15 @@ apiRouter.get('/materiais', async (req: Request, res: Response) => {
     const params: any[] = [];
 
     if (departamentoId) {
-      query += ' AND departamento_id = ?';
+      query += ' AND DEPARTAMENTO_ID_MATERIAIS = ?';
       params.push(departamentoId);
     }
     if (unidadeId) {
-      query += ' AND unidade_id = ?';
+      query += ' AND UNIDADE_ID_MATERIAIS = ?';
       params.push(unidadeId);
     }
 
-    query += ' ORDER BY nome ASC';
+    query += ' ORDER BY NOME_MATERIAIS ASC';
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
@@ -6731,7 +6731,7 @@ apiRouter.post('/materiais', async (req: Request, res: Response) => {
 
     await pool.query(
       `INSERT INTO MATERIAIS 
-        (id, tipo_material_id, tipo_material_nome, nome, quantidade, quantidade_disponivel, quantidade_em_uso, quantidade_consumida, departamento_id, departamento_nome, unidade_id, unidade_nome, validade, local_guarda, numero_serie, observacoes, criado_por_usuario_id, criado_por_nome, data_criacao, data_atualizacao)
+        (ID_MATERIAIS, TIPO_MATERIAL_ID_MATERIAIS, TIPO_MATERIAL_NOME_MATERIAIS, NOME_MATERIAIS, QUANTIDADE_MATERIAIS, QUANTIDADE_DISPONIVEL_MATERIAIS, QUANTIDADE_EM_USO_MATERIAIS, QUANTIDADE_CONSUMIDA_MATERIAIS, DEPARTAMENTO_ID_MATERIAIS, DEPARTAMENTO_NOME_MATERIAIS, UNIDADE_ID_MATERIAIS, UNIDADE_NOME_MATERIAIS, VALIDADE_MATERIAIS, LOCAL_GUARDA_MATERIAIS, NUMERO_SERIE_MATERIAIS, OBSERVACOES_MATERIAIS, CRIADO_POR_USUARIO_ID_MATERIAIS, CRIADO_POR_NOME_MATERIAIS, DATA_CRIACAO_MATERIAIS, DATA_ATUALIZACAO_MATERIAIS)
        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         newId,
@@ -6797,26 +6797,25 @@ apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
 
     const newTotal = quantidade !== undefined ? Math.max(0, parseInt(quantidade, 10)) : current.quantidade;
     const inUse = Number(current.quantidade_em_uso || 0);
-    const consumed = Number(current.quantidade_consumida || 0);
     const newDisponivel = Math.max(0, newTotal - inUse);
 
     await pool.query(
       `UPDATE MATERIAIS SET
-        tipo_material_id = COALESCE(?, tipo_material_id),
-        tipo_material_nome = COALESCE(?, tipo_material_nome),
-        nome = COALESCE(?, nome),
-        quantidade = ?,
-        quantidade_disponivel = ?,
-        departamento_id = COALESCE(?, departamento_id),
-        departamento_nome = COALESCE(?, departamento_nome),
-        unidade_id = COALESCE(?, unidade_id),
-        unidade_nome = COALESCE(?, unidade_nome),
-        validade = ?,
-        local_guarda = COALESCE(?, local_guarda),
-        numero_serie = ?,
-        observacoes = ?,
-        data_atualizacao = NOW()
-       WHERE id = ?`,
+        TIPO_MATERIAL_ID_MATERIAIS = COALESCE(?, TIPO_MATERIAL_ID_MATERIAIS),
+        TIPO_MATERIAL_NOME_MATERIAIS = COALESCE(?, TIPO_MATERIAL_NOME_MATERIAIS),
+        NOME_MATERIAIS = COALESCE(?, NOME_MATERIAIS),
+        QUANTIDADE_MATERIAIS = ?,
+        QUANTIDADE_DISPONIVEL_MATERIAIS = ?,
+        DEPARTAMENTO_ID_MATERIAIS = COALESCE(?, DEPARTAMENTO_ID_MATERIAIS),
+        DEPARTAMENTO_NOME_MATERIAIS = COALESCE(?, DEPARTAMENTO_NOME_MATERIAIS),
+        UNIDADE_ID_MATERIAIS = COALESCE(?, UNIDADE_ID_MATERIAIS),
+        UNIDADE_NOME_MATERIAIS = COALESCE(?, UNIDADE_NOME_MATERIAIS),
+        VALIDADE_MATERIAIS = ?,
+        LOCAL_GUARDA_MATERIAIS = COALESCE(?, LOCAL_GUARDA_MATERIAIS),
+        NUMERO_SERIE_MATERIAIS = ?,
+        OBSERVACOES_MATERIAIS = ?,
+        DATA_ATUALIZACAO_MATERIAIS = NOW()
+       WHERE ID_MATERIAIS = ?`,
       [
         tipoMaterialId || null,
         tipoMaterialNome || null,
@@ -6926,19 +6925,19 @@ apiRouter.get('/cautelas-materiais', async (req: Request, res: Response) => {
     const params: any[] = [];
 
     if (departamentoId) {
-      query += ' AND departamento_id = ?';
+      query += ' AND DEPARTAMENTO_ID_CAUTELAS_MATERIAIS = ?';
       params.push(departamentoId);
     }
     if (unidadeId) {
-      query += ' AND unidade_id = ?';
+      query += ' AND UNIDADE_ID_CAUTELAS_MATERIAIS = ?';
       params.push(unidadeId);
     }
     if (status) {
-      query += ' AND status = ?';
+      query += ' AND STATUS_CAUTELAS_MATERIAIS = ?';
       params.push(status);
     }
 
-    query += ' ORDER BY data_retirada DESC';
+    query += ' ORDER BY DATA_RETIRADA_CAUTELAS_MATERIAIS DESC';
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
@@ -7016,7 +7015,7 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
     const qty = Math.max(1, parseInt(quantidade || '1', 10));
 
     // Verify stock availability
-    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, TIPO_MATERIAL_NOME_MATERIAIS as tipo_material_nome, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida FROM MATERIAIS WHERE ID_MATERIAIS = ?', [materialId]);
+    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, TIPO_MATERIAL_NOME_MATERIAIS as tipo_material_nome, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida, DEPARTAMENTO_ID_MATERIAIS as departamento_id, UNIDADE_ID_MATERIAIS as unidade_id FROM MATERIAIS WHERE ID_MATERIAIS = ?', [materialId]);
     if (!matRows || matRows.length === 0) {
       return res.status(404).json({ error: 'Material não encontrado no estoque.' });
     }
@@ -7048,12 +7047,12 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
     // Insert cautela
     await pool.query(
       `INSERT INTO CAUTELAS_MATERIAIS (
-        id, protocolo, material_id, material_nome, tipo_material_nome, quantidade,
-        tipo_destinatario, usuario_interno_id, usuario_interno_nome, usuario_interno_masp, usuario_interno_cargo,
-        usuario_externo_nome, usuario_externo_documento, usuario_externo_orgao, usuario_externo_telefone,
-        data_retirada, data_prevista_devolucao, finalidade, status, foi_consumido,
-        responsavel_entrega_id, responsavel_entrega_nome, responsavel_entrega_masp,
-        departamento_id, unidade_id, data_criacao, data_atualizacao
+        ID_CAUTELAS_MATERIAIS, PROTOCOLO_CAUTELAS_MATERIAIS, MATERIAL_ID_CAUTELAS_MATERIAIS, MATERIAL_NOME_CAUTELAS_MATERIAIS, TIPO_MATERIAL_NOME_CAUTELAS_MATERIAIS, QUANTIDADE_CAUTELAS_MATERIAIS,
+        TIPO_DESTINATARIO_CAUTELAS_MATERIAIS, USUARIO_INTERNO_ID_CAUTELAS_MATERIAIS, USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS, USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS, USUARIO_INTERNO_CARGO_CAUTELAS_MATERIAIS,
+        USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_DOCUMENTO_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_ORGAO_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_TELEFONE_CAUTELAS_MATERIAIS,
+        DATA_RETIRADA_CAUTELAS_MATERIAIS, DATA_PREVISTA_DEVOLUCAO_CAUTELAS_MATERIAIS, FINALIDADE_CAUTELAS_MATERIAIS, STATUS_CAUTELAS_MATERIAIS, FOI_CONSUMIDO_CAUTELAS_MATERIAIS,
+        RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS, RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS, RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS,
+        DEPARTAMENTO_ID_CAUTELAS_MATERIAIS, UNIDADE_ID_CAUTELAS_MATERIAIS, DATA_CRIACAO_CAUTELAS_MATERIAIS, DATA_ATUALIZACAO_CAUTELAS_MATERIAIS
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Uso', 0, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         newId,
@@ -7085,10 +7084,10 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
     // Update material quantities: reduce available, increase in_use
     await pool.query(
       `UPDATE MATERIAIS SET 
-        quantidade_disponivel = quantidade_disponivel - ?,
-        quantidade_em_uso = quantidade_em_uso + ?,
-        data_atualizacao = NOW()
-       WHERE id = ?`,
+        QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS - ?,
+        QUANTIDADE_EM_USO_MATERIAIS = QUANTIDADE_EM_USO_MATERIAIS + ?,
+        DATA_ATUALIZACAO_MATERIAIS = NOW()
+       WHERE ID_MATERIAIS = ?`,
       [qty, qty, materialId]
     );
 
@@ -7126,7 +7125,7 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
       responsavelRecebimentoMasp
     } = req.body;
 
-    const [cautRows]: any = await pool.query('SELECT ID_CAUTELAS_MATERIAIS as id, PROTOCOLO_CAUTELAS_MATERIAIS as protocolo, MATERIAL_ID_CAUTELAS_MATERIAIS as material_id, QUANTIDADE_CAUTELAS_MATERIAIS as quantidade, STATUS_CAUTELAS_MATERIAIS as status FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
+    const [cautRows]: any = await pool.query('SELECT ID_CAUTELAS_MATERIAIS as id, PROTOCOLO_CAUTELAS_MATERIAIS as protocolo, MATERIAL_ID_CAUTELAS_MATERIAIS as material_id, MATERIAL_NOME_CAUTELAS_MATERIAIS as material_nome, QUANTIDADE_CAUTELAS_MATERIAIS as quantidade, STATUS_CAUTELAS_MATERIAIS as status FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
     if (!cautRows || cautRows.length === 0) {
       return res.status(404).json({ error: 'Cautela de material não encontrada.' });
     }
@@ -7145,15 +7144,15 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
     // 1. Update cautela record
     await pool.query(
       `UPDATE CAUTELAS_MATERIAIS SET
-        status = ?,
-        foi_consumido = ?,
-        relato_uso_anomalias = ?,
-        data_devolucao = ?,
-        responsavel_recebimento_id = ?,
-        responsavel_recebimento_nome = ?,
-        responsavel_recebimento_masp = ?,
-        data_atualizacao = NOW()
-       WHERE id = ?`,
+        STATUS_CAUTELAS_MATERIAIS = ?,
+        FOI_CONSUMIDO_CAUTELAS_MATERIAIS = ?,
+        RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS = ?,
+        DATA_DEVOLUCAO_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_RECEBIMENTO_ID_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_RECEBIMENTO_NOME_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_RECEBIMENTO_MASP_CAUTELAS_MATERIAIS = ?,
+        DATA_ATUALIZACAO_CAUTELAS_MATERIAIS = NOW()
+       WHERE ID_CAUTELAS_MATERIAIS = ?`,
       [
         finalStatus,
         isConsumed ? 1 : 0,
@@ -7169,24 +7168,23 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
     // 2. Update material inventory
     if (isConsumed) {
       // Material foi utilizado e não retornará mais ao estoque!
-      // Reduz estoque total, zera quantidade em uso desta cautela, incrementa consumido
       await pool.query(
         `UPDATE MATERIAIS SET
-          quantidade = GREATEST(0, quantidade - ?),
-          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
-          quantidade_consumida = quantidade_consumida + ?,
-          data_atualizacao = NOW()
-         WHERE id = ?`,
+          QUANTIDADE_MATERIAIS = GREATEST(0, QUANTIDADE_MATERIAIS - ?),
+          QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
+          QUANTIDADE_CONSUMIDA_MATERIAIS = QUANTIDADE_CONSUMIDA_MATERIAIS + ?,
+          DATA_ATUALIZACAO_MATERIAIS = NOW()
+         WHERE ID_MATERIAIS = ?`,
         [qty, qty, qty, caut.material_id]
       );
     } else {
       // Retorna ao estoque disponível
       await pool.query(
         `UPDATE MATERIAIS SET
-          quantidade_disponivel = quantidade_disponivel + ?,
-          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
-          data_atualizacao = NOW()
-         WHERE id = ?`,
+          QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS + ?,
+          QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
+          DATA_ATUALIZACAO_MATERIAIS = NOW()
+         WHERE ID_MATERIAIS = ?`,
         [qty, qty, caut.material_id]
       );
     }
@@ -7226,7 +7224,7 @@ apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) 
     const { id } = req.params;
     const { deletedByUserId, deletedByName } = req.query as any;
 
-    const [cautRows]: any = await pool.query('SELECT ID_CAUTELAS_MATERIAIS as id, PROTOCOLO_CAUTELAS_MATERIAIS as protocolo, MATERIAL_ID_CAUTELAS_MATERIAIS as material_id, QUANTIDADE_CAUTELAS_MATERIAIS as quantidade, STATUS_CAUTELAS_MATERIAIS as status FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
+    const [cautRows]: any = await pool.query('SELECT ID_CAUTELAS_MATERIAIS as id, PROTOCOLO_CAUTELAS_MATERIAIS as protocolo, MATERIAL_ID_CAUTELAS_MATERIAIS as material_id, MATERIAL_NOME_CAUTELAS_MATERIAIS as material_nome, QUANTIDADE_CAUTELAS_MATERIAIS as quantidade, STATUS_CAUTELAS_MATERIAIS as status FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
     if (!cautRows || cautRows.length === 0) {
       return res.status(404).json({ error: 'Cautela não encontrada.' });
     }
@@ -7237,10 +7235,10 @@ apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) 
       const qty = Number(caut.quantidade || 1);
       await pool.query(
         `UPDATE MATERIAIS SET
-          quantidade_disponivel = quantidade_disponivel + ?,
-          quantidade_em_uso = GREATEST(0, quantidade_em_uso - ?),
-          data_atualizacao = NOW()
-         WHERE id = ?`,
+          QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS + ?,
+          QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
+          DATA_ATUALIZACAO_MATERIAIS = NOW()
+         WHERE ID_MATERIAIS = ?`,
         [qty, qty, caut.material_id]
       );
     }

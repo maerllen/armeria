@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   Material,
   TipoMaterial,
@@ -150,14 +150,31 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     (userUnitId && !isGeral && !isAdmin)
   );
 
-  // Available data from storage
-  const tiposMateriais = storage.getTiposMateriais();
-  const materiais = storage.getMateriais(currentUser);
-  const cautelas = storage.getCautelasMateriais(currentUser);
+  // Available data from storage with active state synchronization
+  const [tiposMateriais, setTiposMateriais] = useState<TipoMaterial[]>(() => storage.getTiposMateriais());
+  const [materiaisList, setMateriaisList] = useState<Material[]>(() => storage.getMateriais(currentUser));
+  const [cautelasList, setCautelasList] = useState<CautelaMaterial[]>(() => storage.getCautelasMateriais(currentUser));
+  const materiais = materiaisList;
+  const cautelas = cautelasList;
+
+  const reloadMateriais = async () => {
+    try {
+      await storage.refreshFromServer();
+    } catch {
+      // fallback to storage
+    }
+    setTiposMateriais(storage.getTiposMateriais());
+    setMateriaisList(storage.getMateriais(currentUser));
+    setCautelasList(storage.getCautelasMateriais(currentUser));
+  };
+
+  useEffect(() => {
+    reloadMateriais();
+  }, [currentUser]);
 
   // Filtered materials
   const filteredMateriais = useMemo(() => {
-    return materiais.filter(m => {
+    return materiaisList.filter(m => {
       const matchSearch =
         m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
         m.tipoMaterialNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -171,11 +188,11 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
 
       return matchSearch && matchType && matchDept && matchUnit;
     });
-  }, [materiais, searchTerm, selectedTypeFilter, selectedDeptFilter, selectedUnitFilter]);
+  }, [materiaisList, searchTerm, selectedTypeFilter, selectedDeptFilter, selectedUnitFilter]);
 
   // Filtered cautelas
   const filteredCautelas = useMemo(() => {
-    return cautelas.filter(c => {
+    return cautelasList.filter(c => {
       const matchSearch =
         c.materialNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (c.protocolo && c.protocolo.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -198,7 +215,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
 
       return matchSearch && matchStatus;
     });
-  }, [cautelas, searchTerm, cautelaStatusFilter]);
+  }, [cautelasList, searchTerm, cautelaStatusFilter]);
 
   // Departments & Units for select dropdowns
   const availableUnitsForForm = useMemo(() => {
@@ -305,6 +322,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setSuccessMessage(editingMaterial ? 'Material atualizado com sucesso!' : 'Novo material cadastrado com sucesso!');
       setTimeout(() => setSuccessMessage(null), 4000);
       onRefresh();
+      reloadMateriais();
     } else {
       setErrorMessage(result.error || 'Erro ao salvar material.');
     }
@@ -320,6 +338,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setSuccessMessage('Material excluído com sucesso.');
       setTimeout(() => setSuccessMessage(null), 3000);
       onRefresh();
+      reloadMateriais();
     } else {
       alert(res.error || 'Não foi possível excluir o material.');
     }
@@ -350,6 +369,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setSuccessMessage('Tipo de material cadastrado com sucesso!');
       setTimeout(() => setSuccessMessage(null), 3000);
       onRefresh();
+      reloadMateriais();
     } else {
       setErrorMessage(res.error || 'Erro ao cadastrar tipo.');
     }
@@ -444,6 +464,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setShowTransferModal(false);
       setSuccessMessage(`Transferência de ${transferQtd}x "${transferMaterialTarget.nome}" para a unidade ${destUnit?.name} despachada com sucesso. Aguarda recibo do armeiro de destino.`);
       onRefresh();
+      reloadMateriais();
     } catch (err: any) {
       setErrorMessage(err.message || 'Erro ao realizar transferência de material.');
     } finally {
@@ -514,6 +535,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setSuccessMessage('Cautela de material realizada com sucesso!');
       setTimeout(() => setSuccessMessage(null), 4000);
       onRefresh();
+      reloadMateriais();
     } else {
       setErrorMessage(res.error || 'Erro ao registrar cautela.');
     }
@@ -568,6 +590,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setSuccessMessage(msg);
       setTimeout(() => setSuccessMessage(null), 4000);
       onRefresh();
+      reloadMateriais();
     } else {
       setErrorMessage(res.error || 'Erro ao registrar devolução.');
     }

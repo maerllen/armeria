@@ -192,12 +192,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Armas disponíveis na unidade do usuário para solicitação de cautela (qualquer arma no cofre da unidade)
   const userUnitWeapons = useMemo(() => {
     const userUnitId = currentUser.unitId;
-    // Permite ao policial solicitar acautelamento de qualquer arma disponível no cofre de sua unidade
-    return weapons.filter(w => {
-      const sameUnit = isGeral ? true : (w.unitId === userUnitId);
-      return sameUnit && (w.status === 'No Cofre' || !w.status);
+    // Permite ao policial solicitar acautelamento de qualquer arma disponível na sua unidade
+    const sourceWeapons = (weapons && weapons.length > 0) ? weapons : storage.getAllWeapons();
+    return sourceWeapons.filter(w => {
+      const sameUnit = isGeral ? true : (
+        (userUnitId && w.unitId === userUnitId) ||
+        (!w.unitId && currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
+        (!userUnitId && currentUser.departmentId && w.departmentId === currentUser.departmentId)
+      );
+      const st = (w.status || '').toLowerCase().trim();
+      const isAvailable = !st || st.includes('cofre') || st.includes('dispon');
+      const notBlocked = st !== 'acautelada' && st !== 'em trânsito' && st !== 'em transito' && st !== 'manutenção' && st !== 'manutencao';
+      return sameUnit && (isAvailable || notBlocked);
     });
-  }, [weapons, currentUser.unitId, isGeral]);
+  }, [weapons, currentUser.unitId, currentUser.departmentId, isGeral]);
 
 
   const availableAmmoInUnit = useMemo(() => {

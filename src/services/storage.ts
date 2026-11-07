@@ -914,27 +914,17 @@ class StorageService {
     if (actor.role === 'Geral') {
       result = this.state.weapons;
     } else if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      result = this.state.weapons.filter(w => w.departmentId === actor.departmentId);
+      result = this.state.weapons.filter(w => !w.departmentId || w.departmentId === actor.departmentId);
     } else {
-      // Policial or Armeiro scoped to unit: filter weapons in unit
-      result = this.state.weapons.filter(w => w.unitId === actor.unitId);
-      if (actor.role === 'Policial') {
-        const validCourses = (actor.courses || []).filter(c => !isCourseExpired(c.completionDate));
-        const qualifiedCourseObjects = this.state.courses.filter(courseObj =>
-          validCourses.some(vc => vc.courseId === courseObj.id)
-        );
-
-        result = result.filter(weapon => {
-          return qualifiedCourseObjects.some(course => {
-            const modelMatch = (course.allowedModels || []).some(m => (m || '').toLowerCase() === (weapon.model || '').toLowerCase());
-            const caliberMatch = (course.allowedCalibers || []).some(c => (c || '').toLowerCase() === (weapon.caliber || '').toLowerCase());
-            return modelMatch && caliberMatch;
-          });
-        });
-      }
+      // Policial or Armeiro scoped to unit: vê todas as armas da sua unidade
+      result = this.state.weapons.filter(w => !w.unitId || w.unitId === actor.unitId || (actor.departmentId && w.departmentId === actor.departmentId));
     }
 
     return result;
+  }
+
+  public getAllWeapons(): Weapon[] {
+    return this.state.weapons || [];
   }
 
   public getAllWeaponsForAdmin(currentUser?: User | null): Weapon[] {

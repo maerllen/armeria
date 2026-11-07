@@ -1260,6 +1260,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
+      'explosivos',
       'armas',
       'municoes',
       'unidade',
@@ -1289,12 +1290,13 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   }
 
   // 4. Explosivista
-  if (role === 'Explosivista') {
+  if (role === 'Explosivista' || isUserExplosivista(user)) {
     return [
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
       'explosivos',
+      'materiais',
       'unidade',
       'cofre',
       'relatorio'
@@ -1311,11 +1313,16 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
 
   // 6. Policial
   if (role === 'Policial') {
-    return [
+    const policeModules: ModuleType[] = [
       'meu-perfil',
       'cautela-armas',
-      'cautela-municoes'
+      'cautela-municoes',
+      'materiais'
     ];
+    if (isUserExplosivista(user)) {
+      policeModules.push('explosivos');
+    }
+    return policeModules;
   }
 
   // Padrão de segurança
