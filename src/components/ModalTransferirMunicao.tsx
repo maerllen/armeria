@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { AmmunitionStock, Caliber, Department, Unit, VaultSpace, User, AmmoTransfer, AmmoTransferItem } from '../types';
 import { storage } from '../services/storage';
+import { formatMasp } from '../utils/masks';
 import {
   ArrowRightLeft,
   Building2,
@@ -76,10 +77,19 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
     return firstOther?.id || '';
   });
 
-  // Destination Armorer
+  // Destination Armorer: lista todos os armeiros da unidade selecionada
   const availableDestArmorers = useMemo(() => {
     const allUsers = storage.getUsers();
-    return allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
+    const inUnit = allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
+    const unitArmorers = inUnit.filter(u => 
+      u.role === 'Armeiro' || 
+      u.activeRole === 'Armeiro' || 
+      (u.roles && u.roles.includes('Armeiro')) ||
+      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    );
+    if (unitArmorers.length > 0) return unitArmorers;
+    if (inUnit.length > 0) return inUnit;
+    return allUsers.filter(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro' || u.role === 'Administrador' || u.role === 'Geral');
   }, [destUnitId]);
 
   const [destArmorerId, setDestArmorerId] = useState<string>('');
@@ -368,9 +378,6 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
             <div>
               <h2 className="text-base font-bold text-slate-100 flex items-center space-x-2">
                 <span>Transferência de Munições entre Unidades</span>
-                <span className="text-xs bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded-full font-mono">
-                  Tramitação Oficial
-                </span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
                 Envio formal de munições com custódia e recebimento pendente pelo Armeiro de destino
@@ -759,13 +766,13 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  MASP / Documento <span className="text-amber-400">*</span>
+                  MASP <span className="text-amber-400">*</span>
                 </label>
                 <input
                   type="text"
                   value={transporterMasp}
-                  onChange={(e) => setTransporterMasp(e.target.value)}
-                  placeholder="MASP ou matrícula"
+                  onChange={(e) => setTransporterMasp(formatMasp(e.target.value))}
+                  placeholder="Ex: 1.255.748-0 ou 125.574-8"
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono"
                   required
                 />
@@ -773,13 +780,13 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
 
               <div>
                 <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                  Cargo / Função
+                  CARGO
                 </label>
                 <input
                   type="text"
                   value={transporterCargo}
                   onChange={(e) => setTransporterCargo(e.target.value)}
-                  placeholder="Investigador, Escrivão, Delegado..."
+                  placeholder="DELEGADO, PERITO, INVESTIGADOR, ESCRIVÃO..."
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
                 />
               </div>

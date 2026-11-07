@@ -240,6 +240,16 @@ input, select, textarea, button {
 .theme-light select,
 .theme-light textarea {
   color-scheme: light;
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+.theme-light input:focus,
+.theme-light select:focus,
+.theme-light textarea:focus {
+  border-color: #d97706 !important;
+  box-shadow: 0 0 0 2px rgba(217, 119, 6, 0.2) !important;
 }
 
 .theme-light select option {
@@ -249,12 +259,92 @@ input, select, textarea, button {
 
 .theme-light input::placeholder,
 .theme-light textarea::placeholder {
-  color: #94a3b8 !important;
+  color: #64748b !important;
+}
+
+/* Backgrounds nítidos de painéis, cards e superfícies no tema claro */
+.theme-light .bg-slate-900,
+.theme-light .bg-slate-900\/95,
+.theme-light .bg-slate-900\/90,
+.theme-light .bg-slate-900\/80,
+.theme-light .bg-slate-900\/70,
+.theme-light .bg-slate-900\/60,
+.theme-light .bg-slate-900\/50,
+.theme-light .bg-slate-900\/40 {
+  background-color: #ffffff !important;
+}
+
+.theme-light .bg-slate-950,
+.theme-light .bg-slate-950\/95,
+.theme-light .bg-slate-950\/90,
+.theme-light .bg-slate-950\/80,
+.theme-light .bg-slate-950\/70,
+.theme-light .bg-slate-950\/60,
+.theme-light .bg-slate-950\/50,
+.theme-light .bg-slate-950\/40 {
+  background-color: #f8fafc !important;
+}
+
+/* Bordas visíveis e limpas */
+.theme-light .border-slate-800,
+.theme-light .border-slate-800\/80,
+.theme-light .border-slate-800\/60,
+.theme-light .border-slate-800\/40,
+.theme-light .border-slate-700,
+.theme-light .border-slate-700\/80 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Textos principais e de ênfase: Alto Contraste e 100% Legíveis */
+.theme-light .text-slate-100 { color: #020617 !important; }
+.theme-light .text-slate-200 { color: #0f172a !important; }
+.theme-light .text-slate-300 { color: #1e293b !important; }
+.theme-light .text-slate-400 { color: #334155 !important; }
+.theme-light .text-slate-500 { color: #475569 !important; }
+.theme-light .text-slate-600 { color: #475569 !important; }
+
+/* Cores de status, avisos e tags ajustadas para contraste máximo no fundo claro */
+.theme-light .text-amber-400,
+.theme-light .text-amber-400\/90,
+.theme-light .text-amber-300,
+.theme-light .text-amber-200,
+.theme-light .text-amber-200\/80,
+.theme-light .text-yellow-400,
+.theme-light .text-yellow-300 {
+  color: #b45309 !important;
+}
+
+.theme-light .text-cyan-400,
+.theme-light .text-cyan-300,
+.theme-light .text-sky-400,
+.theme-light .text-sky-300,
+.theme-light .text-blue-400,
+.theme-light .text-blue-300 {
+  color: #0369a1 !important;
+}
+
+.theme-light .text-emerald-400,
+.theme-light .text-emerald-300,
+.theme-light .text-green-400,
+.theme-light .text-green-300 {
+  color: #047857 !important;
+}
+
+.theme-light .text-red-400,
+.theme-light .text-red-300,
+.theme-light .text-rose-400,
+.theme-light .text-rose-300 {
+  color: #b91c1c !important;
+}
+
+.theme-light .text-purple-400,
+.theme-light .text-purple-300 {
+  color: #6d28d9 !important;
 }
 
 /* Prevent accidental text-white on white cards when not on colored buttons */
-.theme-light .text-white:not(button):not(button *):not(.bg-amber-600 *):not(.bg-amber-500 *):not(.bg-blue-600 *):not(.bg-emerald-600 *):not(.bg-red-600 *):not(.bg-rose-600 *):not(.bg-indigo-600 *):not(.bg-cyan-600 *) {
-  color: #0f172a;
+.theme-light .text-white:not(button):not(button *):not(.bg-amber-600 *):not(.bg-amber-500 *):not(.bg-blue-600 *):not(.bg-emerald-600 *):not(.bg-red-600 *):not(.bg-rose-600 *):not(.bg-indigo-600 *):not(.bg-cyan-600 *):not(.bg-purple-600 *) {
+  color: #0f172a !important;
 }
 
 /* Scrollbars */

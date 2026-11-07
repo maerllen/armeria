@@ -112,15 +112,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const availableCalibers = storage.getCalibers().map(c => c.name);
 
   const cargosList: UserCargo[] = [
-    'Delegado',
-    'Investigador',
-    'Escrivão',
-    'Perito',
-    'Médico Legista',
-    'Operador',
-    'Explosivista',
-    'Condutor de Cães',
-    'Veterinário'
+    'DELEGADO',
+    'PERITO',
+    'INVESTIGADOR',
+    'ESCRIVÃO'
   ];
 
   const allSystemRoles: UserRole[] = isGeral

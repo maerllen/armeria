@@ -119,12 +119,10 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   };
 
   const cargosList: UserCargo[] = [
-    'Delegado',
-    'Investigador',
-    'Escrivão',
-    'Perito',
-    'Médico Legista',
-    'Operador'
+    'DELEGADO',
+    'PERITO',
+    'INVESTIGADOR',
+    'ESCRIVÃO'
   ];
 
   return (

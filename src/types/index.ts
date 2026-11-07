@@ -23,10 +23,14 @@ export type ModuleType =
   | 'veterinario';
 
 export type UserCargo = 
+  | 'DELEGADO' 
+  | 'PERITO' 
+  | 'INVESTIGADOR' 
+  | 'ESCRIVÃO'
   | 'Delegado' 
   | 'Investigador' 
   | 'Escrivão' 
-  | 'Perito' 
+  | 'Perito'
   | 'Médico Legista' 
   | 'Operador'
   | 'Explosivista'

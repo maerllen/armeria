@@ -1098,35 +1098,37 @@ class StorageService {
   public getWeaponTransfers(currentUser?: User | null): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     // Strict Role Check: ONLY Armeiro, Administrador, and Geral can view transfers
     const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
-    if (!allowedRoles.includes(actor.role)) return [];
+    if (!allowedRoles.includes(role)) return [];
 
-    if (actor.role === 'Geral') return this.state.weaponTransfers;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+    if (role === 'Geral') return this.state.weaponTransfers;
+    if (role === 'Administrador' || (role === 'Armeiro' && actor.managementScope !== 'unit')) {
       return this.state.weaponTransfers.filter(
-        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId || t.destinationArmorerId === actor.id
       );
     }
     return this.state.weaponTransfers.filter(
-      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId || t.destinationArmorerId === actor.id
     );
   }
 
   public getPendingIncomingTransfers(currentUser?: User | null): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const transfers = this.getWeaponTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (actor.role === 'Geral') return true;
+      if (role === 'Geral') return true;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
-      if (actor.role === 'Administrador') {
-        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      if (role === 'Administrador') {
+        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId || t.destinationUnitId === actor.unitId;
       }
-      if (actor.role === 'Armeiro') {
+      if (role === 'Armeiro') {
         if (actor.managementScope !== 'unit') {
-          return t.destinationDepartmentId === actor.departmentId;
+          return t.destinationDepartmentId === actor.departmentId || t.destinationUnitId === actor.unitId;
         }
         return t.destinationUnitId === actor.unitId;
       }

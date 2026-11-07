@@ -139,16 +139,47 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       console.warn('[Aviso Migração USUARIOS]', migErr);
     }
 
-    // 4. CALIBRES
+    // 4. CALIBRES (CADASTRO DE MUNIÇÃO: FABRICANTE, CALIBRE, TIPO, PESO)
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`CALIBRES\` (
         \`ID_CALIBRES\` VARCHAR(64) NOT NULL,
         \`NOME_CALIBRES\` VARCHAR(128) NOT NULL,
+        \`FABRICANTE_CALIBRES\` VARCHAR(255) DEFAULT NULL,
+        \`TIPO_CALIBRES\` VARCHAR(100) DEFAULT NULL,
+        \`PESO_CALIBRES\` VARCHAR(50) DEFAULT NULL,
         \`DATA_CRIACAO_CALIBRES\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (\`ID_CALIBRES\`),
-        UNIQUE KEY \`uk_calibres_nome\` (\`NOME_CALIBRES\`)
+        KEY \`idx_calibres_nome\` (\`NOME_CALIBRES\`),
+        KEY \`idx_calibres_fabricante\` (\`FABRICANTE_CALIBRES\`),
+        KEY \`idx_calibres_nome_tipo_peso\` (\`NOME_CALIBRES\`, \`TIPO_CALIBRES\`, \`PESO_CALIBRES\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Migração suave de CALIBRES: remove restrição de nome único e adiciona colunas de especificações
+    try {
+      // Remove a restrição uk_calibres_nome se existir
+      try {
+        await connection.query('ALTER TABLE `CALIBRES` DROP INDEX `uk_calibres_nome`');
+      } catch (_) {}
+
+      const [colsCal]: any = await connection.query(`
+        SELECT COLUMN_NAME FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CALIBRES'
+      `);
+      const existingCols = new Set((colsCal || []).map((c: any) => c.COLUMN_NAME));
+
+      if (!existingCols.has('FABRICANTE_CALIBRES')) {
+        await connection.query('ALTER TABLE `CALIBRES` ADD COLUMN `FABRICANTE_CALIBRES` VARCHAR(255) DEFAULT NULL AFTER `NOME_CALIBRES`');
+      }
+      if (!existingCols.has('TIPO_CALIBRES')) {
+        await connection.query('ALTER TABLE `CALIBRES` ADD COLUMN `TIPO_CALIBRES` VARCHAR(100) DEFAULT NULL AFTER `FABRICANTE_CALIBRES`');
+      }
+      if (!existingCols.has('PESO_CALIBRES')) {
+        await connection.query('ALTER TABLE `CALIBRES` ADD COLUMN `PESO_CALIBRES` VARCHAR(50) DEFAULT NULL AFTER `TIPO_CALIBRES`');
+      }
+    } catch (migErr) {
+      console.warn('[Aviso Migração CALIBRES]', migErr);
+    }
 
     // 5. COFRES
     await connection.query(`
@@ -415,6 +446,24 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         KEY \`idx_trf_destino\` (\`DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Migração suave de TRANSFERENCIAS_ARMAS: assegura colunas do armeiro de destino
+    try {
+      const [colArmId]: any = await connection.query(`
+        SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'TRANSFERENCIAS_ARMAS' AND COLUMN_NAME = 'DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS'
+      `);
+      if (colArmId[0]?.cnt === 0) {
+        await connection.query(`
+          ALTER TABLE \`TRANSFERENCIAS_ARMAS\` 
+            ADD COLUMN \`DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL AFTER \`DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS\`,
+            ADD COLUMN \`DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL AFTER \`DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS\`,
+            ADD COLUMN \`DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL AFTER \`DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS\`
+        `);
+      }
+    } catch (migErr) {
+      console.warn('[Aviso Migração TRANSFERENCIAS_ARMAS Destino Armeiro]', migErr);
+    }
 
     // 14.1 TRANSFERENCIAS_MUNICOES
     await connection.query(`

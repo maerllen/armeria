@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Weapon, Department, Unit, VaultSpace, User, WeaponTransfer, WeaponTransferItem } from '../types';
 import { storage } from '../services/storage';
+import { formatMasp } from '../utils/masks';
 import {
   ArrowRightLeft,
   Building2,
@@ -82,7 +83,16 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   // Destination Armorer selection - armorer of destination unit who will receive and allocate in vault
   const availableDestArmorers = useMemo(() => {
     const allUsers = storage.getUsers();
-    return allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
+    const inUnit = allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
+    const unitArmorers = inUnit.filter(u => 
+      u.role === 'Armeiro' || 
+      u.activeRole === 'Armeiro' || 
+      (u.roles && u.roles.includes('Armeiro')) ||
+      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    );
+    if (unitArmorers.length > 0) return unitArmorers;
+    if (inUnit.length > 0) return inUnit;
+    return allUsers.filter(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro' || u.role === 'Administrador' || u.role === 'Geral');
   }, [destUnitId]);
 
   const [destArmorerId, setDestArmorerId] = useState<string>('');
@@ -560,26 +570,26 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">MASP do Policial *</label>
+                <label className="block text-xs text-slate-400 mb-1">MASP *</label>
                 <input
                   id="transfer-transporter-masp-input"
                   type="text"
                   value={transporterMasp}
-                  onChange={e => setTransporterMasp(e.target.value)}
-                  placeholder="Ex: 1234567-8"
+                  onChange={e => setTransporterMasp(formatMasp(e.target.value))}
+                  placeholder="Ex: 1.255.748-0 ou 125.574-8"
                   required
-                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
+                  className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none font-mono"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-slate-400 mb-1">Cargo / Função</label>
+                <label className="block text-xs text-slate-400 mb-1">CARGO</label>
                 <input
                   id="transfer-transporter-cargo-input"
                   type="text"
                   value={transporterCargo}
                   onChange={e => setTransporterCargo(e.target.value)}
-                  placeholder="Ex: Investigador de Polícia"
+                  placeholder="DELEGADO, PERITO, INVESTIGADOR, ESCRIVÃO..."
                   className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
                 />
               </div>

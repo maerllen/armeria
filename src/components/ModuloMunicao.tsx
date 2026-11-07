@@ -988,7 +988,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             >
               <option value="">Todos os Calibres</option>
               {calibers.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {c.fabricante ? `[${c.fabricante}] ` : ''}{c.name}{c.tipo ? ` - ${c.tipo}` : ''}{c.peso ? ` (${c.peso})` : ''}
+                </option>
               ))}
             </select>
           </div>
@@ -2166,7 +2168,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                       >
                         {calibers.map((c) => (
                           <option key={c.id} value={c.id}>
-                            {c.name}
+                            {c.fabricante ? `[${c.fabricante}] ` : ''}{c.name}{c.tipo ? ` - ${c.tipo}` : ''}{c.peso ? ` (${c.peso})` : ''}
                           </option>
                         ))}
                       </select>
@@ -2471,7 +2473,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   >
                     {calibers.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name}
+                        {c.fabricante ? `[${c.fabricante}] ` : ''}{c.name}{c.tipo ? ` - ${c.tipo}` : ''}{c.peso ? ` (${c.peso})` : ''}
                       </option>
                     ))}
                   </select>

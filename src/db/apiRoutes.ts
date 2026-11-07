@@ -1167,11 +1167,15 @@ apiRouter.post('/calibers', async (req: Request, res: Response) => {
     const pool = getPool();
 
     const [existing]: any = await pool.query(
-      'SELECT ID_CALIBRES as id FROM CALIBRES WHERE LOWER(NOME_CALIBRES) = LOWER(?) AND (LOWER(COALESCE(FABRICANTE_CALIBRES, "")) = LOWER(COALESCE(?, "")) OR ? IS NULL)',
-      [cleanName, cleanFab, cleanFab]
+      `SELECT ID_CALIBRES as id FROM CALIBRES 
+       WHERE LOWER(NOME_CALIBRES) = LOWER(?) 
+         AND (LOWER(COALESCE(FABRICANTE_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND FABRICANTE_CALIBRES IS NULL))
+         AND (LOWER(COALESCE(TIPO_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND TIPO_CALIBRES IS NULL))
+         AND (LOWER(COALESCE(PESO_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND PESO_CALIBRES IS NULL))`,
+      [cleanName, cleanFab, cleanFab, cleanTipo, cleanTipo, cleanPeso, cleanPeso]
     );
     if (existing && existing.length > 0) {
-      return res.status(400).json({ error: 'Este calibre/especificação de munição já está cadastrado.' });
+      return res.status(400).json({ error: 'Esta especificação exata de munição (mesmo calibre, fabricante, tipo e peso) já está cadastrada.' });
     }
 
     const id = `cal-${Date.now()}`;
@@ -5541,69 +5545,206 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
     }
 
     // Salva registro da transferência com status 'Pendente'
-    await pool.query(
-      `INSERT INTO TRANSFERENCIAS_ARMAS (
-        ID_TRANSFERENCIAS_ARMAS,
-        NUMERO_PROTOCOLO_TRANSFERENCIAS_ARMAS,
-        DATA_TRANSFERENCIA_TRANSFERENCIAS_ARMAS,
-        ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
-        ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
-        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
-        ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
-        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
-        DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
-        DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
-        DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
-        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS,
-        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS,
-        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS,
-        DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS,
-        DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS,
-        RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS,
-        RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS,
-        RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
-        RESPONSAVEL_PERFIL_TRANSFERENCIAS_ARMAS,
-        TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS,
-        TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS,
-        TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS,
-        MOTIVO_TRANSFERENCIAS_ARMAS,
-        ARMAS_JSON_TRANSFERENCIAS_ARMAS,
-        TOTAL_ARMAS_TRANSFERENCIAS_ARMAS,
-        TOTAL_CARREGADORES_TRANSFERENCIAS_ARMAS,
-        OBSERVACAO_TRANSFERENCIAS_ARMAS,
-        STATUS_TRANSFERENCIAS_ARMAS,
-        DATA_CRIACAO_TRANSFERENCIAS_ARMAS
-      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
-      [
-        transferId,
-        protocolNumber,
-        originDepartmentId || null,
-        originDepartmentName || null,
-        originUnitId || null,
-        originUnitName || null,
-        destinationDepartmentId || null,
-        destinationDepartmentName || null,
-        destinationUnitId || null,
-        destinationUnitName || null,
-        destinationArmorerId || null,
-        destinationArmorerName || null,
-        destinationArmorerMasp || null,
-        destinationVaultSpaceId || null,
-        destinationVaultSpaceCode || null,
-        actor.id,
-        actor.name,
-        actor.masp,
-        actor.role,
-        receiverOrTransporterName.trim(),
-        receiverOrTransporterMasp.trim(),
-        receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
-        reason.trim(),
-        JSON.stringify(weapons),
-        weapons.length,
-        totalMagazines,
-        observation ? observation.trim() : null
-      ]
-    );
+    try {
+      await pool.query(
+        `INSERT INTO TRANSFERENCIAS_ARMAS (
+          ID_TRANSFERENCIAS_ARMAS,
+          NUMERO_PROTOCOLO_TRANSFERENCIAS_ARMAS,
+          DATA_TRANSFERENCIA_TRANSFERENCIAS_ARMAS,
+          ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+          ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+          ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+          ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+          DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+          DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+          DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+          DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+          DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS,
+          DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS,
+          DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS,
+          DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS,
+          DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS,
+          RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS,
+          RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS,
+          RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
+          RESPONSAVEL_PERFIL_TRANSFERENCIAS_ARMAS,
+          TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS,
+          TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS,
+          TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS,
+          MOTIVO_TRANSFERENCIAS_ARMAS,
+          ARMAS_JSON_TRANSFERENCIAS_ARMAS,
+          TOTAL_ARMAS_TRANSFERENCIAS_ARMAS,
+          TOTAL_CARREGADORES_TRANSFERENCIAS_ARMAS,
+          OBSERVACAO_TRANSFERENCIAS_ARMAS,
+          STATUS_TRANSFERENCIAS_ARMAS,
+          DATA_CRIACAO_TRANSFERENCIAS_ARMAS
+        ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
+        [
+          transferId,
+          protocolNumber,
+          originDepartmentId || null,
+          originDepartmentName || null,
+          originUnitId || null,
+          originUnitName || null,
+          destinationDepartmentId || null,
+          destinationDepartmentName || null,
+          destinationUnitId || null,
+          destinationUnitName || null,
+          destinationArmorerId || null,
+          destinationArmorerName || null,
+          destinationArmorerMasp || null,
+          destinationVaultSpaceId || null,
+          destinationVaultSpaceCode || null,
+          actor.id,
+          actor.name,
+          actor.masp,
+          actor.role,
+          receiverOrTransporterName.trim(),
+          receiverOrTransporterMasp.trim(),
+          receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
+          reason.trim(),
+          JSON.stringify(weapons),
+          weapons.length,
+          totalMagazines,
+          observation ? observation.trim() : null
+        ]
+      );
+    } catch (insertErr: any) {
+      if (insertErr.code === 'ER_BAD_FIELD_ERROR' || (insertErr.message && insertErr.message.includes('DESTINO_ARMEIRO'))) {
+        try {
+          await pool.query(`
+            ALTER TABLE \`TRANSFERENCIAS_ARMAS\` 
+              ADD COLUMN IF NOT EXISTS \`DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL AFTER \`DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS\`,
+              ADD COLUMN IF NOT EXISTS \`DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS\` VARCHAR(255) DEFAULT NULL AFTER \`DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS\`,
+              ADD COLUMN IF NOT EXISTS \`DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS\` VARCHAR(64) DEFAULT NULL AFTER \`DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS\`
+          `);
+          await pool.query(
+            `INSERT INTO TRANSFERENCIAS_ARMAS (
+              ID_TRANSFERENCIAS_ARMAS,
+              NUMERO_PROTOCOLO_TRANSFERENCIAS_ARMAS,
+              DATA_TRANSFERENCIA_TRANSFERENCIAS_ARMAS,
+              ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+              ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+              ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+              ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_ARMEIRO_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_ARMAS,
+              DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_PERFIL_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS,
+              MOTIVO_TRANSFERENCIAS_ARMAS,
+              ARMAS_JSON_TRANSFERENCIAS_ARMAS,
+              TOTAL_ARMAS_TRANSFERENCIAS_ARMAS,
+              TOTAL_CARREGADORES_TRANSFERENCIAS_ARMAS,
+              OBSERVACAO_TRANSFERENCIAS_ARMAS,
+              STATUS_TRANSFERENCIAS_ARMAS,
+              DATA_CRIACAO_TRANSFERENCIAS_ARMAS
+            ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
+            [
+              transferId,
+              protocolNumber,
+              originDepartmentId || null,
+              originDepartmentName || null,
+              originUnitId || null,
+              originUnitName || null,
+              destinationDepartmentId || null,
+              destinationDepartmentName || null,
+              destinationUnitId || null,
+              destinationUnitName || null,
+              destinationArmorerId || null,
+              destinationArmorerName || null,
+              destinationArmorerMasp || null,
+              destinationVaultSpaceId || null,
+              destinationVaultSpaceCode || null,
+              actor.id,
+              actor.name,
+              actor.masp,
+              actor.role,
+              receiverOrTransporterName.trim(),
+              receiverOrTransporterMasp.trim(),
+              receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
+              reason.trim(),
+              JSON.stringify(weapons),
+              weapons.length,
+              totalMagazines,
+              observation ? observation.trim() : null
+            ]
+          );
+        } catch {
+          // Fallback sem as colunas do armeiro se o ALTER TABLE falhar
+          await pool.query(
+            `INSERT INTO TRANSFERENCIAS_ARMAS (
+              ID_TRANSFERENCIAS_ARMAS,
+              NUMERO_PROTOCOLO_TRANSFERENCIAS_ARMAS,
+              DATA_TRANSFERENCIA_TRANSFERENCIAS_ARMAS,
+              ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+              ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+              ORIGEM_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+              ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_UNIDADE_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_UNIDADE_NOME_TRANSFERENCIAS_ARMAS,
+              DESTINO_COFRE_ID_TRANSFERENCIAS_ARMAS,
+              DESTINO_COFRE_CODIGO_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
+              RESPONSAVEL_PERFIL_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS,
+              TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS,
+              MOTIVO_TRANSFERENCIAS_ARMAS,
+              ARMAS_JSON_TRANSFERENCIAS_ARMAS,
+              TOTAL_ARMAS_TRANSFERENCIAS_ARMAS,
+              TOTAL_CARREGADORES_TRANSFERENCIAS_ARMAS,
+              OBSERVACAO_TRANSFERENCIAS_ARMAS,
+              STATUS_TRANSFERENCIAS_ARMAS,
+              DATA_CRIACAO_TRANSFERENCIAS_ARMAS
+            ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente', NOW())`,
+            [
+              transferId,
+              protocolNumber,
+              originDepartmentId || null,
+              originDepartmentName || null,
+              originUnitId || null,
+              originUnitName || null,
+              destinationDepartmentId || null,
+              destinationDepartmentName || null,
+              destinationUnitId || null,
+              destinationUnitName || null,
+              destinationVaultSpaceId || null,
+              destinationVaultSpaceCode || null,
+              actor.id,
+              actor.name,
+              actor.masp,
+              actor.role,
+              receiverOrTransporterName.trim(),
+              receiverOrTransporterMasp.trim(),
+              receiverOrTransporterCargo ? receiverOrTransporterCargo.trim() : null,
+              reason.trim(),
+              JSON.stringify(weapons),
+              weapons.length,
+              totalMagazines,
+              observation ? observation.trim() : null
+            ]
+          );
+        }
+      } else {
+        throw insertErr;
+      }
+    }
 
     const weaponSerials = weapons.map((w: any) => w.serialNumber).join(', ');
     await insertAuditLog(
