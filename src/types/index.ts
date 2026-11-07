@@ -1163,6 +1163,8 @@ export interface CautelaArma {
   authorizedAt?: string;
   authorizationNotes?: string;
   linkedAmmoCautelaId?: string;
+  ammoQuantity?: number;
+  ammoDestinacao?: string;
   
   // Devolução
   returnDate?: string;

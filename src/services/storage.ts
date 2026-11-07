@@ -3061,13 +3061,20 @@ class StorageService {
     }
   }
 
-  public async authorizeCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+  public async authorizeCautelaArma(
+    id: string, 
+    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean }
+  ): Promise<{ success: boolean; error?: string }> {
+    const opts = typeof options === 'string' ? { notes: options } : (options || {});
     try {
       const res = await fetch(`/api/cautelas-armas/${id}/autorizar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          notes,
+          notes: opts.notes,
+          vaultSpaceId: opts.vaultSpaceId,
+          stockId: opts.stockId,
+          seraDevolvida: opts.seraDevolvida,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,
@@ -3150,13 +3157,20 @@ class StorageService {
     }
   }
 
-  public async authorizeCautelaMunicao(id: string, vaultSpaceId?: string): Promise<{ success: boolean; error?: string }> {
+  public async authorizeCautelaMunicao(
+    id: string, 
+    options?: string | { vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; notes?: string }
+  ): Promise<{ success: boolean; error?: string }> {
+    const opts = typeof options === 'string' ? { vaultSpaceId: options } : (options || {});
     try {
       const res = await fetch(`/api/cautelas-municoes/${id}/autorizar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          vaultSpaceId,
+          vaultSpaceId: opts.vaultSpaceId,
+          stockId: opts.stockId,
+          seraDevolvida: opts.seraDevolvida,
+          notes: opts.notes,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,

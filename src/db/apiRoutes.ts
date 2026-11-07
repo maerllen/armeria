@@ -8831,6 +8831,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
 
     const cautela = rows[0];
     const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+    const { vaultSpaceId, stockId, seraDevolvida } = req.body;
 
     // 1. Atualiza status da cautela para AUTORIZADA
     await pool.query(`
@@ -8853,34 +8854,108 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
     `, [cautela.ARMA_ID_ACAUTELAR_ARMAS]);
 
     // 3. Se houver cautela de munição vinculada, autoriza e deduz o estoque do cofre
-    if (cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS) {
-      const [ammoRows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS]);
-      if (ammoRows && ammoRows.length > 0) {
-        const ammoCautela = ammoRows[0];
-        await pool.query(`
-          UPDATE ACAUTELAR_MUNICOES SET
-            STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA',
-            ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
-            ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
-            ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
-            DATA_AUTORIZACAO_ACAUTELAR_MUNICOES = NOW(),
-            DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
-          WHERE ID_ACAUTELAR_MUNICOES = ?
-        `, [armorer.id, armorer.name, armorer.masp, ammoCautela.ID_ACAUTELAR_MUNICOES]);
+    const ammoCautelaId = cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS;
+    const [ammoRows]: any = ammoCautelaId 
+      ? await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [ammoCautelaId])
+      : await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ? LIMIT 1', [id]);
 
-        // Deduz do estoque no cofre
-        if (ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES) {
-          const qty = Number(ammoCautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
-          await pool.query(`
-            UPDATE ESTOQUE_MUNICOES SET
-              QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
-              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
-            WHERE COFRE_ID_ESTOQUE_MUNICOES = ? 
-              AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
-            LIMIT 1
-          `, [qty, ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+    if (ammoRows && ammoRows.length > 0) {
+      const ammoCautela = ammoRows[0];
+      const qty = Number(ammoCautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+      const seraDev = seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : (ammoCautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES !== undefined ? ammoCautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES : 1);
+
+      let effectiveVault = vaultSpaceId || ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES;
+      let stockDetails: any = null;
+
+      if (stockId) {
+        const [stockRes]: any = await pool.query('SELECT * FROM ESTOQUE_MUNICOES WHERE ID_ESTOQUE_MUNICOES = ?', [stockId]);
+        if (stockRes && stockRes.length > 0) {
+          stockDetails = stockRes[0];
+          effectiveVault = stockDetails.COFRE_ID_ESTOQUE_MUNICOES || effectiveVault;
         }
       }
+
+      await pool.query(`
+        UPDATE ACAUTELAR_MUNICOES SET
+          STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA',
+          ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
+          ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
+          ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
+          COFRE_ID_ACAUTELAR_MUNICOES = COALESCE(?, COFRE_ID_ACAUTELAR_MUNICOES),
+          LOTE_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, LOTE_MUNICAO_ACAUTELAR_MUNICOES),
+          FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES),
+          TIPO_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, TIPO_MUNICAO_ACAUTELAR_MUNICOES),
+          PESO_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, PESO_MUNICAO_ACAUTELAR_MUNICOES),
+          ANO_FABRICACAO_ACAUTELAR_MUNICOES = COALESCE(?, ANO_FABRICACAO_ACAUTELAR_MUNICOES),
+          DESTINACAO_ACAUTELAR_MUNICOES = COALESCE(?, DESTINACAO_ACAUTELAR_MUNICOES),
+          SERA_DEVOLVIDA_ACAUTELAR_MUNICOES = ?,
+          DATA_AUTORIZACAO_ACAUTELAR_MUNICOES = NOW(),
+          DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+        WHERE ID_ACAUTELAR_MUNICOES = ?
+      `, [
+        armorer.id, armorer.name, armorer.masp,
+        effectiveVault,
+        stockDetails?.LOTE_ESTOQUE_MUNICOES || null,
+        stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || null,
+        stockDetails?.TIPO_ESTOQUE_MUNICOES || null,
+        stockDetails?.PESO_ESTOQUE_MUNICOES || null,
+        stockDetails?.ANO_FABRICACAO_ESTOQUE_MUNICOES || null,
+        stockDetails?.DESTINACAO_ESTOQUE_MUNICOES || null,
+        seraDev,
+        ammoCautela.ID_ACAUTELAR_MUNICOES
+      ]);
+
+      // Deduz do estoque no cofre
+      if (stockId) {
+        await pool.query(`
+          UPDATE ESTOQUE_MUNICOES SET
+            QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+            DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+          WHERE ID_ESTOQUE_MUNICOES = ?
+        `, [qty, stockId]);
+      } else if (effectiveVault) {
+        await pool.query(`
+          UPDATE ESTOQUE_MUNICOES SET
+            QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+            DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+          WHERE COFRE_ID_ESTOQUE_MUNICOES = ? 
+            AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
+          LIMIT 1
+        `, [qty, effectiveVault, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES, ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
+      }
+
+      // Registra movimentação de saída
+      const movId = `ammomov-caut-${Date.now()}`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movId,
+          stockDetails?.CALIBRE_ID_ESTOQUE_MUNICOES || ammoCautela.CALIBRE_ID_ACAUTELAR_MUNICOES || 'padrao',
+          qty,
+          cautela.DEPARTAMENTO_ID_ACAUTELAR_ARMAS || null,
+          cautela.UNIDADE_ID_ACAUTELAR_ARMAS || null,
+          effectiveVault || 'COFRE_PADRAO',
+          `Cautela Conjunta com Arma ${cautela.MODELO_ACAUTELAR_ARMAS} Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} - ${seraDev ? 'Irá devolver' : 'Retirada permanente'}`,
+          stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || ammoCautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null,
+          stockDetails?.TIPO_ESTOQUE_MUNICOES || ammoCautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null,
+          stockDetails?.PESO_ESTOQUE_MUNICOES || ammoCautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null,
+          stockDetails?.LOTE_ESTOQUE_MUNICOES || ammoCautela.LOTE_MUNICAO_ACAUTELAR_MUNICOES || null,
+          stockDetails?.ANO_FABRICACAO_ESTOQUE_MUNICOES || ammoCautela.ANO_FABRICACAO_ACAUTELAR_MUNICOES || null,
+          stockDetails?.DESTINACAO_ESTOQUE_MUNICOES || ammoCautela.DESTINACAO_ACAUTELAR_MUNICOES || null,
+          cautela.REQUERENTE_ID_ACAUTELAR_ARMAS,
+          cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS,
+          cautela.REQUERENTE_MASP_ACAUTELAR_ARMAS,
+          `Autorizado pelo armeiro ${armorer.name} (${armorer.masp})`,
+          armorer.id,
+          armorer.name
+        ]
+      );
     }
 
     await insertAuditLog(
@@ -9211,7 +9286,7 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
 apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { armorerId, armorerName, armorerMasp, vaultSpaceId, actor } = req.body;
+    const { armorerId, armorerName, armorerMasp, vaultSpaceId, stockId, seraDevolvida, notes, actor } = req.body;
     const pool = getPool();
 
     const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [id]);
@@ -9221,8 +9296,18 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
 
     const cautela = rows[0];
     const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
-    const effectiveVaultId = vaultSpaceId || cautela.COFRE_ID_ACAUTELAR_MUNICOES;
+    let effectiveVaultId = vaultSpaceId || cautela.COFRE_ID_ACAUTELAR_MUNICOES;
     const qty = Number(cautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+    const seraDev = seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : (cautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES !== undefined ? cautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES : 1);
+
+    let stockDetails: any = null;
+    if (stockId) {
+      const [stockRes]: any = await pool.query('SELECT * FROM ESTOQUE_MUNICOES WHERE ID_ESTOQUE_MUNICOES = ?', [stockId]);
+      if (stockRes && stockRes.length > 0) {
+        stockDetails = stockRes[0];
+        effectiveVaultId = stockDetails.COFRE_ID_ESTOQUE_MUNICOES || effectiveVaultId;
+      }
+    }
 
     // 1. Autoriza na tabela ACAUTELAR_MUNICOES
     await pool.query(`
@@ -9232,13 +9317,40 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
         ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
         ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
         COFRE_ID_ACAUTELAR_MUNICOES = COALESCE(?, COFRE_ID_ACAUTELAR_MUNICOES),
+        LOTE_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, LOTE_MUNICAO_ACAUTELAR_MUNICOES),
+        FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES),
+        TIPO_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, TIPO_MUNICAO_ACAUTELAR_MUNICOES),
+        PESO_MUNICAO_ACAUTELAR_MUNICOES = COALESCE(?, PESO_MUNICAO_ACAUTELAR_MUNICOES),
+        ANO_FABRICACAO_ACAUTELAR_MUNICOES = COALESCE(?, ANO_FABRICACAO_ACAUTELAR_MUNICOES),
+        DESTINACAO_ACAUTELAR_MUNICOES = COALESCE(?, DESTINACAO_ACAUTELAR_MUNICOES),
+        SERA_DEVOLVIDA_ACAUTELAR_MUNICOES = ?,
+        OBSERVACOES_ACAUTELAR_MUNICOES = COALESCE(?, OBSERVACOES_ACAUTELAR_MUNICOES),
         DATA_AUTORIZACAO_ACAUTELAR_MUNICOES = NOW(),
         DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
       WHERE ID_ACAUTELAR_MUNICOES = ?
-    `, [armorer.id, armorer.name, armorer.masp, effectiveVaultId, id]);
+    `, [
+      armorer.id, armorer.name, armorer.masp,
+      effectiveVaultId,
+      stockDetails?.LOTE_ESTOQUE_MUNICOES || null,
+      stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || null,
+      stockDetails?.TIPO_ESTOQUE_MUNICOES || null,
+      stockDetails?.PESO_ESTOQUE_MUNICOES || null,
+      stockDetails?.ANO_FABRICACAO_ESTOQUE_MUNICOES || null,
+      stockDetails?.DESTINACAO_ESTOQUE_MUNICOES || null,
+      seraDev,
+      notes || null,
+      id
+    ]);
 
     // 2. Deduz da quantidade total do local do cofre de onde a munição foi retirada
-    if (effectiveVaultId) {
+    if (stockId) {
+      await pool.query(`
+        UPDATE ESTOQUE_MUNICOES SET
+          QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
+          DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+        WHERE ID_ESTOQUE_MUNICOES = ?
+      `, [qty, stockId]);
+    } else if (effectiveVaultId) {
       await pool.query(`
         UPDATE ESTOQUE_MUNICOES SET
           QUANTIDADE_ESTOQUE_MUNICOES = GREATEST(0, QUANTIDADE_ESTOQUE_MUNICOES - ?),
@@ -9247,27 +9359,40 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
           AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL)
         LIMIT 1
       `, [qty, effectiveVaultId, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES]);
-
-      // 3. Registra em MOVIMENTACOES_MUNICOES para histórico completo do cofre
-      const movId = `ammomov-caut-${Date.now()}`;
-      await pool.query(
-        `INSERT INTO MOVIMENTACOES_MUNICOES 
-         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
-          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
-          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
-          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
-          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
-         VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
-        [
-          movId, cautela.CALIBRE_ID_ACAUTELAR_MUNICOES || 'padrao', qty, cautela.DEPARTAMENTO_ID_ACAUTELAR_MUNICOES || null, cautela.UNIDADE_ID_ACAUTELAR_MUNICOES || null, effectiveVaultId,
-          `Cautela de Munição - Policial ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES} (MASP ${cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES})`,
-          cautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.LOTE_MUNICAO_ACAUTELAR_MUNICOES || null, cautela.ANO_FABRICACAO_ACAUTELAR_MUNICOES || null, cautela.DESTINACAO_ACAUTELAR_MUNICOES || null,
-          cautela.REQUERENTE_ID_ACAUTELAR_MUNICOES, cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES, cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES,
-          `Autorizado pelo armeiro ${armorer.name} (${armorer.masp})`,
-          armorer.id, armorer.name
-        ]
-      );
     }
+
+    // 3. Registra em MOVIMENTACOES_MUNICOES para histórico completo do cofre
+    const movId = `ammomov-caut-${Date.now()}`;
+    await pool.query(
+      `INSERT INTO MOVIMENTACOES_MUNICOES 
+       (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+        DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+        FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+        TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+        OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+       VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        movId,
+        stockDetails?.CALIBRE_ID_ESTOQUE_MUNICOES || cautela.CALIBRE_ID_ACAUTELAR_MUNICOES || 'padrao',
+        qty,
+        cautela.DEPARTAMENTO_ID_ACAUTELAR_MUNICOES || null,
+        cautela.UNIDADE_ID_ACAUTELAR_MUNICOES || null,
+        effectiveVaultId || 'COFRE_PADRAO',
+        `Cautela de Munição - Policial ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES} (MASP ${cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES}) - ${seraDev ? 'Irá devolver' : 'Retirada permanente'}`,
+        stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || cautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null,
+        stockDetails?.TIPO_ESTOQUE_MUNICOES || cautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null,
+        stockDetails?.PESO_ESTOQUE_MUNICOES || cautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null,
+        stockDetails?.LOTE_ESTOQUE_MUNICOES || cautela.LOTE_MUNICAO_ACAUTELAR_MUNICOES || null,
+        stockDetails?.ANO_FABRICACAO_ESTOQUE_MUNICOES || cautela.ANO_FABRICACAO_ACAUTELAR_MUNICOES || null,
+        stockDetails?.DESTINACAO_ESTOQUE_MUNICOES || cautela.DESTINACAO_ACAUTELAR_MUNICOES || null,
+        cautela.REQUERENTE_ID_ACAUTELAR_MUNICOES,
+        cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES,
+        cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES,
+        `Autorizado pelo armeiro ${armorer.name} (${armorer.masp})`,
+        armorer.id,
+        armorer.name
+      ]
+    );
 
     await insertAuditLog(
       'Munições',

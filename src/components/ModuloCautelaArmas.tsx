@@ -72,6 +72,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [magazineQuantity, setMagazineQuantity] = useState<number>(2);
   const [requestAmmoTogether, setRequestAmmoTogether] = useState(true);
   const [ammoQuantity, setAmmoQuantity] = useState<number>(30);
+  const [ammoDestinacao, setAmmoDestinacao] = useState<'Defesa' | 'Treinamento'>('Defesa');
   const [ammoType, setAmmoType] = useState('Operacional');
   const [ammoLot, setAmmoLot] = useState('Lote Unidade');
   const [ammoSeraDevolvida, setAmmoSeraDevolvida] = useState(true);
@@ -80,6 +81,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [isDirectCautela, setIsDirectCautela] = useState(false);
   const [targetOfficerId, setTargetOfficerId] = useState('');
   const [selectedAmmoStockId, setSelectedAmmoStockId] = useState('');
+
+  // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
+  const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
+  const [authStockId, setAuthStockId] = useState('');
+  const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
+  const [authNotes, setAuthNotes] = useState('');
 
   // Available officers in unit (strict unit restriction for direct checkout)
   const availableUnitOfficers = useMemo(() => {
@@ -218,6 +225,40 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
   }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
 
+  // Munições disponíveis na unidade correspondentes ao armamento que o armeiro está autorizando
+  const availableAmmoForAuthorizingWeapon = useMemo(() => {
+    if (!authorizingCautela) return [];
+    const targetUnitId = authorizingCautela.unitId || currentUser.unitId;
+    const selCal = (authorizingCautela.weaponCaliber || '').toLowerCase().trim();
+    return ammoStocks.filter(st => {
+      const matchUnit = isGeral ? true : (st.unitId === targetUnitId);
+      const cal = calibers.find(c => c.id === st.caliberId);
+      const calName = (cal?.name || '').toLowerCase().trim();
+      const matchCaliber = !selCal ||
+                           (cal && (calName.includes(selCal) || selCal.includes(calName))) ||
+                           (st.caliberId === authorizingCautela.weaponCaliber);
+      return matchUnit && matchCaliber && st.quantity > 0;
+    });
+  }, [authorizingCautela, ammoStocks, calibers, currentUser.unitId, isGeral]);
+
+  React.useEffect(() => {
+    if (authorizingCautela && availableAmmoForAuthorizingWeapon.length > 0) {
+      if (!availableAmmoForAuthorizingWeapon.some(s => s.id === authStockId)) {
+        setAuthStockId(availableAmmoForAuthorizingWeapon[0].id);
+      }
+    }
+  }, [authorizingCautela, availableAmmoForAuthorizingWeapon, authStockId]);
+
+  const getLinkedAmmoForCautela = (cautela: CautelaArma) => {
+    const list = storage.getCautelasMunicoes();
+    return list.find(m => 
+      m.id === cautela.linkedAmmoCautelaId || 
+      (m as any).cautelaArmaId === cautela.id || 
+      m.linkedWeaponCautelaId === cautela.id ||
+      (m.requesterId === cautela.requesterId && (m.status === 'PENDENTE' || m.status === 'AUTORIZADA') && Math.abs(new Date(m.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 15000)
+    ) || null;
+  };
+
   // Submeter nova solicitação de cautela
   const handleRequestCautela = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -265,16 +306,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         armorerMasp: isDirect ? currentUser.masp : undefined
       };
 
-      if (requestAmmoTogether && Number(ammoQuantity) >= 0) {
+      if (requestAmmoTogether && Number(ammoQuantity) > 0) {
         payload.ammunition = {
           caliberName: weapon.caliber,
           quantity: Number(ammoQuantity) || 0,
-          tipoMunicao: ammoType,
-          loteMunicao: ammoLot,
-          vaultSpaceId: weapon.vaultSpaceId,
-          reason: `Acautelamento em conjunto com ${weapon.model} Nº ${weapon.serialNumber}`,
-          seraDevolvida: ammoSeraDevolvida
+          destinacao: ammoDestinacao,
+          tipoMunicao: ammoDestinacao === 'Defesa' ? 'Defesa / Operacional' : 'Treinamento',
+          loteMunicao: isDirect ? ammoLot : 'A definir pelo armeiro',
+          vaultSpaceId: isDirect ? (availableAmmoForSelectedWeapon.find(s => s.id === selectedAmmoStockId)?.vaultSpaceId || weapon.vaultSpaceId) : undefined,
+          reason: `Acautelamento em conjunto com ${weapon.model} Nº ${weapon.serialNumber} (${ammoDestinacao})`,
+          seraDevolvida: isDirect ? ammoSeraDevolvida : (ammoDestinacao === 'Defesa')
         };
+        payload.ammoQuantity = Number(ammoQuantity) || 0;
+        payload.ammoDestinacao = ammoDestinacao;
       }
 
       const res = await storage.requestCautelaArma(payload);
@@ -332,7 +376,49 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   };
 
-  // Autorizar Cautela (Armeiro)
+  // Abertura do fluxo de autorização pelo armeiro
+  const handleOpenAuthorize = (cautela: CautelaArma) => {
+    const linkedAmmo = getLinkedAmmoForCautela(cautela);
+    const hasAmmo = Boolean(cautela.linkedAmmoCautelaId || (cautela.ammoQuantity && cautela.ammoQuantity > 0) || linkedAmmo);
+    if (hasAmmo) {
+      setAuthorizingCautela(cautela);
+      const isTreinamento = (cautela.ammoDestinacao === 'Treinamento' || linkedAmmo?.destinacao === 'Treinamento');
+      setAuthSeraDevolvida(!isTreinamento);
+      setAuthNotes('');
+    } else {
+      setNotesModal({ id: cautela.id, action: 'AUTORIZAR' });
+    }
+  };
+
+  // Confirmar autorização com seleção de cofre/lote e permanente vs devolver depois
+  const handleConfirmAuthorizeWithAmmo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authorizingCautela) return;
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      const selectedStock = availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId);
+      const res = await storage.authorizeCautelaArma(authorizingCautela.id, {
+        notes: authNotes,
+        stockId: authStockId || undefined,
+        vaultSpaceId: selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId,
+        seraDevolvida: authSeraDevolvida
+      });
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao autorizar acautelamento.');
+      } else {
+        setSuccessMsg(`Cautela da arma ${authorizingCautela.weaponModel} autorizada com sucesso! A munição foi deduzida do cofre selecionado (${authSeraDevolvida ? 'Irá devolver depois' : 'Retirada permanente'}).`);
+        setAuthorizingCautela(null);
+        onRefresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao autorizar acautelamento.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Autorizar Cautela (Armeiro - Sem munições ou direto)
   const handleAuthorize = async (id: string, notes?: string) => {
     setIsSubmitting(true);
     setErrorMsg('');
@@ -868,99 +954,132 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                 {requestAmmoTogether && (
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5">
-                    <div>
-                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                        <span>Selecione a Munição no Cofre (Mesmo Calibre {selectedWeapon?.caliber})</span>
-                        <span className="text-[10px] text-amber-400 font-mono font-normal">
-                          {availableAmmoForSelectedWeapon.length} lote(s) disponível(is)
-                        </span>
-                      </label>
-                      {availableAmmoForSelectedWeapon.length === 0 ? (
-                        <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300">
-                          Não há munições cadastradas em estoque no calibre <strong>{selectedWeapon?.caliber || 'da arma'}</strong> na sua unidade.
+                    {!isDirectCautela ? (
+                      /* Formulário para o policial: fala apenas a quantidade e se é de treinamento ou defesa */
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 uppercase mb-1">
+                              Quantidade de Munições Desejadas
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="300"
+                              value={ammoQuantity}
+                              onChange={(e) => setAmmoQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 font-mono font-bold focus:border-amber-500"
+                              required
+                            />
+                            <span className="text-[10px] text-slate-400 mt-1 block">
+                              Calibre correspondente: <strong>{selectedWeapon?.caliber || 'Padrão da Arma'}</strong>
+                            </span>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-300 uppercase mb-1">
+                              Destinação da Munição
+                            </label>
+                            <select
+                              value={ammoDestinacao}
+                              onChange={(e) => setAmmoDestinacao(e.target.value as 'Defesa' | 'Treinamento')}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-semibold focus:border-amber-500"
+                            >
+                              <option value="Defesa">Defesa (Serviço Operacional / Plantão)</option>
+                              <option value="Treinamento">Treinamento (Instrução / Estande de Tiro)</option>
+                            </select>
+                            <span className="text-[10px] text-amber-400/90 mt-1 block">
+                              O armeiro definirá o cofre, lote e se será com devolução ou baixa definitiva.
+                            </span>
+                          </div>
                         </div>
-                      ) : (
-                        <select
-                          value={selectedAmmoStockId}
-                          onChange={(e) => {
-                            const found = availableAmmoForSelectedWeapon.find(s => s.id === e.target.value);
-                            setSelectedAmmoStockId(e.target.value);
-                            if (found) {
-                              setAmmoType(found.tipoMunicao || 'Operacional');
-                              setAmmoLot(found.loteMunicao || 'Lote Padrão');
-                              setAmmoQuantity(Math.min(ammoQuantity || 30, found.quantity));
-                            }
-                          }}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
-                        >
-                          {availableAmmoForSelectedWeapon.map(st => {
-                            const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
-                            const cal = calibers.find(c => c.id === st.caliberId);
-                            return (
-                              <option key={st.id} value={st.id}>
-                                Cofre: {vault ? vault.code : 'Cofre'} • Tipo: {st.tipoMunicao || cal?.tipo || 'Padrão'} • Peso: {st.pesoMunicao || cal?.peso || 'N/I'} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
-                              </option>
-                            );
-                          })}
-                        </select>
-                      )}
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Quantidade de Munições (pode ser 0)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          max={availableAmmoForSelectedWeapon.find(s => s.id === selectedAmmoStockId)?.quantity || 200}
-                          value={ammoQuantity}
-                          onChange={(e) => setAmmoQuantity(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono font-bold"
-                        />
                       </div>
+                    ) : (
+                      /* Acautelamento direto pelo armeiro */
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                            <span>Selecione a Munição no Cofre (Mesmo Calibre {selectedWeapon?.caliber})</span>
+                            <span className="text-[10px] text-amber-400 font-mono font-normal">
+                              {availableAmmoForSelectedWeapon.length} lote(s) disponível(is)
+                            </span>
+                          </label>
+                          {availableAmmoForSelectedWeapon.length === 0 ? (
+                            <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300">
+                              Não há munições cadastradas em estoque no calibre <strong>{selectedWeapon?.caliber || 'da arma'}</strong> na sua unidade.
+                            </div>
+                          ) : (
+                            <select
+                              value={selectedAmmoStockId}
+                              onChange={(e) => {
+                                const found = availableAmmoForSelectedWeapon.find(s => s.id === e.target.value);
+                                setSelectedAmmoStockId(e.target.value);
+                                if (found) {
+                                  setAmmoType(found.tipoMunicao || 'Operacional');
+                                  setAmmoLot(found.loteMunicao || 'Lote Padrão');
+                                  setAmmoQuantity(Math.min(ammoQuantity || 30, found.quantity));
+                                }
+                              }}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                            >
+                              {availableAmmoForSelectedWeapon.map(st => {
+                                const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+                                const cal = calibers.find(c => c.id === st.caliberId);
+                                return (
+                                  <option key={st.id} value={st.id}>
+                                    Cofre: {vault ? vault.code : 'Cofre'} • Tipo: {st.tipoMunicao || cal?.tipo || 'Padrão'} • Peso: {st.pesoMunicao || cal?.peso || 'N/I'} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
+                                  </option>
+                                );
+                              })}
+                            </select>
+                          )}
+                        </div>
 
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Tipo de Munição
-                        </label>
-                        <input
-                          type="text"
-                          value={ammoType}
-                          onChange={(e) => setAmmoType(e.target.value)}
-                          placeholder="Ex: ETOG, EXPO, Operacional..."
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium"
-                          required
-                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Quantidade de Munições
+                            </label>
+                            <input
+                              type="number"
+                              min="0"
+                              max={availableAmmoForSelectedWeapon.find(s => s.id === selectedAmmoStockId)?.quantity || 200}
+                              value={ammoQuantity}
+                              onChange={(e) => setAmmoQuantity(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono font-bold"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Destinação
+                            </label>
+                            <select
+                              value={ammoDestinacao}
+                              onChange={(e) => setAmmoDestinacao(e.target.value as 'Defesa' | 'Treinamento')}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium"
+                            >
+                              <option value="Defesa">Defesa</option>
+                              <option value="Treinamento">Treinamento</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Tipo de Retirada
+                            </label>
+                            <select
+                              value={ammoSeraDevolvida ? 'DEVOLVER' : 'PERMANENTE'}
+                              onChange={(e) => setAmmoSeraDevolvida(e.target.value === 'DEVOLVER')}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium"
+                            >
+                              <option value="DEVOLVER">Irá devolver depois</option>
+                              <option value="PERMANENTE">Retirada permanente</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
-
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Lote da Munição
-                        </label>
-                        <input
-                          type="text"
-                          value={ammoLot}
-                          onChange={(e) => setAmmoLot(e.target.value)}
-                          placeholder="Lote..."
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-2 pt-1">
-                      <input
-                        type="checkbox"
-                        id="seraDevolvidaCheck"
-                        checked={ammoSeraDevolvida}
-                        onChange={(e) => setAmmoSeraDevolvida(e.target.checked)}
-                        className="w-3.5 h-3.5 rounded text-amber-500 bg-slate-900 border-slate-700"
-                      />
-                      <label htmlFor="seraDevolvidaCheck" className="text-[11px] text-slate-300">
-                        Munições serão devolvidas se não deflagradas (caso contrário serão dadas como consumo)
-                      </label>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1368,7 +1487,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                               {isPending && canAuthorize && (
                                 <div className="flex items-center space-x-2">
                                   <button
-                                    onClick={() => handleAuthorize(cautela.id)}
+                                    onClick={() => handleOpenAuthorize(cautela)}
                                     className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
                                   >
                                     <Check className="w-3.5 h-3.5" />
@@ -1407,6 +1526,37 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                               </span>
                             </div>
                           </div>
+
+                          {/* Seção com detalhes da munição conjunta solicitada */}
+                          {(() => {
+                            const linked = getLinkedAmmoForCautela(cautela);
+                            const hasMun = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linked);
+                            if (!hasMun) return null;
+                            const qty = cautela.ammoQuantity || linked?.quantity || 'N/I';
+                            const dest = cautela.ammoDestinacao || linked?.destinacao || 'Defesa';
+                            return (
+                              <div className="p-3 bg-amber-950/30 border border-amber-800/60 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
+                                <div className="flex items-center space-x-2">
+                                  <Disc className="w-4 h-4 text-amber-400 shrink-0" />
+                                  <span>
+                                    Munições Solicitadas: <strong>{qty} un.</strong> • Destinação: <strong>{dest}</strong>
+                                    {linked?.seraDevolvida !== undefined && (
+                                      <span className="text-[11px] text-slate-300 ml-2">
+                                        ({linked.seraDevolvida ? 'Irá devolver depois' : 'Retirada permanente / baixa definitiva'})
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                                {linked?.status && (
+                                  <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border ${
+                                    linked.status === 'AUTORIZADA' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-slate-300 border-slate-700'
+                                  }`}>
+                                    Munição {linked.status}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
 
                           {isReturned && (
                             <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
@@ -1658,6 +1808,165 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 >
                   <RotateCcw className="w-4 h-4" />
                   <span>{isSubmitting ? 'Registrando...' : 'Confirmar Devolução ao Cofre'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE AUTORIZAÇÃO PELO ARMEIRO (SELEÇÃO DE COFRE/LOTE E PERMANENTE OU DEVOLVER DEPOIS) */}
+      {authorizingCautela && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-xl shadow-2xl my-auto space-y-4">
+            <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
+                  <Shield className="w-5 h-5 text-amber-400" />
+                  <span>Autorização e Liberação de Armamento e Munição</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Informe o cofre/lote de onde retirará a munição e a modalidade de acautelamento.
+                </p>
+              </div>
+              <button 
+                type="button" 
+                onClick={() => setAuthorizingCautela(null)} 
+                className="text-slate-400 hover:text-slate-200"
+              >
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmAuthorizeWithAmmo} className="space-y-4">
+              {/* Resumo do Pedido do Policial */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-slate-300">
+                  <span>Policial Solicitante:</span>
+                  <strong className="text-slate-100">{authorizingCautela.requesterName} (MASP: {authorizingCautela.requesterMasp})</strong>
+                </div>
+                <div className="flex items-center justify-between text-slate-300">
+                  <span>Arma Solicitada:</span>
+                  <strong className="text-slate-100 font-mono">{authorizingCautela.weaponModel} - Série: {authorizingCautela.weaponSerialNumber} ({authorizingCautela.weaponCaliber})</strong>
+                </div>
+                <div className="flex items-center justify-between text-amber-300 pt-1 border-t border-slate-800/80">
+                  <span>Munições Solicitadas:</span>
+                  <strong>
+                    {authorizingCautela.ammoQuantity || getLinkedAmmoForCautela(authorizingCautela)?.quantity || 30} unidades • Destinação: {authorizingCautela.ammoDestinacao || getLinkedAmmoForCautela(authorizingCautela)?.destinacao || 'Defesa'}
+                  </strong>
+                </div>
+              </div>
+
+              {/* 1. Seleção do Cofre e Lote da Munição */}
+              <div>
+                <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                  <span>De qual cofre / lote vai tirar as munições?</span>
+                  <span className="text-[10px] text-amber-400 font-mono font-normal">
+                    {availableAmmoForAuthorizingWeapon.length} lote(s) disponível(is)
+                  </span>
+                </label>
+
+                {availableAmmoForAuthorizingWeapon.length === 0 ? (
+                  <div className="p-3 bg-red-950/40 border border-red-800 text-xs text-red-300 rounded-xl">
+                    ⚠ Não há estoque de munições no calibre <strong>{authorizingCautela.weaponCaliber}</strong> cadastrado nesta unidade.
+                  </div>
+                ) : (
+                  <select
+                    value={authStockId}
+                    onChange={(e) => setAuthStockId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                    required
+                  >
+                    {availableAmmoForAuthorizingWeapon.map(st => {
+                      const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+                      const cal = calibers.find(c => c.id === st.caliberId);
+                      return (
+                        <option key={st.id} value={st.id}>
+                          {vault ? vault.code : 'Cofre'} • {st.fabricante || 'CBC'} • Calibre: {cal ? cal.name : (st.caliberId || authorizingCautela.weaponCaliber)} • Tipo: {st.tipoMunicao || 'Comum'} • Peso: {st.pesoMunicao || 'N/I'} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
+                        </option>
+                      );
+                    })}
+                  </select>
+                )}
+              </div>
+
+              {/* 2. Tipo de Retirada: Permanente vs Devolver Depois */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider">
+                  Tipo de Retirada da Munição
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                  <label className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
+                    authSeraDevolvida
+                      ? 'bg-amber-950/40 border-amber-500 text-slate-100 shadow-sm'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="authRetiradaTipo"
+                        checked={authSeraDevolvida}
+                        onChange={() => setAuthSeraDevolvida(true)}
+                        className="text-amber-500"
+                      />
+                      <span className="font-bold text-slate-100">Irá devolver depois</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      Cautela temporária: as munições não deflagradas deverão retornar ao cofre.
+                    </span>
+                  </label>
+
+                  <label className={`p-3 rounded-xl border cursor-pointer transition flex flex-col justify-between ${
+                    !authSeraDevolvida
+                      ? 'bg-amber-950/40 border-amber-500 text-slate-100 shadow-sm'
+                      : 'bg-slate-900 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}>
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="radio"
+                        name="authRetiradaTipo"
+                        checked={!authSeraDevolvida}
+                        onChange={() => setAuthSeraDevolvida(false)}
+                        className="text-amber-500"
+                      />
+                      <span className="font-bold text-slate-100">Retirada permanente</span>
+                    </div>
+                    <span className="text-[11px] text-slate-400 mt-1">
+                      Baixa definitiva: consumo, treinamento ou missão (não retornará ao cofre).
+                    </span>
+                  </label>
+                </div>
+              </div>
+
+              {/* 3. Despacho / Observações do Armeiro */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Despacho / Observações do Armeiro (Opcional)
+                </label>
+                <textarea
+                  value={authNotes}
+                  onChange={(e) => setAuthNotes(e.target.value)}
+                  placeholder="Observações pertinentes à liberação do armamento e das munições..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100"
+                  rows={2}
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setAuthorizingCautela(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting || (availableAmmoForAuthorizingWeapon.length > 0 && !authStockId)}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Autorizando...' : 'Confirmar Autorização e Baixa no Estoque'}</span>
                 </button>
               </div>
             </form>

@@ -139,16 +139,6 @@ export default function App() {
     initApp();
   }, []);
 
-  const handleSelectModule = (mod: ModuleType) => {
-    if (mod === activeModule) {
-      setIsMobileMenuOpen(false);
-      return;
-    }
-    setActiveModule(mod);
-    setIsMobileMenuOpen(false);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  };
-
   // Security guard: ensure active module is strictly accessible by current user's role
   useEffect(() => {
     if (!currentUser) return;
@@ -224,12 +214,15 @@ export default function App() {
     }
   };
 
-  const pendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
+  const [acknowledgedModuleAlerts, setAcknowledgedModuleAlerts] = useState<Record<string, number>>({});
 
   const isArmeiroUser = effectiveUser?.role === 'Armeiro' || effectiveUser?.activeRole === 'Armeiro';
   const isGeralUser = effectiveUser?.role === 'Geral' || effectiveUser?.activeRole === 'Geral';
 
-  const pendingWeaponCautelasCount = useMemo(() => {
+  const rawPendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
+  const pendingMovementsCount = Math.max(0, rawPendingMovementsCount - (acknowledgedModuleAlerts['movimentacoes'] || 0));
+
+  const rawPendingWeaponCautelasCount = useMemo(() => {
     const list = storage.getCautelasArmas();
     if (isGeralUser) {
       return list.filter(c => c.status === 'PENDENTE').length;
@@ -239,8 +232,9 @@ export default function App() {
     }
     return 0;
   }, [effectiveUser, isArmeiroUser, isGeralUser]);
+  const pendingWeaponCautelasCount = Math.max(0, rawPendingWeaponCautelasCount - (acknowledgedModuleAlerts['cautela-armas'] || 0));
 
-  const pendingAmmoCautelasCount = useMemo(() => {
+  const rawPendingAmmoCautelasCount = useMemo(() => {
     const list = storage.getCautelasMunicoes();
     if (isGeralUser) {
       return list.filter(c => c.status === 'PENDENTE').length;
@@ -250,13 +244,47 @@ export default function App() {
     }
     return 0;
   }, [effectiveUser, isArmeiroUser, isGeralUser]);
+  const pendingAmmoCautelasCount = Math.max(0, rawPendingAmmoCautelasCount - (acknowledgedModuleAlerts['cautela-municoes'] || 0));
 
-  const readyReceiptsCount = useMemo(() => {
+  const rawReadyReceiptsCount = useMemo(() => {
     if (!effectiveUser) return 0;
     const armasAutorizadas = storage.getCautelasArmas().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
     const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
     return armasAutorizadas + municoesAutorizadas;
   }, [effectiveUser]);
+  const readyReceiptsCount = Math.max(0, rawReadyReceiptsCount - (acknowledgedModuleAlerts['meu-perfil'] || 0));
+
+  // Ajusta acknowledged quando o total diminui
+  useEffect(() => {
+    setAcknowledgedModuleAlerts(prev => {
+      const next = { ...prev };
+      if ((next['cautela-armas'] || 0) > rawPendingWeaponCautelasCount) next['cautela-armas'] = rawPendingWeaponCautelasCount;
+      if ((next['cautela-municoes'] || 0) > rawPendingAmmoCautelasCount) next['cautela-municoes'] = rawPendingAmmoCautelasCount;
+      if ((next['movimentacoes'] || 0) > rawPendingMovementsCount) next['movimentacoes'] = rawPendingMovementsCount;
+      if ((next['meu-perfil'] || 0) > rawReadyReceiptsCount) next['meu-perfil'] = rawReadyReceiptsCount;
+      return next;
+    });
+  }, [rawPendingWeaponCautelasCount, rawPendingAmmoCautelasCount, rawPendingMovementsCount, rawReadyReceiptsCount]);
+
+  const handleSelectModule = (mod: ModuleType) => {
+    // Ao clicar no módulo, limpa a notificação/alerta daquele módulo imediatamente
+    setAcknowledgedModuleAlerts(prev => {
+      let currentVal = 0;
+      if (mod === 'cautela-armas') currentVal = rawPendingWeaponCautelasCount;
+      else if (mod === 'cautela-municoes') currentVal = rawPendingAmmoCautelasCount;
+      else if (mod === 'movimentacoes') currentVal = rawPendingMovementsCount;
+      else if (mod === 'meu-perfil') currentVal = rawReadyReceiptsCount;
+      return { ...prev, [mod]: currentVal };
+    });
+
+    if (mod === activeModule) {
+      setIsMobileMenuOpen(false);
+      return;
+    }
+    setActiveModule(mod);
+    setIsMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   const userDepartment = currentUser?.departmentId 
     ? (departments.find(d => d.id === currentUser.departmentId) || storage.getAllDepartments().find(d => d.id === currentUser.departmentId) || null)
