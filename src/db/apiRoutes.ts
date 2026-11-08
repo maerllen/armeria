@@ -8942,7 +8942,29 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
     ]);
 
     if (isDirect) {
-      await pool.query("UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada' WHERE ID_ARMAS = ?", [weaponId]);
+      let vaultCode = '';
+      if (vaultSpaceId) {
+        try {
+          const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [vaultSpaceId]);
+          if (vRows && vRows.length > 0) {
+            vaultCode = vRows[0].CODIGO_COFRES;
+          }
+        } catch (e) {
+          vaultCode = vaultSpaceId;
+        }
+      }
+      const locationNote = `Acautelada com ${requesterName} (MASP: ${requesterMasp}) • Último cofre: ${vaultCode || 'N/A'}`;
+      try {
+        await pool.query(
+          "UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada', COFRE_ID_ARMAS = NULL, OBSERVACAO_LOCALIZACAO_ARMAS = ?, LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS) WHERE ID_ARMAS = ?",
+          [locationNote, vaultSpaceId || null, weaponId]
+        );
+      } catch (e) {
+        await pool.query(
+          "UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada', COFRE_ID_ARMAS = NULL, OBSERVACAO_LOCALIZACAO_ARMAS = ? WHERE ID_ARMAS = ?",
+          [locationNote, weaponId]
+        );
+      }
     }
 
     await insertAuditLog(
@@ -8987,12 +9009,39 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
       WHERE ID_ACAUTELAR_ARMAS = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
 
-    // 2. Atualiza a arma para status 'Acautelada', mantendo a localização no cofre registrada para retorno
-    await pool.query(`
-      UPDATE ARMAS SET 
-        STATUS_ARMAS = 'Acautelada'
-      WHERE ID_ARMAS = ?
-    `, [cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    // 2. Atualiza a arma para status 'Acautelada', retirando do cofre físico mas mantendo último cofre e policial
+    let vaultCode = '';
+    const originVaultId = cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS || vaultSpaceId;
+    if (originVaultId) {
+      try {
+        const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [originVaultId]);
+        if (vRows && vRows.length > 0) {
+          vaultCode = vRows[0].CODIGO_COFRES;
+        }
+      } catch (e) {
+        vaultCode = originVaultId;
+      }
+    }
+    const locationNote = `Acautelada com ${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS} (MASP: ${cautela.REQUERENTE_MASP_ACAUTELAR_ARMAS}) • Último cofre: ${vaultCode || 'N/A'}`;
+
+    try {
+      await pool.query(`
+        UPDATE ARMAS SET 
+          STATUS_ARMAS = 'Acautelada',
+          COFRE_ID_ARMAS = NULL,
+          OBSERVACAO_LOCALIZACAO_ARMAS = ?,
+          LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS)
+        WHERE ID_ARMAS = ?
+      `, [locationNote, originVaultId || null, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    } catch (e) {
+      await pool.query(`
+        UPDATE ARMAS SET 
+          STATUS_ARMAS = 'Acautelada',
+          COFRE_ID_ARMAS = NULL,
+          OBSERVACAO_LOCALIZACAO_ARMAS = ?
+        WHERE ID_ARMAS = ?
+      `, [locationNote, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    }
 
     // 3. Se houver cautela de munição vinculada, autoriza e deduz o estoque do cofre
     const ammoCautelaId = cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS;
@@ -9120,6 +9169,13 @@ apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response)
     const pool = getPool();
     const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
 
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [id]);
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
+    }
+    const cautela = rows[0];
+
+    // 1. Atualiza registro da cautela para RECUSADA
     await pool.query(`
       UPDATE ACAUTELAR_ARMAS SET
         STATUS_ACAUTELAR_ARMAS = 'RECUSADA',
@@ -9131,7 +9187,41 @@ apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response)
       WHERE ID_ACAUTELAR_ARMAS = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
 
-    return res.json({ success: true });
+    // 2. Quando o armeiro recusar, a arma volta para o cofre no local de origem
+    if (cautela.ARMA_ID_ACAUTELAR_ARMAS) {
+      await pool.query(`
+        UPDATE ARMAS SET 
+          STATUS_ARMAS = 'No Cofre',
+          COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+          OBSERVACAO_LOCALIZACAO_ARMAS = NULL
+        WHERE ID_ARMAS = ?
+      `, [cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    }
+
+    // 3. Se houver cautela de munição vinculada, recusa também
+    const ammoCautelaId = cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS;
+    if (ammoCautelaId) {
+      await pool.query(`
+        UPDATE ACAUTELAR_MUNICOES SET
+          STATUS_ACAUTELAR_MUNICOES = 'RECUSADA',
+          ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
+          ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
+          ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
+          OBSERVACOES_ACAUTELAR_MUNICOES = ?,
+          DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
+        WHERE ID_ACAUTELAR_MUNICOES = ?
+      `, [armorer.id, armorer.name, armorer.masp, notes || 'Recusada junto com armamento', ammoCautelaId]);
+    }
+
+    await insertAuditLog(
+      'Armas',
+      'Recusar',
+      `Armeiro ${armorer.name} (MASP ${armorer.masp}) recusou cautela da arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS}. Arma retornada ao cofre de origem.`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Cautela de arma recusada e armamento mantido no cofre de origem.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -9200,13 +9290,26 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       id
     ]);
 
-    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre'
+    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre', retornando ao cofre de origem
     const newStatus = !isWorking ? 'Manutenção' : 'No Cofre';
-    await pool.query(`
-      UPDATE ARMAS SET 
-        STATUS_ARMAS = ?
-      WHERE ID_ARMAS = ?
-    `, [newStatus, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    try {
+      await pool.query(`
+        UPDATE ARMAS SET 
+          STATUS_ARMAS = ?,
+          COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+          OBSERVACAO_LOCALIZACAO_ARMAS = NULL,
+          TIROS_DISPARADOS_ARMAS = TIROS_DISPARADOS_ARMAS + ?
+        WHERE ID_ARMAS = ?
+      `, [newStatus, cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, shots, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    } catch (e) {
+      await pool.query(`
+        UPDATE ARMAS SET 
+          STATUS_ARMAS = ?,
+          COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+          OBSERVACAO_LOCALIZACAO_ARMAS = NULL
+        WHERE ID_ARMAS = ?
+      `, [newStatus, cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+    }
 
     await insertAuditLog(
       'Armas',
@@ -9556,6 +9659,9 @@ apiRouter.put('/cautelas-municoes/:id/recusar', async (req: Request, res: Respon
     const pool = getPool();
     const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
 
+    const [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [id]);
+    const cautela = (rows && rows.length > 0) ? rows[0] : null;
+
     await pool.query(`
       UPDATE ACAUTELAR_MUNICOES SET
         STATUS_ACAUTELAR_MUNICOES = 'RECUSADA',
@@ -9567,7 +9673,15 @@ apiRouter.put('/cautelas-municoes/:id/recusar', async (req: Request, res: Respon
       WHERE ID_ACAUTELAR_MUNICOES = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, id]);
 
-    return res.json({ success: true });
+    await insertAuditLog(
+      'Munições',
+      'Recusar',
+      `Armeiro ${armorer.name} (MASP ${armorer.masp}) recusou solicitação de munições ${cautela ? `(${cautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES} un. ${cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES})` : ''}`,
+      armorer,
+      req.ip
+    );
+
+    return res.json({ success: true, message: 'Solicitação de cautela de munições recusada.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

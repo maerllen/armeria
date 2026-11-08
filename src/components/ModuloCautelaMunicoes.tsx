@@ -1093,202 +1093,414 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
               <p className="text-xs text-slate-500 mt-1">Utilize o botão "Solicitar Munições" para iniciar um novo pedido.</p>
             </div>
           ) : activeTab === 'MINHAS' ? (
-            /* VISUALIZAÇÃO MINHAS CAUTELAS: SEPARAÇÃO ENTRE CAUTELAS ATIVAS E HISTÓRICO DEVOLVIDO */
+            /* VISUALIZAÇÃO MINHAS CAUTELAS: SEPARAÇÃO ENTRE CAUTELAS ATIVAS (A DEVOLVER), BAIXADAS (USO PERMANENTE), RECUSADAS E DEVOLVIDAS */
             <div className="space-y-6">
-              {/* Seção 1: Cautelas Ativas */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
-                    <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                      Cautelas Ativas em Posse do Policial
-                    </h3>
-                  </div>
-                  <span className="text-[11px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
-                    {scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'PENDENTE').length} Ativa(s)
-                  </span>
-                </div>
+              {/* Seção 1: Cautelas Ativas a Devolver */}
+              {(() => {
+                const ativas = scopedCautelas.filter(c => c.status === 'AUTORIZADA' && Boolean(c.seraDevolvida));
+                return (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                        <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                          Munições Acauteladas (Ativas - Aguardando Devolução)
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold bg-emerald-500/10 text-emerald-400 px-2 py-0.5 rounded border border-emerald-500/20">
+                        {ativas.length} Cautela(s) Ativa(s)
+                      </span>
+                    </div>
 
-                {scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'PENDENTE').length === 0 ? (
-                  <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
-                    Você não possui nenhuma cautela de munição ativa no momento.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3">
-                    {scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'PENDENTE').map(cautela => {
-                      const isAuthorized = cautela.status === 'AUTORIZADA';
-                      const isPending = cautela.status === 'PENDENTE';
-                      const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+                    {ativas.length === 0 ? (
+                      <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
+                        Você não possui nenhuma munição acautelada temporária pendente de devolução.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {ativas.map(cautela => {
+                          const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
 
-                      return (
+                          return (
+                            <div
+                              key={cautela.id}
+                              className="bg-slate-900 border border-emerald-800/40 rounded-2xl p-4 sm:p-5 hover:border-emerald-700/60 transition space-y-3 shadow-sm ring-1 ring-emerald-500/10"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                <div className="flex items-center space-x-3">
+                                  <div className="p-2.5 rounded-xl border bg-emerald-500/10 border-emerald-500/20 text-emerald-400">
+                                    <Disc className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className="text-sm font-bold text-slate-100">{cautela.caliberName}</h4>
+                                      <span className="font-mono text-xs text-cyan-400 font-bold">
+                                        {cautela.quantity} unidades
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-emerald-500/20 text-emerald-300 border-emerald-500/30">
+                                        Acautelada (Ativa - A Devolver)
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                      Solicitante: <strong className="text-slate-200">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp})
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center space-x-2 self-end sm:self-center">
+                                  <button
+                                    onClick={() => handlePrintRecibo(cautela)}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                                    title="Imprimir Recibo de Cautela de Munições"
+                                  >
+                                    <Printer className="w-3.5 h-3.5 text-cyan-400" />
+                                    <span>Imprimir Recibo</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenReturnModal(cautela)}
+                                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    <span>Devolver ao Cofre</span>
+                                  </button>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Tipo & Lote</span>
+                                  <span className="text-slate-200 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Local de Origem</span>
+                                  <span className="font-mono text-slate-200 font-bold">{vault ? vault.code : 'Cofre da Unidade'}</span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Retirada</span>
+                                  <span className="text-slate-300">
+                                    {cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Fornecedor</span>
+                                  <span className="text-slate-200 font-semibold truncate block">
+                                    {cautela.armorerName ? `${cautela.armorerName} (${cautela.armorerMasp})` : 'Armeiro da Unidade'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Seção 2: Munições Baixadas (Uso Permanente / Treinamento / Consumo) */}
+              {(() => {
+                const baixadas = scopedCautelas.filter(c => c.status === 'CONSUMIDA' || (c.status === 'AUTORIZADA' && !c.seraDevolvida));
+                return (
+                  <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-400" />
+                        <h3 className="text-xs font-bold text-slate-100 uppercase tracking-wider">
+                          Munições Baixadas (Uso Permanente / Treinamento / Consumo)
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold bg-blue-500/10 text-blue-300 px-2 py-0.5 rounded border border-blue-500/20">
+                        {baixadas.length} Registro(s) Baixado(s)
+                      </span>
+                    </div>
+
+                    {baixadas.length === 0 ? (
+                      <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
+                        Nenhuma munição baixada de forma definitiva registrada.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {baixadas.map(cautela => {
+                          const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+
+                          return (
+                            <div
+                              key={cautela.id}
+                              className="bg-slate-900 border border-blue-900/40 rounded-2xl p-4 sm:p-5 hover:border-blue-700/60 transition space-y-3"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                <div className="flex items-center space-x-3">
+                                  <div className="p-2.5 rounded-xl border bg-blue-500/10 border-blue-500/20 text-blue-400">
+                                    <Disc className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className="text-sm font-bold text-slate-100">{cautela.caliberName}</h4>
+                                      <span className="font-mono text-xs text-blue-300 font-bold">
+                                        {cautela.quantity} unidades
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-blue-500/20 text-blue-300 border-blue-500/30">
+                                        Baixada (Uso Permanente)
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                      Autorizado para: <strong className="text-slate-200">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp}) • Destinação: {cautela.destinacao || 'Consumo Operacional'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <button
+                                  onClick={() => handlePrintRecibo(cautela)}
+                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                                  title="Imprimir Comprovante de Baixa de Munições"
+                                >
+                                  <Printer className="w-3.5 h-3.5 text-blue-400" />
+                                  <span>Imprimir Recibo</span>
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Tipo & Lote</span>
+                                  <span className="text-slate-200 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Origem</span>
+                                  <span className="font-mono text-slate-200 font-bold">{vault ? vault.code : 'Cofre da Unidade'}</span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Baixa</span>
+                                  <span className="text-slate-300">
+                                    {cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Responsável</span>
+                                  <span className="text-slate-200 font-semibold truncate block">
+                                    {cautela.armorerName ? `${cautela.armorerName} (${cautela.armorerMasp})` : 'Armeiro da Unidade'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Seção 3: Cautelas Recusadas (Indeferidas pelo Armeiro) */}
+              {(() => {
+                const recusadas = scopedCautelas.filter(c => c.status === 'RECUSADA');
+                return (
+                  <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <XCircle className="w-3.5 h-3.5 text-red-400" />
+                        <h3 className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                          Cautelas Recusadas (Solicitações Indeferidas)
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold bg-red-500/10 text-red-400 px-2 py-0.5 rounded border border-red-500/20">
+                        {recusadas.length} Recusada(s)
+                      </span>
+                    </div>
+
+                    {recusadas.length === 0 ? (
+                      <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
+                        Nenhuma solicitação de munição foi recusada.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {recusadas.map(cautela => {
+                          const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+
+                          return (
+                            <div
+                              key={cautela.id}
+                              className="bg-slate-900 border border-red-900/40 rounded-2xl p-4 sm:p-5 space-y-3 opacity-90"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                <div className="flex items-center space-x-3">
+                                  <div className="p-2.5 rounded-xl border bg-red-500/10 border-red-500/20 text-red-400">
+                                    <Disc className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className="text-sm font-bold text-slate-100">{cautela.caliberName}</h4>
+                                      <span className="font-mono text-xs text-red-400 font-bold">
+                                        {cautela.quantity} unidades solicitadas
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-red-500/20 text-red-300 border-red-500/30">
+                                        Recusada
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-400 mt-0.5">
+                                      Solicitado em: {new Date(cautela.requestDate).toLocaleString('pt-BR')} • {cautela.reason || 'Sem motivo especificado'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="text-xs text-red-300 bg-red-950/40 border border-red-900/40 px-3 py-1.5 rounded-xl">
+                                  Indeferido por {cautela.armorerName || 'Armeiro'} {cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}
+                                </div>
+                              </div>
+
+                              {cautela.observations && (
+                                <div className="p-3 bg-red-950/20 border border-red-900/30 rounded-xl text-xs text-red-300">
+                                  <strong>Justificativa da recusa:</strong> {cautela.observations}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Seção 4: Solicitações Pendentes */}
+              {(() => {
+                const pendentes = scopedCautelas.filter(c => c.status === 'PENDENTE');
+                if (pendentes.length === 0) return null;
+                return (
+                  <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                          Solicitações Pendentes (Aguardando Armeiro)
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                        {pendentes.length} Pendente(s)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {pendentes.map(cautela => (
                         <div
                           key={cautela.id}
-                          className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 hover:border-slate-700 transition space-y-3"
+                          className="bg-slate-900 border border-amber-900/40 rounded-2xl p-4 sm:p-5 space-y-3"
                         >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                          <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
                             <div className="flex items-center space-x-3">
-                              <div className={`p-2.5 rounded-xl border ${
-                                isAuthorized
-                                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
-                                  : 'bg-cyan-500/10 border-cyan-500/20 text-cyan-400'
-                              }`}>
-                                <Disc className="w-5 h-5" />
+                              <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/20 text-amber-400">
+                                <Clock className="w-5 h-5" />
                               </div>
                               <div>
                                 <div className="flex items-center space-x-2">
                                   <h4 className="text-sm font-bold text-slate-100">{cautela.caliberName}</h4>
-                                  <span className="font-mono text-xs text-cyan-400 font-bold">
+                                  <span className="font-mono text-xs text-amber-400 font-bold">
                                     {cautela.quantity} unidades
                                   </span>
-                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border ${
-                                    isAuthorized
-                                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                                      : 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30 animate-pulse'
-                                  }`}>
-                                    {cautela.status === 'AUTORIZADA' ? 'Acautelada (Ativa)' : cautela.status}
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse">
+                                    Aguardando Análise
                                   </span>
                                 </div>
                                 <p className="text-xs text-slate-400 mt-0.5">
-                                  Solicitante: <strong className="text-slate-200">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp})
+                                  Solicitado em: {new Date(cautela.requestDate).toLocaleString('pt-BR')} • Motivo: {cautela.reason}
                                 </p>
                               </div>
                             </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
-                            <div className="flex items-center space-x-2 self-end sm:self-center">
-                              {isAuthorized && (
+              {/* Seção 5: Histórico de Cautelas Devolvidas */}
+              {(() => {
+                const devolvidas = scopedCautelas.filter(c => c.status === 'DEVOLVIDA');
+                return (
+                  <div className="space-y-3 pt-4 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
+                        <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                          Histórico de Munições Devolvidas ao Cofre
+                        </h3>
+                      </div>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {devolvidas.length} Registro(s) Devolvido(s)
+                      </span>
+                    </div>
+
+                    {devolvidas.length === 0 ? (
+                      <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
+                        Nenhum histórico de devolução de munições registrado.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 gap-3">
+                        {devolvidas.map(cautela => {
+                          const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+
+                          return (
+                            <div
+                              key={cautela.id}
+                              className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 hover:border-slate-700 transition space-y-3"
+                            >
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                <div className="flex items-center space-x-3">
+                                  <div className="p-2.5 rounded-xl border bg-slate-800 border-slate-700 text-slate-400">
+                                    <Disc className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center space-x-2">
+                                      <h4 className="text-sm font-bold text-slate-200">{cautela.caliberName}</h4>
+                                      <span className="font-mono text-xs text-slate-400 font-bold">
+                                        {cautela.quantity} unidades
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-slate-800 text-slate-300 border-slate-700">
+                                        Devolvida ao Cofre
+                                      </span>
+                                    </div>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                      Devolvida em: {cautela.returnedAt ? new Date(cautela.returnedAt).toLocaleString('pt-BR') : 'N/A'} por {cautela.returnArmorerName || 'Armeiro'}
+                                    </p>
+                                  </div>
+                                </div>
+
                                 <button
                                   onClick={() => handlePrintRecibo(cautela)}
-                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
-                                  title="Imprimir Recibo de Cautela de Munições"
+                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                                  title="Imprimir Comprovante Oficial"
                                 >
                                   <Printer className="w-3.5 h-3.5 text-cyan-400" />
-                                  <span>Imprimir Recibo</span>
+                                  <span>Imprimir Comprovante</span>
                                 </button>
-                              )}
-                              {isAuthorized && (
-                                <button
-                                  onClick={() => handleOpenReturnModal(cautela)}
-                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
-                                >
-                                  <RotateCcw className="w-3.5 h-3.5" />
-                                  <span>Devolver / Baixar</span>
-                                </button>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Tipo & Lote</span>
-                              <span className="text-slate-200 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Local do Cofre</span>
-                              <span className="font-mono text-slate-200 font-bold">{vault ? vault.code : 'Cofre da Unidade'}</span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Retirada</span>
-                              <span className="text-slate-300">
-                                {cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date(cautela.requestDate).toLocaleString('pt-BR')}
-                              </span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Autorizador</span>
-                              <span className="text-slate-200 font-semibold truncate block">
-                                {cautela.armorerName ? `${cautela.armorerName} (${cautela.armorerMasp})` : 'Aguardando autorização'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* Seção 2: Histórico de Cautelas Devolvidas / Encerradas */}
-              <div className="space-y-3 pt-4 border-t border-slate-800/80">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <div className="flex items-center space-x-2">
-                    <RotateCcw className="w-3.5 h-3.5 text-slate-400" />
-                    <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-                      Histórico de Cautelas Devolvidas / Baixadas
-                    </h3>
-                  </div>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    {scopedCautelas.filter(c => c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' || c.status === 'RECUSADA').length} Registro(s)
-                  </span>
-                </div>
-
-                {scopedCautelas.filter(c => c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' || c.status === 'RECUSADA').length === 0 ? (
-                  <div className="p-4 bg-slate-950/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500 italic">
-                    Nenhum histórico de cautelas devolvidas ou encerradas.
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-1 gap-3">
-                    {scopedCautelas.filter(c => c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' || c.status === 'RECUSADA').map(cautela => {
-                      const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
-
-                      return (
-                        <div
-                          key={cautela.id}
-                          className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 hover:border-slate-700 transition space-y-3"
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                            <div className="flex items-center space-x-3">
-                              <div className="p-2.5 rounded-xl border bg-slate-800 border-slate-700 text-slate-400">
-                                <Disc className="w-5 h-5" />
                               </div>
-                              <div>
-                                <div className="flex items-center space-x-2">
-                                  <h4 className="text-sm font-bold text-slate-200">{cautela.caliberName}</h4>
-                                  <span className="font-mono text-xs text-slate-400 font-bold">
-                                    {cautela.quantity} unidades
-                                  </span>
-                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-slate-800 text-slate-300 border-slate-700">
-                                    {cautela.status}
-                                  </span>
+
+                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Tipo & Lote</span>
+                                  <span className="text-slate-300 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
                                 </div>
-                                <p className="text-xs text-slate-500 mt-0.5">
-                                  Devolvida/Encerrada em: {cautela.returnedAt ? new Date(cautela.returnedAt).toLocaleString('pt-BR') : 'N/A'}
-                                </p>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Devolvidas ao Cofre</span>
+                                  <span className="font-bold text-cyan-400 font-mono">{cautela.returnedQuantity || 0} un.</span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Consumidas / Disparadas</span>
+                                  <span className="font-bold text-amber-400 font-mono">{Math.max(0, cautela.quantity - (cautela.returnedQuantity || 0))} un.</span>
+                                </div>
+                                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Retorno</span>
+                                  <span className="font-mono text-slate-300 font-bold">{vault ? vault.code : 'Cofre'}</span>
+                                </div>
                               </div>
                             </div>
-
-                            <button
-                              onClick={() => handlePrintRecibo(cautela)}
-                              className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
-                              title="Imprimir Comprovante Oficial"
-                            >
-                              <Printer className="w-3.5 h-3.5 text-cyan-400" />
-                              <span>Imprimir Comprovante</span>
-                            </button>
-                          </div>
-
-                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Tipo & Lote</span>
-                              <span className="text-slate-300 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Devolvidas ao Cofre</span>
-                              <span className="font-bold text-cyan-400 font-mono">{cautela.returnedQuantity || 0} un.</span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Consumidas / Disparadas</span>
-                              <span className="font-bold text-amber-400 font-mono">{Math.max(0, cautela.quantity - (cautela.returnedQuantity || 0))} un.</span>
-                            </div>
-                            <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                              <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Retorno</span>
-                              <span className="font-mono text-slate-300 font-bold">{vault ? vault.code : 'Cofre'}</span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </div>
           ) : (
             /* VISUALIZAÇÃO GERAL (Armeiro / Admin - PENDENTES ou TODAS) */

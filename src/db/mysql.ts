@@ -240,6 +240,16 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       // Ignorar
     }
 
+    try {
+      await connection.query(`
+        ALTER TABLE \`ARMAS\` 
+        ADD COLUMN IF NOT EXISTS \`TIROS_DISPARADOS_ARMAS\` INT NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS \`LOCAL_ANTERIOR_COFRE_ID_ARMAS\` VARCHAR(64) DEFAULT NULL
+      `);
+    } catch (e) {
+      // Ignorar se já existem
+    }
+
     // 7. ESTOQUE_MUNICOES
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`ESTOQUE_MUNICOES\` (

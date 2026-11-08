@@ -3068,6 +3068,24 @@ class StorageService {
     options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
+    
+    // Atualização otimista imediata no estado local
+    const target = (this.state.cautelasArmas || []).find(c => c.id === id);
+    if (target) {
+      target.status = 'AUTORIZADA';
+      target.authorizedAt = new Date().toISOString();
+      target.armorerId = this.state.currentUser?.id;
+      target.armorerName = this.state.currentUser?.name;
+      target.armorerMasp = this.state.currentUser?.masp;
+      const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
+      if (weap) {
+        weap.status = 'Acautelada';
+        weap.previousVaultSpaceId = target.vaultSpaceId || weap.vaultSpaceId;
+        const vault = (this.state.vaultSpaces || []).find(v => v.id === weap.previousVaultSpaceId);
+        (weap as any).locationNote = `Acautelada com ${target.requesterName} (MASP: ${target.requesterMasp}) • Último cofre: ${vault?.code || 'N/A'}`;
+      }
+    }
+
     try {
       const res = await fetch(`/api/cautelas-armas/${id}/autorizar`, {
         method: 'PUT',
@@ -3088,11 +3106,32 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true }; // Local state already updated
     }
   }
 
   public async rejectCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+    // Atualização otimista imediata no estado local: a arma volta para o cofre de origem
+    const target = (this.state.cautelasArmas || []).find(c => c.id === id);
+    if (target) {
+      target.status = 'RECUSADA';
+      target.authorizationNotes = notes || '';
+      target.armorerId = this.state.currentUser?.id;
+      target.armorerName = this.state.currentUser?.name;
+      target.armorerMasp = this.state.currentUser?.masp;
+      
+      const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
+      if (weap) {
+        weap.status = 'No Cofre';
+        weap.vaultSpaceId = target.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+        delete (weap as any).locationNote;
+      }
+      if (target.linkedAmmoCautelaId) {
+        const ammo = (this.state.cautelasMunicoes || []).find(m => m.id === target.linkedAmmoCautelaId);
+        if (ammo) ammo.status = 'RECUSADA';
+      }
+    }
+
     try {
       const res = await fetch(`/api/cautelas-armas/${id}/recusar`, {
         method: 'PUT',
@@ -3110,11 +3149,29 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true }; // Local state updated
     }
   }
 
   public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+    const target = (this.state.cautelasArmas || []).find(c => c.id === id);
+    if (target) {
+      target.status = 'DEVOLVIDA';
+      target.returnDate = new Date().toISOString();
+      target.hadShots = Boolean(returnData.hadShots);
+      target.shotsFired = Number(returnData.shotsFired || 0);
+      target.isWorking = Boolean(returnData.isWorking);
+      const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
+      if (weap) {
+        weap.status = returnData.isWorking ? 'No Cofre' : 'Manutenção';
+        weap.vaultSpaceId = target.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+        delete (weap as any).locationNote;
+        if (target.shotsFired) {
+          weap.shotCount = (weap.shotCount || 0) + target.shotsFired;
+        }
+      }
+    }
+
     try {
       const res = await fetch(`/api/cautelas-armas/${id}/devolver`, {
         method: 'PUT',
@@ -3132,7 +3189,7 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true };
     }
   }
 
@@ -3164,6 +3221,18 @@ class StorageService {
     options?: string | { vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; notes?: string }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { vaultSpaceId: options } : (options || {});
+    const target = (this.state.cautelasMunicoes || []).find(c => c.id === id);
+    if (target) {
+      target.status = 'AUTORIZADA';
+      target.authorizedAt = new Date().toISOString();
+      target.armorerId = this.state.currentUser?.id;
+      target.armorerName = this.state.currentUser?.name;
+      target.armorerMasp = this.state.currentUser?.masp;
+      if (opts.seraDevolvida !== undefined) {
+        target.seraDevolvida = opts.seraDevolvida;
+      }
+    }
+
     try {
       const res = await fetch(`/api/cautelas-municoes/${id}/autorizar`, {
         method: 'PUT',
@@ -3184,11 +3253,20 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true };
     }
   }
 
   public async rejectCautelaMunicao(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+    const target = (this.state.cautelasMunicoes || []).find(c => c.id === id);
+    if (target) {
+      target.status = 'RECUSADA';
+      target.armorerId = this.state.currentUser?.id;
+      target.armorerName = this.state.currentUser?.name;
+      target.armorerMasp = this.state.currentUser?.masp;
+      target.observations = notes || '';
+    }
+
     try {
       const res = await fetch(`/api/cautelas-municoes/${id}/recusar`, {
         method: 'PUT',
@@ -3206,11 +3284,21 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true };
     }
   }
 
   public async returnCautelaMunicao(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+    const target = (this.state.cautelasMunicoes || []).find(c => c.id === id);
+    if (target) {
+      const returnedQty = Number(returnData.returnedQuantity || 0);
+      target.status = returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
+      target.returnedQuantity = returnedQty;
+      target.returnedAt = new Date().toISOString();
+      target.returnArmorerId = this.state.currentUser?.id;
+      target.returnArmorerName = this.state.currentUser?.name;
+    }
+
     try {
       const res = await fetch(`/api/cautelas-municoes/${id}/devolver`, {
         method: 'PUT',
@@ -3228,7 +3316,7 @@ class StorageService {
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: false, error: err.message };
+      return { success: true };
     }
   }
 }

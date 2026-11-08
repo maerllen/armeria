@@ -504,6 +504,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     // Status filter
     if (statusFilter !== 'TODOS') {
       if (statusFilter === 'NO_COFRE' && w.status !== 'No Cofre') return false;
+      if (statusFilter === 'ACAUTELADA' && w.status !== 'Acautelada') return false;
       if (statusFilter === 'EM_MOVIMENTO' && w.status !== 'Em Trânsito' && w.status !== 'Em Transito') return false;
       if (statusFilter === 'EM_AULA' && w.status !== 'Em Aula' && w.status !== 'Em Sala de Aula') return false;
       if (statusFilter === 'EM_MANUTENCAO' && w.status !== 'Em Manutenção' && w.status !== 'Manutenção') return false;
@@ -910,6 +911,17 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </button>
 
                 <button
+                  onClick={() => setStatusFilter('ACAUTELADA')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                    statusFilter === 'ACAUTELADA'
+                      ? 'bg-purple-950 text-purple-300 border border-purple-600'
+                      : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  Acautelada
+                </button>
+
+                <button
                   onClick={() => setStatusFilter('EM_MOVIMENTO')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
                     statusFilter === 'EM_MOVIMENTO'
@@ -1178,6 +1190,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               unitWeapons.map((w) => {
                 const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
                 const weaponUnit = units.find(u => u.id === w.unitId);
+                const activeCautela = storage.getCautelasArmas().find(c => c.weaponId === w.id && c.status === 'AUTORIZADA');
+                const lastVaultCode = vaultSpaces.find(v => v.id === (w.previousVaultSpaceId || activeCautela?.vaultSpaceId))?.code || (vault ? vault.code : 'Cofre Padrão');
 
                 return (
                   <div
@@ -1191,6 +1205,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                         <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-md border ${
                           w.status === 'No Cofre'
                             ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                            : w.status === 'Acautelada'
+                            ? 'bg-purple-950 text-purple-300 border-purple-800'
                             : w.status === 'Em Trânsito'
                             ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
                             : w.status === 'Pendente de Recibo'
@@ -1231,13 +1247,25 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                           </p>
                         )}
                         <p>Calibre: <strong className="text-slate-200">{w.caliber}</strong></p>
-                        <p>
-                          Cofre: <strong className="text-slate-200">
-                            {w.status === 'Manutenção' || w.status === 'Em Manutenção'
-                              ? 'Em Manutenção'
-                              : vault ? vault.code : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Em Trânsito')}
-                          </strong>
-                        </p>
+                        {w.status === 'Acautelada' ? (
+                          <div className="mt-2 pt-1.5 border-t border-purple-900/40 text-[11px] font-sans">
+                            <p className="text-purple-300 font-semibold flex items-center space-x-1">
+                              <Shield className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                              <span>Acautelada com: <strong className="text-purple-100">{activeCautela ? activeCautela.requesterName : ((w as any).locationNote ? (w as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}</strong></span>
+                            </p>
+                            <p className="text-[10px] text-purple-300/80 font-mono mt-0.5">
+                              {activeCautela ? `MASP: ${activeCautela.requesterMasp} • ` : ''}Último cofre: <strong className="text-purple-200">{lastVaultCode}</strong>
+                            </p>
+                          </div>
+                        ) : (
+                          <p>
+                            Cofre: <strong className="text-slate-200">
+                              {w.status === 'Manutenção' || w.status === 'Em Manutenção'
+                                ? 'Em Manutenção'
+                                : vault ? vault.code : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Em Trânsito')}
+                            </strong>
+                          </p>
+                        )}
                       </div>
                     </div>
 
@@ -1320,12 +1348,35 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 <div>
                   <span className="text-slate-400 text-[10px] block">STATUS ATUAL:</span>
                   <span className={`font-bold ${
-                    selectedWeaponDetail.status === 'No Cofre' ? 'text-emerald-400' : 'text-amber-400'
+                    selectedWeaponDetail.status === 'No Cofre'
+                      ? 'text-emerald-400'
+                      : selectedWeaponDetail.status === 'Acautelada'
+                      ? 'text-purple-400'
+                      : 'text-amber-400'
                   }`}>
                     {selectedWeaponDetail.status}
                   </span>
                 </div>
               </div>
+
+              {selectedWeaponDetail.status === 'Acautelada' && (() => {
+                const activeCautelaDetail = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');
+                const lastVault = vaultSpaces.find(v => v.id === (selectedWeaponDetail.previousVaultSpaceId || activeCautelaDetail?.vaultSpaceId));
+                return (
+                  <div className="p-3 bg-purple-950/40 border border-purple-800/60 rounded-xl text-xs text-purple-200 space-y-1">
+                    <div className="font-bold text-purple-300 flex items-center space-x-1.5">
+                      <Shield className="w-4 h-4 text-purple-400" />
+                      <span>Armamento Acautelado com Policial</span>
+                    </div>
+                    <p>
+                      Servidor Responsável: <strong>{activeCautelaDetail?.requesterName || ((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}</strong> {activeCautelaDetail?.requesterMasp ? `(MASP: ${activeCautelaDetail.requesterMasp})` : ''}
+                    </p>
+                    <p className="text-[11px] text-purple-300/80">
+                      Último cofre registrado antes da saída: <strong className="text-purple-100">{lastVault ? lastVault.code : 'No Cofre de Origem'}</strong>
+                    </p>
+                  </div>
+                );
+              })()}
 
               <div className="pt-2 border-t border-slate-800 grid grid-cols-2 gap-3 text-xs font-mono">
                 <div>
@@ -1343,7 +1394,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 <div>
                   <span className="text-slate-400 text-[10px] block">LOCAL NO COFRE:</span>
                   <span className="font-bold text-amber-400">
-                    {vaultSpaces.find(v => v.id === selectedWeaponDetail.vaultSpaceId)?.code || (selectedWeaponDetail.status === 'Manutenção' ? 'Em Manutenção' : 'Em Trânsito')}
+                    {selectedWeaponDetail.status === 'Acautelada'
+                      ? `Acautelada (Último: ${vaultSpaces.find(v => v.id === (selectedWeaponDetail.previousVaultSpaceId || selectedWeaponDetail.vaultSpaceId))?.code || 'Cofre'})`
+                      : vaultSpaces.find(v => v.id === selectedWeaponDetail.vaultSpaceId)?.code || (selectedWeaponDetail.status === 'Manutenção' ? 'Em Manutenção' : 'Em Trânsito')}
                   </span>
                 </div>
                 <div>
