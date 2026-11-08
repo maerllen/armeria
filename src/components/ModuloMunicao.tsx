@@ -2,10 +2,11 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History, FileText } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ModalTransferirMunicao } from './ModalTransferirMunicao';
+import { ModalHistoricoTransferenciasMunicao } from './ModalHistoricoTransferenciasMunicao';
 
 interface AmmunitionModuleProps {
   currentUser: User;
@@ -33,6 +34,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [showCaliberModal, setShowCaliberModal] = useState(false);
   const [showMovementModal, setShowMovementModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
+  const [showTransferHistoryModal, setShowTransferHistoryModal] = useState(false);
   const [transferTargetStock, setTransferTargetStock] = useState<AmmunitionStock | null>(null);
 
   // Ammo/Caliber Form & Edit State (Inside Cadastro de Munição Modal: Fabricante, Calibre, Tipo, Peso)
@@ -938,19 +940,35 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             </button>
           )}
 
-          {/* Transferência de Unidade Button */}
+          {/* Transferência de Unidade & Histórico Buttons */}
           {(isGeral || currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') && (
-            <button
-              onClick={() => {
-                setTransferTargetStock(null);
-                setShowTransferModal(true);
-              }}
-              className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-              title="Transferir munições para outra unidade policial"
-            >
-              <ArrowRightLeft className="w-4 h-4 text-white" />
-              <span>Transferência de Unidade</span>
-            </button>
+            <>
+              <button
+                onClick={() => setShowTransferHistoryModal(true)}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Visualizar histórico de transferências de munições entre unidades"
+              >
+                <FileText className="w-4 h-4 text-sky-400" />
+                <span>Histórico Transferências</span>
+                {storage.getAmmoTransfers(currentUser, filterUnitId || undefined).length > 0 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded-full bg-sky-500/20 border border-sky-500/40 text-sky-300 text-[10px] font-mono font-bold">
+                    {storage.getAmmoTransfers(currentUser, filterUnitId || undefined).length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => {
+                  setTransferTargetStock(null);
+                  setShowTransferModal(true);
+                }}
+                className="bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Transferir munições para outra unidade policial"
+              >
+                <ArrowRightLeft className="w-4 h-4 text-white" />
+                <span>Transferência de Unidade</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -3159,6 +3177,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             setSuccessMsg(`Transferência de munições registrada com sucesso (Guia nº ${transfer.id}). Aguardando confirmação do armeiro de destino.`);
             onRefresh();
           }}
+        />
+      )}
+
+      {/* Modal Histórico de Transferências de Munições */}
+      {showTransferHistoryModal && (
+        <ModalHistoricoTransferenciasMunicao
+          transfers={storage.getAmmoTransfers(currentUser, filterUnitId || undefined)}
+          currentUser={currentUser}
+          selectedUnitId={filterUnitId}
+          onClose={() => setShowTransferHistoryModal(false)}
+          onOpenNewTransfer={() => {
+            setTransferTargetStock(null);
+            setShowTransferModal(true);
+          }}
+          onRefresh={onRefresh}
         />
       )}
 

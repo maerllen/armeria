@@ -237,7 +237,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const canManageMaintenance = isGeral || isArmeiro || isExplosivista;
   const canTransferWeapons = isGeral || isAdmin || isArmeiro || isExplosivista;
 
-  const weaponTransfers = canTransferWeapons ? storage.getWeaponTransfers(currentUser) : [];
+  const weaponTransfers = canTransferWeapons 
+    ? storage.getWeaponTransfers(currentUser, selectedUnitId && selectedUnitId !== 'ALL' ? selectedUnitId : undefined) 
+    : [];
   const pendingTransfers = canTransferWeapons ? storage.getPendingIncomingTransfers(currentUser) : [];
 
   // Vault spaces for weapons: MUST BE TYPE ARMAS
@@ -2212,6 +2214,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         <TransferHistoryModal
           transfers={weaponTransfers}
           currentUser={currentUser}
+          selectedUnitId={selectedUnitId}
           onClose={() => setShowTransferHistoryModal(false)}
           onSelectTransfer={(trf) => setSelectedTransferForReceipt(trf)}
           onReceiveTransfer={(trf) => setTransferToReceive(trf)}

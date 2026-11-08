@@ -1095,22 +1095,36 @@ class StorageService {
   }
 
   // --- WEAPON TRANSFERS BETWEEN UNITS ---
-  public getWeaponTransfers(currentUser?: User | null): WeaponTransfer[] {
+  public getWeaponTransfers(currentUser?: User | null, unitIdFilter?: string): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
     const role = actor.activeRole || actor.role;
-    // Strict Role Check: ONLY Armeiro, Administrador, and Geral can view transfers
-    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
+    // Strict Role Check: ONLY Armeiro, Administrador, Geral, and Policial
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro', 'Policial'];
     if (!allowedRoles.includes(role)) return [];
 
-    if (role === 'Geral') return this.state.weaponTransfers;
-    if (role === 'Administrador' || (role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.weaponTransfers.filter(
-        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId || t.destinationArmorerId === actor.id
+    const allTransfers = this.state.weaponTransfers || [];
+
+    // If an explicit unit filter is passed (and not 'ALL'), only return transfers where that unit is origin or destination
+    if (unitIdFilter && unitIdFilter !== 'ALL') {
+      return allTransfers.filter(
+        t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
-    return this.state.weaponTransfers.filter(
-      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId || t.destinationArmorerId === actor.id
+
+    // Strict Rule:
+    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
+    if (actor.unitId) {
+      return allTransfers.filter(
+        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      );
+    }
+
+    // Super-user Geral with no unit restriction sees all transfers
+    if (role === 'Geral') return allTransfers;
+
+    return allTransfers.filter(
+      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
     );
   }
 
@@ -1121,18 +1135,12 @@ class StorageService {
     const transfers = this.getWeaponTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (role === 'Geral') return true;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
-      if (role === 'Administrador') {
-        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId || t.destinationUnitId === actor.unitId;
-      }
-      if (role === 'Armeiro') {
-        if (actor.managementScope !== 'unit') {
-          return t.destinationDepartmentId === actor.departmentId || t.destinationUnitId === actor.unitId;
-        }
+      if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      return t.destinationUnitId === actor.unitId;
+      if (role === 'Geral' && !actor.unitId) return true;
+      return false;
     });
   }
 
@@ -1237,41 +1245,49 @@ class StorageService {
   }
 
   // --- AMMO TRANSFERS BETWEEN UNITS ---
-  public getAmmoTransfers(currentUser?: User | null): AmmoTransfer[] {
+  public getAmmoTransfers(currentUser?: User | null, unitIdFilter?: string): AmmoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
-    if (!allowedRoles.includes(actor.role)) return [];
+    const role = actor.activeRole || actor.role;
+    const allowedRoles = ['Geral', 'Administrador', 'Armeiro', 'Policial'];
+    if (!allowedRoles.includes(role)) return [];
 
-    if (actor.role === 'Geral') return this.state.ammoTransfers;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.ammoTransfers.filter(
-        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+    const allTransfers = this.state.ammoTransfers || [];
+
+    if (unitIdFilter && unitIdFilter !== 'ALL') {
+      return allTransfers.filter(
+        t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
-    return this.state.ammoTransfers.filter(
-      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+
+    // Strict Rule:
+    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
+    if (actor.unitId) {
+      return allTransfers.filter(
+        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      );
+    }
+
+    if (role === 'Geral') return allTransfers;
+
+    return allTransfers.filter(
+      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
     );
   }
 
   public getPendingIncomingAmmoTransfers(currentUser?: User | null): AmmoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const transfers = this.getAmmoTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (actor.role === 'Geral') return true;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
-      if (actor.role === 'Administrador') {
-        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
-      }
-      if (actor.role === 'Armeiro') {
-        if (actor.managementScope !== 'unit') {
-          return t.destinationDepartmentId === actor.departmentId;
-        }
+      if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      return t.destinationUnitId === actor.unitId;
+      if (role === 'Geral' && !actor.unitId) return true;
+      return false;
     });
   }
 
@@ -1350,33 +1366,46 @@ class StorageService {
   }
 
   // --- EXPLOSIVO TRANSFERS BETWEEN UNITS ---
-  public getExplosivoTransfers(currentUser?: User | null): ExplosivoTransfer[] {
+  public getExplosivoTransfers(currentUser?: User | null, unitIdFilter?: string): ExplosivoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const list = this.state.explosivoTransfers || [];
-    if (actor.role === 'Geral') return list;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+
+    if (unitIdFilter && unitIdFilter !== 'ALL') {
       return list.filter(
-        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+        t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
+
+    // Strict Rule:
+    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
+    if (actor.unitId) {
+      return list.filter(
+        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      );
+    }
+
+    if (role === 'Geral') return list;
+
     return list.filter(
-      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
     );
   }
 
   public getPendingIncomingExplosivoTransfers(currentUser?: User | null): ExplosivoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const transfers = this.getExplosivoTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (actor.role === 'Geral') return true;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
-      if (actor.role === 'Administrador') {
-        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      if (actor.unitId) {
+        return t.destinationUnitId === actor.unitId;
       }
-      return t.destinationUnitId === actor.unitId;
+      if (role === 'Geral' && !actor.unitId) return true;
+      return false;
     });
   }
 
@@ -1545,33 +1574,46 @@ class StorageService {
   }
 
   // --- MATERIAL TRANSFERS BETWEEN UNITS ---
-  public getMaterialTransfers(currentUser?: User | null): MaterialTransfer[] {
+  public getMaterialTransfers(currentUser?: User | null, unitIdFilter?: string): MaterialTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const list = this.state.materialTransfers || [];
-    if (actor.role === 'Geral') return list;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+
+    if (unitIdFilter && unitIdFilter !== 'ALL') {
       return list.filter(
-        t => t.originDepartmentId === actor.departmentId || t.destinationDepartmentId === actor.departmentId
+        t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
+
+    // Strict Rule:
+    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
+    if (actor.unitId) {
+      return list.filter(
+        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      );
+    }
+
+    if (role === 'Geral') return list;
+
     return list.filter(
-      t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
     );
   }
 
   public getPendingIncomingMaterialTransfers(currentUser?: User | null): MaterialTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = actor.activeRole || actor.role;
     const transfers = this.getMaterialTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (actor.role === 'Geral') return true;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
-      if (actor.role === 'Administrador') {
-        return t.destinationDepartmentId === actor.departmentId || !actor.departmentId;
+      if (actor.unitId) {
+        return t.destinationUnitId === actor.unitId;
       }
-      return t.destinationUnitId === actor.unitId;
+      if (role === 'Geral' && !actor.unitId) return true;
+      return false;
     });
   }
 

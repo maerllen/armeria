@@ -27,6 +27,7 @@ import {
 interface TransferHistoryModalProps {
   transfers: WeaponTransfer[];
   currentUser: User;
+  selectedUnitId?: string;
   onClose: () => void;
   onSelectTransfer: (transfer: WeaponTransfer) => void;
   onOpenNewTransfer?: () => void;
@@ -37,6 +38,7 @@ interface TransferHistoryModalProps {
 export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
   transfers,
   currentUser,
+  selectedUnitId,
   onClose,
   onSelectTransfer,
   onOpenNewTransfer,
@@ -46,6 +48,17 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Recebido' | 'Cancelado'>('all');
   
+  // Available units for filtering
+  const allUnits = useMemo(() => storage.getAllUnits(), []);
+
+  // For users with unitId, they are strictly bound to their unit.
+  // For Geral users with no unitId, they can pick a specific unit or ALL.
+  const [activeUnitFilter, setActiveUnitFilter] = useState<string>(() => {
+    if (currentUser.unitId) return currentUser.unitId;
+    if (selectedUnitId && selectedUnitId !== 'ALL') return selectedUnitId;
+    return 'ALL';
+  });
+
   // State for Undo / Cancel modal
   const [transferToUndo, setTransferToUndo] = useState<WeaponTransfer | null>(null);
   const [undoReason, setUndoReason] = useState('');
@@ -53,8 +66,22 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
   const [undoError, setUndoError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  const filteredTransfers = useMemo(() => {
+  const unitScopedTransfers = useMemo(() => {
     let result = transfers;
+    if (currentUser.unitId) {
+      result = result.filter(
+        t => t.originUnitId === currentUser.unitId || t.destinationUnitId === currentUser.unitId
+      );
+    } else if (activeUnitFilter && activeUnitFilter !== 'ALL') {
+      result = result.filter(
+        t => t.originUnitId === activeUnitFilter || t.destinationUnitId === activeUnitFilter
+      );
+    }
+    return result;
+  }, [transfers, currentUser.unitId, activeUnitFilter]);
+
+  const filteredTransfers = useMemo(() => {
+    let result = unitScopedTransfers;
     if (statusFilter !== 'all') {
       result = result.filter(t => (t.status || (t.receivedAt ? 'Recebido' : 'Pendente')) === statusFilter);
     }
@@ -77,7 +104,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
 
       return protocolMatch || originMatch || destMatch || transporterMatch || userMatch || reasonMatch || weaponMatch;
     });
-  }, [transfers, searchTerm, statusFilter]);
+  }, [unitScopedTransfers, searchTerm, statusFilter]);
 
   const canReceiveTransfer = (trf: WeaponTransfer) => {
     if (trf.status === 'Recebido' || trf.status === 'Cancelado') return false;
@@ -185,6 +212,51 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
             </div>
           )}
 
+          {/* Unit Isolation Info Banner or Selector */}
+          {currentUser.unitId ? (
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
+                <span className="text-slate-300">
+                  Unidade: <strong className="text-amber-300">{currentUser.unitName || allUnits.find(u => u.id === currentUser.unitId)?.name || 'Sua Unidade'}</strong>
+                </span>
+              </div>
+              <span className="text-[11px] text-amber-300/90 font-medium bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20 w-fit">
+                Exibindo estritamente transferências de Origem ou Destino desta unidade
+              </span>
+            </div>
+          ) : (
+            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-sky-400 shrink-0" />
+                <span className="text-slate-300 font-medium">Filtrar por Unidade Envolvida (Origem ou Destino):</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <select
+                  value={activeUnitFilter}
+                  onChange={e => setActiveUnitFilter(e.target.value)}
+                  className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-amber-500"
+                >
+                  <option value="ALL">Todas as Unidades (Visão Geral)</option>
+                  {allUnits.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name}
+                    </option>
+                  ))}
+                </select>
+                {activeUnitFilter !== 'ALL' && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveUnitFilter('ALL')}
+                    className="text-[11px] text-slate-400 hover:text-white underline shrink-0"
+                  >
+                    Ver Todas
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Filters row */}
           <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
             <div className="relative flex-1 w-full">
@@ -206,7 +278,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                   statusFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Todas ({transfers.length})
+                Todas ({unitScopedTransfers.length})
               </button>
               <button
                 type="button"
@@ -216,7 +288,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                 }`}
               >
                 <Clock className="w-3.5 h-3.5" />
-                <span>Pendentes ({transfers.filter(t => (t.status || 'Pendente') === 'Pendente').length})</span>
+                <span>Pendentes ({unitScopedTransfers.filter(t => (t.status || 'Pendente') === 'Pendente').length})</span>
               </button>
               <button
                 type="button"
@@ -226,7 +298,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                 }`}
               >
                 <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>Recebidas ({transfers.filter(t => t.status === 'Recebido').length})</span>
+                <span>Recebidas ({unitScopedTransfers.filter(t => t.status === 'Recebido').length})</span>
               </button>
               <button
                 type="button"
@@ -236,7 +308,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                 }`}
               >
                 <Ban className="w-3.5 h-3.5" />
-                <span>Desfeitas ({transfers.filter(t => t.status === 'Cancelado').length})</span>
+                <span>Desfeitas ({unitScopedTransfers.filter(t => t.status === 'Cancelado').length})</span>
               </button>
             </div>
           </div>
