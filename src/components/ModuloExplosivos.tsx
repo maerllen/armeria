@@ -287,11 +287,18 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   // Dynamic available explosive types
   const tiposDisponiveis = useMemo(() => {
     if (tiposExplosivos && tiposExplosivos.length > 0) {
-      return tiposExplosivos;
+      return tiposExplosivos
+        .filter(t => t && (t.nome || (t as any).NOME_TIPOS_EXPLOSIVOS || (t as any).name))
+        .map(t => ({
+          ...t,
+          id: t.id || (t as any).ID_TIPOS_EXPLOSIVOS || '',
+          nome: t.nome || (t as any).NOME_TIPOS_EXPLOSIVOS || (t as any).name || '',
+          descricao: t.descricao || (t as any).DESCRICAO_TIPOS_EXPLOSIVOS || ''
+        }));
     }
     return TIPOS_EXPLOSIVOS.map((nome, idx) => ({
       id: `te-default-${idx}`,
-      nome,
+      nome: nome || '',
       descricao: ''
     }));
   }, [tiposExplosivos]);
@@ -316,9 +323,10 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   // Cascading subtipos: only options matching the chosen formTipo
   const subtiposDisponiveisParaTipo = useMemo(() => {
     if (!formTipo) return [];
-    const chosenTipoNorm = formTipo.toLowerCase().trim();
-    const matchingTipoObj = tiposDisponiveis.find(t => t.nome.toLowerCase().trim() === chosenTipoNorm);
-    return subtiposExplosivos.filter(s => {
+    const chosenTipoNorm = (formTipo || '').toLowerCase().trim();
+    const matchingTipoObj = tiposDisponiveis.find(t => (t?.nome || '').toLowerCase().trim() === chosenTipoNorm);
+    return (subtiposExplosivos || []).filter(s => {
+      if (!s) return false;
       const sTipoNomeNorm = (s.tipoNome || '').toLowerCase().trim();
       return sTipoNomeNorm === chosenTipoNorm || (matchingTipoObj && s.tipoId === matchingTipoObj.id);
     });
@@ -326,7 +334,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
   // Filtered Explosives list
   const filteredExplosivos = useMemo(() => {
-    return explosivos.filter(item => {
+    return (explosivos || []).filter(item => {
+      if (!item) return false;
       // Dept filter
       if (selectedDeptId !== 'ALL' && item.departmentId && item.departmentId !== selectedDeptId) {
         return false;
@@ -353,12 +362,12 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         if (!matchesCofre) return false;
       }
       // Search term
-      if (searchTerm.trim()) {
-        const query = searchTerm.toLowerCase();
-        const matchesName = item.nome.toLowerCase().includes(query);
-        const matchesLote = item.lote.toLowerCase().includes(query);
-        const matchesFab = item.fabricante.toLowerCase().includes(query);
-        const matchesLoc = item.localArmazenamento.toLowerCase().includes(query);
+      if (searchTerm && searchTerm.trim()) {
+        const query = searchTerm.toLowerCase().trim();
+        const matchesName = (item.nome || '').toLowerCase().includes(query);
+        const matchesLote = (item.lote || '').toLowerCase().includes(query);
+        const matchesFab = (item.fabricante || '').toLowerCase().includes(query);
+        const matchesLoc = (item.localArmazenamento || '').toLowerCase().includes(query);
         const matchesSub = (item.subtipo || '').toLowerCase().includes(query);
         return matchesName || matchesLote || matchesFab || matchesLoc || matchesSub;
       }
@@ -369,13 +378,13 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   // Statistics
   const stats = useMemo(() => {
     const totalItens = filteredExplosivos.length;
-    const altosExplosivos = filteredExplosivos.filter(e => e.tipo.includes('Alto Explosivo')).length;
-    const iniciadores = filteredExplosivos.filter(e => e.tipo.includes('Iniciador') || e.tipo.includes('Granada')).length;
-    const operacionais = filteredExplosivos.filter(e => e.status === 'Operacional').length;
-    const instrucao = filteredExplosivos.filter(e => e.status === 'Instrução').length;
-    const destruicao = filteredExplosivos.filter(e => e.status === 'Destruição').length;
+    const altosExplosivos = filteredExplosivos.filter(e => (e?.tipo || '').includes('Alto Explosivo')).length;
+    const iniciadores = filteredExplosivos.filter(e => (e?.tipo || '').includes('Iniciador') || (e?.tipo || '').includes('Granada')).length;
+    const operacionais = filteredExplosivos.filter(e => e?.status === 'Operacional').length;
+    const instrucao = filteredExplosivos.filter(e => e?.status === 'Instrução').length;
+    const destruicao = filteredExplosivos.filter(e => e?.status === 'Destruição').length;
     const vencidos = filteredExplosivos.filter(e => {
-      if (!e.dataValidade) return false;
+      if (!e?.dataValidade) return false;
       return new Date(e.dataValidade) < new Date();
     }).length;
 
@@ -384,7 +393,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
 
   // Filtered movements for the Collapsible History table
   const filteredMovements = useMemo(() => {
-    return movimentacoes.filter(m => {
+    return (movimentacoes || []).filter(m => {
+      if (!m) return false;
       // Dept filter
       if (selectedDeptId !== 'ALL' && m.departmentId && m.departmentId !== selectedDeptId) {
         return false;
@@ -404,15 +414,15 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       // Column filter - Nome Explosivo
       if (colFilterExplosivo) {
         const query = colFilterExplosivo.toLowerCase();
-        const nome = (m.nomeExplosivo || m.explosivoNome || '').toLowerCase();
+        const nome = (m.nomeExplosivo || (m as any).explosivoNome || '').toLowerCase();
         if (!nome.includes(query)) return false;
       }
       // Column filter - Qtd
-      if (colFilterQtd && !String(m.quantidade).includes(colFilterQtd)) {
+      if (colFilterQtd && !String(m.quantidade ?? '').includes(colFilterQtd)) {
         return false;
       }
       // Column filter - Motivo
-      if (colFilterMotivo && !m.motivo.toLowerCase().includes(colFilterMotivo.toLowerCase())) {
+      if (colFilterMotivo && !(m.motivo || '').toLowerCase().includes(colFilterMotivo.toLowerCase())) {
         return false;
       }
       // Column filter - Policial

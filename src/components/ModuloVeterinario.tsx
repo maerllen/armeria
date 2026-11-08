@@ -604,9 +604,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // Filtered Dogs
   const filteredDogs = useMemo(() => {
     return cachorros.filter(d => {
+      if (!d) return false;
       const matchSearch =
-        d.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        d.raca.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (d.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (d.raca || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (d.microchip && d.microchip.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (d.usuarioInternoNome && d.usuarioInternoNome.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (d.responsavelExternoNome && d.responsavelExternoNome.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -618,8 +619,9 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // Filtered Products
   const filteredProducts = useMemo(() => {
     return produtos.filter(p => {
+      if (!p) return false;
       const matchSearch =
-        p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (p.nome || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (p.codigoBarras && p.codigoBarras.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (p.categoria && p.categoria.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (p.fabricante && p.fabricante.toLowerCase().includes(searchTerm.toLowerCase()));

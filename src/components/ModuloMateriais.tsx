@@ -174,13 +174,16 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
 
   // Filtered materials
   const filteredMateriais = useMemo(() => {
-    return materiaisList.filter(m => {
-      const matchSearch =
-        m.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        m.tipoMaterialNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (m.localGuarda && m.localGuarda.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (m.numeroSerie && m.numeroSerie.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (m.unidadeNome && m.unidadeNome.toLowerCase().includes(searchTerm.toLowerCase()));
+    const search = (searchTerm || '').trim().toLowerCase();
+    return (materiaisList || []).filter(m => {
+      if (!m) return false;
+      const matchSearch = !search || (
+        (m.nome || '').toLowerCase().includes(search) ||
+        (m.tipoMaterialNome || '').toLowerCase().includes(search) ||
+        (m.localGuarda && m.localGuarda.toLowerCase().includes(search)) ||
+        (m.numeroSerie && m.numeroSerie.toLowerCase().includes(search)) ||
+        (m.unidadeNome && m.unidadeNome.toLowerCase().includes(search))
+      );
 
       const matchType = selectedTypeFilter ? m.tipoMaterialId === selectedTypeFilter : true;
       const matchDept = selectedDeptFilter ? m.departamentoId === selectedDeptFilter : true;
@@ -192,13 +195,16 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
 
   // Filtered cautelas
   const filteredCautelas = useMemo(() => {
-    return cautelasList.filter(c => {
-      const matchSearch =
-        c.materialNome.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (c.protocolo && c.protocolo.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (c.usuarioInternoNome && c.usuarioInternoNome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (c.usuarioExternoNome && c.usuarioExternoNome.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (c.usuarioInternoMasp && c.usuarioInternoMasp.includes(searchTerm));
+    const search = (searchTerm || '').trim().toLowerCase();
+    return (cautelasList || []).filter(c => {
+      if (!c) return false;
+      const matchSearch = !search || (
+        (c.materialNome || '').toLowerCase().includes(search) ||
+        (c.protocolo && c.protocolo.toLowerCase().includes(search)) ||
+        (c.usuarioInternoNome && c.usuarioInternoNome.toLowerCase().includes(search)) ||
+        (c.usuarioExternoNome && c.usuarioExternoNome.toLowerCase().includes(search)) ||
+        (c.usuarioInternoMasp && c.usuarioInternoMasp.includes(searchTerm))
+      );
 
       const matchStatus =
         cautelaStatusFilter === 'todas'

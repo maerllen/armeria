@@ -6806,9 +6806,9 @@ apiRouter.get('/materiais', async (req: Request, res: Response) => {
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
-      tipoMaterialId: r.tipo_material_id,
-      tipoMaterialNome: r.tipo_material_nome,
-      nome: r.nome,
+      tipoMaterialId: r.tipo_material_id || '',
+      tipoMaterialNome: r.tipo_material_nome || r.TIPO_MATERIAL_NOME_MATERIAIS || 'Material',
+      nome: r.nome || r.NOME_MATERIAIS || '',
       quantidade: Number(r.quantidade || 0),
       quantidadeDisponivel: Number(r.quantidade_disponivel ?? r.quantidade ?? 0),
       quantidadeEmUso: Number(r.quantidade_em_uso || 0),
@@ -7082,10 +7082,10 @@ apiRouter.get('/cautelas-materiais', async (req: Request, res: Response) => {
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
       id: r.id,
-      protocolo: r.protocolo,
+      protocolo: r.protocolo || '',
       materialId: r.material_id,
-      materialNome: r.material_nome,
-      tipoMaterialNome: r.tipo_material_nome,
+      materialNome: r.material_nome || '',
+      tipoMaterialNome: r.tipo_material_nome || '',
       quantidade: Number(r.quantidade || 1),
       tipoDestinatario: r.tipo_destinatario,
       usuarioInternoId: r.usuario_interno_id,
@@ -7446,6 +7446,13 @@ apiRouter.get('/explosivos', async (req: Request, res: Response) => {
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({
       ...r,
+      nome: r.nome || r.NOME_EXPLOSIVOS || '',
+      tipo: r.tipo || r.TIPO_EXPLOSIVOS || 'Outro',
+      subtipo: r.subtipo || r.SUBTIPO_EXPLOSIVOS || '',
+      lote: r.lote || r.LOTE_EXPLOSIVOS || '',
+      fabricante: r.fabricante || r.FABRICANTE_EXPLOSIVOS || '',
+      localArmazenamento: r.localArmazenamento || r.LOCAL_ARMAZENAMENTO_EXPLOSIVOS || '',
+      status: r.status || r.STATUS_EXPLOSIVOS || 'Operacional',
       quantidade: Number(r.quantidade || 0),
       dataFabricacao: r.dataFabricacao ? (r.dataFabricacao instanceof Date ? r.dataFabricacao.toISOString().split('T')[0] : String(r.dataFabricacao).substring(0, 10)) : undefined,
       dataValidade: r.dataValidade ? (r.dataValidade instanceof Date ? r.dataValidade.toISOString().split('T')[0] : String(r.dataValidade).substring(0, 10)) : undefined
@@ -7805,7 +7812,13 @@ apiRouter.get('/tipos-explosivos', async (_req: Request, res: Response) => {
     const [rows]: any = await pool.query(
       'SELECT ID_TIPOS_EXPLOSIVOS as id, NOME_TIPOS_EXPLOSIVOS as nome, DESCRICAO_TIPOS_EXPLOSIVOS as descricao, DATA_CRIACAO_TIPOS_EXPLOSIVOS as createdAt FROM TIPOS_EXPLOSIVOS ORDER BY NOME_TIPOS_EXPLOSIVOS ASC'
     );
-    return res.json(rows || []);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id || r.ID_TIPOS_EXPLOSIVOS || '',
+      nome: r.nome || r.NOME_TIPOS_EXPLOSIVOS || '',
+      descricao: r.descricao || r.DESCRICAO_TIPOS_EXPLOSIVOS || '',
+      createdAt: r.createdAt || r.DATA_CRIACAO_TIPOS_EXPLOSIVOS
+    }));
+    return res.json(mapped);
   } catch (err: any) {
     console.error('Error fetching tipos_explosivos:', err);
     return res.status(500).json({ error: err.message });
@@ -7945,9 +7958,16 @@ apiRouter.get('/subtipos-explosivos', async (req: Request, res: Response) => {
       query += ' AND LOWER(TIPO_NOME_SUBTIPOS_EXPLOSIVOS) = LOWER(?)';
       params.push(tipoNome);
     }
-    query += ' ORDER BY NOME_SUBTIPOS_EXPLOSIVOS ASC';
     const [rows]: any = await pool.query(query, params);
-    return res.json(rows || []);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id || r.ID_SUBTIPOS_EXPLOSIVOS || '',
+      tipoId: r.tipoId || r.TIPO_ID_SUBTIPOS_EXPLOSIVOS || '',
+      tipoNome: r.tipoNome || r.TIPO_NOME_SUBTIPOS_EXPLOSIVOS || '',
+      nome: r.nome || r.NOME_SUBTIPOS_EXPLOSIVOS || '',
+      descricao: r.descricao || r.DESCRICAO_SUBTIPOS_EXPLOSIVOS || '',
+      createdAt: r.createdAt || r.DATA_CRIACAO_SUBTIPOS_EXPLOSIVOS
+    }));
+    return res.json(mapped);
   } catch (err: any) {
     console.error('Error fetching subtipos_explosivos:', err);
     return res.status(500).json({ error: err.message });

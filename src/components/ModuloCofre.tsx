@@ -838,10 +838,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             });
 
             const matchesExplosives = storedExplosives.some(e =>
-              e.nome.toLowerCase().includes(term) ||
-              e.tipo.toLowerCase().includes(term) ||
-              (e.subtipo && e.subtipo.toLowerCase().includes(term)) ||
-              e.lote.toLowerCase().includes(term)
+              (e?.nome || '').toLowerCase().includes(term) ||
+              (e?.tipo || '').toLowerCase().includes(term) ||
+              (e?.subtipo && e.subtipo.toLowerCase().includes(term)) ||
+              (e?.lote || '').toLowerCase().includes(term)
             );
 
             return matchesBasic || matchesWeapons || matchesAmmo || matchesExplosives;

@@ -1507,8 +1507,8 @@ class StorageService {
 
     const destExp = this.state.explosivos.find(e =>
       e.unitId === transfer.destinationUnitId &&
-      e.nome.trim().toLowerCase() === transfer.nomeExplosivo.trim().toLowerCase() &&
-      e.lote.trim().toLowerCase() === (transfer.lote || '').trim().toLowerCase()
+      (e.nome || '').trim().toLowerCase() === (transfer.nomeExplosivo || '').trim().toLowerCase() &&
+      (e.lote || '').trim().toLowerCase() === (transfer.lote || '').trim().toLowerCase()
     );
 
     if (destExp) {
@@ -1686,7 +1686,7 @@ class StorageService {
 
     const destMat = this.state.materiais.find(m =>
       m.unidadeId === transfer.destinationUnitId &&
-      m.nome.trim().toLowerCase() === transfer.nomeMaterial.trim().toLowerCase() &&
+      (m.nome || '').trim().toLowerCase() === (transfer.nomeMaterial || '').trim().toLowerCase() &&
       (transfer.numeroSerie ? m.numeroSerie === transfer.numeroSerie : true)
     );
 
