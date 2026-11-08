@@ -53,7 +53,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   const [lastDirectCautelaArma, setLastDirectCautelaArma] = useState<CautelaArma | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'RECUSADA'>('TODOS');
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'RECUSADA'>('TODOS');
   
   // Modal de Devolução
   const [returningCautela, setReturningCautela] = useState<CautelaArma | null>(null);
@@ -65,6 +65,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [malfunctionDescription, setMalfunctionDescription] = useState('');
   const [returnedMagazinesCount, setReturnedMagazinesCount] = useState<number>(1);
   const [returnObservations, setReturnObservations] = useState('');
+  const [returnVaultSpaceId, setReturnVaultSpaceId] = useState('');
 
   // Modal de Nova Solicitação de Cautela
   const [selectedWeaponId, setSelectedWeaponId] = useState('');
@@ -155,7 +156,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     }
 
-    if (statusFilter !== 'TODOS') {
+    if (statusFilter === 'DEFERIDAS') {
+      list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLVIDA');
+    } else if (statusFilter === 'INDEFERIDAS') {
+      list = list.filter(c => c.status === 'RECUSADA');
+    } else if (statusFilter !== 'TODOS') {
       list = list.filter(c => c.status === statusFilter);
     }
 
@@ -460,6 +465,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   };
 
+  // Armas Vault Spaces na unidade da arma devolvida
+  const availableArmasVaults = useMemo(() => {
+    if (!returningCautela) return [];
+    const targetUnit = returningCautela.unitId || currentUser.unitId;
+    return vaultSpaces.filter(v => 
+      (!v.unitId || v.unitId === targetUnit) && 
+      (v.type === 'ARMAS' || !v.type)
+    );
+  }, [returningCautela, vaultSpaces, currentUser.unitId]);
+
   // Abrir Modal de Devolução
   const handleOpenReturnModal = (cautela: CautelaArma) => {
     setReturningCautela(cautela);
@@ -471,6 +486,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setMalfunctionDescription('');
     setReturnedMagazinesCount(cautela.magazineQuantity || 1);
     setReturnObservations('');
+    setReturnVaultSpaceId(cautela.vaultSpaceId || '');
   };
 
   // Concluir Devolução
@@ -490,6 +506,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setIsSubmitting(true);
     setErrorMsg('');
     try {
+      const selectedVault = vaultSpaces.find(v => v.id === returnVaultSpaceId);
       const res = await storage.returnCautelaArma(returningCautela.id, {
         hadShots,
         shotsFired: hadShots ? shotsFired : 0,
@@ -498,13 +515,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         hadMalfunction,
         malfunctionDescription: hadMalfunction ? malfunctionDescription.trim() : null,
         returnedMagazinesCount,
+        destinationVaultSpaceId: returnVaultSpaceId || returningCautela.vaultSpaceId,
         returnObservations: returnObservations.trim()
       });
 
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao registrar devolução.');
       } else {
-        setSuccessMsg(`Arma ${returningCautela.weaponModel} devolvida com sucesso ao cofre de origem!`);
+        const destText = selectedVault ? `no cofre ${selectedVault.code}` : 'ao cofre da unidade';
+        setSuccessMsg(`Arma ${returningCautela.weaponModel} (Série: ${returningCautela.weaponSerialNumber}) devolvida e guardada com sucesso ${destText}!`);
         setReturningCautela(null);
         onRefresh();
       }
@@ -1129,17 +1148,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </div>
 
             <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
-              {(['TODOS', 'PENDENTE', 'AUTORIZADA', 'DEVOLVIDA', 'RECUSADA'] as const).map(st => (
+              {[
+                { id: 'TODOS', label: 'Todas' },
+                { id: 'DEFERIDAS', label: 'Deferidas (Autorizadas / Devolvidas)' },
+                { id: 'INDEFERIDAS', label: 'Indeferidas (Recusadas)' },
+                { id: 'PENDENTE', label: 'Pendentes' }
+              ].map(item => (
                 <button
-                  key={st}
-                  onClick={() => setStatusFilter(st)}
+                  key={item.id}
+                  onClick={() => setStatusFilter(item.id as any)}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                    statusFilter === st
-                      ? 'bg-amber-500 text-slate-950 font-black'
+                    statusFilter === item.id
+                      ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
                       : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
                   }`}
                 >
-                  {st === 'TODOS' ? 'Todos' : st}
+                  {item.label}
                 </button>
               ))}
             </div>
@@ -1156,6 +1180,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <div className="space-y-6">
               {activeTab === 'MINHAS' ? (
                 <>
+                  {/* Alerta de Cautela Recusada / Indeferida */}
+                  {scopedCautelas.filter(c => c.status === 'RECUSADA').length > 0 && (
+                    <div className="p-4 bg-red-950/70 border border-red-800/80 rounded-2xl flex items-start space-x-3.5 shadow-sm">
+                      <div className="p-2 bg-red-500/20 text-red-400 rounded-xl shrink-0 mt-0.5 border border-red-500/30">
+                        <AlertCircle className="w-5 h-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <h4 className="text-xs font-bold text-red-200">
+                          Atenção: Você possui {scopedCautelas.filter(c => c.status === 'RECUSADA').length} solicitação(ões) de cautela RECUSADA(S) pelo armeiro.
+                        </h4>
+                        <p className="text-[11px] text-red-300/80 leading-relaxed">
+                          A arma solicitada não foi liberada e retornou ao cofre da unidade. Consulte os detalhes e a justificativa na seção <strong>"Cautelas Recusadas (Solicitações Indeferidas)"</strong> abaixo.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Seção 1: Cautelas Ativas */}
                   <div className="space-y-3">
                     <div className="flex items-center justify-between pb-1 border-b border-slate-800">
@@ -1886,6 +1927,40 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
                   required
                 />
+              </div>
+
+              {/* 5. Local no Cofre para Guarda (Pode ser alterado pelo Armeiro) */}
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-200 flex items-center space-x-2">
+                    <Crosshair className="w-4 h-4 text-amber-400" />
+                    <span>Local no Cofre para Guarda (Alterável pelo Armeiro):</span>
+                  </label>
+                  <span className="text-[10px] text-amber-400 font-mono">
+                    Original: {vaultSpaces.find(v => v.id === returningCautela.vaultSpaceId)?.code || 'Cofre Padrão'}
+                  </span>
+                </div>
+
+                {availableArmasVaults.length === 0 ? (
+                  <div className="text-xs text-slate-400 font-mono">
+                    Retornará ao cofre original: {vaultSpaces.find(v => v.id === returningCautela.vaultSpaceId)?.code || 'Cofre Padrão'}
+                  </div>
+                ) : (
+                  <select
+                    value={returnVaultSpaceId}
+                    onChange={(e) => setReturnVaultSpaceId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                  >
+                    {availableArmasVaults.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.code} - {v.description || 'Cofre da Unidade'} {v.id === returningCautela.vaultSpaceId ? '(Local Original de Saída)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                )}
+                <p className="text-[10px] text-slate-400">
+                  O armeiro ao aceitar a devolução pode manter o compartimento original ou selecionar outro cofre/slot livre para guardar a arma.
+                </p>
               </div>
 
               <div>

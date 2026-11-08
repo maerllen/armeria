@@ -9262,6 +9262,8 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       returnArmorerId,
       returnArmorerName,
       returnArmorerMasp,
+      destinationVaultSpaceId,
+      vaultSpaceId,
       actor
     } = req.body;
 
@@ -9276,6 +9278,22 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
     const condicoes = isWorking ? 'Condições de Uso' : 'Apresenta Defeito';
     const shots = parseInt(String(shotsFired || 0), 10);
     const mags = parseInt(String(returnedMagazinesCount || 1), 10);
+    const targetVaultId = destinationVaultSpaceId || vaultSpaceId || cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS;
+
+    let targetVaultCode = '';
+    if (targetVaultId) {
+      try {
+        const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [targetVaultId]);
+        if (vRows && vRows.length > 0) targetVaultCode = vRows[0].CODIGO_COFRES;
+      } catch (e) {
+        targetVaultCode = targetVaultId;
+      }
+    }
+
+    let finalObs = returnObservations ? returnObservations.trim() : '';
+    if (targetVaultCode && targetVaultId !== cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS) {
+      finalObs = finalObs ? `${finalObs} | Local alterado na devolução: ${targetVaultCode}` : `Local alterado na devolução: ${targetVaultCode}`;
+    }
 
     // 1. Atualiza registro da cautela como DEVOLVIDA com todos os dados técnicos de uso
     await pool.query(`
@@ -9306,40 +9324,41 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       hadMalfunction ? 1 : 0,
       malfunctionDescription || null,
       mags,
-      returnObservations || null,
+      finalObs || null,
       id
     ]);
 
-    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre', retornando ao cofre de origem
+    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre', armazenando no cofre selecionado
     const newStatus = !isWorking ? 'Manutenção' : 'No Cofre';
     try {
       await pool.query(`
         UPDATE ARMAS SET 
           STATUS_ARMAS = ?,
-          COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+          COFRE_ID_ARMAS = ?,
           OBSERVACAO_LOCALIZACAO_ARMAS = NULL,
+          LOCAL_ANTERIOR_COFRE_ID_ARMAS = ?,
           TIROS_DISPARADOS_ARMAS = TIROS_DISPARADOS_ARMAS + ?
         WHERE ID_ARMAS = ?
-      `, [newStatus, cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, shots, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+      `, [newStatus, targetVaultId, targetVaultId, shots, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
     } catch (e) {
       await pool.query(`
         UPDATE ARMAS SET 
           STATUS_ARMAS = ?,
-          COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+          COFRE_ID_ARMAS = ?,
           OBSERVACAO_LOCALIZACAO_ARMAS = NULL
         WHERE ID_ARMAS = ?
-      `, [newStatus, cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+      `, [newStatus, targetVaultId, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
     }
 
     await insertAuditLog(
       'Armas',
       'Devolver',
-      `Arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} devolvida por ${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}. Tiros: ${shots}. Condição: ${condicoes}. Panes: ${hadMalfunction ? 'Sim' : 'Não'}.`,
+      `Arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} devolvida por ${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}. Guardada no cofre: ${targetVaultCode || 'Padrão'}. Tiros: ${shots}. Condição: ${condicoes}. Panes: ${hadMalfunction ? 'Sim' : 'Não'}.`,
       armorer,
       req.ip
     );
 
-    return res.json({ success: true, message: 'Devolução de armamento registrada com sucesso!' });
+    return res.json({ success: true, message: `Devolução registrada com sucesso! Armamento guardado no cofre ${targetVaultCode || 'padrão'}.` });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

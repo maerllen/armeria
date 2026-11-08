@@ -1192,6 +1192,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 const weaponUnit = units.find(u => u.id === w.unitId);
                 const activeCautela = storage.getCautelasArmas().find(c => c.weaponId === w.id && c.status === 'AUTORIZADA');
                 const lastVaultCode = vaultSpaces.find(v => v.id === (w.previousVaultSpaceId || activeCautela?.vaultSpaceId))?.code || (vault ? vault.code : 'Cofre Padrão');
+                const officerName = activeCautela ? activeCautela.requesterName : (((w as any).locationNote ? (w as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial'));
 
                 return (
                   <div
@@ -1206,7 +1207,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                           w.status === 'No Cofre'
                             ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
                             : w.status === 'Acautelada'
-                            ? 'bg-purple-950 text-purple-300 border-purple-800'
+                            ? 'bg-purple-950 text-purple-300 border-purple-800 max-w-[260px] truncate'
                             : w.status === 'Em Trânsito'
                             ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
                             : w.status === 'Pendente de Recibo'
@@ -1214,8 +1215,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             : w.status === 'Manutenção' || w.status === 'Em Manutenção'
                             ? 'bg-amber-500/25 text-amber-300 border-amber-500/50'
                             : 'bg-purple-950 text-purple-300 border-purple-800'
-                        }`}>
-                          {w.status}
+                        }`} title={w.status === 'Acautelada' ? `Cautelada com ${officerName}` : w.status}>
+                          {w.status === 'Acautelada' ? `Cautelada — ${officerName}` : w.status}
                         </span>
 
                         <div className="flex items-center space-x-1">
@@ -1354,7 +1355,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       ? 'text-purple-400'
                       : 'text-amber-400'
                   }`}>
-                    {selectedWeaponDetail.status}
+                    {selectedWeaponDetail.status === 'Acautelada'
+                      ? `Cautelada — ${storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA')?.requesterName || ((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}`
+                      : selectedWeaponDetail.status}
                   </span>
                 </div>
               </div>

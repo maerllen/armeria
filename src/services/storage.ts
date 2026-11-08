@@ -3163,8 +3163,9 @@ class StorageService {
       target.isWorking = Boolean(returnData.isWorking);
       const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
       if (weap) {
-        weap.status = returnData.isWorking ? 'No Cofre' : 'Manutenção';
-        weap.vaultSpaceId = target.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+        const destVault = returnData.destinationVaultSpaceId || returnData.vaultSpaceId || target.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+        weap.vaultSpaceId = destVault;
+        weap.previousVaultSpaceId = destVault;
         delete (weap as any).locationNote;
         if (target.shotsFired) {
           weap.shotCount = (weap.shotCount || 0) + target.shotsFired;
