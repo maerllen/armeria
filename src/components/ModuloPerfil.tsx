@@ -55,11 +55,23 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
     }
   });
 
+  const userMaspClean = (activeUser.masp || '').replace(/\D/g, '');
+  const userNorm = (activeUser.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+  const isProfileUserMatch = (requesterId?: string, requesterMasp?: string, requesterName?: string) => {
+    if (requesterId && requesterId === activeUser.id) return true;
+    if (requesterMasp && activeUser.masp && requesterMasp.trim().toLowerCase() === activeUser.masp.trim().toLowerCase()) return true;
+    const reqClean = (requesterMasp || '').replace(/\D/g, '');
+    if (userMaspClean && reqClean && userMaspClean === reqClean) return true;
+    const reqNorm = (requesterName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    if (userNorm && reqNorm && (userNorm === reqNorm || userNorm.includes(reqNorm) || reqNorm.includes(userNorm))) return true;
+    return false;
+  };
+
   const userArmasCautelas = storage.getCautelasArmas().filter(
-    c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
+    c => isProfileUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
   );
   const userMunicoesCautelas = storage.getCautelasMunicoes().filter(
-    c => c.requesterId === activeUser.id && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
+    c => isProfileUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
   );
   const totalAutorizadas = userArmasCautelas.length + userMunicoesCautelas.length;
 

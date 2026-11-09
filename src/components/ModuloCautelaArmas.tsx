@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { 
   User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department 
 } from '../types';
@@ -156,26 +156,121 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return s === 'PENDENTE' || s === 'PENDENTE DE RECIBO' || s === 'PENDENTE RECIBO' || s === 'CAUTELA PENDENTE';
   };
 
+  // Normalizador de texto para busca insensível a caixa, acentos e espaços extras
+  const normalizeStr = (s?: string) =>
+    (s || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+  // Limpeza de dígitos para comparação flexível de MASP
+  const cleanDigits = (s?: string) => (s || '').replace(/\D/g, '');
+
+  // Verifica se a cautela pertence ao policial atual (por ID, MASP com/sem formatação, ou Nome)
+  const isUserCautela = useCallback((c: CautelaArma | null | undefined): boolean => {
+    if (!c) return false;
+
+    // 1. Match direto por ID de requerente
+    if (c.requesterId && currentUser.id && c.requesterId === currentUser.id) {
+      return true;
+    }
+
+    // 2. Match por MASP exato
+    const userMasp = (currentUser.masp || '').trim().toLowerCase();
+    const reqMasp = (c.requesterMasp || '').trim().toLowerCase();
+    if (userMasp && reqMasp && userMasp === reqMasp) {
+      return true;
+    }
+
+    // Match por dígitos do MASP (ignora pontos, traços, barras)
+    const userDigits = cleanDigits(currentUser.masp);
+    const reqDigits = cleanDigits(c.requesterMasp);
+    if (userDigits && reqDigits) {
+      if (userDigits === reqDigits) return true;
+      if (userDigits.length >= 4 && reqDigits.length >= 4) {
+        if (userDigits.endsWith(reqDigits) || reqDigits.endsWith(userDigits)) return true;
+      }
+    }
+
+    // 3. Match por Nome (normalizado sem acentos)
+    const userNorm = normalizeStr(currentUser.name);
+    const reqNorm = normalizeStr(c.requesterName);
+    if (userNorm && reqNorm) {
+      if (userNorm === reqNorm) return true;
+      if (userNorm.length >= 4 && reqNorm.length >= 4) {
+        if (userNorm.includes(reqNorm) || reqNorm.includes(userNorm)) return true;
+      }
+      const userParts = userNorm.split(/\s+/).filter(p => p.length > 2);
+      const reqParts = reqNorm.split(/\s+/).filter(p => p.length > 2);
+      if (userParts.length >= 2 && reqParts.length >= 2) {
+        const firstMatch = userParts[0] === reqParts[0];
+        const lastMatch = userParts[userParts.length - 1] === reqParts[reqParts.length - 1];
+        if (firstMatch && lastMatch) return true;
+      }
+    }
+
+    // 4. Match em observação/motivo
+    if (userDigits && userDigits.length >= 5) {
+      const reasonDigits = cleanDigits(c.reason);
+      if (reasonDigits.includes(userDigits)) return true;
+    }
+    if (userNorm && userNorm.length >= 5 && c.reason) {
+      const reasonNorm = normalizeStr(c.reason);
+      if (reasonNorm.includes(userNorm)) return true;
+    }
+
+    return false;
+  }, [currentUser]);
+
+  // Helper para verificar se uma arma pertence ao usuário atual
+  const isUserWeapon = useCallback((w: Weapon | null | undefined): boolean => {
+    if (!w) return false;
+    const destId = (w as any).destinatarioId || '';
+    if (destId && currentUser.id && destId === currentUser.id) return true;
+
+    const locNote = (w as any).locationNote || '';
+    const polAcautelado = (w as any).policialAcautelado || '';
+
+    const userMasp = (currentUser.masp || '').trim().toLowerCase();
+    if (userMasp && (locNote.toLowerCase().includes(userMasp) || polAcautelado.toLowerCase().includes(userMasp))) {
+      return true;
+    }
+
+    const userDigits = cleanDigits(currentUser.masp);
+    if (userDigits && userDigits.length >= 4) {
+      const locDigits = cleanDigits(locNote);
+      const polDigits = cleanDigits(polAcautelado);
+      if (locDigits.includes(userDigits) || polDigits.includes(userDigits)) return true;
+    }
+
+    const userNorm = normalizeStr(currentUser.name);
+    if (userNorm && userNorm.length >= 4) {
+      const locNorm = normalizeStr(locNote);
+      const polNorm = normalizeStr(polAcautelado);
+      if (locNorm.includes(userNorm) || polNorm.includes(userNorm)) return true;
+    }
+
+    return false;
+  }, [currentUser]);
+
   // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
     let list = [...allCautelas];
 
     // Se estiver na aba MINHAS ou se for Policial: filtra estritamente as cautelas do próprio usuário
     if (activeTab === 'MINHAS' || isPolicial) {
-      list = list.filter(c => 
-        c.requesterId === currentUser.id || 
-        c.requesterMasp === currentUser.masp ||
-        (currentUser.masp && c.requesterMasp && c.requesterMasp.trim() === currentUser.masp.trim())
-      );
+      list = list.filter(c => isUserCautela(c));
 
-      // Inclui armas que o usuário solicitou e estão marcadas como "Cautela Pendente" mas ainda não constam na lista
+      // Inclui armas que o usuário solicitou ou acautelou mas que ainda não constam na lista
       (weapons || []).forEach(w => {
+        const isMyWeaponMatch = isUserWeapon(w);
+        if (!isMyWeaponMatch) return;
+
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        const locNote = (w as any).locationNote || '';
-        const isMyPending = (w as any).destinatarioId === currentUser.id ||
-                            (currentUser.masp && locNote.includes(currentUser.masp)) ||
-                            ((w as any).policialAcautelado && (w as any).policialAcautelado.includes(currentUser.name));
-        if (isWeaponPending && isMyPending && !list.some(c => c.weaponId === w.id)) {
+        const isWeaponAcautelada = w.status === 'Acautelada';
+
+        if (isWeaponPending && !list.some(c => c.weaponId === w.id)) {
           list.unshift({
             id: `caut-sync-${w.id}`,
             weaponId: w.id,
@@ -202,11 +297,39 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             returnedMagazinesCount: w.magazineQuantity || 2,
             createdAt: new Date().toISOString()
           });
+        } else if (isWeaponAcautelada && !list.some(c => c.weaponId === w.id && (c.status === 'AUTORIZADA' || c.status === 'PENDENTE'))) {
+          list.unshift({
+            id: `caut-active-${w.id}`,
+            weaponId: w.id,
+            weaponSerialNumber: w.serialNumber,
+            weaponModel: w.model,
+            weaponType: w.type,
+            weaponCaliber: w.caliber,
+            magazineQuantity: w.magazineQuantity || 2,
+            vaultSpaceId: w.vaultSpaceId,
+            departmentId: w.departmentId,
+            unitId: w.unitId,
+            requesterId: currentUser.id,
+            requesterName: currentUser.name,
+            requesterMasp: currentUser.masp,
+            requesterCargo: currentUser.cargo,
+            requesterPhone: currentUser.phone,
+            reason: 'Acautelamento em uso pelo policial',
+            requestDate: (w as any).dataModificacao || new Date().toISOString(),
+            authorizedAt: (w as any).dataModificacao || new Date().toISOString(),
+            status: 'AUTORIZADA',
+            hadShots: false,
+            shotsFired: 0,
+            isWorking: true,
+            hadMalfunction: false,
+            returnedMagazinesCount: w.magazineQuantity || 2,
+            createdAt: (w as any).dataModificacao || new Date().toISOString()
+          });
         }
       });
     } else if (isArmeiro) {
       if (currentUser.managementScope !== 'department') {
-        list = list.filter(c => c.unitId === currentUser.unitId || c.requesterId === currentUser.id);
+        list = list.filter(c => c.unitId === currentUser.unitId || isUserCautela(c));
       }
     }
 
@@ -237,7 +360,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
 
     return list;
-  }, [allCautelas, currentUser, isArmeiro, isPolicial, activeTab, statusFilter, searchTerm, weapons]);
+  }, [allCautelas, currentUser, isArmeiro, isPolicial, activeTab, statusFilter, searchTerm, weapons, isUserCautela, isUserWeapon]);
 
   // Estado para armazenar IDs de recusas dispensadas pelo usuário
   const [dismissedRefusalIds, setDismissedRefusalIds] = useState<string[]>(() => {
@@ -312,8 +435,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Contadores para badges
   const pendingCount = useMemo(() => {
-    if (currentUser.role === 'Policial') {
-      return allCautelas.filter(c => (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && isPendingStatus(c.status)).length;
+    if (currentUser.role === 'Policial' || isPolicial) {
+      const myCautelasPending = allCautelas.filter(c => isUserCautela(c) && isPendingStatus(c.status));
+      const extraPending = (weapons || []).filter(w => {
+        const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
+        return isWeaponPending && isUserWeapon(w) && !myCautelasPending.some(c => c.weaponId === w.id);
+      });
+      return myCautelasPending.length + extraPending.length;
     }
     
     const myUnitPending = allCautelas.filter(c => {
@@ -328,25 +456,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
 
     return myUnitPending.length + pendingWeaponsNotInCautelas.length;
-  }, [allCautelas, currentUser, weapons, isGeral]);
+  }, [allCautelas, currentUser, weapons, isGeral, isPolicial, isUserCautela, isUserWeapon]);
 
   const myActiveCount = useMemo(() => {
-    return allCautelas.filter(c => (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && c.status === 'AUTORIZADA').length;
-  }, [allCautelas, currentUser.id, currentUser.masp]);
+    const listFromCautelas = allCautelas.filter(c => isUserCautela(c) && c.status === 'AUTORIZADA');
+    const extraAcauteladas = (weapons || []).filter(w => 
+      w.status === 'Acautelada' && 
+      isUserWeapon(w) && 
+      !listFromCautelas.some(c => c.weaponId === w.id)
+    );
+    return listFromCautelas.length + extraAcauteladas.length;
+  }, [allCautelas, isUserCautela, weapons, isUserWeapon]);
 
   const myPendingCount = useMemo(() => {
-    return allCautelas.filter(c => 
-      (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && 
-      isPendingStatus(c.status)
-    ).length;
-  }, [allCautelas, currentUser.id, currentUser.masp]);
+    const listFromCautelas = allCautelas.filter(c => isUserCautela(c) && isPendingStatus(c.status));
+    const extraPending = (weapons || []).filter(w => 
+      (w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo') && 
+      isUserWeapon(w) && 
+      !listFromCautelas.some(c => c.weaponId === w.id)
+    );
+    return listFromCautelas.length + extraPending.length;
+  }, [allCautelas, isUserCautela, weapons, isUserWeapon]);
 
   const myRefusedCautelas = useMemo(() => {
-    return allCautelas.filter(c => 
-      (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && 
-      c.status === 'RECUSADA'
-    );
-  }, [allCautelas, currentUser.id, currentUser.masp]);
+    return allCautelas.filter(c => isUserCautela(c) && c.status === 'RECUSADA');
+  }, [allCautelas, isUserCautela]);
 
   // Cautelas recusadas não dispensadas (para notificar imediatamente o policial)
   const unreadRefusedCautelas = useMemo(() => {

@@ -248,8 +248,19 @@ export default function App() {
 
   const rawReadyReceiptsCount = useMemo(() => {
     if (!effectiveUser) return 0;
-    const armasAutorizadas = storage.getCautelasArmas().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
-    const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => c.requesterId === effectiveUser.id && c.status === 'AUTORIZADA').length;
+    const userMaspClean = (effectiveUser.masp || '').replace(/\D/g, '');
+    const userNorm = (effectiveUser.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const isUserMatch = (requesterId?: string, requesterMasp?: string, requesterName?: string) => {
+      if (requesterId && requesterId === effectiveUser.id) return true;
+      if (requesterMasp && effectiveUser.masp && requesterMasp.trim().toLowerCase() === effectiveUser.masp.trim().toLowerCase()) return true;
+      const reqClean = (requesterMasp || '').replace(/\D/g, '');
+      if (userMaspClean && reqClean && userMaspClean === reqClean) return true;
+      const reqNorm = (requesterName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+      if (userNorm && reqNorm && (userNorm === reqNorm || userNorm.includes(reqNorm) || reqNorm.includes(userNorm))) return true;
+      return false;
+    };
+    const armasAutorizadas = storage.getCautelasArmas().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
+    const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
     return armasAutorizadas + municoesAutorizadas;
   }, [effectiveUser]);
   const readyReceiptsCount = Math.max(0, rawReadyReceiptsCount - (acknowledgedModuleAlerts['meu-perfil'] || 0));

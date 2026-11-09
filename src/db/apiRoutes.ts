@@ -8739,7 +8739,7 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
 
 apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
   try {
-    const { userId, unitId, status } = req.query;
+    const { userId, masp, name, unitId, status } = req.query;
     const pool = getPool();
 
     // Auto-sincroniza armas com status 'Cautela Pendente', 'Pendente de Recibo' ou 'Pendente Recibo'
@@ -8837,9 +8837,24 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
     `;
     const params: any[] = [];
 
-    if (userId) {
-      query += ' AND REQUERENTE_ID_ACAUTELAR_ARMAS = ?';
-      params.push(userId);
+    if (userId || masp || name) {
+      const uMasp = masp ? String(masp).trim() : null;
+      const uMaspDigits = masp ? String(masp).replace(/\D/g, '') : null;
+      const uName = name ? `%${String(name).trim().toLowerCase()}%` : null;
+
+      query += ` AND (
+        (? IS NOT NULL AND REQUERENTE_ID_ACAUTELAR_ARMAS = ?)
+        OR (? IS NOT NULL AND (
+          REQUERENTE_MASP_ACAUTELAR_ARMAS = ? 
+          OR REPLACE(REPLACE(REQUERENTE_MASP_ACAUTELAR_ARMAS, '.', ''), '-', '') = ?
+        ))
+        OR (? IS NOT NULL AND LOWER(REQUERENTE_NOME_ACAUTELAR_ARMAS) LIKE ?)
+      )`;
+      params.push(
+        userId || null, userId || null,
+        uMasp || null, uMasp || null, uMaspDigits || null,
+        uName || null, uName || null
+      );
     }
     if (unitId) {
       query += ' AND UNIDADE_ID_ACAUTELAR_ARMAS = ?';
