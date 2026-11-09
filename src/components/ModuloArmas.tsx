@@ -1194,7 +1194,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 const weaponUnit = units.find(u => u.id === w.unitId);
                 const activeCautela = storage.getCautelasArmas().find(c => c.weaponId === w.id && c.status === 'AUTORIZADA');
                 const lastVaultCode = vaultSpaces.find(v => v.id === (w.previousVaultSpaceId || activeCautela?.vaultSpaceId))?.code || (vault ? vault.code : 'Cofre Padrão');
-                const officerName = activeCautela ? activeCautela.requesterName : (((w as any).locationNote ? (w as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial'));
+                const officerName = activeCautela ? activeCautela.requesterName : (((w as any).locationNote ? (w as any).locationNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : 'Policial'));
+                const officerMasp = activeCautela ? activeCautela.requesterMasp : (((w as any).locationNote && (w as any).locationNote.includes('MASP:')) ? (w as any).locationNote.split('MASP:')[1].split(')')[0].trim() : '');
+                const officerDisplay = officerMasp ? `${officerName} (MASP: ${officerMasp})` : officerName;
 
                 return (
                   <div
@@ -1211,7 +1213,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             : w.status === 'Cautela Pendente'
                             ? 'bg-amber-950 text-amber-300 border-amber-800 animate-pulse'
                             : w.status === 'Acautelada'
-                            ? 'bg-purple-950 text-purple-300 border-purple-800 max-w-[260px] truncate'
+                            ? 'bg-purple-950 text-purple-300 border-purple-800 max-w-[280px] truncate'
                             : w.status === 'Em Trânsito'
                             ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
                             : w.status === 'Pendente de Recibo'
@@ -1219,8 +1221,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             : w.status === 'Manutenção' || w.status === 'Em Manutenção'
                             ? 'bg-amber-500/25 text-amber-300 border-amber-500/50'
                             : 'bg-purple-950 text-purple-300 border-purple-800'
-                        }`} title={w.status === 'Acautelada' ? `Cautelada com ${officerName}` : w.status}>
-                          {w.status === 'Acautelada' ? `Cautelada — ${officerName}` : w.status}
+                        }`} title={w.status === 'Acautelada' ? `Acautelada com ${officerDisplay}` : w.status}>
+                          {w.status === 'Acautelada' ? `Acautelada — ${officerDisplay}` : w.status}
                         </span>
 
                         <div className="flex items-center space-x-1">
@@ -1256,10 +1258,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                           <div className="mt-2 pt-1.5 border-t border-purple-900/40 text-[11px] font-sans">
                             <p className="text-purple-300 font-semibold flex items-center space-x-1">
                               <Shield className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                              <span>Acautelada com: <strong className="text-purple-100">{activeCautela ? activeCautela.requesterName : ((w as any).locationNote ? (w as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}</strong></span>
+                              <span>Acautelada com: <strong className="text-purple-100">{officerName}</strong> {officerMasp ? <span className="text-purple-300 font-mono font-bold">(MASP: {officerMasp})</span> : null}</span>
                             </p>
                             <p className="text-[10px] text-purple-300/80 font-mono mt-0.5">
-                              {activeCautela ? `MASP: ${activeCautela.requesterMasp} • ` : ''}Último cofre: <strong className="text-purple-200">{lastVaultCode}</strong>
+                              {officerMasp ? `MASP: ${officerMasp} • ` : ''}Último cofre: <strong className="text-purple-200">{lastVaultCode}</strong>
                             </p>
                           </div>
                         ) : (
@@ -1360,7 +1362,12 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       : 'text-amber-400'
                   }`}>
                     {selectedWeaponDetail.status === 'Acautelada'
-                      ? `Cautelada — ${storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA')?.requesterName || ((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}`
+                      ? `Acautelada — ${(() => {
+                          const activeCautelaDetail = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');
+                          const name = activeCautelaDetail ? activeCautelaDetail.requesterName : (((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : 'Policial'));
+                          const masp = activeCautelaDetail ? activeCautelaDetail.requesterMasp : (((selectedWeaponDetail as any).locationNote && (selectedWeaponDetail as any).locationNote.includes('MASP:')) ? (selectedWeaponDetail as any).locationNote.split('MASP:')[1].split(')')[0].trim() : '');
+                          return masp ? `${name} (MASP: ${masp})` : name;
+                        })()}`
                       : selectedWeaponDetail.status}
                   </span>
                 </div>
