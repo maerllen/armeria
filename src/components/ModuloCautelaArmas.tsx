@@ -150,11 +150,60 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Lista de cautelas
   const allCautelas = storage.getCautelasArmas();
 
+  // Função auxiliar para verificar status pendente de recibo / autorização
+  const isPendingStatus = (st: string) => {
+    const s = (st || '').trim().toUpperCase();
+    return s === 'PENDENTE' || s === 'PENDENTE DE RECIBO' || s === 'PENDENTE RECIBO' || s === 'CAUTELA PENDENTE';
+  };
+
   // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
-    let list = allCautelas;
-    if (isPolicial) {
-      list = list.filter(c => c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp);
+    let list = [...allCautelas];
+
+    // Se estiver na aba MINHAS ou se for Policial: filtra estritamente as cautelas do próprio usuário
+    if (activeTab === 'MINHAS' || isPolicial) {
+      list = list.filter(c => 
+        c.requesterId === currentUser.id || 
+        c.requesterMasp === currentUser.masp ||
+        (currentUser.masp && c.requesterMasp && c.requesterMasp.trim() === currentUser.masp.trim())
+      );
+
+      // Inclui armas que o usuário solicitou e estão marcadas como "Cautela Pendente" mas ainda não constam na lista
+      (weapons || []).forEach(w => {
+        const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
+        const locNote = (w as any).locationNote || '';
+        const isMyPending = (w as any).destinatarioId === currentUser.id ||
+                            (currentUser.masp && locNote.includes(currentUser.masp)) ||
+                            ((w as any).policialAcautelado && (w as any).policialAcautelado.includes(currentUser.name));
+        if (isWeaponPending && isMyPending && !list.some(c => c.weaponId === w.id)) {
+          list.unshift({
+            id: `caut-sync-${w.id}`,
+            weaponId: w.id,
+            weaponSerialNumber: w.serialNumber,
+            weaponModel: w.model,
+            weaponType: w.type,
+            weaponCaliber: w.caliber,
+            magazineQuantity: w.magazineQuantity || 2,
+            vaultSpaceId: w.vaultSpaceId,
+            departmentId: w.departmentId,
+            unitId: w.unitId,
+            requesterId: currentUser.id,
+            requesterName: currentUser.name,
+            requesterMasp: currentUser.masp,
+            requesterCargo: currentUser.cargo,
+            requesterPhone: currentUser.phone,
+            reason: 'Solicitação de acautelamento - Aguardando Cautela',
+            requestDate: new Date().toISOString(),
+            status: 'PENDENTE',
+            hadShots: false,
+            shotsFired: 0,
+            isWorking: true,
+            hadMalfunction: false,
+            returnedMagazinesCount: w.magazineQuantity || 2,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
     } else if (isArmeiro) {
       if (currentUser.managementScope !== 'department') {
         list = list.filter(c => c.unitId === currentUser.unitId || c.requesterId === currentUser.id);
@@ -166,10 +215,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     } else if (statusFilter === 'INDEFERIDAS') {
       list = list.filter(c => c.status === 'RECUSADA');
     } else if (statusFilter === 'TODOS') {
-      if (isPolicial) {
+      if (isPolicial || activeTab === 'MINHAS') {
         // Cautela recusada deixa de aparecer em Minhas Cautelas e passa a ser mostrada em Indeferidas
         list = list.filter(c => c.status !== 'RECUSADA');
       }
+    } else if (statusFilter === 'PENDENTE') {
+      list = list.filter(c => isPendingStatus(c.status));
     } else if (statusFilter !== 'TODOS') {
       list = list.filter(c => c.status === statusFilter);
     }
@@ -186,7 +237,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
 
     return list;
-  }, [allCautelas, currentUser, isArmeiro, isPolicial, statusFilter, searchTerm]);
+  }, [allCautelas, currentUser, isArmeiro, isPolicial, activeTab, statusFilter, searchTerm, weapons]);
 
   // Estado para armazenar IDs de recusas dispensadas pelo usuário
   const [dismissedRefusalIds, setDismissedRefusalIds] = useState<string[]>(() => {
@@ -197,12 +248,6 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return [];
     }
   });
-
-  // Função auxiliar para verificar status pendente de recibo / autorização
-  const isPendingStatus = (st: string) => {
-    const s = (st || '').trim().toUpperCase();
-    return s === 'PENDENTE' || s === 'PENDENTE DE RECIBO' || s === 'PENDENTE RECIBO' || s === 'CAUTELA PENDENTE';
-  };
 
   // Lista a exibir com base na aba selecionada (PENDENTES mostra estritamente pendentes de recibo da unidade/departamento)
   const displayedCautelas = useMemo(() => {
@@ -215,7 +260,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         if (isWeaponPending && !list.some(c => c.weaponId === w.id)) {
           const locNote = (w as any).locationNote || '';
           list.push({
-            id: `caut-weapon-sync-${w.id}`,
+            id: `caut-sync-${w.id}`,
             weaponId: w.id,
             weaponSerialNumber: w.serialNumber,
             weaponModel: w.model,
@@ -286,8 +331,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   }, [allCautelas, currentUser, weapons, isGeral]);
 
   const myActiveCount = useMemo(() => {
-    return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'AUTORIZADA').length;
-  }, [allCautelas, currentUser.id]);
+    return allCautelas.filter(c => (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && c.status === 'AUTORIZADA').length;
+  }, [allCautelas, currentUser.id, currentUser.masp]);
+
+  const myPendingCount = useMemo(() => {
+    return allCautelas.filter(c => 
+      (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && 
+      isPendingStatus(c.status)
+    ).length;
+  }, [allCautelas, currentUser.id, currentUser.masp]);
 
   const myRefusedCautelas = useMemo(() => {
     return allCautelas.filter(c => 
@@ -980,8 +1032,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           <Shield className="w-3.5 h-3.5" />
           <span>Minhas Cautelas</span>
           {myActiveCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 font-mono">
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono">
               {myActiveCount} ativa{myActiveCount > 1 ? 's' : ''}
+            </span>
+          )}
+          {myPendingCount > 0 && (
+            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono animate-pulse">
+              {myPendingCount} aguardando
             </span>
           )}
         </button>
@@ -1423,19 +1480,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                   {/* Seção: Solicitações Pendentes (Exibida em TODAS ou PENDENTE) */}
                   {(statusFilter === 'TODOS' || statusFilter === 'PENDENTE') && (() => {
-                    const pendentes = scopedCautelas.filter(c => c.status === 'PENDENTE');
+                    const pendentes = scopedCautelas.filter(c => isPendingStatus(c.status));
                     if (pendentes.length === 0) return null;
                     return (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
-                            <Clock className="w-3.5 h-3.5 text-amber-400" />
+                            <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                             <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                              Solicitações Pendentes (Cautela Pendente - Aguardando Armeiro)
+                              Solicitações Pendentes (Aguardando Cautela / Resposta do Armeiro)
                             </h4>
                           </div>
-                          <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded-md border border-amber-800/60">
-                            {pendentes.length} pendente(s)
+                          <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-800/60">
+                            {pendentes.length} aguardando cautela
                           </span>
                         </div>
 
@@ -1443,27 +1500,38 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           {pendentes.map(cautela => (
                             <div
                               key={cautela.id}
-                              className="bg-slate-900 border border-amber-900/40 rounded-2xl p-4 sm:p-5 space-y-3"
+                              className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md ring-1 ring-amber-500/20"
                             >
-                              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                                 <div className="flex items-center space-x-3">
-                                  <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/20 text-amber-400">
-                                    <Clock className="w-5 h-5" />
+                                  <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400">
+                                    <Clock className="w-5 h-5 animate-pulse" />
                                   </div>
                                   <div>
-                                    <div className="flex items-center space-x-2">
+                                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                                       <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
                                       <span className="font-mono text-xs text-amber-400 font-bold">
                                         Nº {cautela.weaponSerialNumber}
                                       </span>
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse">
-                                        Cautela Pendente
+                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse flex items-center space-x-1">
+                                        <span>●</span>
+                                        <span>Aguardando Cautela</span>
                                       </span>
                                     </div>
-                                    <p className="text-xs text-slate-400 mt-0.5">
+                                    <p className="text-xs text-amber-300/90 mt-1 flex items-center space-x-1.5 font-medium">
+                                      <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                                      <span>Aguardando resposta do Armeiro para autorização e liberação do armamento</span>
+                                    </p>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">
                                       Solicitado em {new Date(cautela.requestDate).toLocaleString('pt-BR')} • Motivo: "{cautela.reason || 'Serviço Policial'}"
                                     </p>
                                   </div>
+                                </div>
+                                <div className="self-end sm:self-center">
+                                  <span className="px-3 py-1 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
+                                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Pendente de Liberação</span>
+                                  </span>
                                 </div>
                               </div>
                             </div>

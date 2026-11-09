@@ -3090,7 +3090,42 @@ class StorageService {
   }
 
   public async requestCautelaArma(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
-    // Atualização otimista imediata no estado local
+    const tempId = `caut-arma-${Date.now()}`;
+    const newCautela: CautelaArma = {
+      id: tempId,
+      weaponId: payload.weaponId,
+      weaponSerialNumber: payload.weaponSerialNumber,
+      weaponModel: payload.weaponModel,
+      weaponType: payload.weaponType,
+      weaponCaliber: payload.weaponCaliber,
+      magazineQuantity: payload.magazineQuantity || 2,
+      vaultSpaceId: payload.vaultSpaceId,
+      departmentId: payload.departmentId,
+      unitId: payload.unitId,
+      requesterId: payload.requesterId,
+      requesterName: payload.requesterName,
+      requesterMasp: payload.requesterMasp,
+      requesterCargo: payload.requesterCargo,
+      requesterPhone: payload.requesterPhone,
+      reason: payload.reason,
+      status: payload.directAuthorized ? 'AUTORIZADA' : 'PENDENTE',
+      requestDate: new Date().toISOString(),
+      authorizedAt: payload.directAuthorized ? new Date().toISOString() : undefined,
+      armorerId: payload.armorerId,
+      armorerName: payload.armorerName,
+      armorerMasp: payload.armorerMasp,
+      hadShots: false,
+      shotsFired: 0,
+      isWorking: true,
+      hadMalfunction: false,
+      returnedMagazinesCount: payload.magazineQuantity || 2,
+      createdAt: new Date().toISOString()
+    };
+
+    if (!this.state.cautelasArmas) this.state.cautelasArmas = [];
+    this.state.cautelasArmas.unshift(newCautela);
+
+    // Atualização otimista imediata no estado local da arma
     const weap = (this.state.weapons || []).find(w => w.id === payload.weaponId);
     if (weap) {
       weap.status = payload.directAuthorized ? 'Acautelada' : 'Cautela Pendente';
@@ -3108,8 +3143,11 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
+      if (data.id) {
+        newCautela.id = data.id;
+      }
       await this.refreshFromServer();
-      return { success: true, id: data.id };
+      return { success: true, id: data.id || tempId };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -3122,7 +3160,15 @@ class StorageService {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
     
     // Atualização otimista imediata no estado local
-    const target = (this.state.cautelasArmas || []).find(c => c.id === id);
+    const cleanId = id.replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
+    const target = (this.state.cautelasArmas || []).find(c => 
+      c.id === id || 
+      c.id === cleanId || 
+      c.id === `caut-sync-${cleanId}` ||
+      c.weaponId === id || 
+      c.weaponId === cleanId
+    );
+
     if (target) {
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
@@ -3139,7 +3185,8 @@ class StorageService {
     }
 
     try {
-      const res = await fetch(`/api/cautelas-armas/${id}/autorizar`, {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${actualId}/autorizar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -3166,7 +3213,15 @@ class StorageService {
 
   public async rejectCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
     // Atualização otimista imediata no estado local: a arma volta para o cofre de origem
-    const target = (this.state.cautelasArmas || []).find(c => c.id === id);
+    const cleanId = id.replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
+    const target = (this.state.cautelasArmas || []).find(c => 
+      c.id === id || 
+      c.id === cleanId || 
+      c.id === `caut-sync-${cleanId}` ||
+      c.weaponId === id || 
+      c.weaponId === cleanId
+    );
+
     if (target) {
       target.status = 'RECUSADA';
       target.authorizationNotes = notes || '';
@@ -3187,7 +3242,8 @@ class StorageService {
     }
 
     try {
-      const res = await fetch(`/api/cautelas-armas/${id}/recusar`, {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${actualId}/recusar`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
