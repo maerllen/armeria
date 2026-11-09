@@ -140,7 +140,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Detalhes / Termo de Cautela
   const [viewingCautela, setViewingCautela] = useState<CautelaArma | null>(null);
-  const [notesModal, setNotesModal] = useState<{ id: string; action: 'AUTORIZAR' | 'RECUSAR' } | null>(null);
+  const [notesModal, setNotesModal] = useState<{ id: string; action: 'AUTORIZAR' | 'RECUSAR'; weaponId?: string; weaponSerialNumber?: string } | null>(null);
   const [actionNotes, setActionNotes] = useState('');
 
   const [successMsg, setSuccessMsg] = useState('');
@@ -576,7 +576,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         vaultSpaceId: selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId,
         seraDevolvida: authSeraDevolvida,
         ammoQuantity: authWithAmmo ? Number(authAmmoQty) : undefined,
-        destinacao: authAmmoDestinacao
+        destinacao: authAmmoDestinacao,
+        weaponId: authorizingCautela.weaponId,
+        weaponSerialNumber: authorizingCautela.weaponSerialNumber,
+        cautelaId: authorizingCautela.id,
+        requesterName: authorizingCautela.requesterName,
+        requesterMasp: authorizingCautela.requesterMasp,
+        requesterCargo: authorizingCautela.requesterCargo
       });
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar acautelamento.');
@@ -597,8 +603,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setIsSubmitting(true);
     setErrorMsg('');
     try {
-      const targetCautela = allCautelas.find(c => c.id === id);
-      const res = await storage.authorizeCautelaArma(id, notes);
+      const targetCautela = allCautelas.find(c => c.id === id || c.weaponId === id);
+      const res = await storage.authorizeCautelaArma(id, {
+        notes,
+        weaponId: targetCautela?.weaponId,
+        weaponSerialNumber: targetCautela?.weaponSerialNumber,
+        cautelaId: targetCautela?.id || id,
+        requesterName: targetCautela?.requesterName,
+        requesterMasp: targetCautela?.requesterMasp,
+        requesterCargo: targetCautela?.requesterCargo
+      });
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar cautela.');
       } else {
@@ -617,12 +631,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   };
 
   // Recusar Cautela (Armeiro)
-  const handleReject = async (id: string, notes?: string) => {
+  const handleReject = async (id: string, notes?: string, extraWeaponId?: string, extraSerial?: string) => {
     setIsSubmitting(true);
     setErrorMsg('');
     try {
-      const targetCautela = allCautelas.find(c => c.id === id);
-      const res = await storage.rejectCautelaArma(id, notes);
+      const targetCautela = allCautelas.find(c => c.id === id || c.weaponId === id || (extraWeaponId && c.weaponId === extraWeaponId));
+      const res = await storage.rejectCautelaArma(id, notes, {
+        weaponId: extraWeaponId || targetCautela?.weaponId,
+        weaponSerialNumber: extraSerial || targetCautela?.weaponSerialNumber,
+        cautelaId: targetCautela?.id || id,
+        requesterName: targetCautela?.requesterName,
+        requesterMasp: targetCautela?.requesterMasp
+      });
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao recusar cautela.');
       } else {
@@ -1979,7 +1999,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       <span>Autorizar Cautela</span>
                                     </button>
                                     <button
-                                      onClick={() => setNotesModal({ id: cautela.id, action: 'RECUSAR' })}
+                                      onClick={() => setNotesModal({ 
+                                        id: cautela.id, 
+                                        action: 'RECUSAR',
+                                        weaponId: cautela.weaponId,
+                                        weaponSerialNumber: cautela.weaponSerialNumber
+                                      })}
                                       className="flex items-center space-x-1 px-3 py-2 bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 rounded-xl text-xs font-semibold transition"
                                       title="Recusar solicitação e retornar arma ao cofre"
                                     >
@@ -2709,7 +2734,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => handleReject(notesModal.id, actionNotes)}
+                onClick={() => handleReject(notesModal.id, actionNotes, notesModal.weaponId, notesModal.weaponSerialNumber)}
                 className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold text-xs rounded-xl"
               >
                 Confirmar Recusa

@@ -9069,35 +9069,72 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
   }
 });
 
-// Função auxiliar robusta para localizar ou resolver o registro da cautela por ID da cautela, ID da arma ou IDs de sincronização
-async function findCautelaArmaRecord(pool: any, id: string): Promise<any | null> {
-  if (!id) return null;
-  // 1. Busca exata por ID_ACAUTELAR_ARMAS
-  let [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [id]);
-  if (rows && rows.length > 0) return rows[0];
+// Função auxiliar robusta para localizar ou resolver o registro da cautela por ID da cautela, ID da arma, número de série ou IDs de sincronização
+async function findCautelaArmaRecord(pool: any, id: string, body?: any): Promise<any | null> {
+  const reqWeaponId = body?.weaponId;
+  const reqSerial = body?.weaponSerialNumber;
+  const reqCautelaId = body?.cautelaId;
 
-  // 2. Busca removendo possíveis prefixos de sincronização
-  const cleanId = id.replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
-  [rows] = await pool.query(`
+  // 1. Busca exata por ID_ACAUTELAR_ARMAS (com id ou body.cautelaId)
+  if (id) {
+    let [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [id]);
+    if (rows && rows.length > 0) return rows[0];
+  }
+  if (reqCautelaId && reqCautelaId !== id) {
+    let [rows]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [reqCautelaId]);
+    if (rows && rows.length > 0) return rows[0];
+  }
+
+  // 2. Busca removendo possíveis prefixos de sincronização e considerando weaponId / serial fornecidos no body
+  const cleanId = (id || '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
+  let [rows]: any = await pool.query(`
     SELECT * FROM ACAUTELAR_ARMAS 
     WHERE ID_ACAUTELAR_ARMAS = ? 
        OR ID_ACAUTELAR_ARMAS = ? 
        OR ID_ACAUTELAR_ARMAS = ?
        OR ARMA_ID_ACAUTELAR_ARMAS = ? 
        OR ARMA_ID_ACAUTELAR_ARMAS = ?
+       OR (? IS NOT NULL AND ARMA_ID_ACAUTELAR_ARMAS = ?)
+       OR (? IS NOT NULL AND NUMERO_SERIE_ACAUTELAR_ARMAS = ?)
     ORDER BY CASE 
       WHEN STATUS_ACAUTELAR_ARMAS IN ('PENDENTE', 'Cautela Pendente', 'Pendente de Recibo') THEN 1 
       WHEN STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA' THEN 2 
       ELSE 3 
     END ASC, DATA_CRIACAO_ACAUTELAR_ARMAS DESC
-  `, [cleanId, `caut-sync-${cleanId}`, `caut-weapon-sync-${cleanId}`, id, cleanId]);
+  `, [
+    cleanId, `caut-sync-${cleanId}`, `caut-weapon-sync-${cleanId}`, 
+    id, cleanId,
+    reqWeaponId || null, reqWeaponId || null,
+    reqSerial || null, reqSerial || null
+  ]);
   if (rows && rows.length > 0) return rows[0];
 
-  // 3. Se a cautela ainda não estiver em ACAUTELAR_ARMAS, mas a arma existir no banco
-  const [wRows]: any = await pool.query('SELECT * FROM ARMAS WHERE ID_ARMAS = ? OR ID_ARMAS = ?', [id, cleanId]);
+  // 3. Busca na tabela ARMAS se o armamento existe pelo id, cleanId, reqWeaponId ou reqSerial
+  const [wRows]: any = await pool.query(`
+    SELECT * FROM ARMAS 
+    WHERE ID_ARMAS = ? 
+       OR ID_ARMAS = ? 
+       OR (? IS NOT NULL AND ID_ARMAS = ?)
+       OR (? IS NOT NULL AND NUMERO_SERIE_ARMAS = ?)
+    LIMIT 1
+  `, [id, cleanId, reqWeaponId || null, reqWeaponId || null, reqSerial || null, reqSerial || null]);
+
   if (wRows && wRows.length > 0) {
     const w = wRows[0];
+    // Verifica se já existe qualquer cautela para essa arma
+    const [cRows]: any = await pool.query(`
+      SELECT * FROM ACAUTELAR_ARMAS 
+      WHERE ARMA_ID_ACAUTELAR_ARMAS = ? 
+      ORDER BY DATA_CRIACAO_ACAUTELAR_ARMAS DESC LIMIT 1
+    `, [w.ID_ARMAS]);
+    if (cRows && cRows.length > 0) return cRows[0];
+
+    // Se ainda não existir registro em ACAUTELAR_ARMAS, cria o registro imediatamente
     const autoId = `caut-sync-${w.ID_ARMAS}`;
+    const reqName = body?.requesterName || 'Policial Solicitante';
+    const reqMasp = body?.requesterMasp || '0000000';
+    const reqCargo = body?.requesterCargo || 'INVESTIGADOR';
+
     await pool.query(`
       INSERT INTO ACAUTELAR_ARMAS (
         ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
@@ -9108,15 +9145,25 @@ async function findCautelaArmaRecord(pool: any, id: string): Promise<any | null>
         REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
         FINALIDADE_MOTIVO_ACAUTELAR_ARMAS, STATUS_ACAUTELAR_ARMAS,
         DATA_SOLICITACAO_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usr-solicitante', 'Policial Solicitante', '0000000', 'INVESTIGADOR', 'Solicitação pendente de recebimento', 'PENDENTE', NOW(), NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'usr-solicitante', ?, ?, ?, 'Solicitação de acautelamento', 'PENDENTE', NOW(), NOW())
       ON DUPLICATE KEY UPDATE STATUS_ACAUTELAR_ARMAS = VALUES(STATUS_ACAUTELAR_ARMAS)
     `, [
       autoId, w.ID_ARMAS, w.NUMERO_SERIE_ARMAS, w.MODELO_ARMAS, w.TIPO_ARMAS || 'Arma de Fogo',
       w.CALIBRE_ARMAS, w.QUANTIDADE_CARREGADORES_ARMAS || 2, w.COFRE_ID_ARMAS,
-      w.DEPARTAMENTO_ID_ARMAS, w.UNIDADE_ID_ARMAS
+      w.DEPARTAMENTO_ID_ARMAS, w.UNIDADE_ID_ARMAS,
+      reqName, reqMasp, reqCargo
     ]);
     const [created]: any = await pool.query('SELECT * FROM ACAUTELAR_ARMAS WHERE ID_ACAUTELAR_ARMAS = ?', [autoId]);
     if (created && created.length > 0) return created[0];
+  }
+
+  // 4. Fallback por número de série se foi passado no body
+  if (reqSerial) {
+    const [bySerial]: any = await pool.query(
+      'SELECT * FROM ACAUTELAR_ARMAS WHERE NUMERO_SERIE_ACAUTELAR_ARMAS = ? ORDER BY DATA_CRIACAO_ACAUTELAR_ARMAS DESC LIMIT 1',
+      [reqSerial]
+    );
+    if (bySerial && bySerial.length > 0) return bySerial[0];
   }
 
   return null;
@@ -9128,7 +9175,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
     const { armorerId, armorerName, armorerMasp, notes, actor } = req.body;
     const pool = getPool();
 
-    const cautela = await findCautelaArmaRecord(pool, id);
+    const cautela = await findCautelaArmaRecord(pool, id, req.body);
     if (!cautela) {
       return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
     }
@@ -9403,7 +9450,7 @@ apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response)
     const pool = getPool();
     const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
 
-    const cautela = await findCautelaArmaRecord(pool, id);
+    const cautela = await findCautelaArmaRecord(pool, id, req.body);
     if (!cautela) {
       return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
     }
@@ -9482,7 +9529,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
     } = req.body;
 
     const pool = getPool();
-    const cautela = await findCautelaArmaRecord(pool, id);
+    const cautela = await findCautelaArmaRecord(pool, id, req.body);
     if (!cautela) {
       return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
     }

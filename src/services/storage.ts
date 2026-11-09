@@ -3155,7 +3155,7 @@ class StorageService {
 
   public async authorizeCautelaArma(
     id: string, 
-    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; ammoQuantity?: number; destinacao?: string }
+    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; ammoQuantity?: number; destinacao?: string; weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string; requesterCargo?: string }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
     
@@ -3166,7 +3166,8 @@ class StorageService {
       c.id === cleanId || 
       c.id === `caut-sync-${cleanId}` ||
       c.weaponId === id || 
-      c.weaponId === cleanId
+      c.weaponId === cleanId ||
+      ((opts as any).weaponId && c.weaponId === (opts as any).weaponId)
     );
 
     if (target) {
@@ -3196,6 +3197,12 @@ class StorageService {
           seraDevolvida: opts.seraDevolvida,
           ammoQuantity: opts.ammoQuantity,
           destinacao: opts.destinacao,
+          weaponId: (opts as any).weaponId || target?.weaponId,
+          weaponSerialNumber: (opts as any).weaponSerialNumber || target?.weaponSerialNumber,
+          cautelaId: target?.id || id,
+          requesterName: target?.requesterName,
+          requesterMasp: target?.requesterMasp,
+          requesterCargo: target?.requesterCargo,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,
@@ -3211,7 +3218,11 @@ class StorageService {
     }
   }
 
-  public async rejectCautelaArma(id: string, notes?: string): Promise<{ success: boolean; error?: string }> {
+  public async rejectCautelaArma(
+    id: string, 
+    notes?: string,
+    extra?: { weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string }
+  ): Promise<{ success: boolean; error?: string }> {
     // Atualização otimista imediata no estado local: a arma volta para o cofre de origem
     const cleanId = id.replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
     const target = (this.state.cautelasArmas || []).find(c => 
@@ -3219,7 +3230,8 @@ class StorageService {
       c.id === cleanId || 
       c.id === `caut-sync-${cleanId}` ||
       c.weaponId === id || 
-      c.weaponId === cleanId
+      c.weaponId === cleanId ||
+      (extra?.weaponId && c.weaponId === extra.weaponId)
     );
 
     if (target) {
@@ -3248,6 +3260,11 @@ class StorageService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           notes,
+          weaponId: extra?.weaponId || target?.weaponId,
+          weaponSerialNumber: extra?.weaponSerialNumber || target?.weaponSerialNumber,
+          cautelaId: target?.id || id,
+          requesterName: target?.requesterName,
+          requesterMasp: target?.requesterMasp,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,
