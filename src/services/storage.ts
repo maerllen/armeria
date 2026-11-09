@@ -3090,6 +3090,16 @@ class StorageService {
   }
 
   public async requestCautelaArma(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
+    // Atualização otimista imediata no estado local
+    const weap = (this.state.weapons || []).find(w => w.id === payload.weaponId);
+    if (weap) {
+      weap.status = payload.directAuthorized ? 'Acautelada' : 'Cautela Pendente';
+      if (payload.directAuthorized) {
+        weap.previousVaultSpaceId = payload.vaultSpaceId || weap.vaultSpaceId;
+        (weap as any).locationNote = `Acautelada com ${payload.requesterName} (MASP: ${payload.requesterMasp})`;
+      }
+    }
+
     try {
       const res = await fetch('/api/cautelas-armas', {
         method: 'POST',
@@ -3107,7 +3117,7 @@ class StorageService {
 
   public async authorizeCautelaArma(
     id: string, 
-    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean }
+    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; ammoQuantity?: number; destinacao?: string }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
     
@@ -3137,6 +3147,8 @@ class StorageService {
           vaultSpaceId: opts.vaultSpaceId,
           stockId: opts.stockId,
           seraDevolvida: opts.seraDevolvida,
+          ammoQuantity: opts.ammoQuantity,
+          destinacao: opts.destinacao,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,

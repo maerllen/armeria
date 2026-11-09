@@ -188,7 +188,7 @@ export interface AmmunitionMovement {
   createdAt: string;
 }
 
-export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula' | 'Acautelada';
+export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula' | 'Acautelada' | 'Cautela Pendente';
 
 export interface Weapon {
   id: string;

@@ -37,7 +37,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [maspRaw, setMaspRaw] = useState('');
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
-  const [cargo, setCargo] = useState<UserCargo>('Investigador');
+  const [cargo, setCargo] = useState<UserCargo>('INVESTIGADOR');
   const [role, setRole] = useState<UserRole>('Policial');
   const [selectedRoles, setSelectedRoles] = useState<UserRole[]>(['Policial']);
   const [deptId, setDeptId] = useState('');
@@ -139,7 +139,13 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setMaspRaw(usr.masp);
       setName(usr.name);
       setPhone(usr.phone);
-      setCargo(usr.cargo);
+      const rawCargo = (usr.cargo || '').toUpperCase().trim();
+      const validCargos: UserCargo[] = ['DELEGADO', 'PERITO', 'INVESTIGADOR', 'ESCRIVÃO'];
+      if (validCargos.includes(rawCargo as UserCargo)) {
+        setCargo(rawCargo as UserCargo);
+      } else {
+        setCargo('INVESTIGADOR');
+      }
       setRole(usr.role);
       const userRoles = usr.roles && usr.roles.length > 0 ? usr.roles : [usr.role];
       setSelectedRoles(userRoles);
@@ -158,7 +164,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setMaspRaw('');
       setName('');
       setPhone('');
-      setCargo('Investigador');
+      setCargo('INVESTIGADOR');
       setRole('Policial');
       setSelectedRoles(['Policial']);
       const initialDept = isRestrictedRegistrar

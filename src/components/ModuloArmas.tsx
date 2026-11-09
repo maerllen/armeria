@@ -1208,6 +1208,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                         <span className={`text-[10px] font-mono font-bold px-2.5 py-0.5 rounded-md border ${
                           w.status === 'No Cofre'
                             ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
+                            : w.status === 'Cautela Pendente'
+                            ? 'bg-amber-950 text-amber-300 border-amber-800 animate-pulse'
                             : w.status === 'Acautelada'
                             ? 'bg-purple-950 text-purple-300 border-purple-800 max-w-[260px] truncate'
                             : w.status === 'Em Trânsito'

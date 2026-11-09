@@ -38,7 +38,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'armas': 'Módulo de Armas',
   'municoes': 'Módulo de Munições',
   'unidade': 'Unidades e Departamentos',
-  'usuarios': 'Usuários e Cursos',
+  'usuarios': 'Usuários',
   'cofre': 'Locais do Cofre',
   'movimentacoes': 'Movimentações Bélicas',
   'materiais': 'Módulo de Materiais',

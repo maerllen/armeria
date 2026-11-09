@@ -10,7 +10,9 @@
     "start": "node server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "db:update": "tsx scripts/update_all_tables.ts",
+    "db:init": "tsx scripts/update_all_tables.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

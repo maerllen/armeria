@@ -281,18 +281,137 @@ input, select, textarea, button {
 .theme-light .bg-slate-950\/70,
 .theme-light .bg-slate-950\/60,
 .theme-light .bg-slate-950\/50,
-.theme-light .bg-slate-950\/40 {
+.theme-light .bg-slate-950\/40,
+.theme-light .bg-slate-950\/30,
+.theme-light .bg-slate-950\/20 {
   background-color: #f8fafc !important;
 }
 
-/* Bordas visíveis e limpas */
+/* Superfícies intermediárias e abas no tema claro */
+.theme-light .bg-slate-850,
+.theme-light .bg-slate-800,
+.theme-light .bg-slate-800\/90,
+.theme-light .bg-slate-800\/80,
+.theme-light .bg-slate-800\/70,
+.theme-light .bg-slate-800\/60,
+.theme-light .bg-slate-800\/50,
+.theme-light .bg-slate-800\/40,
+.theme-light .bg-slate-800\/30,
+.theme-light .bg-slate-800\/20 {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light .bg-slate-700,
+.theme-light .bg-slate-700\/80,
+.theme-light .bg-slate-700\/60,
+.theme-light .bg-slate-700\/50 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Badges e alertas temáticos no tema claro */
+.theme-light .bg-amber-950,
+.theme-light .bg-amber-950\/80,
+.theme-light .bg-amber-950\/70,
+.theme-light .bg-amber-950\/60,
+.theme-light .bg-amber-950\/50,
+.theme-light .bg-amber-950\/40,
+.theme-light .bg-amber-950\/30,
+.theme-light .bg-amber-950\/20 {
+  background-color: #fef3c7 !important;
+}
+
+.theme-light .bg-red-950,
+.theme-light .bg-red-950\/80,
+.theme-light .bg-red-950\/70,
+.theme-light .bg-red-950\/60,
+.theme-light .bg-red-950\/50,
+.theme-light .bg-red-950\/40,
+.theme-light .bg-red-950\/30,
+.theme-light .bg-red-950\/20 {
+  background-color: #fee2e2 !important;
+}
+
+.theme-light .bg-emerald-950,
+.theme-light .bg-emerald-950\/80,
+.theme-light .bg-emerald-950\/70,
+.theme-light .bg-emerald-950\/60,
+.theme-light .bg-emerald-950\/50,
+.theme-light .bg-emerald-950\/40,
+.theme-light .bg-emerald-950\/30,
+.theme-light .bg-emerald-950\/20 {
+  background-color: #d1fae5 !important;
+}
+
+.theme-light .bg-purple-950,
+.theme-light .bg-purple-950\/80,
+.theme-light .bg-purple-950\/70,
+.theme-light .bg-purple-950\/60,
+.theme-light .bg-purple-950\/50,
+.theme-light .bg-purple-950\/40,
+.theme-light .bg-purple-950\/30,
+.theme-light .bg-purple-950\/20 {
+  background-color: #ede9fe !important;
+}
+
+.theme-light .bg-blue-950,
+.theme-light .bg-blue-950\/80,
+.theme-light .bg-blue-950\/70,
+.theme-light .bg-blue-950\/60,
+.theme-light .bg-blue-950\/50,
+.theme-light .bg-blue-950\/40,
+.theme-light .bg-blue-950\/30,
+.theme-light .bg-blue-950\/20,
+.theme-light .bg-cyan-950,
+.theme-light .bg-cyan-950\/80,
+.theme-light .bg-cyan-950\/70,
+.theme-light .bg-cyan-950\/60,
+.theme-light .bg-cyan-950\/50,
+.theme-light .bg-cyan-950\/40 {
+  background-color: #e0f2fe !important;
+}
+
+/* Bordas visíveis, nítidas e limpas no tema claro */
 .theme-light .border-slate-800,
 .theme-light .border-slate-800\/80,
 .theme-light .border-slate-800\/60,
 .theme-light .border-slate-800\/40,
 .theme-light .border-slate-700,
-.theme-light .border-slate-700\/80 {
+.theme-light .border-slate-700\/80,
+.theme-light .border-slate-700\/60 {
   border-color: #cbd5e1 !important;
+}
+
+.theme-light .border-amber-800,
+.theme-light .border-amber-800\/80,
+.theme-light .border-amber-800\/60,
+.theme-light .border-amber-800\/50,
+.theme-light .border-amber-800\/40,
+.theme-light .border-amber-700 {
+  border-color: #f59e0b !important;
+}
+
+.theme-light .border-red-800,
+.theme-light .border-red-800\/80,
+.theme-light .border-red-800\/60,
+.theme-light .border-red-800\/40,
+.theme-light .border-red-700 {
+  border-color: #f87171 !important;
+}
+
+.theme-light .border-emerald-800,
+.theme-light .border-emerald-800\/80,
+.theme-light .border-emerald-800\/60,
+.theme-light .border-emerald-800\/40,
+.theme-light .border-emerald-700 {
+  border-color: #34d399 !important;
+}
+
+.theme-light .border-purple-800,
+.theme-light .border-purple-800\/80,
+.theme-light .border-purple-800\/60,
+.theme-light .border-purple-800\/40,
+.theme-light .border-purple-700 {
+  border-color: #c084fc !important;
 }
 
 /* Textos principais e de ênfase: Alto Contraste e 100% Legíveis */
@@ -311,7 +430,7 @@ input, select, textarea, button {
 .theme-light .text-amber-200\/80,
 .theme-light .text-yellow-400,
 .theme-light .text-yellow-300 {
-  color: #b45309 !important;
+  color: #92400e !important;
 }
 
 .theme-light .text-cyan-400,
@@ -327,19 +446,19 @@ input, select, textarea, button {
 .theme-light .text-emerald-300,
 .theme-light .text-green-400,
 .theme-light .text-green-300 {
-  color: #047857 !important;
+  color: #065f46 !important;
 }
 
 .theme-light .text-red-400,
 .theme-light .text-red-300,
 .theme-light .text-rose-400,
 .theme-light .text-rose-300 {
-  color: #b91c1c !important;
+  color: #991b1b !important;
 }
 
 .theme-light .text-purple-400,
 .theme-light .text-purple-300 {
-  color: #6d28d9 !important;
+  color: #581c87 !important;
 }
 
 /* Prevent accidental text-white on white cards when not on colored buttons */

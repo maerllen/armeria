@@ -110,7 +110,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'usuarios',
-      label: 'Usuários e Cursos',
+      label: 'Usuários',
       icon: Users,
       visible: allowedModules.includes('usuarios')
     },
