@@ -8742,6 +8742,56 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
     const { userId, unitId, status } = req.query;
     const pool = getPool();
 
+    // Auto-sincroniza armas com status 'Cautela Pendente', 'Pendente de Recibo' ou 'Pendente Recibo'
+    // garantindo que apareçam imediatamente para o armeiro em Solicitações Pendentes
+    try {
+      const [pendArmas]: any = await pool.query(`
+        SELECT a.* 
+        FROM ARMAS a
+        WHERE a.STATUS_ARMAS IN ('Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')
+          AND NOT EXISTS (
+            SELECT 1 FROM ACAUTELAR_ARMAS ac 
+            WHERE ac.ARMA_ID_ACAUTELAR_ARMAS = a.ID_ARMAS 
+              AND ac.STATUS_ACAUTELAR_ARMAS IN ('PENDENTE', 'Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')
+          )
+      `);
+
+      for (const pa of (pendArmas || [])) {
+        const syncId = `caut-sync-${pa.ID_ARMAS}`;
+        await pool.query(`
+          INSERT INTO ACAUTELAR_ARMAS (
+            ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
+            MODELO_ACAUTELAR_ARMAS, TIPO_ARMA_ACAUTELAR_ARMAS, CALIBRE_ACAUTELAR_ARMAS,
+            QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS,
+            DEPARTAMENTO_ID_ACAUTELAR_ARMAS, UNIDADE_ID_ACAUTELAR_ARMAS,
+            REQUERENTE_ID_ACAUTELAR_ARMAS, REQUERENTE_NOME_ACAUTELAR_ARMAS,
+            REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
+            FINALIDADE_MOTIVO_ACAUTELAR_ARMAS, DATA_SOLICITACAO_ACAUTELAR_ARMAS,
+            STATUS_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', NOW())
+          ON DUPLICATE KEY UPDATE STATUS_ACAUTELAR_ARMAS = 'PENDENTE'
+        `, [
+          syncId,
+          pa.ID_ARMAS,
+          pa.NUMERO_SERIE_ARMAS,
+          pa.MODELO_ARMAS,
+          pa.TIPO_ARMAS || 'Arma de Fogo',
+          pa.CALIBRE_ARMAS,
+          pa.QUANTIDADE_CARREGADORES_ARMAS || 2,
+          pa.COFRE_ID_ARMAS || null,
+          pa.DEPARTAMENTO_ID_ARMAS || null,
+          pa.UNIDADE_ID_ARMAS || null,
+          pa.DESTINATARIO_ID_ARMAS || 'usr-solicitante',
+          'Policial Solicitante',
+          'Pendente Recibo',
+          'Policial',
+          pa.STATUS_ARMAS === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo'
+        ]);
+      }
+    } catch (syncErr) {
+      // Ignora erro de sincronização se colunas opcionais variarem
+    }
+
     let query = `
       SELECT 
         ID_ACAUTELAR_ARMAS as id,
@@ -8796,22 +8846,34 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
       params.push(unitId);
     }
     if (status) {
-      query += ' AND STATUS_ACAUTELAR_ARMAS = ?';
-      params.push(status);
+      if (status === 'PENDENTE') {
+        query += " AND STATUS_ACAUTELAR_ARMAS IN ('PENDENTE', 'Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')";
+      } else {
+        query += ' AND STATUS_ACAUTELAR_ARMAS = ?';
+        params.push(status);
+      }
     }
 
     query += ' ORDER BY DATA_CRIACAO_ACAUTELAR_ARMAS DESC';
 
     const [rows]: any = await pool.query(query, params);
-    const mapped = (rows || []).map((r: any) => ({
-      ...r,
-      hadShots: Boolean(r.hadShots),
-      isWorking: r.condicoesUso !== 'Apresenta Defeito',
-      hadMalfunction: Boolean(r.hadMalfunction),
-      magazineQuantity: Number(r.magazineQuantity || 1),
-      shotsFired: Number(r.shotsFired || 0),
-      returnedMagazinesCount: Number(r.returnedMagazinesCount || 0)
-    }));
+    const mapped = (rows || []).map((r: any) => {
+      const rawStatus = (r.status || '').trim().toUpperCase();
+      const normalizedStatus = (rawStatus === 'PENDENTE DE RECIBO' || rawStatus === 'PENDENTE RECIBO' || rawStatus === 'CAUTELA PENDENTE')
+        ? 'PENDENTE'
+        : r.status;
+
+      return {
+        ...r,
+        status: normalizedStatus,
+        hadShots: Boolean(r.hadShots),
+        isWorking: r.condicoesUso !== 'Apresenta Defeito',
+        hadMalfunction: Boolean(r.hadMalfunction),
+        magazineQuantity: Number(r.magazineQuantity || 1),
+        shotsFired: Number(r.shotsFired || 0),
+        returnedMagazinesCount: Number(r.returnedMagazinesCount || 0)
+      };
+    });
 
     return res.json(mapped);
   } catch (err: any) {

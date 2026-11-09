@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS `ARMAS` (
   `CALIBRE_ARMAS` VARCHAR(64) NOT NULL,
   `QUANTIDADE_CARREGADORES_ARMAS` INT NOT NULL DEFAULT 3,
   `ESTADO_CONSERVACAO_ARMAS` VARCHAR(64) DEFAULT 'Novo',
-  `STATUS_ARMAS` ENUM('No Cofre', 'Acautelada', 'Em Trânsito', 'Em Manutenção', 'Extraviada / Baixada') NOT NULL DEFAULT 'No Cofre',
+  `STATUS_ARMAS` VARCHAR(64) NOT NULL DEFAULT 'No Cofre',
   `LOCALIZACAO_COFRE_ID_ARMAS` VARCHAR(64) DEFAULT NULL,
   `DEPARTAMENTO_ID_ARMAS` VARCHAR(64) DEFAULT NULL,
   `UNIDADE_ID_ARMAS` VARCHAR(64) DEFAULT NULL,
@@ -701,8 +701,60 @@ CREATE TABLE IF NOT EXISTS `LOGS_AUDITORIA` (
   KEY `idx_audit_usuario` (`USUARIO_ID_LOGS_AUDITORIA`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------------------------------------
+-- 19. ATUALIZAÇÃO E SINCRONIZAÇÃO: CAUTELA DE ARMAS E PENDENTES DE RECIBO
+-- ------------------------------------------------------------------------------
+-- 19.1 Permite valores de status estendidos (ex: 'Cautela Pendente', 'Pendente de Recibo')
+ALTER TABLE `ARMAS` 
+  MODIFY COLUMN `STATUS_ARMAS` VARCHAR(64) NOT NULL DEFAULT 'No Cofre';
+
+ALTER TABLE `ACAUTELAR_ARMAS` 
+  MODIFY COLUMN `STATUS_ACAUTELAR_ARMAS` VARCHAR(64) NOT NULL DEFAULT 'PENDENTE';
+
+-- 19.2 Sincroniza qualquer arma que esteja com status 'Cautela Pendente' ou 'Pendente de Recibo'
+-- garantindo que conste em ACAUTELAR_ARMAS como PENDENTE para aparecer ao Armeiro
+INSERT INTO `ACAUTELAR_ARMAS` (
+  `ID_ACAUTELAR_ARMAS`,
+  `ARMA_ID_ACAUTELAR_ARMAS`,
+  `POLICIAL_ID_ACAUTELAR_ARMAS`,
+  `POLICIAL_NOME_ACAUTELAR_ARMAS`,
+  `POLICIAL_MASP_ACAUTELAR_ARMAS`,
+  `CARGO_ACAUTELAR_ARMAS`,
+  `STATUS_ACAUTELAR_ARMAS`,
+  `UNIDADE_ID_ACAUTELAR_ARMAS`,
+  `MOTIVO_ACAUTELAR_ARMAS`,
+  `DATA_ACAUTELAR_ARMAS`
+)
+SELECT 
+  CONCAT('caut-sync-', a.ID_ARMAS) AS `ID_ACAUTELAR_ARMAS`,
+  a.ID_ARMAS AS `ARMA_ID_ACAUTELAR_ARMAS`,
+  COALESCE(u.ID_USUARIOS, 'policial-sistema') AS `POLICIAL_ID_ACAUTELAR_ARMAS`,
+  COALESCE(u.NOME_USUARIOS, a.OBSERVACOES_ARMAS, 'Policial Solicitante') AS `POLICIAL_NOME_ACAUTELAR_ARMAS`,
+  COALESCE(u.MASP_USUARIOS, '0000000') AS `POLICIAL_MASP_ACAUTELAR_ARMAS`,
+  COALESCE(u.CARGO_USUARIOS, 'INVESTIGADOR') AS `CARGO_ACAUTELAR_ARMAS`,
+  'PENDENTE' AS `STATUS_ACAUTELAR_ARMAS`,
+  a.UNIDADE_ID_ARMAS AS `UNIDADE_ID_ACAUTELAR_ARMAS`,
+  'Solicitação pendente de recebimento pelo armeiro' AS `MOTIVO_ACAUTELAR_ARMAS`,
+  NOW() AS `DATA_ACAUTELAR_ARMAS`
+FROM `ARMAS` a
+LEFT JOIN `USUARIOS` u ON (
+  u.UNIDADE_ID_USUARIOS = a.UNIDADE_ID_ARMAS
+  AND (u.PERFIL_USUARIOS = 'Policial' OR u.CARGO_USUARIOS IN ('INVESTIGADOR', 'DELEGADO', 'PERITO', 'ESCRIVÃO'))
+)
+WHERE (
+  LOWER(a.STATUS_ARMAS) LIKE '%pendente%' 
+  OR a.STATUS_ARMAS IN ('Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')
+)
+AND NOT EXISTS (
+  SELECT 1 FROM `ACAUTELAR_ARMAS` ca 
+  WHERE ca.ARMA_ID_ACAUTELAR_ARMAS = a.ID_ARMAS 
+  AND ca.STATUS_ACAUTELAR_ARMAS IN ('PENDENTE', 'Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')
+)
+GROUP BY a.ID_ARMAS;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ==============================================================================
 -- FIM DO SCRIPT DE ATUALIZAÇÃO DO BANCO DE DADOS
 -- ==============================================================================
+

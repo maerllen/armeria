@@ -198,12 +198,57 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   });
 
-  // Lista a exibir com base na aba selecionada (PENDENTES mostra estritamente pendentes da unidade/departamento)
+  // Função auxiliar para verificar status pendente de recibo / autorização
+  const isPendingStatus = (st: string) => {
+    const s = (st || '').trim().toUpperCase();
+    return s === 'PENDENTE' || s === 'PENDENTE DE RECIBO' || s === 'PENDENTE RECIBO' || s === 'CAUTELA PENDENTE';
+  };
+
+  // Lista a exibir com base na aba selecionada (PENDENTES mostra estritamente pendentes de recibo da unidade/departamento)
   const displayedCautelas = useMemo(() => {
     if (activeTab === 'PENDENTES') {
-      let list = allCautelas.filter(c => c.status === 'PENDENTE');
+      let list = allCautelas.filter(c => isPendingStatus(c.status));
+
+      // Garante também a inclusão de armas que constem no cofre com status "Cautela Pendente" ou "Pendente de Recibo"
+      (weapons || []).forEach(w => {
+        const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
+        if (isWeaponPending && !list.some(c => c.weaponId === w.id)) {
+          const locNote = (w as any).locationNote || '';
+          list.push({
+            id: `caut-weapon-sync-${w.id}`,
+            weaponId: w.id,
+            weaponSerialNumber: w.serialNumber,
+            weaponModel: w.model,
+            weaponType: w.type,
+            weaponCaliber: w.caliber,
+            magazineQuantity: w.magazineQuantity || 2,
+            vaultSpaceId: w.vaultSpaceId,
+            departmentId: w.departmentId,
+            unitId: w.unitId,
+            requesterId: (w as any).destinatarioId || 'solicitante',
+            requesterName: locNote ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : 'Policial Solicitante',
+            requesterMasp: locNote && locNote.includes('MASP:') ? locNote.split('MASP:')[1].split(')')[0].trim() : 'Pendente Recibo',
+            requesterCargo: 'Investigador',
+            reason: w.status === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo',
+            requestDate: new Date().toISOString(),
+            status: 'PENDENTE',
+            hadShots: false,
+            shotsFired: 0,
+            isWorking: true,
+            hadMalfunction: false,
+            returnedMagazinesCount: w.magazineQuantity || 2,
+            createdAt: new Date().toISOString()
+          });
+        }
+      });
+
       if (isArmeiro && currentUser.managementScope !== 'department') {
-        list = list.filter(c => c.unitId === currentUser.unitId || !c.unitId);
+        list = list.filter(c => 
+          !currentUser.unitId || 
+          c.unitId === currentUser.unitId || 
+          !c.unitId ||
+          (weapons || []).some(w => w.id === c.weaponId && (w.unitId === currentUser.unitId || !w.unitId))
+        );
       }
       if (searchTerm.trim()) {
         const term = searchTerm.toLowerCase();
@@ -218,18 +263,27 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return list;
     }
     return scopedCautelas;
-  }, [activeTab, allCautelas, isArmeiro, currentUser, searchTerm, scopedCautelas]);
+  }, [activeTab, allCautelas, weapons, isArmeiro, currentUser, searchTerm, scopedCautelas]);
 
   // Contadores para badges
   const pendingCount = useMemo(() => {
     if (currentUser.role === 'Policial') {
-      return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'PENDENTE').length;
+      return allCautelas.filter(c => (c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp) && isPendingStatus(c.status)).length;
     }
-    if (isArmeiro && currentUser.managementScope !== 'department') {
-      return allCautelas.filter(c => c.unitId === currentUser.unitId && c.status === 'PENDENTE').length;
-    }
-    return allCautelas.filter(c => c.status === 'PENDENTE').length;
-  }, [allCautelas, currentUser, isArmeiro]);
+    
+    const myUnitPending = allCautelas.filter(c => {
+      const matchUnit = isGeral || !currentUser.unitId || currentUser.managementScope === 'department' || c.unitId === currentUser.unitId || !c.unitId || (weapons || []).some(w => w.id === c.weaponId && (w.unitId === currentUser.unitId || !w.unitId));
+      return matchUnit && isPendingStatus(c.status);
+    });
+
+    const pendingWeaponsNotInCautelas = (weapons || []).filter(w => {
+      const matchUnit = isGeral || !currentUser.unitId || currentUser.managementScope === 'department' || w.unitId === currentUser.unitId;
+      const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
+      return matchUnit && isWeaponPending && !myUnitPending.some(c => c.weaponId === w.id);
+    });
+
+    return myUnitPending.length + pendingWeaponsNotInCautelas.length;
+  }, [allCautelas, currentUser, weapons, isGeral]);
 
   const myActiveCount = useMemo(() => {
     return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'AUTORIZADA').length;
