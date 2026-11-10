@@ -1395,9 +1395,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">ESTADO</span>
                 <span className="text-xs font-bold block truncate" title="Todos os Departamentos da Polícia Civil">Todos os Departamentos</span>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono block">
-                {stocks.reduce((acc, s) => acc + s.quantity, 0)} un. ({stocks.length} lotes)
-              </span>
             </button>
           )}
 
@@ -1424,9 +1421,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">{d.code}</span>
                   <span className="text-xs font-bold block truncate" title={d.name}>{d.name}</span>
                 </div>
-                <span className="text-[10px] text-slate-400 font-mono block">
-                  {deptTotalCartuchos} un. ({deptStocks.length} lotes)
-                </span>
               </button>
             );
           })}
