@@ -1452,11 +1452,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               >
                 <Building className="w-3.5 h-3.5" />
                 <span>Todas as Unidades</span>
-                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                  filterUnitId === 'ALL' || !filterUnitId ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
-                }`}>
-                  {stocks.filter(s => filterDepartmentId === 'ALL' || !filterDepartmentId ? true : s.departmentId === filterDepartmentId).length} lotes
-                </span>
+                
               </button>
             )}
 
@@ -1476,11 +1472,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   }`}
                 >
                   <span>{u.name}</span>
-                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
-                    isSelected ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
-                  }`}>
-                    {unitStocks.length} lotes ({unitTotalCartuchos} un.)
-                  </span>
+                  
                 </button>
               );
             })}
