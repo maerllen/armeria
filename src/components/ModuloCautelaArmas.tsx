@@ -862,6 +862,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       const usedAmmoCount = hadShots ? (Number(returnAmmoUsedCount) || Number(shotsFired) || 0) : 0;
 
       const res = await storage.returnCautelaArma(returningCautela.id, {
+        weaponId: returningCautela.weaponId,
+        weaponSerialNumber: returningCautela.weaponSerialNumber,
+        cautelaId: returningCautela.id,
+        requesterName: returningCautela.requesterName,
+        requesterMasp: returningCautela.requesterMasp,
+        requesterCargo: returningCautela.requesterCargo,
         hadShots,
         shotsFired: hadShots ? (Number(shotsFired) || usedAmmoCount) : 0,
         ammoUsedCount: usedAmmoCount,

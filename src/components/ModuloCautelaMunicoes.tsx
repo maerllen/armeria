@@ -90,6 +90,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   const [returningCautela, setReturningCautela] = useState<CautelaMunicao | null>(null);
   const [returnedQty, setReturnedQty] = useState<number>(0);
   const [returnObs, setReturnObs] = useState('');
+  const [returnVaultSpaceId, setReturnVaultSpaceId] = useState('');
 
   const [notesModal, setNotesModal] = useState<{ id: string; action: 'RECUSAR' } | null>(null);
   const [actionNotes, setActionNotes] = useState('');
@@ -452,11 +453,21 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
   };
 
+  // Cofres disponíveis para retorno de munição na unidade
+  const availableReturnVaults = useMemo(() => {
+    if (!returningCautela) return [];
+    const targetUnit = returningCautela.unitId || currentUser.unitId;
+    return vaultSpaces.filter(v => (!v.unitId || v.unitId === targetUnit));
+  }, [returningCautela, vaultSpaces, currentUser.unitId]);
+
   // Abrir Modal de Devolução
   const handleOpenReturnModal = (cautela: CautelaMunicao) => {
     setReturningCautela(cautela);
     setReturnedQty(cautela.quantity);
     setReturnObs('');
+    const targetUnit = cautela.unitId || currentUser.unitId;
+    const defaultVault = cautela.vaultSpaceId || vaultSpaces.find(v => (!v.unitId || v.unitId === targetUnit) && (v.type === 'MUNIÇÃO' || v.type === 'MUNIÇÕES' || v.type === 'MUNICAO'))?.id || vaultSpaces[0]?.id || '';
+    setReturnVaultSpaceId(defaultVault);
   };
 
   // Confirmar devolução de munição não deflagrada
@@ -473,17 +484,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     setIsSubmitting(true);
     setErrorMsg('');
     try {
+      const selectedVault = vaultSpaces.find(v => v.id === returnVaultSpaceId);
       const res = await storage.returnCautelaMunicao(returningCautela.id, {
         returnedQuantity: ret,
+        destinationVaultSpaceId: returnVaultSpaceId || returningCautela.vaultSpaceId,
         observations: returnObs.trim()
       });
 
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao registrar devolução.');
       } else {
+        const destText = selectedVault ? `no cofre ${selectedVault.code}` : 'ao cofre da unidade';
         setSuccessMsg(
           ret > 0 
-            ? `Devolução de ${ret} munições confirmada! As unidades retornaram ao estoque do cofre.`
+            ? `Devolução de ${ret} munições confirmada! As unidades retornaram ao estoque ${destText}.`
             : `Registro concluído: todas as ${returningCautela.quantity} munições foram dadas como consumidas em serviço.`
         );
         setReturningCautela(null);
@@ -1711,6 +1725,30 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   </strong>
                 </div>
               </div>
+
+              {returnedQty > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1 flex items-center justify-between">
+                    <span>Cofre de Destino para Guarda (Escolha do Armeiro)</span>
+                  </label>
+                  <select
+                    value={returnVaultSpaceId}
+                    onChange={(e) => setReturnVaultSpaceId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 font-mono focus:border-cyan-500"
+                    required
+                  >
+                    {availableReturnVaults.length === 0 ? (
+                      <option value="">Cofre Padrão da Unidade</option>
+                    ) : (
+                      availableReturnVaults.map(v => (
+                        <option key={v.id} value={v.id}>
+                          {v.code} - {v.description || 'Cofre da Unidade'} {v.id === returningCautela.vaultSpaceId ? '(Local Original)' : ''}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
