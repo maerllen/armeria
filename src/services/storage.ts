@@ -3158,7 +3158,23 @@ class StorageService {
 
   public async authorizeCautelaArma(
     id: string, 
-    options?: string | { notes?: string; vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; ammoQuantity?: number; destinacao?: string; weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string; requesterCargo?: string }
+    options?: string | { 
+      notes?: string; 
+      vaultSpaceId?: string; 
+      stockId?: string; 
+      seraDevolvida?: boolean; 
+      ammoQuantity?: number; 
+      destinacao?: string; 
+      weaponId?: string; 
+      weaponSerialNumber?: string; 
+      cautelaId?: string; 
+      requesterName?: string; 
+      requesterMasp?: string; 
+      requesterCargo?: string;
+      armorerId?: string;
+      armorerName?: string;
+      armorerMasp?: string;
+    }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
     
@@ -3176,15 +3192,30 @@ class StorageService {
     if (target) {
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
-      target.armorerId = this.state.currentUser?.id;
-      target.armorerName = this.state.currentUser?.name;
-      target.armorerMasp = this.state.currentUser?.masp;
+      target.armorerId = (opts as any).armorerId || this.state.currentUser?.id;
+      target.armorerName = (opts as any).armorerName || this.state.currentUser?.name;
+      target.armorerMasp = (opts as any).armorerMasp || this.state.currentUser?.masp;
       const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
       if (weap) {
         weap.status = 'Acautelada';
         weap.previousVaultSpaceId = target.vaultSpaceId || weap.vaultSpaceId;
         const vault = (this.state.vaultSpaces || []).find(v => v.id === weap.previousVaultSpaceId);
         (weap as any).locationNote = `Acautelada com ${target.requesterName} (MASP: ${target.requesterMasp}) • Último cofre: ${vault?.code || 'N/A'}`;
+      }
+
+      // Sincroniza cautela de munição vinculada imediatamente no estado local
+      const ammoList = this.state.cautelasMunicoes || [];
+      const linkedMun = ammoList.find(m => 
+        m.id === target.linkedAmmoCautelaId || 
+        (m as any).cautelaArmaId === target.id || 
+        m.linkedWeaponCautelaId === target.id
+      );
+      if (linkedMun) {
+        linkedMun.status = 'AUTORIZADA';
+        linkedMun.authorizedAt = new Date().toISOString();
+        linkedMun.armorerId = target.armorerId;
+        linkedMun.armorerName = target.armorerName;
+        linkedMun.armorerMasp = target.armorerMasp;
       }
     }
 
@@ -3206,9 +3237,9 @@ class StorageService {
           requesterName: target?.requesterName,
           requesterMasp: target?.requesterMasp,
           requesterCargo: target?.requesterCargo,
-          armorerId: this.state.currentUser?.id,
-          armorerName: this.state.currentUser?.name,
-          armorerMasp: this.state.currentUser?.masp,
+          armorerId: (opts as any).armorerId || this.state.currentUser?.id,
+          armorerName: (opts as any).armorerName || this.state.currentUser?.name,
+          armorerMasp: (opts as any).armorerMasp || this.state.currentUser?.masp,
           actor: this.state.currentUser
         })
       });

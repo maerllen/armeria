@@ -510,104 +510,423 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
   };
 
-  // Impressão do Recibo / Termo de Cautela de Munições
+  // Localiza armamento vinculado à cautela de munição
+  const getLinkedWeaponInfo = (cautela: CautelaMunicao) => {
+    const cautelasArmas = storage.getCautelasArmas();
+    const weapons = storage.getWeapons();
+
+    let weaponCautela = cautelasArmas.find(c => 
+      c.id === cautela.linkedWeaponCautelaId || 
+      c.linkedAmmoCautelaId === cautela.id ||
+      (c as any).ammoCautelaId === cautela.id
+    );
+
+    if (!weaponCautela && cautela.requesterId) {
+      weaponCautela = cautelasArmas.find(c => 
+        (c.requesterId === cautela.requesterId || c.requesterMasp === cautela.requesterMasp) &&
+        (c.status === 'AUTORIZADA' || c.status === 'PENDENTE') &&
+        Math.abs(new Date(c.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 60000
+      );
+    }
+
+    if (weaponCautela) {
+      const weapon = weapons.find(w => w.id === weaponCautela?.weaponId || w.serialNumber === weaponCautela?.weaponSerialNumber);
+      const desc = weapon ? `${weapon.model} (${weapon.type || 'Arma'})` : (weaponCautela.weaponModel || 'Armamento');
+      const serial = weaponCautela.weaponSerialNumber || weapon?.serialNumber || '';
+      return {
+        cautelaArma: weaponCautela,
+        weapon,
+        serialNumber: serial,
+        description: desc,
+        fullText: serial ? `${serial} - ${desc}` : desc
+      };
+    }
+
+    return {
+      cautelaArma: null,
+      weapon: null,
+      serialNumber: '',
+      description: '',
+      fullText: '-'
+    };
+  };
+
+  // Impressão do Recibo / Termo de Cautela de Munições com Armamento Vinculado em Tema Claro
   const handlePrintRecibo = (cautela: CautelaMunicao) => {
     const unitObj = units.find(u => u.id === cautela.unitId);
     const deptObj = departments.find(d => d.id === cautela.departmentId);
     const vaultObj = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+    const vaultUnit = vaultObj ? units.find(u => u.id === vaultObj.unitId) : null;
+    const vaultAddress = vaultObj ? `${vaultObj.code}${vaultUnit ? ` (${vaultUnit.name})` : ''}` : 'Cofre da Unidade';
+
+    const cal = calibers.find(c => c.id === cautela.caliberId || c.name === cautela.caliberName);
+    const stock = ammoStocks.find(s => s.id === (cautela as any).stockId);
+    const fab = cautela.fabricante || stock?.fabricante || cal?.fabricante || 'CBC';
+    const tipo = cautela.tipoMunicao || stock?.tipoMunicao || cal?.tipo || 'Operacional';
+    const peso = cautela.pesoMunicao || stock?.pesoMunicao || (cal as any)?.peso || '';
+
+    const linkedWeapon = getLinkedWeaponInfo(cautela);
+    const hasLinkedWeapon = Boolean(linkedWeapon.cautelaArma || linkedWeapon.weapon);
+
+    const weaponVault = linkedWeapon.cautelaArma?.vaultSpaceId 
+      ? vaultSpaces.find(v => v.id === linkedWeapon.cautelaArma?.vaultSpaceId) 
+      : (linkedWeapon.weapon?.vaultSpaceId ? vaultSpaces.find(v => v.id === linkedWeapon.weapon?.vaultSpaceId) : null);
+    const weaponVaultUnit = weaponVault ? units.find(u => u.id === weaponVault.unitId) : null;
+    const weaponVaultAddress = weaponVault ? `${weaponVault.code}${weaponVaultUnit ? ` (${weaponVaultUnit.name})` : ''}` : 'Cofre de Origem';
 
     const htmlContent = `
-      <div style="font-family: Arial, sans-serif; padding: 24px; color: #111; line-height: 1.5;">
-        <div style="text-align: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 20px;">
-          <h2 style="margin: 0; font-size: 18px; text-transform: uppercase;">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
-          <h3 style="margin: 4px 0 0 0; font-size: 15px; font-weight: normal; text-transform: uppercase;">
-            ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} - ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Recibo de Cautela de Munições - ${cautela.id.toUpperCase()}</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 12mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          body {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            margin: 0;
+            padding: 8px;
+            font-size: 11px;
+            line-height: 1.45;
+          }
+          .header-box {
+            text-align: center;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+          }
+          .header-title-org {
+            margin: 0;
+            font-size: 16px;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: #0f172a;
+          }
+          .header-subtitle-unit {
+            margin: 3px 0 0 0;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #334155;
+          }
+          .header-doc-title {
+            margin: 12px 0 0 0;
+            font-size: 15px;
+            font-weight: bold;
+            text-decoration: underline;
+            letter-spacing: 0.5px;
+            color: #000000;
+          }
+          .protocol-tag {
+            margin: 4px 0 0 0;
+            font-size: 10px;
+            font-family: monospace;
+            color: #475569;
+          }
+          .section-banner {
+            font-size: 11px;
+            font-weight: bold;
+            text-transform: uppercase;
+            background-color: #f1f5f9;
+            color: #0f172a;
+            padding: 5px 8px;
+            border-left: 4px solid #0f172a;
+            margin: 12px 0 6px 0;
+          }
+          .data-table {
+            width: 100%;
+            font-size: 11px;
+            border-collapse: collapse;
+            margin-bottom: 8px;
+          }
+          .data-table th, .data-table td {
+            border: 1px solid #cbd5e1;
+            padding: 5px 7px;
+            text-align: left;
+            vertical-align: middle;
+          }
+          .data-table th {
+            background-color: #f8fafc;
+            font-weight: bold;
+            color: #0f172a;
+          }
+          .info-table {
+            width: 100%;
+            font-size: 11px;
+            border-collapse: collapse;
+            margin-bottom: 6px;
+          }
+          .info-table td {
+            padding: 3px 4px;
+            vertical-align: top;
+          }
+          .commitment-box {
+            margin-top: 18px;
+            font-size: 10px;
+            text-align: justify;
+            color: #1e293b;
+            background-color: #f8fafc;
+            border: 1px solid #cbd5e1;
+            padding: 8px 10px;
+            border-radius: 4px;
+            line-height: 1.4;
+          }
+          .signatures-container {
+            margin-top: 40px;
+            display: flex;
+            justify-content: space-between;
+            text-align: center;
+            font-size: 10px;
+          }
+          .signature-box {
+            width: 45%;
+            border-top: 1px solid #0f172a;
+            padding-top: 5px;
+            color: #0f172a;
+          }
+          .page-break {
+            page-break-before: always;
+            break-before: page;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px dashed #94a3b8;
+          }
+          .footer-note {
+            margin-top: 20px;
+            text-align: center;
+            font-size: 9px;
+            color: #64748b;
+          }
+        </style>
+      </head>
+      <body>
+        <!-- PÁGINA 1: RECIBO DE CAUTELA E FORNECIMENTO DE MUNIÇÕES -->
+        <div class="header-box">
+          <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+          <h3 class="header-subtitle-unit">
+            ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
           </h3>
-          <h1 style="margin: 16px 0 0 0; font-size: 16px; font-weight: bold; text-decoration: underline; letter-spacing: 0.5px;">
+          <h1 class="header-doc-title">
             RECIBO DE CAUTELA E FORNECIMENTO DE MUNIÇÕES
           </h1>
-          <p style="margin: 6px 0 0 0; font-size: 11px; color: #444;">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
+          <p class="protocol-tag">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
         </div>
 
-        <div style="margin-bottom: 18px;">
-          <h4 style="margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; background: #eee; padding: 4px 8px; border-left: 4px solid #000;">
+        <div>
+          <div class="section-banner">
             1. DADOS DO SERVIDOR REQUISITANTE
-          </h4>
-          <table style="width: 100%; font-size: 12px; border-collapse: collapse;">
+          </div>
+          <table class="info-table">
             <tr>
-              <td style="padding: 4px 0; width: 60%;"><strong>Nome:</strong> ${cautela.requesterName}</td>
-              <td style="padding: 4px 0; width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
+              <td style="width: 60%;"><strong>Nome:</strong> ${cautela.requesterName}</td>
+              <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
             </tr>
             <tr>
-              <td style="padding: 4px 0;"><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
-              <td style="padding: 4px 0;"><strong>Unidade:</strong> ${unitObj ? unitObj.name : 'N/A'}</td>
+              <td><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
+              <td><strong>Unidade de Lotação:</strong> ${unitObj ? unitObj.name : 'N/A'}</td>
+            </tr>
+            <tr>
+              <td colspan="2"><strong>Armamento Vinculado:</strong> ${linkedWeapon.fullText}</td>
             </tr>
           </table>
         </div>
 
-        <div style="margin-bottom: 18px;">
-          <h4 style="margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; background: #eee; padding: 4px 8px; border-left: 4px solid #000;">
-            2. DISCRIMINAÇÃO DAS MUNIÇÕES FORNECIDAS
-          </h4>
-          <table style="width: 100%; font-size: 12px; border: 1px solid #ccc; border-collapse: collapse; text-align: left;">
+        <div>
+          <div class="section-banner">
+            2. ESPECIFICAÇÃO DAS MUNIÇÕES FORNECIDAS
+          </div>
+          <table class="data-table">
             <thead>
-              <tr style="background: #f4f4f4;">
-                <th style="border: 1px solid #ccc; padding: 6px;">Calibre</th>
-                <th style="border: 1px solid #ccc; padding: 6px;">Quantidade</th>
-                <th style="border: 1px solid #ccc; padding: 6px;">Tipo</th>
-                <th style="border: 1px solid #ccc; padding: 6px;">Lote</th>
-                <th style="border: 1px solid #ccc; padding: 6px;">Local no Cofre</th>
+              <tr>
+                <th>Calibre</th>
+                <th>Quantidade</th>
+                <th>Fabricante</th>
+                <th>Tipo / Peso</th>
+                <th>Lote</th>
+                <th>Cofre de Origem</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style="border: 1px solid #ccc; padding: 6px;"><strong>${cautela.caliberName}</strong></td>
-                <td style="border: 1px solid #ccc; padding: 6px; font-weight: bold; font-size: 13px;">${cautela.quantity} cartuchos</td>
-                <td style="border: 1px solid #ccc; padding: 6px;">${cautela.tipoMunicao || 'Operacional'}</td>
-                <td style="border: 1px solid #ccc; padding: 6px; font-family: monospace;">${cautela.loteMunicao || 'Padrão'}</td>
-                <td style="border: 1px solid #ccc; padding: 6px; font-family: monospace;">${vaultObj ? vaultObj.code : 'Cofre'}</td>
+                <td><strong>${cautela.caliberName}</strong></td>
+                <td style="font-weight: bold; font-size: 12px; color: #000;">${cautela.quantity} cartuchos</td>
+                <td>${fab}</td>
+                <td>${tipo}${peso ? ` • ${peso}` : ''}</td>
+                <td style="font-family: monospace;">${cautela.loteMunicao || 'Padrão'}</td>
+                <td>${vaultAddress}</td>
               </tr>
             </tbody>
           </table>
         </div>
 
-        <div style="margin-bottom: 18px;">
-          <h4 style="margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; background: #eee; padding: 4px 8px; border-left: 4px solid #000;">
+        <div>
+          <div class="section-banner">
             3. FINALIDADE E AUTORIZAÇÃO
-          </h4>
-          <p style="font-size: 12px; margin: 4px 0;"><strong>Motivo do Uso:</strong> ${cautela.reason}</p>
-          <p style="font-size: 12px; margin: 4px 0;"><strong>Data da Solicitação:</strong> ${new Date(cautela.requestDate).toLocaleString('pt-BR')}</p>
-          <p style="font-size: 12px; margin: 4px 0;"><strong>Data da Autorização:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : 'Pendente'}</p>
-          <p style="font-size: 12px; margin: 4px 0;"><strong>Armeiro Fornecedor:</strong> ${cautela.armorerName || 'Aguardando'} (MASP: ${cautela.armorerMasp || 'N/A'})</p>
-          <p style="font-size: 12px; margin: 4px 0;"><strong>Previsão de Devolução:</strong> ${cautela.seraDevolvida ? 'Sim (munições não deflagradas devem retornar ao cofre)' : 'Não (consumo operacional/treinamento)'}</p>
+          </div>
+          <table class="info-table">
+            <tr>
+              <td style="width: 60%;"><strong>Motivo do Uso / Destinação:</strong> ${cautela.reason || 'Serviço Policial Operacional'} • ${cautela.destinacao || 'Defesa'}</td>
+              <td style="width: 40%;"><strong>Data da Solicitação:</strong> ${new Date(cautela.requestDate).toLocaleString('pt-BR')}</td>
+            </tr>
+            <tr>
+              <td><strong>Armeiro Responsável / Fornecedor:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
+              <td><strong>Data da Autorização:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : 'Pendente'}</td>
+            </tr>
+            <tr>
+              <td colspan="2"><strong>Previsão de Devolução:</strong> ${cautela.seraDevolvida ? 'Sim (munições não deflagradas devem retornar ao cofre)' : 'Não (consumo operacional/treinamento)'}</td>
+            </tr>
+          </table>
         </div>
 
         ${cautela.status === 'DEVOLVIDA' || cautela.status === 'CONSUMIDA' ? `
-          <div style="margin-bottom: 18px;">
-            <h4 style="margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; background: #eee; padding: 4px 8px; border-left: 4px solid #000;">
+          <div>
+            <div class="section-banner">
               4. PRESTAÇÃO DE CONTAS / DEVOLUÇÃO
-            </h4>
-            <p style="font-size: 12px; margin: 4px 0;"><strong>Status Final:</strong> ${cautela.status}</p>
-            <p style="font-size: 12px; margin: 4px 0;"><strong>Munições Retornadas ao Cofre:</strong> ${cautela.returnedQuantity || 0} unidades</p>
-            <p style="font-size: 12px; margin: 4px 0;"><strong>Munições Deflagradas / Consumidas:</strong> ${cautela.quantity - (cautela.returnedQuantity || 0)} unidades</p>
-            <p style="font-size: 12px; margin: 4px 0;"><strong>Data do Fechamento:</strong> ${cautela.returnedAt ? new Date(cautela.returnedAt).toLocaleString('pt-BR') : 'N/A'}</p>
-            ${cautela.observations ? `<p style="font-size: 12px; margin: 4px 0;"><strong>Observações:</strong> ${cautela.observations}</p>` : ''}
+            </div>
+            <table class="info-table">
+              <tr>
+                <td style="width: 50%;"><strong>Status Final:</strong> ${cautela.status}</td>
+                <td style="width: 50%;"><strong>Data do Fechamento:</strong> ${cautela.returnedAt ? new Date(cautela.returnedAt).toLocaleString('pt-BR') : 'N/A'}</td>
+              </tr>
+              <tr>
+                <td><strong>Munições Retornadas ao Cofre:</strong> ${cautela.returnedQuantity || 0} cartuchos</td>
+                <td><strong>Munições Deflagradas / Consumidas:</strong> ${cautela.quantity - (cautela.returnedQuantity || 0)} cartuchos</td>
+              </tr>
+              ${cautela.observations ? `<tr><td colspan="2"><strong>Observações:</strong> ${cautela.observations}</td></tr>` : ''}
+            </table>
           </div>
         ` : ''}
 
-        <div style="margin-top: 55px; display: flex; justify-content: space-between; font-size: 11px; text-align: center;">
-          <div style="width: 45%; border-top: 1px solid #000; padding-top: 6px;">
+        <div class="commitment-box">
+          <strong>TERMO DE RESPONSABILIDADE DE MUNIÇÃO:</strong> O servidor qualificado declara ter recebido os cartuchos discriminados neste termo, responsabilizando-se pela guarda, uso legal e prestação de contas na Armaria da Polícia Civil de Minas Gerais.
+        </div>
+
+        <div class="signatures-container">
+          <div class="signature-box">
             <strong>${cautela.requesterName}</strong><br/>
             MASP: ${cautela.requesterMasp}<br/>
             Servidor Requisitante
           </div>
-          <div style="width: 45%; border-top: 1px solid #000; padding-top: 6px;">
+          <div class="signature-box">
             <strong>${cautela.armorerName || 'Armeiro da Unidade'}</strong><br/>
-            MASP: ${cautela.armorerMasp || 'Armeiro'}<br/>
-            Responsável pelo Fornecimento
+            ${cautela.armorerMasp ? `MASP: ${cautela.armorerMasp}<br/>` : ''}
+            Armeiro Autorizador / Responsável
           </div>
         </div>
-      </div>
+
+        <div class="footer-note">
+          Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} ${hasLinkedWeapon ? '• (Página 1 de 2)' : ''}
+        </div>
+
+        ${hasLinkedWeapon ? `
+          <!-- PÁGINA 2: TERMO DE CAUTELA DO ARMAMENTO ASSOCIADO -->
+          <div class="page-break">
+            <div class="header-box">
+              <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+              <h3 class="header-subtitle-unit">
+                ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
+              </h3>
+              <h1 class="header-doc-title">
+                TERMO DE CAUTELA INDIVIDUAL DE ARMAMENTO
+              </h1>
+              <p class="protocol-tag">ARMAMENTO ASSOCIADO • PROTOCOLO ARMA: ${(linkedWeapon.cautelaArma?.id || 'VINC-ARMA').toUpperCase()}</p>
+            </div>
+
+            <div>
+              <div class="section-banner">
+                1. DADOS DO SERVIDOR CAUTELANTE (RESPONSÁVEL)
+              </div>
+              <table class="info-table">
+                <tr>
+                  <td style="width: 60%;"><strong>Nome:</strong> ${cautela.requesterName}</td>
+                  <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
+                </tr>
+                <tr>
+                  <td><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
+                  <td><strong>Unidade de Lotação:</strong> ${unitObj ? unitObj.name : 'N/A'}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div>
+              <div class="section-banner">
+                2. ESPECIFICAÇÃO DO ARMAMENTO ACAUTELADO
+              </div>
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Tipo</th>
+                    <th>Modelo</th>
+                    <th>Calibre</th>
+                    <th>Nº de Série</th>
+                    <th style="text-align: center;">Carregadores</th>
+                    <th>Cofre de Retorno</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>${linkedWeapon.weapon?.type || linkedWeapon.cautelaArma?.weaponType || 'Arma de Fogo'}</td>
+                    <td><strong>${linkedWeapon.weapon?.model || linkedWeapon.cautelaArma?.weaponModel || 'Armamento'}</strong></td>
+                    <td>${linkedWeapon.weapon?.caliber || linkedWeapon.cautelaArma?.weaponCaliber || cautela.caliberName}</td>
+                    <td style="font-family: monospace;"><strong>${linkedWeapon.serialNumber}</strong></td>
+                    <td style="text-align: center; font-weight: bold;">${linkedWeapon.cautelaArma?.magazineQuantity || linkedWeapon.weapon?.magazineQuantity || 2} un.</td>
+                    <td style="font-family: monospace; font-weight: 600;">${weaponVaultAddress}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <div class="section-banner">
+                3. FINALIDADE E AUTORIZAÇÃO
+              </div>
+              <table class="info-table">
+                <tr>
+                  <td style="width: 60%;"><strong>Finalidade:</strong> Cautela de armamento vinculado ao fornecimento de munições protocolo ${cautela.id.toUpperCase()}</td>
+                  <td style="width: 40%;"><strong>Data:</strong> ${linkedWeapon.cautelaArma?.authorizedAt ? new Date(linkedWeapon.cautelaArma.authorizedAt).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')}</td>
+                </tr>
+                <tr>
+                  <td><strong>Armeiro Autorizador:</strong> ${cautela.armorerName || linkedWeapon.cautelaArma?.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp || linkedWeapon.cautelaArma?.armorerMasp ? `(MASP: ${cautela.armorerMasp || linkedWeapon.cautelaArma?.armorerMasp})` : ''}</td>
+                  <td><strong>Cofre Físico de Origem/Retorno:</strong> ${weaponVaultAddress}</td>
+                </tr>
+              </table>
+            </div>
+
+            <div class="commitment-box">
+              <strong>TERMO DE COMPROMISSO E FIEL DEPOSITÁRIO:</strong> O servidor qualificado acima declara ter recebido o armamento e acessórios descritos em perfeitas condições de conservação e funcionamento, comprometendo-se ao zelo e devolução no cofre de retorno indicado finda a cautela.
+            </div>
+
+            <div class="signatures-container">
+              <div class="signature-box">
+                <strong>${cautela.requesterName}</strong><br/>
+                MASP: ${cautela.requesterMasp}<br/>
+                Servidor Cautelante
+              </div>
+              <div class="signature-box">
+                <strong>${cautela.armorerName || linkedWeapon.cautelaArma?.armorerName || 'Armeiro da Unidade'}</strong><br/>
+                ${cautela.armorerMasp || linkedWeapon.cautelaArma?.armorerMasp ? `MASP: ${cautela.armorerMasp || linkedWeapon.cautelaArma?.armorerMasp}<br/>` : ''}
+                Armeiro Autorizador / Responsável pela Cautela
+              </div>
+            </div>
+
+            <div class="footer-note">
+              Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} • (Página 2 de 2)
+            </div>
+          </div>
+        ` : ''}
+      </body>
+      </html>
     `;
 
     printDocumentInPage(htmlContent);
@@ -1235,7 +1554,12 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                     ) : (
                       <div className="grid grid-cols-1 gap-3">
                         {baixadas.map(cautela => {
-                          const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+                          const cal = calibers.find(c => c.id === cautela.caliberId || c.name === cautela.caliberName);
+                          const stock = ammoStocks.find(s => s.id === (cautela as any).stockId);
+                          const fab = cautela.fabricante || stock?.fabricante || cal?.fabricante || 'CBC';
+                          const tipo = cautela.tipoMunicao || stock?.tipoMunicao || cal?.tipo || 'Operacional';
+                          const peso = cautela.pesoMunicao || stock?.pesoMunicao || (cal as any)?.peso || '';
+                          const linkedWeapon = getLinkedWeaponInfo(cautela);
 
                           return (
                             <div
@@ -1248,10 +1572,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                                     <Disc className="w-5 h-5" />
                                   </div>
                                   <div>
-                                    <div className="flex items-center space-x-2">
+                                    <div className="flex flex-wrap items-center gap-2">
                                       <h4 className="text-sm font-bold text-slate-100">{cautela.caliberName}</h4>
                                       <span className="font-mono text-xs text-blue-300 font-bold">
-                                        {cautela.quantity} unidades
+                                        {cautela.quantity} munições • {fab} • {cautela.caliberName}{tipo ? ` • ${tipo}` : ''}{peso ? ` • ${peso}` : ''}
                                       </span>
                                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-blue-500/20 text-blue-300 border-blue-500/30">
                                         Baixada (Uso Permanente)
@@ -1279,8 +1603,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                                   <span className="text-slate-200 font-bold">{cautela.tipoMunicao || 'Operacional'} • <span className="font-mono">{cautela.loteMunicao || 'Padrão'}</span></span>
                                 </div>
                                 <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Origem</span>
-                                  <span className="font-mono text-slate-200 font-bold">{vault ? vault.code : 'Cofre da Unidade'}</span>
+                                  <span className="text-[10px] text-slate-500 uppercase block font-semibold">VINCULO</span>
+                                  <span className="font-mono text-slate-200 font-bold truncate block" title={linkedWeapon.fullText}>
+                                    {linkedWeapon.fullText}
+                                  </span>
                                 </div>
                                 <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
                                   <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Baixa</span>
@@ -1290,8 +1616,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                                 </div>
                                 <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
                                   <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Responsável</span>
-                                  <span className="text-slate-200 font-semibold truncate block">
-                                    {cautela.armorerName ? `${cautela.armorerName} (${cautela.armorerMasp})` : 'Armeiro da Unidade'}
+                                  <span className="text-slate-200 font-semibold truncate block" title={cautela.armorerName ? `${cautela.armorerName} (MASP: ${cautela.armorerMasp || 'N/A'})` : 'Armeiro da Unidade'}>
+                                    {cautela.armorerName ? `${cautela.armorerName}${cautela.armorerMasp ? ` (${cautela.armorerMasp})` : ''}` : 'Armeiro da Unidade'}
                                   </span>
                                 </div>
                               </div>
@@ -1665,6 +1991,17 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                           </span>
                         )}
                       </div>
+
+                      {(() => {
+                        const linked = getLinkedWeaponInfo(cautela);
+                        if (!linked || linked.fullText === '-') return null;
+                        return (
+                          <div className="p-2.5 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-between text-xs text-slate-300">
+                            <span className="text-slate-400">Armamento Vinculado:</span>
+                            <span className="font-mono font-bold text-amber-400">{linked.fullText}</span>
+                          </div>
+                        );
+                      })()}
 
                       {isDone && (
                         <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex items-center justify-between text-xs">
