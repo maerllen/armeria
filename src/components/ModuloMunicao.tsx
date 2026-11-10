@@ -708,10 +708,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           </div>
           <div class="sig-line">
             ${m.userName}<br>
-            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro Operador</span>
+            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro Operador</span><br>
           </div>
         </div>
-<br>
+
         <div class="footer">
           Documento impresso eletronicamente pelo Sistema de Armeria em ${new Date().toLocaleString('pt-BR')}
         </div>
