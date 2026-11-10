@@ -825,10 +825,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             ${currentUser.name} (MASP: ${currentUser.masp})<br>
             <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Emissão</span>
           </div>
-          <div class="sig-line">
-            Visto da Chefia / Inspetoria<br>
-            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Assinatura / Carimbo</span>
-          </div>
         </div>
 
         <div class="footer">
