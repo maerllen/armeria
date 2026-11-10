@@ -1482,7 +1482,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
                     isSelected ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
                   }`}>
-                    {unitStocks.length} lotes ({unitTotalCartuchos} un.)
+                   { /*unitStocks.length} lotes ({unitTotalCartuchos} un.)*/
                   </span>
                 </button>
               );
