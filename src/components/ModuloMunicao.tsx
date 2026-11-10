@@ -711,7 +711,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro Operador</span>
           </div>
         </div>
-
+<br>
         <div class="footer">
           Documento impresso eletronicamente pelo Sistema de Armeria em ${new Date().toLocaleString('pt-BR')}
         </div>
