@@ -649,21 +649,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         <meta charset="UTF-8">
         <title>Recibo de Munição - ${caliber?.name || 'Munição'}</title>
         <style>
-          @page { size: A4; margin: 15mm; }
+           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
           .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
           .subtitle { font-size: 11px; font-weight: 700; color: #374151; margin-top: 2px; }
           .reg-id { font-family: monospace; font-size: 12px; font-weight: bold; text-align: right; }
           .status-bar { background: #f3f4f6; border: 1px solid #d1d5db; padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; display: flex; justify-content: space-between; font-family: monospace; font-size: 11px; }
-          .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
+          .grid {display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px; }
           .box { border: 1px solid #9ca3af; border-radius: 8px; padding: 12px; font-family: monospace; }
           .box-title { font-size: 10px; font-weight: 800; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #e5e7eb; padding-bottom: 4px; color: #111827; letter-spacing: 0.5px; }
           .field { margin-bottom: 6px; }
           .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
           .val { font-size: 12px; font-weight: bold; color: #000; }
-          .signatures { margin-top: 45px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
-          .sig-line { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; }
+          .signatures { margin-top: 45px; display: grid; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
+          .sig-line {justify-self: center; border-top: 1px solid #000; padding-top: 8px; font-weight: bold; width: 250px; }
           .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
         </style>
       </head>
@@ -989,11 +989,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               <strong>${currentUser.name}</strong><br/>
               MASP: ${currentUser.masp || 'Armeiro'}<br/>
               Armeiro / Responsável pelo Material Bélico
-            </div>
-            <div class="sig-box">
-              <strong>Delegado(a) de Polícia / Titular</strong><br/>
-              Chefia da ${vUnit.name}<br/>
-              Polícia Civil de Minas Gerais
             </div>
           </div>
 
