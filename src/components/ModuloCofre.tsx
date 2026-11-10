@@ -329,13 +329,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             <div class="signatures">
               <div class="sig-line">
                 ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
-                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pelo Mapeamento</span>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pelo Mapa de munições</span>
               </div>
-              <div class="sig-line">
-                Chefia da Unidade Policial<br>
-                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-              </div>
-            </div>
+             </div>
 
             <div class="footer">
               Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armaria PCMG.
@@ -425,10 +421,6 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
                   <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Armaria</span>
                 </div>
-                <div class="sig-line">
-                  Chefia da Unidade Policial<br>
-                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-                </div>
               </div>
 
               <div class="footer">
@@ -469,10 +461,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
                 <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável</span>
               </div>
-              <div class="sig-line">
-                Chefia da Unidade Policial<br>
-                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-              </div>
+              
             </div>
 
             <div class="footer">
@@ -548,10 +537,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
                   <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável</span>
                 </div>
-                <div class="sig-line">
-                  Chefia da Unidade Policial<br>
-                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-                </div>
+              
               </div>
 
               <div class="footer">
@@ -592,10 +578,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 ${currentUser.name} (MASP: ${currentUser.masp || 'Explosivista'})<br>
                 <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Responsável pelo Paiol</span>
               </div>
-              <div class="sig-line">
-                Chefia da Unidade Policial<br>
-                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-              </div>
+             
             </div>
 
             <div class="footer">
@@ -669,10 +652,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   ${currentUser.name} (MASP: ${currentUser.masp || 'Explosivista'})<br>
                   <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Responsável pelo Paiol</span>
                 </div>
-                <div class="sig-line">
-                  Chefia da Unidade Policial<br>
-                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-                </div>
+               
               </div>
 
               <div class="footer">
@@ -794,7 +774,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             text-align: center;
             font-size: 10px;
           }
-          .sig-line { border-top: 1px solid #000; padding-top: 6px; font-weight: bold; }
+          .sig-line { justify-self: center; border-top: 1px solid #000; padding-top: 6px; font-weight: bold; }
           .footer {
             margin-top: 25px;
             text-align: center;
