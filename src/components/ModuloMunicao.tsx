@@ -662,7 +662,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           .field { margin-bottom: 6px; }
           .label { font-size: 9px; font-weight: bold; color: #4b5563; text-transform: uppercase; display: block; }
           .val { font-size: 12px; font-weight: bold; color: #000; }
-          .signatures { margin-top: 45px; display: grid; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
+          .signatures { margin-top: 45px; display: flex; gap: 40px;  justify-content: center; text-align: center; font-family: monospace; font-size: 11px; }
           .sig-line {justify-self: center; border-top: 1px solid #000; padding-top: 8px; font-weight: bold; width: 250px; }
           .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
         </style>
