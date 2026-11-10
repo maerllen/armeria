@@ -94,7 +94,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetAmmo, setDeleteTargetAmmo] = useState<{ type: 'caliber' | 'stock' | 'movement'; id: string; label: string } | null>(null);
 
-  // Edit Ammo Stock Modal State (Fabricante, Lote, Tipo, Peso, Destinação, Ano e Quantidade)
+  // Edit Ammo Stock Modal State (Fabricante, Lote, Tipo, Peso, Destinação, Ano, Quantidade e Transferência de Cofre)
   const [editingStock, setEditingStock] = useState<{
     stock: AmmunitionStock;
     caliberId: string;
@@ -106,6 +106,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     destinacao: string;
     quantity: number;
     additionalInfo: string;
+    targetVaultSpaceId: string;
+    transferMode: 'ALL' | 'PARTIAL';
+    transferQuantity: number;
+    transferObservation: string;
   } | null>(null);
   const [isSavingStock, setIsSavingStock] = useState(false);
   const [lotSelectionForEdit, setLotSelectionForEdit] = useState<{ stocks: AmmunitionStock[]; onSelect: (s: AmmunitionStock) => void } | null>(null);
@@ -392,7 +396,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   };
 
-  // Open Edit Stock Modal (Alteração completa das especificações da munição)
+  // Open Edit Stock Modal (Alteração completa das especificações da munição e transferência de cofre)
   const handleOpenEditStock = (st: AmmunitionStock, currentObs: string) => {
     setEditingStock({
       stock: st,
@@ -404,7 +408,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       anoFabricacao: st.anoFabricacao || new Date().getFullYear(),
       destinacao: st.destinacao || 'Operacional',
       quantity: st.quantity,
-      additionalInfo: currentObs || ''
+      additionalInfo: currentObs || '',
+      targetVaultSpaceId: st.vaultSpaceId,
+      transferMode: 'ALL',
+      transferQuantity: st.quantity,
+      transferObservation: ''
     });
   };
 
@@ -416,6 +424,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setSuccessMsg('');
     setIsSavingStock(true);
     try {
+      const isTransferring = Boolean(
+        editingStock.targetVaultSpaceId && 
+        editingStock.targetVaultSpaceId !== editingStock.stock.vaultSpaceId
+      );
+      const transferQty = editingStock.transferMode === 'ALL' ? editingStock.quantity : editingStock.transferQuantity;
+      
+      const destVault = vaultSpaces.find(v => v.id === editingStock.targetVaultSpaceId);
+      const origVault = vaultSpaces.find(v => v.id === editingStock.stock.vaultSpaceId);
+
       await storage.updateAmmoStock(
         editingStock.stock.id,
         {
@@ -427,11 +444,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           loteMunicao: editingStock.loteMunicao || undefined,
           anoFabricacao: editingStock.anoFabricacao || undefined,
           destinacao: editingStock.destinacao || undefined,
-          additionalInfo: editingStock.additionalInfo
+          additionalInfo: editingStock.additionalInfo,
+          targetVaultSpaceId: isTransferring ? editingStock.targetVaultSpaceId : undefined,
+          transferQuantity: isTransferring ? transferQty : undefined,
+          transferObservation: isTransferring ? (editingStock.transferObservation || `Transferência do cofre ${origVault?.code || ''} para ${destVault?.code || ''}`) : undefined
         },
         currentUser
       );
-      setSuccessMsg('Informações da munição alteradas com sucesso no cofre.');
+      
+      if (isTransferring) {
+        setSuccessMsg(`Informações da munição atualizadas e ${transferQty} unidade(s) transferida(s) com sucesso para o cofre ${destVault?.code || ''}.`);
+      } else {
+        setSuccessMsg('Informações da munição alteradas com sucesso no cofre.');
+      }
       setEditingStock(null);
       onRefresh();
     } catch (err: any) {
@@ -805,6 +830,305 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     printDocumentInPage(html);
   };
 
+  // Impressão do Relatório Completo de Todas as Munições da Unidade com Detalhes de Cada Cofre
+  const handlePrintUnitAmmoReport = () => {
+    const targetUnitId = filterUnitId || currentUser.unitId || (units.length > 0 ? units[0].id : '');
+    const unit = units.find(u => u.id === targetUnitId) || { id: targetUnitId, name: 'Unidade Policial', departmentId: '' };
+    const dept = departments.find(d => d.id === unit.departmentId) || departments.find(d => d.id === currentUser.departmentId);
+
+    // Todas as munições pertencentes a esta unidade
+    const unitStocks = stocks.filter(s => s.unitId === targetUnitId || (!s.unitId && s.departmentId === dept?.id));
+
+    // Todos os cofres vinculados à unidade
+    const unitVaults = vaultSpaces.filter(v => (!v.unitId || v.unitId === targetUnitId));
+    unitStocks.forEach(s => {
+      if (s.vaultSpaceId && !unitVaults.some(v => v.id === s.vaultSpaceId)) {
+        const found = vaultSpaces.find(v => v.id === s.vaultSpaceId);
+        if (found) unitVaults.push(found);
+      }
+    });
+
+    const totalCartuchos = unitStocks.reduce((sum, s) => sum + s.quantity, 0);
+    const totalCalibres = new Set(unitStocks.map(s => s.caliberId)).size;
+    const totalLotes = new Set(unitStocks.map(s => s.loteMunicao).filter(Boolean)).size;
+
+    // Resumo consolidado por calibre
+    const caliberMap = new Map<string, { caliberName: string; total: number; vaults: Map<string, number> }>();
+    unitStocks.forEach(s => {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      const calName = cal ? cal.name : s.caliberId;
+      if (!caliberMap.has(s.caliberId)) {
+        caliberMap.set(s.caliberId, {
+          caliberName,
+          total: 0,
+          vaults: new Map()
+        });
+      }
+      const item = caliberMap.get(s.caliberId)!;
+      item.total += s.quantity;
+      const vObj = vaultSpaces.find(v => v.id === s.vaultSpaceId);
+      const vCode = vObj ? vObj.code : 'Outros';
+      item.vaults.set(vCode, (item.vaults.get(vCode) || 0) + s.quantity);
+    });
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8">
+        <title>Relatório de Munições - ${unit.name}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm 15mm; }
+          body {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 11px;
+            color: #111827;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+            line-height: 1.35;
+          }
+          .header-table {
+            width: 100%;
+            border-bottom: 2px solid #000;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+          }
+          .title-area { text-align: center; }
+          .title-area h2 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .title-area h3 { margin: 3px 0 0 0; font-size: 12px; font-weight: normal; text-transform: uppercase; }
+          .title-area h1 { margin: 8px 0 0 0; font-size: 15px; font-weight: bold; text-decoration: underline; }
+          .summary-card {
+            display: flex;
+            justify-content: space-between;
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 8px 14px;
+            margin-bottom: 14px;
+          }
+          .summary-item { text-align: center; }
+          .summary-item .label { font-size: 9px; text-transform: uppercase; color: #475569; font-weight: bold; }
+          .summary-item .val { font-size: 15px; font-weight: 900; color: #0f172a; font-family: monospace; }
+          .vault-section {
+            margin-bottom: 16px;
+            border: 1px solid #94a3b8;
+            border-radius: 4px;
+            overflow: hidden;
+            page-break-inside: avoid;
+          }
+          .vault-header {
+            background: #0f172a;
+            color: #fff;
+            padding: 6px 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          .vault-header h4 { margin: 0; font-size: 12px; text-transform: uppercase; font-family: monospace; }
+          .vault-badge { background: #334155; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: bold; }
+          table.data-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 10px;
+          }
+          table.data-table th {
+            background: #f1f5f9;
+            color: #1e293b;
+            font-weight: bold;
+            text-align: left;
+            padding: 5px 6px;
+            border-bottom: 1px solid #cbd5e1;
+            text-transform: uppercase;
+            font-size: 9px;
+          }
+          table.data-table td {
+            padding: 5px 6px;
+            border-bottom: 1px solid #e2e8f0;
+          }
+          table.data-table tr:nth-child(even) { background: #f8fafc; }
+          .qty-col { text-align: right; font-family: monospace; font-weight: bold; font-size: 11px; }
+          .vault-footer {
+            background: #f1f5f9;
+            padding: 5px 10px;
+            display: flex;
+            justify-content: flex-end;
+            font-weight: bold;
+            font-size: 10px;
+            border-top: 1px solid #cbd5e1;
+          }
+          .signatures {
+            margin-top: 25px;
+            display: flex;
+            justify-content: space-between;
+            page-break-inside: avoid;
+          }
+          .sig-box {
+            width: 45%;
+            text-align: center;
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            font-size: 10px;
+          }
+          .footer-note {
+            margin-top: 18px;
+            text-align: center;
+            font-size: 9px;
+            color: #64748b;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 6px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header-table">
+          <div class="title-area">
+            <h2>POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+            <h3>${dept ? dept.name : 'DEPARTAMENTO DE POLÍCIA'} - ${unit.name}</h3>
+            <h1>RELATÓRIO GERAL DE ESTOQUE DE MUNIÇÕES POR COFRE</h1>
+            <p style="margin: 4px 0 0 0; font-size: 10px; color: #475569;">
+              INVENTÁRIO FÍSICO DETALHADO POR LOCAL DE ARMAZENAMENTO • EMISSÃO: ${new Date().toLocaleString('pt-BR')}
+            </p>
+          </div>
+        </div>
+
+        <div class="summary-card">
+          <div class="summary-item">
+            <div class="label">Total Geral de Cartuchos</div>
+            <div class="val">${totalCartuchos.toLocaleString('pt-BR')} un.</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Cofres na Unidade</div>
+            <div class="val">${unitVaults.length} cofre(s)</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Calibres Distintos</div>
+            <div class="val">${totalCalibres}</div>
+          </div>
+          <div class="summary-item">
+            <div class="label">Lotes Cadastrados</div>
+            <div class="val">${totalLotes}</div>
+          </div>
+        </div>
+
+        <!-- Detalhamento Individual de Cada Cofre -->
+        ${unitVaults.map(v => {
+          const vStocks = unitStocks.filter(s => s.vaultSpaceId === v.id);
+          const vTotal = vStocks.reduce((sum, s) => sum + s.quantity, 0);
+
+          return `
+            <div class="vault-section">
+              <div class="vault-header">
+                <h4>COFRE: ${v.code} ${v.type ? `(${v.type})` : ''}</h4>
+                <div class="vault-badge">${vTotal.toLocaleString('pt-BR')} cartuchos</div>
+              </div>
+              ${vStocks.length === 0 ? `
+                <div style="padding: 10px; color: #64748b; font-style: italic; text-align: center; font-size: 10px;">
+                  Nenhuma munição estocada neste cofre no momento.
+                </div>
+              ` : `
+                <table class="data-table">
+                  <thead>
+                    <tr>
+                      <th style="width: 18%;">Calibre</th>
+                      <th style="width: 14%;">Fabricante</th>
+                      <th style="width: 15%;">Tipo / Projétil</th>
+                      <th style="width: 10%;">Peso</th>
+                      <th style="width: 15%;">Lote</th>
+                      <th style="width: 8%;">Ano</th>
+                      <th style="width: 10%;">Destinação</th>
+                      <th style="width: 10%; text-align: right;">Quantidade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${vStocks.map(s => {
+                      const cal = calibers.find(c => c.id === s.caliberId);
+                      const calName = cal ? cal.name : s.caliberId;
+                      const fab = s.fabricante || cal?.fabricante || 'CBC';
+                      const tipo = s.tipoMunicao || cal?.tipo || 'COMUM';
+                      const peso = s.pesoMunicao || cal?.peso || 'N/I';
+                      const lote = s.loteMunicao || 'S/L';
+                      const ano = s.anoFabricacao || 'N/A';
+                      const dest = s.destinacao || 'Operacional';
+
+                      return `
+                        <tr>
+                          <td><strong>${calName}</strong></td>
+                          <td>${fab}</td>
+                          <td>${tipo}</td>
+                          <td>${peso}</td>
+                          <td style="font-family: monospace; font-weight: bold;">${lote}</td>
+                          <td>${ano}</td>
+                          <td>${dest}</td>
+                          <td class="qty-col">${s.quantity.toLocaleString('pt-BR')} un.</td>
+                        </tr>
+                      `;
+                    }).join('')}
+                  </tbody>
+                </table>
+                <div class="vault-footer">
+                  Subtotal do Cofre ${v.code}: ${vTotal.toLocaleString('pt-BR')} cartuchos
+                </div>
+              `}
+            </div>
+          `;
+        }).join('')}
+
+        <!-- Consolidação Geral por Calibre na Unidade -->
+        <div style="margin-top: 14px; page-break-inside: avoid;">
+          <h4 style="margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; background: #e2e8f0; padding: 4px 8px; border-left: 3px solid #0f172a;">
+            CONSOLIDAÇÃO GERAL POR CALIBRE NA UNIDADE
+          </h4>
+          <table class="data-table" style="border: 1px solid #cbd5e1;">
+            <thead>
+              <tr style="background: #f1f5f9;">
+                <th style="width: 30%;">Calibre</th>
+                <th style="width: 30%;">Distribuição nos Cofres</th>
+                <th style="width: 20%; text-align: right;">Total na Unidade</th>
+                <th style="width: 20%; text-align: right;">% do Arsenal</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${Array.from(caliberMap.values()).map(cItem => {
+                const pct = totalCartuchos > 0 ? ((cItem.total / totalCartuchos) * 100).toFixed(1) : '0';
+                const vaultsStr = Array.from(cItem.vaults.entries()).map(([vCode, q]) => `${vCode}: ${q.toLocaleString('pt-BR')} un.`).join(' • ');
+
+                return `
+                  <tr>
+                    <td><strong>${cItem.caliberName}</strong></td>
+                    <td style="font-size: 9px; color: #334155;">${vaultsStr}</td>
+                    <td class="qty-col">${cItem.total.toLocaleString('pt-BR')} un.</td>
+                    <td style="text-align: right; font-family: monospace;">${pct}%</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+
+        <div class="signatures">
+          <div class="sig-box">
+            <strong>${currentUser.name}</strong><br/>
+            MASP: ${currentUser.masp || 'Armeiro'}<br/>
+            Armeiro / Responsável pelo Material Bélico
+          </div>
+          <div class="sig-box">
+            <strong>Delegado(a) de Polícia / Titular</strong><br/>
+            Chefia da ${unit.name}<br/>
+            Polícia Civil de Minas Gerais
+          </div>
+        </div>
+
+        <div class="footer-note">
+          Documento oficial gerado eletronicamente pelo Sistema Integrado de Gestão de Armaria e Munições - PCMG • ${new Date().toLocaleString('pt-BR')}
+        </div>
+      </body>
+      </html>
+    `;
+
+    printDocumentInPage(html);
+  };
+
   // Submit Unused Ammo Return
   const handleConfirmReturnAmmo = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -968,6 +1292,17 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <ArrowRightLeft className="w-4 h-4 text-white" />
                 <span>Transferência de Unidade</span>
               </button>
+
+              {/* Botão de Relatório de Munições da Unidade por Cofre */}
+              <button
+                type="button"
+                onClick={handlePrintUnitAmmoReport}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Imprimir relatório completo de todas as munições da unidade com detalhes de cada cofre"
+              >
+                <Printer className="w-4 h-4 text-amber-400" />
+                <span>Relatório da Unidade por Cofre</span>
+              </button>
             </>
           )}
         </div>
@@ -989,9 +1324,20 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
       {/* Global Filter Bar (Calibre, Departamento, Unidade) */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
-        <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
-          <Filter className="w-4 h-4" />
-          <span>Filtros Globais de Pesquisa</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
+            <Filter className="w-4 h-4" />
+            <span>Filtros Globais de Pesquisa</span>
+          </div>
+          <button
+            type="button"
+            onClick={handlePrintUnitAmmoReport}
+            className="flex items-center space-x-1.5 bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm"
+            title="Imprimir relatório completo de todas as munições da unidade com detalhes de cada cofre"
+          >
+            <Printer className="w-3.5 h-3.5 text-amber-400" />
+            <span>Imprimir Relatório dos Cofres da Unidade</span>
+          </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2437,8 +2783,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {/* Modal Alterar Informações da Munição (substitui exclusão permanente) */}
       {editingStock && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl space-y-4">
-            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden shadow-2xl space-y-0">
+            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-2.5">
                 <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
                   <Edit2 className="w-5 h-5" />
@@ -2446,7 +2792,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <div>
                   <h3 className="text-sm font-bold text-slate-100">Alterar Informações da Munição</h3>
                   <p className="text-[11px] text-slate-400">
-                    Cofre: {vaultSpaces.find(v => v.id === editingStock.stock.vaultSpaceId)?.code || 'N/A'}
+                    Cofre Atual: <strong className="text-amber-400 font-mono">{vaultSpaces.find(v => v.id === editingStock.stock.vaultSpaceId)?.code || 'N/A'}</strong>
                   </p>
                 </div>
               </div>
@@ -2459,7 +2805,122 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveStockEdit} className="p-6 pt-2 space-y-4">
+            <form onSubmit={handleSaveStockEdit} className="p-6 space-y-4 overflow-y-auto">
+              {/* Localização / Transferência entre Cofres */}
+              {(() => {
+                const stockUnitId = editingStock.stock.unitId || currentUser.unitId;
+                const unitVaults = vaultSpaces.filter(v => (!v.unitId || v.unitId === stockUnitId) && (v.type === 'MUNIÇÕES' || !v.type));
+                const availableVaults = unitVaults.length > 0 ? unitVaults : vaultSpaces.filter(v => !v.unitId || v.unitId === stockUnitId);
+                const currentVault = vaultSpaces.find(v => v.id === editingStock.stock.vaultSpaceId);
+                const targetVault = vaultSpaces.find(v => v.id === editingStock.targetVaultSpaceId);
+                const isTransferring = Boolean(editingStock.targetVaultSpaceId && editingStock.targetVaultSpaceId !== editingStock.stock.vaultSpaceId);
+
+                return (
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                        Cofre de Armazenamento
+                      </label>
+                      <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                        Cofre Atual: {currentVault?.code || 'N/A'}
+                      </span>
+                    </div>
+
+                    <div>
+                      <select
+                        value={editingStock.targetVaultSpaceId}
+                        onChange={(e) => {
+                          const newVId = e.target.value;
+                          setEditingStock({
+                            ...editingStock,
+                            targetVaultSpaceId: newVId,
+                            transferQuantity: editingStock.quantity
+                          });
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500 font-mono font-bold"
+                      >
+                        {availableVaults.map((v) => (
+                          <option key={v.id} value={v.id}>
+                            {v.code} {v.type ? `(${v.type})` : ''} {v.id === editingStock.stock.vaultSpaceId ? '— [Cofre Atual]' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Alerta e Opções quando selecionado um cofre diferente */}
+                    {isTransferring && (
+                      <div className="p-3 bg-amber-950/40 border border-amber-600/50 rounded-xl space-y-2.5 animate-fadeIn text-xs">
+                        <div className="flex items-center space-x-2 text-amber-300 font-bold">
+                          <ArrowRightLeft className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>Transferência de Munições para o Cofre {targetVault?.code}</span>
+                        </div>
+                        <p className="text-[11px] text-amber-200/90 leading-relaxed">
+                          Ao salvar, as munições serão transferidas do cofre <strong>{currentVault?.code}</strong> para o cofre <strong>{targetVault?.code}</strong> com registro automático no histórico de movimentações.
+                        </p>
+
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          <label className={`flex items-center space-x-2 p-2 rounded-lg border cursor-pointer transition ${editingStock.transferMode === 'ALL' ? 'bg-amber-500/20 border-amber-500 text-amber-200' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                            <input
+                              type="radio"
+                              name="transferMode"
+                              checked={editingStock.transferMode === 'ALL'}
+                              onChange={() => setEditingStock({ ...editingStock, transferMode: 'ALL', transferQuantity: editingStock.quantity })}
+                              className="text-amber-500 focus:ring-0"
+                            />
+                            <span className="font-semibold text-[11px]">Transferir Tudo ({editingStock.quantity} un.)</span>
+                          </label>
+                          <label className={`flex items-center space-x-2 p-2 rounded-lg border cursor-pointer transition ${editingStock.transferMode === 'PARTIAL' ? 'bg-amber-500/20 border-amber-500 text-amber-200' : 'bg-slate-900 border-slate-700 text-slate-400'}`}>
+                            <input
+                              type="radio"
+                              name="transferMode"
+                              checked={editingStock.transferMode === 'PARTIAL'}
+                              onChange={() => setEditingStock({ ...editingStock, transferMode: 'PARTIAL', transferQuantity: Math.min(editingStock.quantity, Math.max(1, Math.floor(editingStock.quantity / 2))) })}
+                              className="text-amber-500 focus:ring-0"
+                            />
+                            <span className="font-semibold text-[11px]">Quantidade Parcial</span>
+                          </label>
+                        </div>
+
+                        {editingStock.transferMode === 'PARTIAL' && (
+                          <div className="pt-1">
+                            <label className="block text-[10px] font-semibold text-slate-300 uppercase mb-1">
+                              Quantidade a transferir para {targetVault?.code} (máximo: {editingStock.quantity})
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={editingStock.quantity}
+                              value={editingStock.transferQuantity}
+                              onChange={(e) => setEditingStock({
+                                ...editingStock,
+                                transferQuantity: Math.min(editingStock.quantity, Math.max(1, parseInt(e.target.value) || 1))
+                              })}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-500"
+                            />
+                            <p className="text-[10px] text-slate-400 mt-1">
+                              Permanecerão no cofre {currentVault?.code}: <strong>{editingStock.quantity - editingStock.transferQuantity} un.</strong>
+                            </p>
+                          </div>
+                        )}
+
+                        <div className="pt-1">
+                          <label className="block text-[10px] font-semibold text-slate-300 uppercase mb-1">
+                            Motivo / Justificativa da Transferência
+                          </label>
+                          <input
+                            type="text"
+                            value={editingStock.transferObservation}
+                            onChange={(e) => setEditingStock({ ...editingStock, transferObservation: e.target.value })}
+                            placeholder="Ex: Remanejamento interno de cofre, reorganização de estoque..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+
               {/* Fabricante & Calibre */}
               <div className="grid grid-cols-2 gap-3">
                 <div>

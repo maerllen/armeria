@@ -862,6 +862,9 @@ class StorageService {
       anoFabricacao?: number | string;
       destinacao?: string;
       additionalInfo?: string;
+      targetVaultSpaceId?: string;
+      transferQuantity?: number;
+      transferObservation?: string;
     },
     actorUser?: User
   ): Promise<boolean> {

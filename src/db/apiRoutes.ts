@@ -1314,7 +1314,9 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const { 
       quantity, caliberId, fabricante, tipoMunicao, pesoMunicao, 
-      loteMunicao, anoFabricacao, destinacao, additionalInfo, actor 
+      loteMunicao, anoFabricacao, destinacao, additionalInfo,
+      targetVaultSpaceId, transferQuantity, transferObservation,
+      actor 
     } = req.body;
     if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
 
@@ -1340,6 +1342,181 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
 
     const newCaliberId = caliberId || currentStock.caliberId;
     const cleanInfo = typeof additionalInfo === 'string' ? additionalInfo.slice(0, 500) : '';
+
+    const isTransfer = Boolean(targetVaultSpaceId && targetVaultSpaceId !== currentStock.vaultSpaceId);
+
+    if (isTransfer) {
+      // 1. Obter dados do cofre de destino
+      const [destVaults]: any = await pool.query(
+        'SELECT ID_COFRES as id, CODIGO_COFRES as code, DEPARTAMENTO_ID_COFRES as departmentId, UNIDADE_ID_COFRES as unitId FROM COFRES WHERE ID_COFRES = ?',
+        [targetVaultSpaceId]
+      );
+      if (!destVaults || destVaults.length === 0) {
+        return res.status(404).json({ error: 'Cofre de destino não encontrado.' });
+      }
+      const destVault = destVaults[0];
+
+      // 2. Obter dados do cofre de origem
+      const [srcVaults]: any = await pool.query(
+        'SELECT ID_COFRES as id, CODIGO_COFRES as code FROM COFRES WHERE ID_COFRES = ?',
+        [currentStock.vaultSpaceId]
+      );
+      const srcVaultCode = srcVaults && srcVaults.length > 0 ? srcVaults[0].code : 'Cofre Origem';
+      const destVaultCode = destVault.code || 'Cofre Destino';
+
+      const qtyToTransfer = transferQuantity ? Math.min(newQty, Math.max(1, parseInt(String(transferQuantity), 10))) : newQty;
+      const obsTransfer = transferObservation ? String(transferObservation).slice(0, 500) : `Transferência interna entre cofres da unidade (${srcVaultCode} -> ${destVaultCode})`;
+
+      if (qtyToTransfer >= newQty) {
+        // Transferência TOTAL do lote para o novo cofre
+        const [existingDestStocks]: any = await pool.query(
+          `SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity 
+           FROM ESTOQUE_MUNICOES 
+           WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ? AND (LOTE_MUNICAO = ? OR (LOTE_MUNICAO IS NULL AND ? IS NULL))`,
+          [targetVaultSpaceId, newCaliberId, loteMunicao || null, loteMunicao || null]
+        );
+
+        if (existingDestStocks && existingDestStocks.length > 0) {
+          const destStockId = existingDestStocks[0].id;
+          const mergedQty = existingDestStocks[0].quantity + qtyToTransfer;
+          await pool.query(
+            `UPDATE ESTOQUE_MUNICOES SET 
+              QUANTIDADE_ESTOQUE_MUNICOES = ?,
+              FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+              TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+              PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+              ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+              DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+             WHERE ID_ESTOQUE_MUNICOES = ?`,
+            [mergedQty, fabricante || null, tipoMunicao || null, pesoMunicao || null, anoFabricacao || null, destinacao || null, destStockId]
+          );
+          await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = 0, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [id]);
+        } else {
+          await pool.query(
+            `UPDATE ESTOQUE_MUNICOES SET 
+              COFRE_ID_ESTOQUE_MUNICOES = ?,
+              UNIDADE_ID_ESTOQUE_MUNICOES = ?,
+              DEPARTAMENTO_ID_ESTOQUE_MUNICOES = ?,
+              QUANTIDADE_ESTOQUE_MUNICOES = ?,
+              CALIBRE_ID_ESTOQUE_MUNICOES = ?,
+              FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+              TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+              PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+              LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO),
+              ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+              DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+             WHERE ID_ESTOQUE_MUNICOES = ?`,
+            [
+              targetVaultSpaceId, destVault.unitId || currentStock.unitId, destVault.departmentId || currentStock.departmentId,
+              newQty, newCaliberId, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null,
+              anoFabricacao || null, destinacao || null, id
+            ]
+          );
+        }
+      } else {
+        // Transferência PARCIAL: subtrai da origem e adiciona/cria no destino
+        const remainingSourceQty = newQty - qtyToTransfer;
+        await pool.query(
+          `UPDATE ESTOQUE_MUNICOES SET 
+            QUANTIDADE_ESTOQUE_MUNICOES = ?,
+            CALIBRE_ID_ESTOQUE_MUNICOES = ?,
+            FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
+            TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+            PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
+            LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO),
+            ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
+            DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+            DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+           WHERE ID_ESTOQUE_MUNICOES = ?`,
+          [
+            remainingSourceQty, newCaliberId, fabricante || null, tipoMunicao || null, pesoMunicao || null,
+            loteMunicao || null, anoFabricacao || null, destinacao || null, id
+          ]
+        );
+
+        const [existingDestStocks]: any = await pool.query(
+          `SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity 
+           FROM ESTOQUE_MUNICOES 
+           WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ? AND (LOTE_MUNICAO = ? OR (LOTE_MUNICAO IS NULL AND ? IS NULL))`,
+          [targetVaultSpaceId, newCaliberId, loteMunicao || null, loteMunicao || null]
+        );
+
+        if (existingDestStocks && existingDestStocks.length > 0) {
+          const destStockId = existingDestStocks[0].id;
+          const mergedQty = existingDestStocks[0].quantity + qtyToTransfer;
+          await pool.query(
+            `UPDATE ESTOQUE_MUNICOES SET 
+              QUANTIDADE_ESTOQUE_MUNICOES = ?,
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW()
+             WHERE ID_ESTOQUE_MUNICOES = ?`,
+            [mergedQty, destStockId]
+          );
+        } else {
+          const newDestStockId = `stock-${Date.now()}`;
+          await pool.query(
+            `INSERT INTO ESTOQUE_MUNICOES (
+              ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES,
+              DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES,
+              FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+              DATA_ATUALIZACAO_ESTOQUE_MUNICOES
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            [
+              newDestStockId, newCaliberId, qtyToTransfer, destVault.departmentId || currentStock.departmentId,
+              destVault.unitId || currentStock.unitId, targetVaultSpaceId, fabricante || null, tipoMunicao || null,
+              pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null
+            ]
+          );
+        }
+      }
+
+      // Registra a Saída no cofre de origem
+      const movIdOut = `ammomov-${Date.now()}-out`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movIdOut, newCaliberId, qtyToTransfer, currentStock.departmentId, currentStock.unitId, currentStock.vaultSpaceId,
+          `Transferência interna: Saída para Cofre ${destVaultCode}`,
+          fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null,
+          actor.id, actor.name, actor.masp, obsTransfer, actor.id, actor.name
+        ]
+      );
+
+      // Registra a Entrada no cofre de destino
+      const movIdIn = `ammomov-${Date.now()}-in`;
+      await pool.query(
+        `INSERT INTO MOVIMENTACOES_MUNICOES 
+         (ID_MOVIMENTACOES_MUNICOES, TIPO_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, 
+          DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, UNIDADE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES, 
+          FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+          TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
+          OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
+         VALUES (?, 'Entrada', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          movIdIn, newCaliberId, qtyToTransfer, destVault.departmentId || currentStock.departmentId, destVault.unitId || currentStock.unitId, targetVaultSpaceId,
+          `Transferência interna: Entrada vinda do Cofre ${srcVaultCode}`,
+          fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null,
+          actor.id, actor.name, actor.masp, obsTransfer, actor.id, actor.name
+        ]
+      );
+
+      await insertAuditLog(
+        'Munições',
+        'Transferir',
+        `Transferência interna de munições: ${qtyToTransfer} un. do Cofre ${srcVaultCode} para o Cofre ${destVaultCode} [${fabricante || 'Fabricante N/A'} - Lote: ${loteMunicao || 'N/A'}]`,
+        actor,
+        req.ip
+      );
+
+      return res.json({ success: true, transferred: true, qtyToTransfer, targetVaultCode: destVaultCode });
+    }
 
     try {
       await pool.query(
