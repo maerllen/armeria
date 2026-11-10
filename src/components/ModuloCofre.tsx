@@ -284,7 +284,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     }
   };
 
-  // Direct print PDF of vault content
+  // Direct print PDF of vault content - Detalhado e uma página por objeto caso haja mais de um item
   const handlePrintVaultContent = (vault: VaultSpace) => {
     const dept = departments.find(d => d.id === vault.departmentId);
     const unit = units.find(u => u.id === vault.unitId);
@@ -292,59 +292,397 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === vault.id);
     const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === vault.id || e.localArmazenamento === vault.code);
 
-    let contentRowsHtml = '';
-    if (vault.type === 'ARMAS') {
-      if (storedWeapons.length === 0) {
-        contentRowsHtml = `<tr><td colspan="5" style="text-align:center; padding: 15px; color: #6b7280; font-style: italic;">Espaço de guarda atualmente livre / sem armamentos armazenados.</td></tr>`;
-      } else {
-        contentRowsHtml = storedWeapons.map((w, idx) => `
-          <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 8px; font-weight: bold;">${idx + 1}</td>
-            <td style="padding: 8px;">${w.type} ${w.model}</td>
-            <td style="padding: 8px; font-family: monospace; font-weight: bold; color: #b45309;">${w.serialNumber}</td>
-            <td style="padding: 8px;">${w.caliber}</td>
-            <td style="padding: 8px;">${(w as any).condition || 'Bom'} (${(w as any).situation || 'Ativa'})</td>
-          </tr>
-        `).join('');
-      }
-    } else if (vault.type === 'MUNIÇÕES') {
-      if (storedAmmo.length === 0) {
-        contentRowsHtml = `<tr><td colspan="4" style="text-align:center; padding: 15px; color: #6b7280; font-style: italic;">Espaço de guarda atualmente sem munições armazenadas.</td></tr>`;
-      } else {
-        contentRowsHtml = storedAmmo.map((s, idx) => {
-          const cal = storage.getCalibers().find(c => c.id === s.caliberId);
-          return `
-            <tr style="border-bottom: 1px solid #e5e7eb;">
-              <td style="padding: 8px; font-weight: bold;">${idx + 1}</td>
-              <td style="padding: 8px; font-weight: bold;">Calibre ${cal?.name || s.caliberId}</td>
-              <td style="padding: 8px; font-family: monospace;">${(s as any).lotNumber || 'Padrão'}</td>
-              <td style="padding: 8px; font-weight: bold; color: #0369a1;">${s.quantity} un</td>
-            </tr>
-          `;
-        }).join('');
-      }
-    } else {
-      if (storedExplosives.length === 0) {
-        contentRowsHtml = `<tr><td colspan="6" style="text-align:center; padding: 15px; color: #6b7280; font-style: italic;">Paiol de guarda atualmente livre / sem materiais explosivos armazenados.</td></tr>`;
-      } else {
-        contentRowsHtml = storedExplosives.map((e, idx) => `
-          <tr style="border-bottom: 1px solid #e5e7eb;">
-            <td style="padding: 8px; font-weight: bold;">${idx + 1}</td>
-            <td style="padding: 8px; font-weight: bold;">${e.nome}</td>
-            <td style="padding: 8px;">${e.tipo} ${e.subtipo ? `(${e.subtipo})` : ''}</td>
-            <td style="padding: 8px; font-family: monospace;">${e.lote}</td>
-            <td style="padding: 8px; font-weight: bold; color: #dc2626;">${e.quantidade} ${e.unidadeMedida}</td>
-            <td style="padding: 8px;">${e.status}</td>
-          </tr>
-        `).join('');
-      }
-    }
-
     const typeLabel = vault.type === 'ARMAS' 
       ? 'COFRE PARA ARMAS' 
       : vault.type === 'MUNIÇÕES' 
       ? 'COFRE PARA MUNIÇÕES' 
       : 'PAIOL / COFRE PARA EXPLOSIVOS';
+
+    let pagesHtml = '';
+
+    if (vault.type === 'MUNIÇÕES') {
+      if (storedAmmo.length === 0) {
+        pagesHtml = `
+          <div class="report-page">
+            <div class="header">
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">SISTEMA DE ARMARIA • RELATÓRIO OFICIAL DE COFRE DE MUNIÇÕES</div>
+              </div>
+              <div class="badge">
+                COFRE<br>
+                <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+              </div>
+            </div>
+
+            <div class="meta-box">
+              <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+              <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+              <div class="meta-item"><label>Tipo de Cofre:</label> <span>${typeLabel}</span></div>
+              <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px; padding: 30px; text-align: center; margin: 40px 0; color: #475569; font-style: italic;">
+              Espaço de guarda atualmente sem munições armazenadas no cofre.
+            </div>
+
+            <div class="signatures">
+              <div class="sig-line">
+                ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pelo Mapeamento</span>
+              </div>
+              <div class="sig-line">
+                Chefia da Unidade Policial<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armaria PCMG.
+            </div>
+          </div>
+        `;
+      } else {
+        pagesHtml = storedAmmo.map((s, idx) => {
+          const cal = storage.getCalibers().find(c => c.id === s.caliberId);
+          const calName = cal ? cal.name : s.caliberId;
+          const fab = s.fabricante || cal?.fabricante || 'CBC';
+          const lote = s.loteMunicao || 'S/L';
+          const tipo = s.tipoMunicao || cal?.tipo || 'COMUM';
+          const peso = s.pesoMunicao || cal?.peso || 'N/I';
+          const dest = s.destinacao || 'Operacional';
+          const ano = s.anoFabricacao || 'N/A';
+          const isLast = idx === storedAmmo.length - 1;
+
+          return `
+            <div class="report-page ${!isLast ? 'page-break' : ''}">
+              <div class="header">
+                <div>
+                  <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                  <div class="subtitle">SISTEMA DE ARMARIA • FICHA INDIVIDUAL DE OBJETO NO COFRE</div>
+                </div>
+                <div class="badge">
+                  LOCAL COFRE<br>
+                  <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+                </div>
+              </div>
+
+              <div class="meta-box">
+                <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+                <div class="meta-item"><label>Unidade Policial:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+                <div class="meta-item"><label>Tipo de Local:</label> <span>${typeLabel}</span></div>
+                <div class="meta-item"><label>Item / Objeto no Cofre:</label> <span style="color: #0369a1;">Página ${idx + 1} de ${storedAmmo.length}</span></div>
+              </div>
+
+              <div class="section-title">DETALHES COMPLETOS DA MUNIÇÃO ARMAZENADA</div>
+
+              <table class="detail-table">
+                <tbody>
+                  <tr>
+                    <td class="dt-label" style="width: 25%;">Calibre:</td>
+                    <td class="dt-value" style="font-size: 13px; font-weight: 900; color: #0f172a;">${calName}</td>
+                    <td class="dt-label" style="width: 20%;">Quantidade no Cofre:</td>
+                    <td class="dt-value" style="font-size: 13px; font-weight: 900; color: #0369a1;">${s.quantity.toLocaleString('pt-BR')} unidades</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Fabricante / Marca:</td>
+                    <td class="dt-value">${fab}</td>
+                    <td class="dt-label">Lote:</td>
+                    <td class="dt-value font-mono" style="font-weight: bold; color: #b45309;">${lote}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Tipo de Projétil:</td>
+                    <td class="dt-value">${tipo}</td>
+                    <td class="dt-label">Peso do Projétil:</td>
+                    <td class="dt-value">${peso}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Ano de Fabricação:</td>
+                    <td class="dt-value">${ano}</td>
+                    <td class="dt-label">Destinação:</td>
+                    <td class="dt-value" style="font-weight: bold;">${dest}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Local no Cofre:</td>
+                    <td class="dt-value" colspan="3"><strong>Espaço ${vault.code}</strong> • ${unit ? unit.name : ''}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Observações / Detalhes:</td>
+                    <td class="dt-value" colspan="3" style="color: #475569; font-style: ${s.additionalInfo ? 'normal' : 'italic'};">
+                      ${s.additionalInfo || 'Padrão / Sem informações adicionais registradas.'}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="info-footer-box">
+                <strong>TERMO DE RESPONSABILIDADE E CONFERÊNCIA FÍSICA:</strong>
+                Declaro para os devidos fins que o material bélico discriminado acima encontra-se devidamente conferido, acondicionado e registrado no local do cofre <strong>${vault.code}</strong> sob responsabilidade da equipe de Armaria desta Unidade.
+              </div>
+
+              <div class="signatures">
+                <div class="sig-line">
+                  ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Armaria</span>
+                </div>
+                <div class="sig-line">
+                  Chefia da Unidade Policial<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+                </div>
+              </div>
+
+              <div class="footer">
+                Página ${idx + 1} de ${storedAmmo.length} • Relatório individual de objeto emitido em ${new Date().toLocaleString('pt-BR')} via Sistema de Armaria PCMG.
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    } else if (vault.type === 'ARMAS') {
+      if (storedWeapons.length === 0) {
+        pagesHtml = `
+          <div class="report-page">
+            <div class="header">
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">SISTEMA DE ARMARIA • RELATÓRIO OFICIAL DE COFRE DE ARMAS</div>
+              </div>
+              <div class="badge">
+                COFRE<br>
+                <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+              </div>
+            </div>
+
+            <div class="meta-box">
+              <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+              <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+              <div class="meta-item"><label>Tipo de Cofre:</label> <span>${typeLabel}</span></div>
+              <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px; padding: 30px; text-align: center; margin: 40px 0; color: #475569; font-style: italic;">
+              Espaço de guarda atualmente livre / sem armamentos armazenados.
+            </div>
+
+            <div class="signatures">
+              <div class="sig-line">
+                ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável</span>
+              </div>
+              <div class="sig-line">
+                Chefia da Unidade Policial<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armaria PCMG.
+            </div>
+          </div>
+        `;
+      } else {
+        pagesHtml = storedWeapons.map((w, idx) => {
+          const isLast = idx === storedWeapons.length - 1;
+          return `
+            <div class="report-page ${!isLast ? 'page-break' : ''}">
+              <div class="header">
+                <div>
+                  <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                  <div class="subtitle">SISTEMA DE ARMARIA • FICHA INDIVIDUAL DE ARMAMENTO NO COFRE</div>
+                </div>
+                <div class="badge">
+                  LOCAL COFRE<br>
+                  <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+                </div>
+              </div>
+
+              <div class="meta-box">
+                <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+                <div class="meta-item"><label>Unidade Policial:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+                <div class="meta-item"><label>Tipo de Local:</label> <span>${typeLabel}</span></div>
+                <div class="meta-item"><label>Item / Armamento no Cofre:</label> <span style="color: #b45309;">Página ${idx + 1} de ${storedWeapons.length}</span></div>
+              </div>
+
+              <div class="section-title">DETALHES COMPLETOS DO ARMAMENTO</div>
+
+              <table class="detail-table">
+                <tbody>
+                  <tr>
+                    <td class="dt-label" style="width: 25%;">Armamento / Tipo:</td>
+                    <td class="dt-value" style="font-size: 13px; font-weight: 900; color: #0f172a;">${w.type} ${w.model}</td>
+                    <td class="dt-label" style="width: 20%;">Número de Série:</td>
+                    <td class="dt-value font-mono" style="font-size: 13px; font-weight: 900; color: #b45309;">${w.serialNumber}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Marca / Fabricante:</td>
+                    <td class="dt-value">${w.manufacturer || (w as any).brand || 'N/I'}</td>
+                    <td class="dt-label">Calibre:</td>
+                    <td class="dt-value font-mono" style="font-weight: bold;">${w.caliber}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Estado / Condição:</td>
+                    <td class="dt-value">${(w as any).condition || 'Bom'}</td>
+                    <td class="dt-label">Situação:</td>
+                    <td class="dt-value" style="font-weight: bold;">${(w as any).situation || 'Ativa'}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Destinação:</td>
+                    <td class="dt-value">${(w as any).destination || (w as any).destinacao || 'Operacional'}</td>
+                    <td class="dt-label">Registro SIGMA/SINARM:</td>
+                    <td class="dt-value font-mono">${(w as any).sigma || (w as any).sinarm || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Local no Cofre:</td>
+                    <td class="dt-value" colspan="3"><strong>Espaço ${vault.code}</strong> • Status: <strong>No Cofre</strong></td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="info-footer-box">
+                <strong>CONFERÊNCIA FÍSICA DE ARMARIA:</strong>
+                Armamento devidamente conferido em depósito físico, inventariado no local do cofre <strong>${vault.code}</strong>.
+              </div>
+
+              <div class="signatures">
+                <div class="sig-line">
+                  ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável</span>
+                </div>
+                <div class="sig-line">
+                  Chefia da Unidade Policial<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+                </div>
+              </div>
+
+              <div class="footer">
+                Página ${idx + 1} de ${storedWeapons.length} • Relatório individual de armamento emitido em ${new Date().toLocaleString('pt-BR')} via Sistema de Armaria PCMG.
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    } else {
+      if (storedExplosives.length === 0) {
+        pagesHtml = `
+          <div class="report-page">
+            <div class="header">
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">SISTEMA DE ARMARIA • RELATÓRIO OFICIAL DE PAIOL / EXPLOSIVOS</div>
+              </div>
+              <div class="badge">
+                PAIOL<br>
+                <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+              </div>
+            </div>
+
+            <div class="meta-box">
+              <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+              <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+              <div class="meta-item"><label>Tipo:</label> <span>${typeLabel}</span></div>
+              <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px; padding: 30px; text-align: center; margin: 40px 0; color: #475569; font-style: italic;">
+              Paiol atualmente livre / sem materiais explosivos armazenados.
+            </div>
+
+            <div class="signatures">
+              <div class="sig-line">
+                ${currentUser.name} (MASP: ${currentUser.masp || 'Explosivista'})<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Responsável pelo Paiol</span>
+              </div>
+              <div class="sig-line">
+                Chefia da Unidade Policial<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armaria PCMG.
+            </div>
+          </div>
+        `;
+      } else {
+        pagesHtml = storedExplosives.map((e, idx) => {
+          const isLast = idx === storedExplosives.length - 1;
+          return `
+            <div class="report-page ${!isLast ? 'page-break' : ''}">
+              <div class="header">
+                <div>
+                  <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                  <div class="subtitle">SISTEMA DE ARMARIA • FICHA INDIVIDUAL DE MATERIAL EXPLOSIVO</div>
+                </div>
+                <div class="badge">
+                  LOCAL PAIOL<br>
+                  <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+                </div>
+              </div>
+
+              <div class="meta-box">
+                <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+                <div class="meta-item"><label>Unidade Policial:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+                <div class="meta-item"><label>Tipo de Local:</label> <span>${typeLabel}</span></div>
+                <div class="meta-item"><label>Item / Material:</label> <span style="color: #dc2626;">Página ${idx + 1} de ${storedExplosives.length}</span></div>
+              </div>
+
+              <div class="section-title">DETALHES COMPLETOS DO MATERIAL EXPLOSIVO</div>
+
+              <table class="detail-table">
+                <tbody>
+                  <tr>
+                    <td class="dt-label" style="width: 25%;">Material / Nome:</td>
+                    <td class="dt-value" style="font-size: 13px; font-weight: 900; color: #0f172a;">${e.nome}</td>
+                    <td class="dt-label" style="width: 20%;">Quantidade:</td>
+                    <td class="dt-value" style="font-size: 13px; font-weight: 900; color: #dc2626;">${e.quantidade} ${e.unidadeMedida}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Tipo / Subtipo:</td>
+                    <td class="dt-value">${e.tipo} ${e.subtipo ? `(${e.subtipo})` : ''}</td>
+                    <td class="dt-label">Lote:</td>
+                    <td class="dt-value font-mono" style="font-weight: bold;">${e.lote}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Status:</td>
+                    <td class="dt-value" style="font-weight: bold;">${e.status}</td>
+                    <td class="dt-label">Validade:</td>
+                    <td class="dt-value">${e.dataValidade || (e as any).validade || 'N/A'}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Destinação / Finalidade:</td>
+                    <td class="dt-value" colspan="3">${(e as any).destinacao || e.observacoes || 'Operacional'}</td>
+                  </tr>
+                  <tr>
+                    <td class="dt-label">Local no Paiol:</td>
+                    <td class="dt-value" colspan="3"><strong>Espaço ${vault.code}</strong> • ${unit ? unit.name : ''}</td>
+                  </tr>
+                </tbody>
+              </table>
+
+              <div class="info-footer-box">
+                <strong>CONFERÊNCIA DE PAIOL:</strong>
+                Material explosivo devidamente catalogado e armazenado conforme normas técnicas de segurança.
+              </div>
+
+              <div class="signatures">
+                <div class="sig-line">
+                  ${currentUser.name} (MASP: ${currentUser.masp || 'Explosivista'})<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Responsável pelo Paiol</span>
+                </div>
+                <div class="sig-line">
+                  Chefia da Unidade Policial<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
+                </div>
+              </div>
+
+              <div class="footer">
+                Página ${idx + 1} de ${storedExplosives.length} • Relatório individual emitido em ${new Date().toLocaleString('pt-BR')} via Sistema de Armaria PCMG.
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
 
     const html = `
       <!DOCTYPE html>
@@ -353,83 +691,123 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         <meta charset="UTF-8">
         <title>Inventário do Cofre - Espaço ${vault.code}</title>
         <style>
-          @page { size: A4; margin: 15mm; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
-          .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 12px; margin-bottom: 16px; }
-          .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
+          @page { size: A4 portrait; margin: 12mm 15mm; }
+          body {
+            font-family: Arial, Helvetica, sans-serif;
+            color: #111827;
+            background: #fff;
+            margin: 0;
+            padding: 0;
+            font-size: 11px;
+            line-height: 1.4;
+          }
+          .report-page {
+            box-sizing: border-box;
+            min-height: 260mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 10px 0;
+          }
+          .page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 2px solid #000;
+            padding-bottom: 10px;
+            margin-bottom: 14px;
+          }
+          .title { font-size: 14px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.5px; color: #000; }
           .subtitle { font-size: 11px; font-weight: 700; color: #374151; margin-top: 2px; }
-          .badge { background: #f3f4f6; border: 1px solid #d1d5db; padding: 8px 12px; border-radius: 6px; font-family: monospace; text-align: right; }
-          .meta-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; margin-bottom: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-family: monospace; }
-          .meta-item label { font-size: 9px; font-weight: bold; color: #6b7280; text-transform: uppercase; display: block; }
-          .meta-item span { font-size: 12px; font-weight: bold; color: #111827; }
-          table { width: 100%; border-collapse: collapse; margin-bottom: 30px; font-size: 11px; }
-          th { background: #111827; color: #fff; text-align: left; padding: 8px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.5px; }
-          .signatures { margin-top: 50px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center; font-family: monospace; font-size: 11px; }
-          .sig-line { border-top: 1px solid #000; padding-top: 8px; font-weight: bold; }
-          .footer { margin-top: 35px; text-align: center; font-size: 9px; color: #6b7280; font-family: monospace; border-top: 1px solid #e5e7eb; padding-top: 10px; }
+          .badge {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            text-align: right;
+            font-size: 9px;
+            font-weight: bold;
+          }
+          .meta-box {
+            background: #f8fafc;
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
+            padding: 10px 14px;
+            margin-bottom: 16px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px 16px;
+          }
+          .meta-item label { font-size: 9px; font-weight: bold; color: #64748b; text-transform: uppercase; display: block; }
+          .meta-item span { font-size: 11px; font-weight: bold; color: #0f172a; }
+          .section-title {
+            font-size: 11px;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            background: #0f172a;
+            color: #fff;
+            padding: 6px 10px;
+            border-radius: 4px 4px 0 0;
+            margin-top: 10px;
+          }
+          table.detail-table {
+            width: 100%;
+            border-collapse: collapse;
+            border: 1px solid #cbd5e1;
+            margin-bottom: 20px;
+          }
+          table.detail-table td {
+            padding: 8px 10px;
+            border: 1px solid #e2e8f0;
+            font-size: 11px;
+          }
+          td.dt-label {
+            background: #f8fafc;
+            font-weight: bold;
+            color: #475569;
+            text-transform: uppercase;
+            font-size: 10px;
+          }
+          td.dt-value {
+            color: #1e293b;
+          }
+          .info-footer-box {
+            background: #f8fafc;
+            border-left: 3px solid #0f172a;
+            padding: 8px 12px;
+            font-size: 9.5px;
+            color: #334155;
+            line-height: 1.45;
+            margin-bottom: 30px;
+          }
+          .signatures {
+            margin-top: 30px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+            text-align: center;
+            font-size: 10px;
+          }
+          .sig-line { border-top: 1px solid #000; padding-top: 6px; font-weight: bold; }
+          .footer {
+            margin-top: 25px;
+            text-align: center;
+            font-size: 9px;
+            color: #64748b;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 8px;
+            font-family: monospace;
+          }
         </style>
       </head>
       <body>
-        <div class="header">
-          <div>
-            <div class="title">POLÍCIA CIVIL • ESTADO DE MINAS GERAIS</div>
-            <div class="subtitle">SISTEMA DE ARMARIA • INVENTÁRIO FÍSICO DE ESPAÇO NO COFRE</div>
-          </div>
-          <div class="badge">
-            CÓDIGO COFRE<br>
-            <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
-          </div>
-        </div>
-
-        <div class="meta-box">
-          <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
-          <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
-          <div class="meta-item"><label>Tipo de Cofre:</label> <span>${typeLabel}</span></div>
-          <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
-        </div>
-
-        <h3 style="font-size: 12px; text-transform: uppercase; margin-bottom: 8px; border-bottom: 1px solid #111827; padding-bottom: 4px;">
-          CONTEÚDO ATUAL ARMAZENADO NO ESPAÇO (${typeLabel})
-        </h3>
-
-        <table>
-          <thead>
-            ${vault.type === 'ARMAS' ? `
-              <tr>
-                <th style="width: 40px;">#</th>
-                <th>Armamento / Modelo</th>
-                <th>Nº de Série</th>
-                <th>Calibre</th>
-                <th>Estado / Situação</th>
-              </tr>
-            ` : `
-              <tr>
-                <th style="width: 40px;">#</th>
-                <th>Calibre</th>
-                <th>Lote</th>
-                <th>Quantidade Armazenada</th>
-              </tr>
-            `}
-          </thead>
-          <tbody>
-            ${contentRowsHtml}
-          </tbody>
-        </table>
-
-        <div class="signatures">
-          <div class="sig-line">
-            ${currentUser.name}<br>
-            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pelo Mapeamento</span>
-          </div>
-          <div class="sig-line">
-            Chefia da Unidade Policial<br>
-            <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Polícia Civil - MG</span>
-          </div>
-        </div>
-
-        <div class="footer">
-          Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armeria PCMG.
-        </div>
+        ${pagesHtml}
       </body>
       </html>
     `;

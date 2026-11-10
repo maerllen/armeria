@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Caliber, AmmunitionStock, AmmunitionMovement, VaultSpace, Department, Unit, AmmoMovementType, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Disc, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, Edit2, Filter, Eye, X, History, FileText } from 'lucide-react';
+import { Disc, Plus, ArrowUpRight, ArrowDownLeft, ArrowRightLeft, AlertCircle, AlertTriangle, Check, Shield, Search, Trash2, Printer, RotateCcw, UserX, UserCheck, Building, ChevronDown, ChevronUp, ChevronRight, Edit2, Filter, Eye, X, History, FileText } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ModalTransferirMunicao } from './ModalTransferirMunicao';
@@ -72,10 +72,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [returnTargetMov, setReturnTargetMov] = useState<AmmunitionMovement | null>(null);
   const [returnQuantity, setReturnQuantity] = useState<number>(0);
 
-  // General Filters
+  // General Filters & Search
+  const [searchTerm, setSearchTerm] = useState('');
   const [filterCaliberId, setFilterCaliberId] = useState('');
-  const [filterDepartmentId, setFilterDepartmentId] = useState('');
-  const [filterUnitId, setFilterUnitId] = useState('');
+  const [filterDepartmentId, setFilterDepartmentId] = useState<string>(() => {
+    if (currentUser.role === 'Geral') return 'ALL';
+    return currentUser.departmentId || '';
+  });
+  const [filterUnitId, setFilterUnitId] = useState<string>(() => {
+    if (currentUser.role === 'Geral') return 'ALL';
+    return currentUser.unitId || '';
+  });
+
+  // Modal de Seleção de Cofres para Impressão
+  const [showPrintVaultSelectModal, setShowPrintVaultSelectModal] = useState(false);
+  const [selectedVaultIdsForReport, setSelectedVaultIdsForReport] = useState<string[]>([]);
 
   // Expanded departments accordion
   const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
@@ -830,53 +841,175 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     printDocumentInPage(html);
   };
 
-  // Impressão do Relatório Completo de Todas as Munições da Unidade com Detalhes de Cada Cofre
-  const handlePrintUnitAmmoReport = () => {
-    const targetUnitId = filterUnitId || currentUser.unitId || (units.length > 0 ? units[0].id : '');
-    const unit = units.find(u => u.id === targetUnitId) || { id: targetUnitId, name: 'Unidade Policial', departmentId: '' };
-    const dept = departments.find(d => d.id === unit.departmentId) || departments.find(d => d.id === currentUser.departmentId);
-
-    // Todas as munições pertencentes a esta unidade
-    const unitStocks = stocks.filter(s => s.unitId === targetUnitId || (!s.unitId && s.departmentId === dept?.id));
-
-    // Todos os cofres vinculados à unidade
-    const unitVaults = vaultSpaces.filter(v => (!v.unitId || v.unitId === targetUnitId));
-    unitStocks.forEach(s => {
-      if (s.vaultSpaceId && !unitVaults.some(v => v.id === s.vaultSpaceId)) {
-        const found = vaultSpaces.find(v => v.id === s.vaultSpaceId);
-        if (found) unitVaults.push(found);
+  // Candidatos de cofres de MUNIÇÕES para o relatório
+  const candidateAmmoVaults = useMemo(() => {
+    let list = vaultSpaces.filter(v => v.type === 'MUNIÇÕES');
+    if (filterUnitId && filterUnitId !== 'ALL') {
+      list = list.filter(v => v.unitId === filterUnitId || (!v.unitId && v.departmentId === filterDepartmentId));
+    } else if (filterDepartmentId && filterDepartmentId !== 'ALL') {
+      list = list.filter(v => v.departmentId === filterDepartmentId);
+    } else if (!isGeral) {
+      if (currentUser.unitId) {
+        list = list.filter(v => v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === currentUser.departmentId));
+      } else if (currentUser.departmentId) {
+        list = list.filter(v => v.departmentId === currentUser.departmentId);
       }
-    });
+    }
+    return list;
+  }, [vaultSpaces, filterUnitId, filterDepartmentId, isGeral, currentUser]);
 
-    const totalCartuchos = unitStocks.reduce((sum, s) => sum + s.quantity, 0);
-    const totalCalibres = new Set(unitStocks.map(s => s.caliberId)).size;
-    const totalLotes = new Set(unitStocks.map(s => s.loteMunicao).filter(Boolean)).size;
+  const handleOpenPrintVaultModal = () => {
+    const defaultIds = candidateAmmoVaults.map(v => v.id);
+    setSelectedVaultIdsForReport(defaultIds);
+    setShowPrintVaultSelectModal(true);
+  };
 
-    // Resumo consolidado por calibre
-    const caliberMap = new Map<string, { caliberName: string; total: number; vaults: Map<string, number> }>();
-    unitStocks.forEach(s => {
-      const cal = calibers.find(c => c.id === s.caliberId);
-      const calName = cal ? cal.name : s.caliberId;
-      if (!caliberMap.has(s.caliberId)) {
-        caliberMap.set(s.caliberId, {
-          caliberName,
-          total: 0,
-          vaults: new Map()
-        });
-      }
-      const item = caliberMap.get(s.caliberId)!;
-      item.total += s.quantity;
-      const vObj = vaultSpaces.find(v => v.id === s.vaultSpaceId);
-      const vCode = vObj ? vObj.code : 'Outros';
-      item.vaults.set(vCode, (item.vaults.get(vCode) || 0) + s.quantity);
-    });
+  // Impressão de Relatório de Munições por Cofre (um cofre por página, selecionados pelo usuário em comando único)
+  const handlePrintUnitAmmoReport = (vaultIdsToPrint?: string[]) => {
+    const targetVaults = (vaultIdsToPrint && vaultIdsToPrint.length > 0)
+      ? vaultSpaces.filter(v => v.type === 'MUNIÇÕES' && vaultIdsToPrint.includes(v.id))
+      : candidateAmmoVaults;
+
+    if (targetVaults.length === 0) {
+      setErrorMsg('Nenhum cofre de munições selecionado para impressão.');
+      return;
+    }
+
+    const defaultUnitId = filterUnitId && filterUnitId !== 'ALL' ? filterUnitId : currentUser.unitId || (units.length > 0 ? units[0].id : '');
+    const defaultUnit = units.find(u => u.id === defaultUnitId) || { id: defaultUnitId, name: 'Unidade Policial', departmentId: '' };
+    const defaultDept = departments.find(d => d.id === defaultUnit.departmentId) || departments.find(d => d.id === currentUser.departmentId);
+
+    const vaultsHtml = targetVaults.map((v, idx) => {
+      const vUnit = units.find(u => u.id === v.unitId) || defaultUnit;
+      const vDept = departments.find(d => d.id === (v.departmentId || vUnit.departmentId)) || defaultDept;
+      const vStocks = stocks.filter(s => s.vaultSpaceId === v.id);
+      const vTotal = vStocks.reduce((sum, s) => sum + s.quantity, 0);
+      const isLast = idx === targetVaults.length - 1;
+
+      const vCalibresCount = new Set(vStocks.map(s => s.caliberId)).size;
+      const vLotesCount = new Set(vStocks.map(s => s.loteMunicao).filter(Boolean)).size;
+
+      return `
+        <div class="vault-report-page ${!isLast ? 'page-break' : ''}">
+          <div class="header-table">
+            <div class="title-area">
+              <h2>POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+              <h3>${vDept ? vDept.name : 'DEPARTAMENTO DE POLÍCIA'} - ${vUnit.name}</h3>
+              <h1>RELATÓRIO INDIVIDUAL DE ESTOQUE NO COFRE</h1>
+              <p style="margin: 4px 0 0 0; font-size: 10px; color: #475569;">
+                INVENTÁRIO FÍSICO DO COFRE ${v.code} (MUNIÇÕES) • EMISSÃO: ${new Date().toLocaleString('pt-BR')} • RELATÓRIO ${idx + 1} DE ${targetVaults.length}
+              </p>
+            </div>
+          </div>
+
+          <div class="vault-banner">
+            <div>
+              <span class="vault-title">COFRE: ${v.code}</span>
+              <span class="vault-type-badge">COFRE PARA MUNIÇÕES</span>
+            </div>
+            <div class="vault-unit-info">
+              Unidade: <strong>${vUnit.name}</strong> • Depto: <strong>${vDept ? vDept.name : 'PCMG'}</strong>
+            </div>
+          </div>
+
+          <div class="summary-card">
+            <div class="summary-item">
+              <div class="label">Total no Cofre</div>
+              <div class="val">${vTotal.toLocaleString('pt-BR')} un.</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Calibres Distintos</div>
+              <div class="val">${vCalibresCount}</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Lotes Distintos</div>
+              <div class="val">${vLotesCount}</div>
+            </div>
+            <div class="summary-item">
+              <div class="label">Status do Local</div>
+              <div class="val" style="color: ${vTotal > 0 ? '#0284c7' : '#64748b'};">${vTotal > 0 ? 'ATIVO COM CARGA' : 'LIVRE / SEM MUNIÇÕES'}</div>
+            </div>
+          </div>
+
+          <h4 style="margin: 12px 0 6px 0; font-size: 11px; text-transform: uppercase; background: #0f172a; color: #fff; padding: 5px 8px; border-radius: 3px;">
+            MUNIÇÕES ESTOCADAS NO COFRE ${v.code}
+          </h4>
+
+          ${vStocks.length === 0 ? `
+            <div style="background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; padding: 25px; text-align: center; color: #64748b; font-style: italic; margin: 15px 0;">
+              Nenhuma munição estocada neste cofre no momento.
+            </div>
+          ` : `
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width: 18%;">Calibre</th>
+                  <th style="width: 14%;">Fabricante</th>
+                  <th style="width: 16%;">Tipo / Projétil</th>
+                  <th style="width: 10%;">Peso</th>
+                  <th style="width: 14%;">Lote</th>
+                  <th style="width: 8%;">Ano</th>
+                  <th style="width: 10%;">Destinação</th>
+                  <th style="width: 10%; text-align: right;">Quantidade</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${vStocks.map(s => {
+                  const cal = calibers.find(c => c.id === s.caliberId);
+                  const calName = cal ? cal.name : s.caliberId;
+                  const fab = s.fabricante || cal?.fabricante || 'CBC';
+                  const tipo = s.tipoMunicao || cal?.tipo || 'COMUM';
+                  const peso = s.pesoMunicao || cal?.peso || 'N/I';
+                  const lote = s.loteMunicao || 'S/L';
+                  const ano = s.anoFabricacao || 'N/A';
+                  const dest = s.destinacao || 'Operacional';
+
+                  return `
+                    <tr>
+                      <td><strong>${calName}</strong></td>
+                      <td>${fab}</td>
+                      <td>${tipo}</td>
+                      <td>${peso}</td>
+                      <td style="font-family: monospace; font-weight: bold; color: #b45309;">${lote}</td>
+                      <td>${ano}</td>
+                      <td>${dest}</td>
+                      <td class="qty-col">${s.quantity.toLocaleString('pt-BR')} un.</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+            <div class="vault-footer">
+              Subtotal do Cofre ${v.code}: ${vTotal.toLocaleString('pt-BR')} cartuchos
+            </div>
+          `}
+
+          <div class="signatures">
+            <div class="sig-box">
+              <strong>${currentUser.name}</strong><br/>
+              MASP: ${currentUser.masp || 'Armeiro'}<br/>
+              Armeiro / Responsável pelo Material Bélico
+            </div>
+            <div class="sig-box">
+              <strong>Delegado(a) de Polícia / Titular</strong><br/>
+              Chefia da ${vUnit.name}<br/>
+              Polícia Civil de Minas Gerais
+            </div>
+          </div>
+
+          <div class="footer-note">
+            Cofre ${v.code} (Relatório ${idx + 1} de ${targetVaults.length}) • Documento gerado eletronicamente pelo Sistema de Armaria PCMG • ${new Date().toLocaleString('pt-BR')}
+          </div>
+        </div>
+      `;
+    }).join('');
 
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Relatório de Munições - ${unit.name}</title>
+        <title>Relatório de Cofres de Munições - ${defaultUnit.name}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           body {
@@ -888,6 +1021,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             padding: 0;
             line-height: 1.35;
           }
+          .vault-report-page {
+            box-sizing: border-box;
+            min-height: 260mm;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 8px 0;
+          }
+          .page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
           .header-table {
             width: 100%;
             border-bottom: 2px solid #000;
@@ -895,9 +1040,22 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             margin-bottom: 12px;
           }
           .title-area { text-align: center; }
-          .title-area h2 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.5px; }
-          .title-area h3 { margin: 3px 0 0 0; font-size: 12px; font-weight: normal; text-transform: uppercase; }
-          .title-area h1 { margin: 8px 0 0 0; font-size: 15px; font-weight: bold; text-decoration: underline; }
+          .title-area h2 { margin: 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+          .title-area h3 { margin: 2px 0 0 0; font-size: 11px; font-weight: normal; text-transform: uppercase; }
+          .title-area h1 { margin: 6px 0 0 0; font-size: 14px; font-weight: bold; text-decoration: underline; }
+          .vault-banner {
+            background: #0f172a;
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+          }
+          .vault-title { font-size: 14px; font-weight: 900; font-family: monospace; letter-spacing: 0.5px; }
+          .vault-type-badge { background: #0284c7; color: #fff; font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; margin-left: 8px; }
+          .vault-unit-info { font-size: 10px; color: #cbd5e1; }
           .summary-card {
             display: flex;
             justify-content: space-between;
@@ -905,49 +1063,33 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             border: 1px solid #cbd5e1;
             border-radius: 4px;
             padding: 8px 14px;
-            margin-bottom: 14px;
+            margin-bottom: 12px;
           }
           .summary-item { text-align: center; }
           .summary-item .label { font-size: 9px; text-transform: uppercase; color: #475569; font-weight: bold; }
-          .summary-item .val { font-size: 15px; font-weight: 900; color: #0f172a; font-family: monospace; }
-          .vault-section {
-            margin-bottom: 16px;
-            border: 1px solid #94a3b8;
-            border-radius: 4px;
-            overflow: hidden;
-            page-break-inside: avoid;
-          }
-          .vault-header {
-            background: #0f172a;
-            color: #fff;
-            padding: 6px 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-          }
-          .vault-header h4 { margin: 0; font-size: 12px; text-transform: uppercase; font-family: monospace; }
-          .vault-badge { background: #334155; padding: 2px 7px; border-radius: 3px; font-size: 10px; font-weight: bold; }
+          .summary-item .val { font-size: 14px; font-weight: 900; color: #0f172a; font-family: monospace; }
           table.data-table {
             width: 100%;
             border-collapse: collapse;
             font-size: 10px;
+            border: 1px solid #cbd5e1;
           }
           table.data-table th {
             background: #f1f5f9;
             color: #1e293b;
             font-weight: bold;
             text-align: left;
-            padding: 5px 6px;
+            padding: 6px;
             border-bottom: 1px solid #cbd5e1;
             text-transform: uppercase;
             font-size: 9px;
           }
           table.data-table td {
-            padding: 5px 6px;
+            padding: 6px;
             border-bottom: 1px solid #e2e8f0;
           }
           table.data-table tr:nth-child(even) { background: #f8fafc; }
-          .qty-col { text-align: right; font-family: monospace; font-weight: bold; font-size: 11px; }
+          .qty-col { text-align: right; font-family: monospace; font-weight: bold; font-size: 11px; color: #0369a1; }
           .vault-footer {
             background: #f1f5f9;
             padding: 5px 10px;
@@ -955,13 +1097,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             justify-content: flex-end;
             font-weight: bold;
             font-size: 10px;
-            border-top: 1px solid #cbd5e1;
+            border: 1px solid #cbd5e1;
+            border-top: none;
+            margin-bottom: 15px;
           }
           .signatures {
             margin-top: 25px;
             display: flex;
             justify-content: space-between;
-            page-break-inside: avoid;
           }
           .sig-box {
             width: 45%;
@@ -971,157 +1114,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             font-size: 10px;
           }
           .footer-note {
-            margin-top: 18px;
+            margin-top: 15px;
             text-align: center;
             font-size: 9px;
             color: #64748b;
             border-top: 1px dashed #cbd5e1;
             padding-top: 6px;
+            font-family: monospace;
           }
         </style>
       </head>
       <body>
-        <div class="header-table">
-          <div class="title-area">
-            <h2>POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
-            <h3>${dept ? dept.name : 'DEPARTAMENTO DE POLÍCIA'} - ${unit.name}</h3>
-            <h1>RELATÓRIO GERAL DE ESTOQUE DE MUNIÇÕES POR COFRE</h1>
-            <p style="margin: 4px 0 0 0; font-size: 10px; color: #475569;">
-              INVENTÁRIO FÍSICO DETALHADO POR LOCAL DE ARMAZENAMENTO • EMISSÃO: ${new Date().toLocaleString('pt-BR')}
-            </p>
-          </div>
-        </div>
-
-        <div class="summary-card">
-          <div class="summary-item">
-            <div class="label">Total Geral de Cartuchos</div>
-            <div class="val">${totalCartuchos.toLocaleString('pt-BR')} un.</div>
-          </div>
-          <div class="summary-item">
-            <div class="label">Cofres na Unidade</div>
-            <div class="val">${unitVaults.length} cofre(s)</div>
-          </div>
-          <div class="summary-item">
-            <div class="label">Calibres Distintos</div>
-            <div class="val">${totalCalibres}</div>
-          </div>
-          <div class="summary-item">
-            <div class="label">Lotes Cadastrados</div>
-            <div class="val">${totalLotes}</div>
-          </div>
-        </div>
-
-        <!-- Detalhamento Individual de Cada Cofre -->
-        ${unitVaults.map(v => {
-          const vStocks = unitStocks.filter(s => s.vaultSpaceId === v.id);
-          const vTotal = vStocks.reduce((sum, s) => sum + s.quantity, 0);
-
-          return `
-            <div class="vault-section">
-              <div class="vault-header">
-                <h4>COFRE: ${v.code} ${v.type ? `(${v.type})` : ''}</h4>
-                <div class="vault-badge">${vTotal.toLocaleString('pt-BR')} cartuchos</div>
-              </div>
-              ${vStocks.length === 0 ? `
-                <div style="padding: 10px; color: #64748b; font-style: italic; text-align: center; font-size: 10px;">
-                  Nenhuma munição estocada neste cofre no momento.
-                </div>
-              ` : `
-                <table class="data-table">
-                  <thead>
-                    <tr>
-                      <th style="width: 18%;">Calibre</th>
-                      <th style="width: 14%;">Fabricante</th>
-                      <th style="width: 15%;">Tipo / Projétil</th>
-                      <th style="width: 10%;">Peso</th>
-                      <th style="width: 15%;">Lote</th>
-                      <th style="width: 8%;">Ano</th>
-                      <th style="width: 10%;">Destinação</th>
-                      <th style="width: 10%; text-align: right;">Quantidade</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    ${vStocks.map(s => {
-                      const cal = calibers.find(c => c.id === s.caliberId);
-                      const calName = cal ? cal.name : s.caliberId;
-                      const fab = s.fabricante || cal?.fabricante || 'CBC';
-                      const tipo = s.tipoMunicao || cal?.tipo || 'COMUM';
-                      const peso = s.pesoMunicao || cal?.peso || 'N/I';
-                      const lote = s.loteMunicao || 'S/L';
-                      const ano = s.anoFabricacao || 'N/A';
-                      const dest = s.destinacao || 'Operacional';
-
-                      return `
-                        <tr>
-                          <td><strong>${calName}</strong></td>
-                          <td>${fab}</td>
-                          <td>${tipo}</td>
-                          <td>${peso}</td>
-                          <td style="font-family: monospace; font-weight: bold;">${lote}</td>
-                          <td>${ano}</td>
-                          <td>${dest}</td>
-                          <td class="qty-col">${s.quantity.toLocaleString('pt-BR')} un.</td>
-                        </tr>
-                      `;
-                    }).join('')}
-                  </tbody>
-                </table>
-                <div class="vault-footer">
-                  Subtotal do Cofre ${v.code}: ${vTotal.toLocaleString('pt-BR')} cartuchos
-                </div>
-              `}
-            </div>
-          `;
-        }).join('')}
-
-        <!-- Consolidação Geral por Calibre na Unidade -->
-        <div style="margin-top: 14px; page-break-inside: avoid;">
-          <h4 style="margin: 0 0 6px 0; font-size: 11px; text-transform: uppercase; background: #e2e8f0; padding: 4px 8px; border-left: 3px solid #0f172a;">
-            CONSOLIDAÇÃO GERAL POR CALIBRE NA UNIDADE
-          </h4>
-          <table class="data-table" style="border: 1px solid #cbd5e1;">
-            <thead>
-              <tr style="background: #f1f5f9;">
-                <th style="width: 30%;">Calibre</th>
-                <th style="width: 30%;">Distribuição nos Cofres</th>
-                <th style="width: 20%; text-align: right;">Total na Unidade</th>
-                <th style="width: 20%; text-align: right;">% do Arsenal</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${Array.from(caliberMap.values()).map(cItem => {
-                const pct = totalCartuchos > 0 ? ((cItem.total / totalCartuchos) * 100).toFixed(1) : '0';
-                const vaultsStr = Array.from(cItem.vaults.entries()).map(([vCode, q]) => `${vCode}: ${q.toLocaleString('pt-BR')} un.`).join(' • ');
-
-                return `
-                  <tr>
-                    <td><strong>${cItem.caliberName}</strong></td>
-                    <td style="font-size: 9px; color: #334155;">${vaultsStr}</td>
-                    <td class="qty-col">${cItem.total.toLocaleString('pt-BR')} un.</td>
-                    <td style="text-align: right; font-family: monospace;">${pct}%</td>
-                  </tr>
-                `;
-              }).join('')}
-            </tbody>
-          </table>
-        </div>
-
-        <div class="signatures">
-          <div class="sig-box">
-            <strong>${currentUser.name}</strong><br/>
-            MASP: ${currentUser.masp || 'Armeiro'}<br/>
-            Armeiro / Responsável pelo Material Bélico
-          </div>
-          <div class="sig-box">
-            <strong>Delegado(a) de Polícia / Titular</strong><br/>
-            Chefia da ${unit.name}<br/>
-            Polícia Civil de Minas Gerais
-          </div>
-        </div>
-
-        <div class="footer-note">
-          Documento oficial gerado eletronicamente pelo Sistema Integrado de Gestão de Armaria e Munições - PCMG • ${new Date().toLocaleString('pt-BR')}
-        </div>
+        ${vaultsHtml}
       </body>
       </html>
     `;
@@ -1167,15 +1171,55 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const visibleDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
 
   // Available units filtered by department filter
-  const availableUnitsForFilter = filterDepartmentId
+  const availableUnitsForFilter = (filterDepartmentId && filterDepartmentId !== 'ALL')
     ? units.filter(u => u.departmentId === filterDepartmentId)
-    : units;
+    : (isGeral ? units : units.filter(u => u.departmentId === currentUser.departmentId));
 
-  // Filtered stocks according to global filters
+  const canSelectAllUnits = isGeral || currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
+  const selectedDepartmentObj = departments.find(d => d.id === filterDepartmentId);
+  const selectedUnitObj = units.find(u => u.id === filterUnitId);
+
+  // Filtered stocks according to global filters and active search term across all fields
+  const term = searchTerm.toLowerCase().trim();
   const filteredStocks = stocks.filter(s => {
     if (filterCaliberId && s.caliberId !== filterCaliberId) return false;
-    if (filterDepartmentId && s.departmentId !== filterDepartmentId) return false;
-    if (filterUnitId && s.unitId !== filterUnitId) return false;
+    if (filterDepartmentId && filterDepartmentId !== 'ALL' && s.departmentId !== filterDepartmentId) return false;
+    if (filterUnitId && filterUnitId !== 'ALL' && s.unitId !== filterUnitId) return false;
+
+    if (term) {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      const vault = vaultSpaces.find(v => v.id === s.vaultSpaceId);
+      const unit = units.find(u => u.id === s.unitId);
+      const dept = departments.find(d => d.id === s.departmentId);
+
+      const calName = (cal?.name || s.caliberId || '').toLowerCase();
+      const fab = (s.fabricante || cal?.fabricante || '').toLowerCase();
+      const lote = (s.loteMunicao || '').toLowerCase();
+      const tipo = (s.tipoMunicao || cal?.tipo || '').toLowerCase();
+      const peso = (s.pesoMunicao || cal?.peso || '').toLowerCase();
+      const ano = (s.anoFabricacao?.toString() || '').toLowerCase();
+      const dest = (s.destinacao || '').toLowerCase();
+      const vCode = (vault?.code || '').toLowerCase();
+      const uName = (unit?.name || '').toLowerCase();
+      const dName = (dept?.name || '').toLowerCase();
+      const addInfo = (s.additionalInfo || '').toLowerCase();
+
+      const matches =
+        calName.includes(term) ||
+        fab.includes(term) ||
+        lote.includes(term) ||
+        tipo.includes(term) ||
+        peso.includes(term) ||
+        ano.includes(term) ||
+        dest.includes(term) ||
+        vCode.includes(term) ||
+        uName.includes(term) ||
+        dName.includes(term) ||
+        addInfo.includes(term);
+
+      if (!matches) return false;
+    }
+
     return true;
   });
 
@@ -1186,8 +1230,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     const vault = vaultSpaces.find(v => v.id === m.vaultSpaceId);
     const movDeptId = m.departmentId || vault?.departmentId;
     const movUnitId = m.unitId || vault?.unitId;
-    if (filterDepartmentId && movDeptId && movDeptId !== filterDepartmentId) return false;
-    if (filterUnitId && movUnitId && movUnitId !== filterUnitId) return false;
+    if (filterDepartmentId && filterDepartmentId !== 'ALL' && movDeptId && movDeptId !== filterDepartmentId) return false;
+    if (filterUnitId && filterUnitId !== 'ALL' && movUnitId && movUnitId !== filterUnitId) return false;
 
     // Column text/dropdown filters
     if (colFilterData && !formatTimestamp(m.createdAt).toLowerCase().includes(colFilterData.toLowerCase())) return false;
@@ -1296,9 +1340,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               {/* Botão de Relatório de Munições da Unidade por Cofre */}
               <button
                 type="button"
-                onClick={handlePrintUnitAmmoReport}
+                onClick={handleOpenPrintVaultModal}
                 className="bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-                title="Imprimir relatório completo de todas as munições da unidade com detalhes de cada cofre"
+                title="Imprimir relatório completo de todas as munições da unidade com seleção de cofres"
               >
                 <Printer className="w-4 h-4 text-amber-400" />
                 <span>Relatório da Unidade por Cofre</span>
@@ -1322,86 +1366,211 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         </div>
       )}
 
-      {/* Global Filter Bar (Calibre, Departamento, Unidade) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+      {/* STEP 1: Seleção de Departamento */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
-            <Filter className="w-4 h-4" />
-            <span>Filtros Globais de Pesquisa</span>
+            <Building className="w-4 h-4" />
+            <span>1. Selecione o Departamento</span>
           </div>
-          <button
-            type="button"
-            onClick={handlePrintUnitAmmoReport}
-            className="flex items-center space-x-1.5 bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm"
-            title="Imprimir relatório completo de todas as munições da unidade com detalhes de cada cofre"
-          >
-            <Printer className="w-3.5 h-3.5 text-amber-400" />
-            <span>Imprimir Relatório dos Cofres da Unidade</span>
-          </button>
+          <span className="text-xs text-slate-400 font-mono">
+            {visibleDepts.length} departamento(s) disponível(is)
+          </span>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+          {isGeral && (
+            <button
+              onClick={() => {
+                setFilterDepartmentId('ALL');
+                setFilterUnitId('ALL');
+              }}
+              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                filterDepartmentId === 'ALL' || !filterDepartmentId
+                  ? 'bg-amber-500/10 border-amber-500/50 text-slate-100 ring-1 ring-amber-500/30'
+                  : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300'
+              }`}
+            >
+              <div>
+                <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">ESTADO</span>
+                <span className="text-xs font-bold block truncate" title="Todos os Departamentos da Polícia Civil">Todos os Departamentos</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono block">
+                {stocks.reduce((acc, s) => acc + s.quantity, 0)} un. ({stocks.length} lotes)
+              </span>
+            </button>
+          )}
+
+          {visibleDepts.map((d) => {
+            const isSelected = d.id === filterDepartmentId;
+            const deptStocks = stocks.filter(s => s.departmentId === d.id);
+            const deptTotalCartuchos = deptStocks.reduce((acc, s) => acc + s.quantity, 0);
+
+            return (
+              <button
+                key={d.id}
+                onClick={() => {
+                  setFilterDepartmentId(d.id);
+                  const deptUnits = units.filter(u => u.departmentId === d.id);
+                  setFilterUnitId(canSelectAllUnits ? 'ALL' : (deptUnits[0]?.id || ''));
+                }}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                  isSelected
+                    ? 'bg-amber-500/10 border-amber-500/50 text-slate-100 ring-1 ring-amber-500/30'
+                    : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300'
+                }`}
+              >
+                <div>
+                  <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">{d.code}</span>
+                  <span className="text-xs font-bold block truncate" title={d.name}>{d.name}</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono block">
+                  {deptTotalCartuchos} un. ({deptStocks.length} lotes)
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* STEP 2: Seleção de Unidade para o Departamento Selecionado */}
+      {filterDepartmentId && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
+              <ChevronRight className="w-4 h-4" />
+              <span>2. Selecione a Unidade em <strong className="text-slate-100">{filterDepartmentId === 'ALL' ? 'Todos os Departamentos' : (selectedDepartmentObj?.name || 'Departamento')}</strong></span>
+            </div>
+            <span className="text-xs text-slate-400 font-mono">
+              {availableUnitsForFilter.length} unidade(s) encontrada(s)
+            </span>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {canSelectAllUnits && (
+              <button
+                onClick={() => setFilterUnitId('ALL')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
+                  filterUnitId === 'ALL' || !filterUnitId
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                    : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                }`}
+              >
+                <Building className="w-3.5 h-3.5" />
+                <span>Todas as Unidades</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                  filterUnitId === 'ALL' || !filterUnitId ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
+                }`}>
+                  {stocks.filter(s => filterDepartmentId === 'ALL' || !filterDepartmentId ? true : s.departmentId === filterDepartmentId).length} lotes
+                </span>
+              </button>
+            )}
+
+            {availableUnitsForFilter.map((u) => {
+              const isSelected = u.id === filterUnitId;
+              const unitStocks = stocks.filter(s => s.unitId === u.id);
+              const unitTotalCartuchos = unitStocks.reduce((sum, s) => sum + s.quantity, 0);
+
+              return (
+                <button
+                  key={u.id}
+                  onClick={() => setFilterUnitId(u.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
+                    isSelected
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <span>{u.name}</span>
+                  <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                    isSelected ? 'bg-slate-950/30 text-slate-950 font-black' : 'bg-slate-900 text-amber-400 border border-slate-800'
+                  }`}>
+                    {unitStocks.length} lotes ({unitTotalCartuchos} un.)
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* STEP 3: Barra de Pesquisa Completa de Munições & Filtro de Calibre */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
           
-          {/* Calibre Filter */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Filtrar por Calibre</label>
+          {/* Campo de Pesquisa Aberta em Todos os Campos */}
+          <div className="relative flex-1">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Pesquisar munição por calibre, fabricante, lote, tipo, peso, destinação, cofre, ano ou detalhes..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500 transition"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => setSearchTerm('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200 p-1"
+                title="Limpar termo de pesquisa"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center space-x-2 shrink-0">
+            {/* Calibre Filter Dropdown */}
             <select
               value={filterCaliberId}
               onChange={(e) => setFilterCaliberId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+              className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
             >
               <option value="">Todos os Calibres</option>
               {calibers.map(c => (
                 <option key={c.id} value={c.id}>
-                  {c.fabricante ? `[${c.fabricante}] ` : ''}{c.name}{c.tipo ? ` - ${c.tipo}` : ''}{c.peso ? ` (${c.peso})` : ''}
+                  {c.fabricante ? `[${c.fabricante}] ` : ''}{c.name}{c.tipo ? ` - ${c.tipo}` : ''}
                 </option>
               ))}
             </select>
-          </div>
 
-          {/* Departamento Filter */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Filtrar por Departamento</label>
-            <select
-              value={filterDepartmentId}
-              onChange={(e) => {
-                setFilterDepartmentId(e.target.value);
-                setFilterUnitId('');
-              }}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+            {/* Botão de Impressão com Seleção de Cofres */}
+            <button
+              type="button"
+              onClick={handleOpenPrintVaultModal}
+              className="flex items-center space-x-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-2.5 rounded-xl text-xs transition shadow-sm"
+              title="Selecionar quais cofres de munições imprimir (cada cofre em página separada)"
             >
-              <option value="">Todos os Departamentos</option>
-              {visibleDepts.map(d => (
-                <option key={d.id} value={d.id}>{d.name} ({d.code})</option>
-              ))}
-            </select>
+              <Printer className="w-4 h-4 text-slate-950" />
+              <span>Imprimir Relatório de Cofres</span>
+            </button>
           </div>
+        </div>
 
-          {/* Unidade Filter */}
-          <div>
-            <label className="block text-[10px] font-semibold text-slate-400 uppercase mb-1">Filtrar por Unidade</label>
-            <select
-              value={filterUnitId}
-              onChange={(e) => setFilterUnitId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
-            >
-              <option value="">Todas as Unidades</option>
-              {availableUnitsForFilter.map(u => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
+        {/* Linha de Feedback de Resultados da Pesquisa */}
+        <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1 border-t border-slate-800/60">
+          <div className="flex items-center space-x-2">
+            <span>Exibindo: <strong className="text-slate-200 font-mono">{filteredStocks.length}</strong> lote(s) de munição</span>
+            {searchTerm && (
+              <span className="bg-amber-500/10 text-amber-300 border border-amber-500/20 px-2 py-0.5 rounded font-mono text-[10px]">
+                Filtro ativo: "{searchTerm}"
+              </span>
+            )}
           </div>
-
+          <span className="font-mono text-amber-400 font-semibold">
+            {filteredStocks.reduce((acc, s) => acc + s.quantity, 0)} cartuchos totais
+          </span>
         </div>
       </div>
 
       {/* Departments Accordion for Ammunition Stock */}
       <div className="space-y-4">
         {visibleDepts.map((dept) => {
-          if (filterDepartmentId && dept.id !== filterDepartmentId) return null;
+          if (filterDepartmentId && filterDepartmentId !== 'ALL' && dept.id !== filterDepartmentId) return null;
 
           const deptStocks = filteredStocks.filter(s => s.departmentId === dept.id);
-          const isExpanded = filterDepartmentId === dept.id || expandedDeptIds.includes(dept.id);
+          const isExpanded = filterDepartmentId === 'ALL' || filterDepartmentId === dept.id || expandedDeptIds.includes(dept.id);
 
           return (
             <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
@@ -3708,6 +3877,141 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
               >
                 Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Seleção de Cofres para Impressão */}
+      {showPrintVaultSelectModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-2xl shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3 shrink-0">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                  <Printer className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">Imprimir Relatório de Cofres de Munições</h3>
+                  <p className="text-xs text-slate-400">
+                    Selecione quais cofres de munições deseja imprimir. Cada cofre será gerado em página separada no mesmo comando.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrintVaultSelectModal(false)}
+                className="text-slate-400 hover:text-slate-200 p-1.5 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between py-1 px-1 shrink-0">
+              <span className="text-xs text-slate-400 font-mono">
+                {candidateAmmoVaults.length} cofre(s) de munições encontrado(s)
+              </span>
+              <div className="flex items-center space-x-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setSelectedVaultIdsForReport(candidateAmmoVaults.map(v => v.id))}
+                  className="text-amber-400 hover:text-amber-300 font-semibold underline text-xs"
+                >
+                  Selecionar Todos
+                </button>
+                <span className="text-slate-600">|</span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedVaultIdsForReport([])}
+                  className="text-slate-400 hover:text-slate-200 font-semibold underline text-xs"
+                >
+                  Desmarcar Todos
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 max-h-[50vh]">
+              {candidateAmmoVaults.length === 0 ? (
+                <div className="text-center py-8 text-slate-500 text-xs italic bg-slate-950/50 rounded-xl border border-slate-800">
+                  Nenhum cofre de munições encontrado para a unidade ou departamento selecionado.
+                </div>
+              ) : (
+                candidateAmmoVaults.map(v => {
+                  const isChecked = selectedVaultIdsForReport.includes(v.id);
+                  const vUnit = units.find(u => u.id === v.unitId);
+                  const vStocks = stocks.filter(s => s.vaultSpaceId === v.id);
+                  const vTotalQty = vStocks.reduce((sum, s) => sum + s.quantity, 0);
+
+                  return (
+                    <label
+                      key={v.id}
+                      className={`flex items-center justify-between p-3.5 rounded-xl border cursor-pointer transition select-none ${
+                        isChecked
+                          ? 'bg-amber-500/10 border-amber-500/40 text-slate-100'
+                          : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-300'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedVaultIdsForReport(prev => [...prev, v.id]);
+                            } else {
+                              setSelectedVaultIdsForReport(prev => prev.filter(id => id !== v.id));
+                            }
+                          }}
+                          className="w-4 h-4 rounded border-slate-700 text-amber-500 focus:ring-amber-500 bg-slate-900"
+                        />
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <span className="font-mono font-bold text-sm text-slate-100">{v.code}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800">
+                              COFRE PARA MUNIÇÕES
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400">
+                            Unidade: {vUnit ? vUnit.name : 'N/A'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right font-mono">
+                        <div className="text-xs font-bold text-amber-400">
+                          {vTotalQty.toLocaleString('pt-BR')} un.
+                        </div>
+                        <div className="text-[10px] text-slate-500">
+                          {vStocks.length} lote(s)
+                        </div>
+                      </div>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="border-t border-slate-800 pt-4 flex items-center justify-between shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowPrintVaultSelectModal(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={selectedVaultIdsForReport.length === 0}
+                onClick={() => {
+                  setShowPrintVaultSelectModal(false);
+                  handlePrintUnitAmmoReport(selectedVaultIdsForReport);
+                }}
+                className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow transition flex items-center space-x-2"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Cofres Selecionados ({selectedVaultIdsForReport.length})</span>
               </button>
             </div>
           </div>
