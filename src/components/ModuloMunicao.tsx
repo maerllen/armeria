@@ -990,12 +990,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               MASP: ${currentUser.masp || 'Armeiro'}<br/>
               Armeiro / Responsável pelo Material Bélico
             </div>
-            <div class="sig-box">
-              <strong>Delegado(a) de Polícia / Titular</strong><br/>
-              Chefia da ${vUnit.name}<br/>
-              Polícia Civil de Minas Gerais
-            </div>
-          </div>
+
+
+            
 
           <div class="footer-note">
             Cofre ${v.code} (Relatório ${idx + 1} de ${targetVaults.length}) • Documento gerado eletronicamente pelo Sistema de Armaria PCMG • ${new Date().toLocaleString('pt-BR')}
