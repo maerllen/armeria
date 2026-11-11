@@ -57,36 +57,8 @@ function keepArmorerSignatureOnly(htmlContent: string): string {
       justify-self: center !important;
       box-sizing: border-box !important;
     }
-    ${isAmmoVaultReport ? `
-      .vault-report-page { padding-bottom: 32mm !important; }
-      #repeated-armorer-signature {
-        position: fixed !important;
-        left: 0 !important;
-        right: 0 !important;
-        bottom: 2mm !important;
-        width: 100% !important;
-        margin: 0 !important;
-        z-index: 1000 !important;
-      }
-      #repeated-armorer-signature .sig-box {
-        width: 250px !important;
-        max-width: 100% !important;
-        margin: 0 auto !important;
-      }
-    ` : ''}
   `;
   document.head.appendChild(printStyle);
-
-  if (isAmmoVaultReport) {
-    // A single fixed signature is repeated by the browser at the same position on every printed page.
-    const signatures = Array.from(document.querySelectorAll('.vault-report-page .signatures'));
-    const repeatedSignature = signatures.shift();
-    signatures.forEach(signature => signature.remove());
-    if (repeatedSignature) {
-      repeatedSignature.id = 'repeated-armorer-signature';
-      document.body.appendChild(repeatedSignature);
-    }
-  }
 
   return `<!DOCTYPE html>${document.documentElement.outerHTML}`;
 }

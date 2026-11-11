@@ -1,16 +1,19 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, 
-  AmmunitionMovement, isUserExplosivista, getSystemLogo 
+  AmmunitionMovement, AmmoTransfer, isUserExplosivista, getSystemLogo 
 } from '../types';
 import { storage } from '../services/storage';
 import { printDocumentInPage } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { ModalTransferirMunicao } from './ModalTransferirMunicao';
+import { ModalHistoricoTransferenciasMunicao } from './ModalHistoricoTransferenciasMunicao';
+import { AmmunitionReceiptModal } from './ModalReciboMunicao';
 import { 
   Disc, Plus, Search, Building, Vault, ArrowRightLeft, Printer, 
   Trash2, Edit2, History, RotateCcw, AlertTriangle, Check, X, 
   ChevronRight, Layers, Package, Send, CheckCircle2, ArrowDownCircle, 
-  ArrowUpCircle, FileText, Sparkles, Filter
+  ArrowUpCircle, FileText, Sparkles, Filter, Clock
 } from 'lucide-react';
 
 interface AmmunitionModuleProps {
@@ -45,13 +48,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const isExplosivista = isUserExplosivista(currentUser);
   const canManage = isGeral || isAdmin || isArmeiro || (isPolicial && currentUser.canMoveAmmunition);
 
-  // Active View Tab: 'estoque' | 'movimentacoes' | 'calibres' | 'transferencias'
-  const [activeTab, setActiveTab] = useState<'estoque' | 'movimentacoes' | 'calibres' | 'transferencias'>('estoque');
-
-  // Search filter - searches across all ammo fields
+  // Search filter across all ammo fields
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Department & Unit selection
+  // Department & Unit selection (Classic Layout Structure)
   const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
     if (isGeral) {
       return departments[0]?.id || '';
@@ -59,7 +59,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     return currentUser.departmentId || departments[0]?.id || '';
   });
 
-  // Available units in selected department
+  // Available units for the selected department
   const availableUnits = useMemo(() => {
     if (!selectedDeptId || selectedDeptId === 'ALL') {
       return units;
@@ -75,7 +75,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     return availableUnits[0]?.id || '';
   });
 
-  // Keep selectedUnitId valid whenever department or availableUnits change
+  // Keep selectedUnitId synchronized and valid whenever department or availableUnits change
   useEffect(() => {
     if (availableUnits.length > 0) {
       const stillValid = availableUnits.some(u => u.id === selectedUnitId);
@@ -171,39 +171,20 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [movRespMasp, setMovRespMasp] = useState('');
   const [movObs, setMovObs] = useState('');
 
+  // Movement Receipt Modal State
+  const [selectedMovForReceipt, setSelectedMovForReceipt] = useState<AmmunitionMovement | null>(null);
+
   // Return Unused Ammo Modal State
   const [returnTargetMov, setReturnTargetMov] = useState<AmmunitionMovement | null>(null);
   const [returnQtyInput, setReturnQtyInput] = useState<number>(0);
 
-  // Transfer Ammo between Units Modal State
+  // Transfer Modals State
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [transfDestDeptId, setTransfDestDeptId] = useState('');
-  const [transfDestUnitId, setTransfDestUnitId] = useState('');
-  const [transfReceiverName, setTransfReceiverName] = useState('');
-  const [transfReceiverMasp, setTransfReceiverMasp] = useState('');
-  const [transfReceiverCargo, setTransfReceiverCargo] = useState('');
-  const [transfReason, setTransfReason] = useState('Suprimento de Material Bélico');
-  const [transfObs, setTransfObs] = useState('');
-  const [transfItems, setTransfItems] = useState<{
-    stockId: string;
-    caliberId: string;
-    caliberName: string;
-    fabricante?: string;
-    tipoMunicao?: string;
-    pesoMunicao?: string;
-    loteMunicao?: string;
-    anoFabricacao?: number | string;
-    destinacao?: string;
-    quantity: number;
-    maxQuantity: number;
-    originVaultSpaceId: string;
-    originVaultCode: string;
-  }[]>([]);
+  const [showTransferHistoryModal, setShowTransferHistoryModal] = useState(false);
+  const [stockToTransferInitially, setStockToTransferInitially] = useState<AmmunitionStock | null>(null);
 
-  // Receive Transfer Modal State
-  const [receivingTransferId, setReceivingTransferId] = useState<string | null>(null);
-  const [receiveDestVaultId, setReceiveDestVaultId] = useState('');
-  const [receiveObs, setReceiveObs] = useState('');
+  // Movements History Drawer / Toggle
+  const [showMovementsSection, setShowMovementsSection] = useState(false);
 
   // Print Vaults Report Modal State
   const [showPrintVaultSelectModal, setShowPrintVaultSelectModal] = useState(false);
@@ -278,15 +259,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     return map;
   }, [candidateAmmoVaults, filteredStocks]);
 
-  // Pending Incoming Ammo Transfers
+  // Pending Incoming Ammo Transfers for the badge
   const pendingTransfers = useMemo(() => {
     return storage.getPendingIncomingAmmoTransfers(currentUser);
   }, [currentUser, stocks]);
 
-  // Ammo transfers history
-  const unitAmmoTransfers = useMemo(() => {
+  const allAmmoTransfers = useMemo(() => {
     return storage.getAmmoTransfers(currentUser, selectedUnitId || undefined);
   }, [currentUser, selectedUnitId, stocks]);
+
+  // Total ammunition count in current unit view
+  const totalAmmoInView = useMemo(() => {
+    return filteredStocks.reduce((sum, s) => sum + s.quantity, 0);
+  }, [filteredStocks]);
 
   // --- Handlers: Stock CRUD & Internal Transfer ---
 
@@ -507,7 +492,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       : movRespMasp;
 
     try {
-      await storage.addAmmoMovement({
+      const createdMov = await storage.addAmmoMovement({
         type: movType,
         caliberId: targetStock.caliberId,
         quantity: Number(movQuantity),
@@ -529,6 +514,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       setSuccessMsg(`Movimentação de ${movType} de ${movQuantity} munição(ões) registrada com sucesso!`);
       setShowMovementModal(false);
       onRefresh();
+      
+      // Auto-open receipt modal
+      setSelectedMovForReceipt(createdMov);
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao registrar movimentação.');
     }
@@ -565,131 +553,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   };
 
-  // --- Handlers: Inter-Unit Ammo Transfers ---
-
-  const handleOpenTransferModal = () => {
-    setErrorMsg('');
-    setSuccessMsg('');
-    const otherUnits = units.filter(u => u.id !== selectedUnitId);
-    const firstOtherUnit = otherUnits[0];
-    setTransfDestDeptId(firstOtherUnit?.departmentId || departments[0]?.id || '');
-    setTransfDestUnitId(firstOtherUnit?.id || '');
-    setTransfReceiverName('');
-    setTransfReceiverMasp('');
-    setTransfReceiverCargo('Investigador');
-    setTransfReason('Suprimento de Munições');
-    setTransfObs('');
-    setTransfItems([]);
-    setShowTransferModal(true);
-  };
-
-  const handleAddStockToTransfer = (stock: AmmunitionStock) => {
-    const exists = transfItems.some(i => i.stockId === stock.id);
-    if (exists) return;
-    const caliber = calibers.find(c => c.id === stock.caliberId);
-    const vault = vaultSpaces.find(v => v.id === stock.vaultSpaceId);
-
-    setTransfItems(prev => [
-      ...prev,
-      {
-        stockId: stock.id,
-        caliberId: stock.caliberId,
-        caliberName: caliber?.name || 'Munição',
-        fabricante: stock.fabricante,
-        tipoMunicao: stock.tipoMunicao,
-        pesoMunicao: stock.pesoMunicao,
-        loteMunicao: stock.loteMunicao,
-        anoFabricacao: stock.anoFabricacao,
-        destinacao: stock.destinacao,
-        quantity: Math.min(100, stock.quantity),
-        maxQuantity: stock.quantity,
-        originVaultSpaceId: stock.vaultSpaceId,
-        originVaultCode: vault?.code || 'Cofre'
-      }
-    ]);
-  };
-
-  const handleSaveTransfer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-
-    if (transfItems.length === 0) {
-      setErrorMsg('Adicione pelo menos um lote de munição para transferir.');
-      return;
-    }
-    if (!transfDestUnitId) {
-      setErrorMsg('Selecione a unidade de destino.');
-      return;
-    }
-    if (transfDestUnitId === selectedUnitId) {
-      setErrorMsg('A unidade de destino deve ser diferente da unidade de origem.');
-      return;
-    }
-    if (!transfReceiverName.trim() || !transfReceiverMasp.trim()) {
-      setErrorMsg('Informe o nome e MASP do recebedor / transportador.');
-      return;
-    }
-
-    const destDept = departments.find(d => d.id === transfDestDeptId);
-    const destUnit = units.find(u => u.id === transfDestUnitId);
-
-    try {
-      await storage.transferAmmo({
-        originDepartmentId: selectedDepartmentObj?.id,
-        originDepartmentName: selectedDepartmentObj?.name,
-        originUnitId: selectedUnitObj?.id,
-        originUnitName: selectedUnitObj?.name,
-        destinationDepartmentId: transfDestDeptId,
-        destinationDepartmentName: destDept?.name || 'Departamento Destino',
-        destinationUnitId: transfDestUnitId,
-        destinationUnitName: destUnit?.name || 'Unidade Destino',
-        receiverOrTransporterName: transfReceiverName.trim(),
-        receiverOrTransporterMasp: transfReceiverMasp.trim(),
-        receiverOrTransporterCargo: transfReceiverCargo,
-        reason: transfReason,
-        observation: transfObs,
-        items: transfItems.map(item => ({
-          caliberId: item.caliberId,
-          caliberName: item.caliberName,
-          fabricante: item.fabricante,
-          tipoMunicao: item.tipoMunicao,
-          pesoMunicao: item.pesoMunicao,
-          loteMunicao: item.loteMunicao,
-          anoFabricacao: item.anoFabricacao,
-          destinacao: item.destinacao,
-          quantity: Number(item.quantity),
-          originVaultSpaceId: item.originVaultSpaceId,
-          originVaultCode: item.originVaultCode
-        }))
-      });
-
-      setSuccessMsg('Transferência de munições iniciada com sucesso. O material aguarda recebimento na unidade de destino.');
-      setShowTransferModal(false);
-      onRefresh();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao iniciar transferência.');
-    }
-  };
-
-  const handleConfirmReceiveTransfer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!receivingTransferId || !receiveDestVaultId) {
-      setErrorMsg('Selecione o cofre de destino para armazenar as munições recebidas.');
-      return;
-    }
-    try {
-      await storage.receiveAmmoTransfer(receivingTransferId, receiveDestVaultId, receiveObs);
-      setSuccessMsg('Munições recebidas e armazenadas no cofre com sucesso!');
-      setReceivingTransferId(null);
-      setReceiveDestVaultId('');
-      setReceiveObs('');
-      onRefresh();
-    } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao dar recibo nas munições.');
-    }
-  };
-
   // --- Handlers: Printing Reports ---
 
   /**
@@ -697,7 +560,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
    * REGRA DO USUÁRIO:
    * 1. Pergunta se deseja imprimir locais de cofres vazios ou somente os com munições.
    * 2. Imprime um relatório por vez (cada cofre em uma página separada).
-   * 3. O relatório contém SOMENTE a assinatura do armeiro responsável (centralizada).
+   * 3. O relatório contém SOMENTE a assinatura do armeiro responsável (logo abaixo do texto certificador!).
    */
   const handlePrintUnitAmmoReport = () => {
     if (selectedVaultIdsForReport.length === 0) {
@@ -798,11 +661,12 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             </tfoot>
           </table>
 
+          <!-- TEXTO CERTIFICADOR EXATO SOLICITADO -->
           <div class="info-footer-box">
             Certifico que o inventário acima reflete fielmente o material bélico (munições) sob guarda no espaço do cofre ${vault.code} na presente data, conforme conferência física realizada pelo armeiro responsável.
           </div>
 
-          <!-- ASSINATURA: SOMENTE O ARMEIRO RESPONSÁVEL (CENTRALIZADA) -->
+          <!-- ASSINATURA: LOGO ABAIXO DO TEXTO CERTIFICADOR, SOMENTE O ARMEIRO RESPONSÁVEL -->
           <div class="signatures">
             <div class="sig-box">
               <div class="sig-line"></div>
@@ -837,10 +701,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           }
           .vault-report-page {
             box-sizing: border-box;
-            min-height: 265mm;
-            display: flex;
-            flex-direction: column;
-            justify-content: space-between;
             padding: 10px 0;
           }
           .page-break {
@@ -904,14 +764,16 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           .info-footer-box {
             background: #f8fafc;
             border-left: 3px solid #0f172a;
-            padding: 8px 12px;
-            font-size: 9.5px;
-            color: #334155;
+            padding: 9px 13px;
+            font-size: 10px;
+            color: #1e293b;
             line-height: 1.45;
-            margin-bottom: 24px;
+            margin-top: 14px;
+            margin-bottom: 22px;
           }
           .signatures {
-            margin-top: 24px;
+            margin-top: 20px;
+            margin-bottom: 24px;
             display: flex;
             justify-content: center;
             text-align: center;
@@ -955,93 +817,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     printDocumentInPage(html);
   };
 
-  /**
-   * Imprime comprovante individual de movimentação
-   */
-  const handlePrintMovementReceipt = (mov: AmmunitionMovement) => {
-    const systemLogo = getSystemLogo(selectedUnitObj, selectedDepartmentObj);
-    const cal = calibers.find(c => c.id === mov.caliberId);
-    const vault = vaultSpaces.find(v => v.id === mov.vaultSpaceId);
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8">
-        <title>Recibo de Munição - ${mov.type}</title>
-        <style>
-          @page { size: A4 portrait; margin: 15mm; }
-          body { font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; margin: 0; padding: 0; font-size: 11px; }
-          .receipt-page { border: 1px solid #cbd5e1; border-radius: 8px; padding: 20px; max-width: 700px; margin: 0 auto; }
-          .header { display: flex; align-items: center; justify-content: space-between; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px; }
-          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; background: #f8fafc; padding: 12px; border-radius: 6px; margin-bottom: 16px; }
-          .signatures { margin-top: 40px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; text-align: center; }
-          .sig-line { border-top: 1px solid #000; padding-top: 6px; font-weight: bold; }
-        </style>
-      </head>
-      <body>
-        <div class="receipt-page">
-          <div class="header">
-            <div style="display: flex; align-items: center; gap: 12px;">
-              <img src="${systemLogo}" alt="Logo" style="height: 50px;" />
-              <div>
-                <div style="font-weight: 900; font-size: 13px;">POLÍCIA CIVIL DE MINAS GERAIS</div>
-                <div style="font-weight: bold; font-size: 11px; color: #374151;">${selectedDepartmentObj?.name || ''}</div>
-                <div style="font-size: 10px; color: #64748b;">${selectedUnitObj?.name || ''}</div>
-              </div>
-            </div>
-            <div style="text-align: right; font-family: monospace;">
-              <strong>RECIBO DE ${mov.type.toUpperCase()}</strong><br>
-              <span style="font-size: 10px;">ID: ${mov.id.slice(0, 8)}</span>
-            </div>
-          </div>
-
-          <div class="meta-grid">
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Tipo de Operação:</strong><br><strong>${mov.type}</strong></div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Data/Hora:</strong><br><strong>${new Date(mov.createdAt).toLocaleString('pt-BR')}</strong></div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Calibre:</strong><br><strong>${cal?.name || '-'}</strong></div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Quantidade:</strong><br><strong style="font-size: 14px;">${mov.quantity} un</strong></div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Fabricante / Lote:</strong><br>${mov.fabricante || '-'} / ${mov.loteMunicao || 'S/L'}</div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Tipo / Peso:</strong><br>${mov.tipoMunicao || '-'} ${mov.pesoMunicao ? `(${mov.pesoMunicao})` : ''}</div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Cofre:</strong><br>${vault?.code || '-'}</div>
-            <div><strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Finalidade / Motivo:</strong><br>${mov.recipientOrReason}</div>
-          </div>
-
-          <div style="margin-bottom: 20px;">
-            <strong style="color: #64748b; font-size: 9px; text-transform: uppercase;">Responsável / Recebedor:</strong><br>
-            <span style="font-size: 12px; font-weight: bold;">${mov.responsibleName || 'Não especificado'}</span>
-            ${mov.responsibleMasp ? `<span style="font-size: 11px; color: #475569;"> (MASP: ${mov.responsibleMasp})</span>` : ''}
-          </div>
-
-          ${mov.observation ? `
-            <div style="background: #f1f5f9; padding: 10px; border-radius: 6px; font-size: 10px; margin-bottom: 30px;">
-              <strong>Observações:</strong> ${mov.observation}
-            </div>
-          ` : ''}
-
-          <div class="signatures">
-            <div class="sig-line">
-              ${mov.responsibleName || 'Recebedor'}<br>
-              <span style="font-size: 9px; font-weight: normal; color: #64748b;">Responsável pela Retirada</span>
-            </div>
-            <div class="sig-line">
-              ${currentUser.name} (MASP: ${currentUser.masp})<br>
-              <span style="font-size: 9px; font-weight: normal; color: #64748b;">Armeiro Operador</span>
-            </div>
-          </div>
-        </div>
-      </body>
-      </html>
-    `;
-
-    printDocumentInPage(html);
-  };
-
-  // Total ammo in current view
-  const totalAmmoInView = useMemo(() => {
-    return filteredStocks.reduce((sum, s) => sum + s.quantity, 0);
-  }, [filteredStocks]);
-
   return (
     <div className="space-y-6">
       
@@ -1070,163 +845,153 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         </div>
       )}
 
-      {/* Main Top Header */}
-      <div className="glass-card rounded-3xl p-6 border border-slate-800 shadow-xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center space-x-4">
-            <div className="p-3 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20 shadow-inner">
-              <Disc className="w-7 h-7" />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight flex items-center gap-2">
-                Módulo de Munições
-                <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                  PCMG
-                </span>
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-400">
-                Gestão tática de calibres, lotes de munições, cofres e transferências
-              </p>
-            </div>
+      {/* Main Top Header - Classic layout matching ModuloArmas */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">
+        <div className="flex items-center space-x-3">
+          <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
+            <Disc className="w-6 h-6" />
           </div>
-
-          {/* Quick Actions */}
-          <div className="flex flex-wrap items-center gap-2.5">
-            {canManage && (
-              <>
-                <button
-                  onClick={() => handleOpenAddStock()}
-                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-lg shadow-amber-500/20 active:scale-95"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Cadastrar Munição</span>
-                </button>
-
-                <button
-                  onClick={() => handleOpenMovementModal(undefined, 'Saída')}
-                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-2 active:scale-95"
-                >
-                  <ArrowRightLeft className="w-4 h-4 text-amber-400" />
-                  <span>Movimentação</span>
-                </button>
-              </>
-            )}
-
-            <button
-              onClick={() => setShowPrintVaultSelectModal(true)}
-              className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-2 active:scale-95"
-            >
-              <Printer className="w-4 h-4 text-cyan-400" />
-              <span>Imprimir Relatório</span>
-            </button>
+          <div>
+            <h1 className="text-xl sm:text-2xl font-black text-slate-100 tracking-tight flex items-center gap-2">
+              Módulo de Munições
+              <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">
+                PCMG
+              </span>
+            </h1>
+            <p className="text-xs sm:text-sm text-slate-400">
+              Controle e rastreabilidade de munições, cofres e transferências da Polícia Civil
+            </p>
           </div>
         </div>
 
-        {/* View Tabs */}
-        <div className="flex border-b border-slate-800 space-x-2 overflow-x-auto pb-1">
+        {/* Quick Actions Header Buttons */}
+        <div className="flex flex-wrap items-center gap-2">
+          {canManage && (
+            <>
+              <button
+                onClick={() => handleOpenAddStock()}
+                className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5 shadow-lg shadow-amber-500/20"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Cadastrar Munição</span>
+              </button>
+
+              <button
+                onClick={() => handleOpenMovementModal(undefined, 'Saída')}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5"
+              >
+                <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                <span>Movimentação</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setStockToTransferInitially(null);
+                  setShowTransferModal(true);
+                }}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5"
+              >
+                <Send className="w-4 h-4 text-sky-400" />
+                <span>Transferir Munições</span>
+              </button>
+            </>
+          )}
+
           <button
-            onClick={() => setActiveTab('estoque')}
-            className={`px-4 py-2 text-xs sm:text-sm font-bold transition flex items-center space-x-2 border-b-2 whitespace-nowrap ${
-              activeTab === 'estoque'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
+            onClick={() => setShowTransferHistoryModal(true)}
+            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5 relative"
           >
-            <Vault className="w-4 h-4" />
-            <span>Estoque por Cofre ({filteredStocks.length} lotes)</span>
+            <History className="w-4 h-4 text-slate-400" />
+            <span>Histórico de Transferências</span>
+            {pendingTransfers.length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse ml-0.5" />
+            )}
           </button>
 
           <button
-            onClick={() => setActiveTab('movimentacoes')}
-            className={`px-4 py-2 text-xs sm:text-sm font-bold transition flex items-center space-x-2 border-b-2 whitespace-nowrap ${
-              activeTab === 'movimentacoes'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
+            onClick={() => setShowPrintVaultSelectModal(true)}
+            className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5"
           >
-            <History className="w-4 h-4" />
-            <span>Movimentações</span>
+            <Printer className="w-4 h-4 text-cyan-400" />
+            <span>Imprimir Relatório</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('calibres')}
-            className={`px-4 py-2 text-xs sm:text-sm font-bold transition flex items-center space-x-2 border-b-2 whitespace-nowrap ${
-              activeTab === 'calibres'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
+            onClick={handleOpenAddCaliber}
+            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl border border-slate-800 transition"
+            title="Catálogo de Calibres"
           >
             <Layers className="w-4 h-4" />
-            <span>Catálogo de Calibres ({calibers.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('transferencias')}
-            className={`px-4 py-2 text-xs sm:text-sm font-bold transition flex items-center space-x-2 border-b-2 whitespace-nowrap relative ${
-              activeTab === 'transferencias'
-                ? 'border-amber-500 text-amber-400'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Send className="w-4 h-4" />
-            <span>Transferências entre Unidades</span>
-            {pendingTransfers.length > 0 && (
-              <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse ml-1" />
-            )}
           </button>
         </div>
+      </div>
 
-        {/* STEP 1: Department Selection (if multiple) */}
-        {departments.length > 1 && (
-          <div className="space-y-2">
-            <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
-              <Building className="w-3.5 h-3.5 text-amber-400" />
-              <span>1. Selecione o Departamento</span>
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {isGeral && (
-                <button
-                  onClick={() => setSelectedDeptId('ALL')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
-                    selectedDeptId === 'ALL'
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                  }`}
-                >
-                  Todos os Departamentos
-                </button>
-              )}
-              {departments.map(dept => {
-                const isSelected = dept.id === selectedDeptId;
-                return (
-                  <button
-                    key={dept.id}
-                    onClick={() => setSelectedDeptId(dept.id)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition border ${
-                      isSelected
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
-                        : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    {dept.name}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
+      {/* STEP 1: Department Selection Grid / Selector */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
+          <Building className="w-4 h-4" />
+          <span>1. Selecione o Departamento</span>
+        </div>
 
-        {/* STEP 2: Unit Selection
-            CRITICAL USER REQUIREMENT:
-            - NÃO deve ter a opção "Todas as unidades"
-            - NÃO deve aparecer quantidade de lotes e nem total das munições no botão de filtro
-            - Deve conter APENAS a abreviação/nome da unidade
-        */}
-        <div className="space-y-2 pt-2 border-t border-slate-800/60">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5">
+          {isGeral && (
+            <button
+              onClick={() => setSelectedDeptId('ALL')}
+              className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                selectedDeptId === 'ALL'
+                  ? 'bg-amber-500/10 border-amber-500/50 text-slate-100 ring-1 ring-amber-500/30'
+                  : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300'
+              }`}
+            >
+              <div>
+                <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">ESTADO</span>
+                <span className="text-xs font-bold block truncate" title="Todos os Departamentos da Polícia Civil">Todos os Departamentos</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono block">
+                {stocks.reduce((acc, curr) => acc + curr.quantity, 0)} munições
+              </span>
+            </button>
+          )}
+
+          {departments.map((d) => {
+            const isSelected = d.id === selectedDeptId;
+            const deptStockCount = stocks.filter(s => s.departmentId === d.id).reduce((acc, curr) => acc + curr.quantity, 0);
+
+            return (
+              <button
+                key={d.id}
+                onClick={() => setSelectedDeptId(d.id)}
+                className={`p-3 rounded-xl border text-left transition flex flex-col justify-between space-y-1 ${
+                  isSelected
+                    ? 'bg-amber-500/10 border-amber-500/50 text-slate-100 ring-1 ring-amber-500/30'
+                    : 'bg-slate-950/80 border-slate-800 hover:border-slate-700 text-slate-300'
+                }`}
+              >
+                <div>
+                  <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">{d.code || 'DEPTO'}</span>
+                  <span className="text-xs font-bold block truncate" title={d.name}>{d.name}</span>
+                </div>
+                <span className="text-[10px] text-slate-400 font-mono block">
+                  {deptStockCount} munições
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* STEP 2: Unit Selection for Selected Department
+          CRITICAL USER REQUIREMENT:
+          - NÃO deve ter a opção "Todas as unidades"
+          - NÃO deve aparecer quantidade de lotes e nem total das munições no botão de filtro
+          - Deve conter APENAS a abreviação/nome da unidade
+      */}
+      {selectedDeptId && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
-              <ChevronRight className="w-3.5 h-3.5" />
-              <span>2. Selecione a Unidade em <strong className="text-slate-100">{selectedDepartmentObj?.name || 'Departamento'}</strong></span>
+            <div className="flex items-center space-x-2 text-amber-400 font-bold text-xs">
+              <ChevronRight className="w-4 h-4" />
+              <span>2. Selecione a Unidade em <strong className="text-slate-100">{selectedDeptId === 'ALL' ? 'Todos os Departamentos' : (selectedDepartmentObj?.name || 'Departamento')}</strong></span>
             </div>
             <span className="text-xs text-slate-400 font-mono">
               {availableUnits.length} unidade(s) disponível(is)
@@ -1234,278 +999,113 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           </div>
 
           <div className="flex flex-wrap gap-2">
-            {availableUnits.map(unit => {
-              const isSelected = unit.id === selectedUnitId;
+            {availableUnits.map((u) => {
+              const isSelected = u.id === selectedUnitId;
+
               return (
                 <button
-                  key={unit.id}
-                  onClick={() => setSelectedUnitId(unit.id)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition border ${
+                  key={u.id}
+                  onClick={() => setSelectedUnitId(u.id)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 border ${
                     isSelected
                       ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md font-black'
                       : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <span>{unit.name}</span>
+                  <span>{u.name}</span>
                 </button>
               );
             })}
           </div>
         </div>
-
-        {/* Search Bar - CRITICAL USER REQUIREMENT: searches across all fields of registered ammo */}
-        <div className="pt-2">
-          <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              placeholder="Pesquisar munição por calibre, fabricante, lote, tipo, peso, ano, destinação, cofre ou observação..."
-              className="w-full bg-slate-950/80 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-        </div>
-
-      </div>
-
-      {/* VIEW CONTENT BY TAB */}
-
-      {/* 1. ABA ESTOQUE POR COFRE */}
-      {activeTab === 'estoque' && (
-        <div className="space-y-6">
-          
-          {/* Summary Banner */}
-          <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800 p-4 rounded-2xl">
-            <div className="flex items-center space-x-3">
-              <Package className="w-5 h-5 text-amber-400" />
-              <div>
-                <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Unidade Atual</span>
-                <span className="text-sm font-bold text-slate-100">{selectedUnitObj?.name || 'Selecione uma Unidade'}</span>
-              </div>
-            </div>
-            <div className="text-right">
-              <span className="text-xs text-slate-400 font-semibold block uppercase tracking-wider">Total em Estoque</span>
-              <span className="text-lg font-black text-amber-400 font-mono">{totalAmmoInView.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-400">un</span></span>
-            </div>
-          </div>
-
-          {candidateAmmoVaults.length === 0 ? (
-            <div className="glass-card rounded-2xl p-12 text-center border border-slate-800 space-y-3">
-              <Vault className="w-12 h-12 text-slate-600 mx-auto" />
-              <h3 className="text-base font-bold text-slate-300">Nenhum cofre de munições encontrado nesta unidade</h3>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                Cadastre um local no cofre do tipo "MUNIÇÕES" no módulo de Cofres para vincular o estoque.
-              </p>
-            </div>
-          ) : (
-            candidateAmmoVaults.map(vault => {
-              const vaultItems = stocksByVault.get(vault.id) || [];
-              const vaultTotal = vaultItems.reduce((acc, curr) => acc + curr.quantity, 0);
-
-              return (
-                <div key={vault.id} className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
-                  
-                  {/* Vault Header */}
-                  <div className="bg-slate-900/90 border-b border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                        <Vault className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center space-x-2">
-                          <h3 className="text-base font-bold text-slate-100 font-mono tracking-wide">
-                            COFRE: {vault.code}
-                          </h3>
-                          <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                            {vault.type}
-                          </span>
-                        </div>
-                        <span className="text-xs text-slate-400">
-                          {vaultItems.length} lote(s) cadastrado(s)
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center space-x-3">
-                      <div className="text-right px-3 py-1.5 bg-slate-950/70 rounded-xl border border-slate-800">
-                        <span className="text-[10px] text-slate-400 uppercase font-mono block">Munições no Cofre</span>
-                        <span className="text-sm font-black text-amber-400 font-mono">{vaultTotal.toLocaleString('pt-BR')} un</span>
-                      </div>
-
-                      {canManage && (
-                        <button
-                          onClick={() => handleOpenAddStock(vault.id)}
-                          className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition"
-                          title="Adicionar munição neste cofre"
-                        >
-                          <Plus className="w-4 h-4 text-amber-400" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Vault Items Table */}
-                  {vaultItems.length === 0 ? (
-                    <div className="p-8 text-center text-slate-500 text-xs">
-                      Nenhuma munição armazenada neste cofre no momento (Cofre vazio).
-                    </div>
-                  ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800/80">
-                          <tr>
-                            <th className="py-3 px-4">Calibre</th>
-                            <th className="py-3 px-4">Fabricante / Lote</th>
-                            <th className="py-3 px-4">Tipo / Peso</th>
-                            <th className="py-3 px-4">Ano / Destinação</th>
-                            <th className="py-3 px-4 text-right">Qtd Disponível</th>
-                            <th className="py-3 px-4 text-right">Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/40">
-                          {vaultItems.map(item => {
-                            const cal = calibers.find(c => c.id === item.caliberId);
-
-                            return (
-                              <tr key={item.id} className="hover:bg-slate-900/40 transition">
-                                <td className="py-3 px-4 font-bold text-slate-100">
-                                  {cal?.name || 'Munição'}
-                                </td>
-                                <td className="py-3 px-4 text-slate-300">
-                                  <span className="font-semibold">{item.fabricante || '-'}</span>
-                                  <span className="text-slate-500 ml-1.5 font-mono text-[11px]">
-                                    Lote: {item.loteMunicao || 'S/L'}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 text-slate-300">
-                                  <span>{item.tipoMunicao || '-'}</span>
-                                  {item.pesoMunicao && (
-                                    <span className="text-slate-500 ml-1.5 text-[11px]">
-                                      ({item.pesoMunicao})
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="py-3 px-4 text-slate-300">
-                                  <span>{item.anoFabricacao || '-'}</span>
-                                  <span className="text-slate-500 ml-1.5">
-                                    • {item.destinacao || 'Operacional'}
-                                  </span>
-                                </td>
-                                <td className="py-3 px-4 text-right font-mono font-bold text-amber-400 text-sm">
-                                  {item.quantity.toLocaleString('pt-BR')} <span className="text-[10px] text-slate-500 font-normal">un</span>
-                                </td>
-                                <td className="py-3 px-4 text-right">
-                                  <div className="flex items-center justify-end space-x-1.5">
-                                    {canManage && (
-                                      <>
-                                        <button
-                                          onClick={() => handleOpenMovementModal(item, 'Saída')}
-                                          className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
-                                          title="Saída / Baixa rápida"
-                                        >
-                                          <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400" />
-                                        </button>
-
-                                        <button
-                                          onClick={() => handleOpenMovementModal(item, 'Entrada')}
-                                          className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
-                                          title="Entrada / Reabastecimento rápido"
-                                        >
-                                          <ArrowDownCircle className="w-3.5 h-3.5 text-emerald-400" />
-                                        </button>
-
-                                        {/* USER REQUIREMENT: Editar informações e transferir munições entre cofres */}
-                                        <button
-                                          onClick={() => handleOpenEditStock(item)}
-                                          className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
-                                          title="Editar Informações ou Transferir entre Cofres"
-                                        >
-                                          <Edit2 className="w-3.5 h-3.5 text-cyan-400" />
-                                        </button>
-
-                                        <button
-                                          onClick={() => setDeleteConfirmState({
-                                            isOpen: true,
-                                            type: 'stock',
-                                            id: item.id,
-                                            message: `Deseja realmente remover o registro de ${item.quantity} munição(ões) do lote "${item.loteMunicao || 'S/L'}" do cofre ${vault.code}?`
-                                          })}
-                                          className="p-1.5 bg-slate-800/80 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg border border-slate-700/60 transition"
-                                          title="Excluir do cofre"
-                                        >
-                                          <Trash2 className="w-3.5 h-3.5" />
-                                        </button>
-                                      </>
-                                    )}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-
-                </div>
-              );
-            })
-          )}
-
-        </div>
       )}
 
-      {/* 2. ABA MOVIMENTAÇÕES */}
-      {activeTab === 'movimentacoes' && (
+      {/* STEP 3: Ammo Search Bar & Vaults Stock view */}
+      {selectedUnitId ? (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-200">
-              Histórico de Movimentações de Munições
-            </h3>
-            {canManage && (
-              <button
-                onClick={() => handleOpenMovementModal()}
-                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Registrar Movimentação</span>
-              </button>
-            )}
+          
+          {/* Search Bar & Summary Card */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              
+              {/* Comprehensive Search Bar across all ammunition fields */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Pesquisar munição por calibre, fabricante, lote, tipo, peso, ano, destinação, cofre ou observação..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-10 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+                />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 p-0.5"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Total Summary */}
+              <div className="flex items-center space-x-3 shrink-0">
+                <div className="px-3 py-1.5 bg-slate-950/80 rounded-xl border border-slate-800 text-right">
+                  <span className="text-[10px] text-slate-400 uppercase font-mono block">Munições em Estoque</span>
+                  <span className="text-sm font-black text-amber-400 font-mono">
+                    {totalAmmoInView.toLocaleString('pt-BR')} <span className="text-[10px] text-slate-400 font-normal">un</span>
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setShowMovementsSection(!showMovementsSection)}
+                  className={`px-3 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 border ${
+                    showMovementsSection
+                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  <History className="w-4 h-4" />
+                  <span>Histórico de Movimentações</span>
+                </button>
+              </div>
+
+            </div>
           </div>
 
-          <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Data/Hora</th>
-                    <th className="py-3 px-4">Tipo</th>
-                    <th className="py-3 px-4">Calibre / Lote</th>
-                    <th className="py-3 px-4">Cofre</th>
-                    <th className="py-3 px-4">Destinatário / Finalidade</th>
-                    <th className="py-3 px-4 text-right">Qtd</th>
-                    <th className="py-3 px-4 text-center">Devolução</th>
-                    <th className="py-3 px-4 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {movements.length === 0 ? (
+          {/* Optional: Movimentações Recentes Drawer / Section */}
+          {showMovementsSection && (
+            <div className="glass-card rounded-2xl border border-slate-800 p-5 space-y-3 animate-in fade-in">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <h3 className="text-sm font-bold text-slate-100 flex items-center space-x-2">
+                  <History className="w-4 h-4 text-amber-400" />
+                  <span>Últimas Movimentações Bélicas Registradas</span>
+                </h3>
+                <button
+                  onClick={() => setShowMovementsSection(false)}
+                  className="text-slate-400 hover:text-slate-200 text-xs"
+                >
+                  Fechar
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-slate-500 text-xs">
-                        Nenhuma movimentação registrada.
-                      </td>
+                      <th className="py-2.5 px-3">Data</th>
+                      <th className="py-2.5 px-3">Tipo</th>
+                      <th className="py-2.5 px-3">Calibre / Lote</th>
+                      <th className="py-2.5 px-3">Cofre</th>
+                      <th className="py-2.5 px-3">Destinatário / Motivo</th>
+                      <th className="py-2.5 px-3 text-right">Qtd</th>
+                      <th className="py-2.5 px-3 text-center">Devolução</th>
+                      <th className="py-2.5 px-3 text-right">Ação</th>
                     </tr>
-                  ) : (
-                    movements.map(mov => {
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/40">
+                    {movements.slice(0, 10).map(mov => {
                       const cal = calibers.find(c => c.id === mov.caliberId);
                       const vault = vaultSpaces.find(v => v.id === mov.vaultSpaceId);
                       const isSaida = mov.type === 'Saída';
@@ -1514,10 +1114,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
                       return (
                         <tr key={mov.id} className="hover:bg-slate-900/40 transition">
-                          <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">
-                            {new Date(mov.createdAt).toLocaleString('pt-BR')}
+                          <td className="py-2 px-3 text-slate-400 font-mono text-[11px]">
+                            {new Date(mov.createdAt).toLocaleDateString('pt-BR')}
                           </td>
-                          <td className="py-3 px-4">
+                          <td className="py-2 px-3">
                             <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                               isSaida 
                                 ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' 
@@ -1526,38 +1126,33 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                               {mov.type}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-slate-200">
+                          <td className="py-2 px-3 text-slate-200">
                             <strong>{cal?.name || 'Munição'}</strong>
                             <span className="text-slate-500 ml-1.5 text-[11px] font-mono">
-                              ({mov.fabricante || '-'} • Lote: {mov.loteMunicao || 'S/L'})
+                              ({mov.loteMunicao || 'S/L'})
                             </span>
                           </td>
-                          <td className="py-3 px-4 font-mono text-slate-300">
+                          <td className="py-2 px-3 font-mono text-slate-300">
                             {vault?.code || '-'}
                           </td>
-                          <td className="py-3 px-4 text-slate-300">
-                            <span className="font-semibold block">{mov.responsibleName || 'Não especificado'}</span>
-                            <span className="text-slate-500 text-[11px]">{mov.recipientOrReason}</span>
+                          <td className="py-2 px-3 text-slate-300">
+                            {mov.responsibleName || mov.recipientOrReason}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-100">
+                          <td className="py-2 px-3 text-right font-mono font-bold text-slate-100">
                             {mov.quantity} un
                           </td>
-                          <td className="py-3 px-4 text-center">
+                          <td className="py-2 px-3 text-center">
                             {isSaida ? (
                               returned > 0 ? (
-                                <span className="text-[10px] text-emerald-400 font-mono">
+                                <span className="text-[10px] text-emerald-400 font-mono font-bold">
                                   {returned} un devolvida(s)
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-slate-500 font-mono">
-                                  Pendente
-                                </span>
+                                <span className="text-[10px] text-slate-500 font-mono">Pendente</span>
                               )
-                            ) : (
-                              <span className="text-[10px] text-slate-600">-</span>
-                            )}
+                            ) : '-'}
                           </td>
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-2 px-3 text-right">
                             <div className="flex items-center justify-end space-x-1.5">
                               {canReturn && canManage && (
                                 <button
@@ -1569,11 +1164,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                   <span>Devolver</span>
                                 </button>
                               )}
-
                               <button
-                                onClick={() => handlePrintMovementReceipt(mov)}
-                                className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition"
-                                title="Imprimir recibo"
+                                onClick={() => setSelectedMovForReceipt(mov)}
+                                className="p-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded border border-slate-700 transition"
+                                title="Imprimir Recibo"
                               >
                                 <Printer className="w-3.5 h-3.5 text-cyan-400" />
                               </button>
@@ -1581,228 +1175,195 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                           </td>
                         </tr>
                       );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 3. ABA CATÁLOGO DE CALIBRES */}
-      {activeTab === 'calibres' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-200">
-              Catálogo de Calibres & Munições Homologadas
-            </h3>
-            {canManage && (
-              <button
-                onClick={handleOpenAddCaliber}
-                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>Novo Calibre</span>
-              </button>
-            )}
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {calibers.map(cal => {
-              const countInStock = stocks
-                .filter(s => s.caliberId === cal.id)
-                .reduce((acc, curr) => acc + curr.quantity, 0);
-
-              return (
-                <div key={cal.id} className="glass-card rounded-2xl p-4 border border-slate-800 space-y-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center space-x-3">
-                      <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
-                        <Disc className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-100">{cal.name}</h4>
-                        <span className="text-[11px] text-slate-400">
-                          {cal.fabricante || 'Fabricante padrão'} • {cal.tipo || 'Operacional'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {canManage && (
-                      <div className="flex items-center space-x-1">
-                        <button
-                          onClick={() => handleOpenEditCaliber(cal)}
-                          className="p-1.5 text-slate-400 hover:text-slate-200"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setDeleteConfirmState({
-                            isOpen: true,
-                            type: 'caliber',
-                            id: cal.id,
-                            message: `Deseja realmente excluir o calibre "${cal.name}"? Certifique-se de que não haja estoques vinculados.`
-                          })}
-                          className="p-1.5 text-slate-400 hover:text-red-400"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800/80 text-xs">
-                    <span className="text-slate-500">Em estoque na rede:</span>
-                    <span className="font-mono font-bold text-amber-400">{countInStock.toLocaleString('pt-BR')} un</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* 4. ABA TRANSFERÊNCIAS ENTRE UNIDADES */}
-      {activeTab === 'transferencias' && (
-        <div className="space-y-6">
-          
-          {/* Incoming Pending Transfers */}
-          {pendingTransfers.length > 0 && (
-            <div className="glass-card rounded-2xl p-5 border border-amber-500/30 bg-amber-500/5 space-y-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl">
-                  <AlertTriangle className="w-5 h-5" />
-                </div>
-                <div>
-                  <h4 className="text-sm font-bold text-slate-100">
-                    Transferências de Munições Aguardando Recibo
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    Munições enviadas de outras unidades que necessitam de conferência e recebimento no cofre.
-                  </p>
-                </div>
-              </div>
-
-              <div className="space-y-3">
-                {pendingTransfers.map(t => (
-                  <div key={t.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <div className="space-y-1">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-xs font-mono font-bold text-amber-400">
-                          {t.originUnitName} → {t.destinationUnitName}
-                        </span>
-                        <span className="text-[10px] bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded font-bold">
-                          {t.totalQuantity} munições
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-300">
-                        Transportador: <strong>{t.receiverOrTransporterName}</strong> (MASP: {t.receiverOrTransporterMasp})
-                      </p>
-                      <p className="text-[11px] text-slate-500">
-                        Motivo: {t.reason} • Data: {t.transferDate}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center space-x-2">
-                      {canManage && (
-                        <button
-                          onClick={() => {
-                            setReceivingTransferId(t.id);
-                            setReceiveDestVaultId(candidateAmmoVaults[0]?.id || '');
-                            setReceiveObs('');
-                          }}
-                          className="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Dar Recibo e Guardar no Cofre</span>
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
 
-          {/* Transfers History Header & Button */}
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-200">
-              Histórico de Transferências de Munições entre Unidades
-            </h3>
-            {canManage && (
-              <button
-                onClick={handleOpenTransferModal}
-                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5 shadow"
-              >
-                <Send className="w-3.5 h-3.5" />
-                <span>Transferir para Outra Unidade</span>
-              </button>
+          {/* Cofres de Munições da Unidade Selecionada */}
+          <div className="space-y-4">
+            {candidateAmmoVaults.length === 0 ? (
+              <div className="glass-card rounded-2xl p-12 text-center border border-slate-800 space-y-3">
+                <Vault className="w-12 h-12 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-slate-300">Nenhum cofre de munições encontrado nesta unidade</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Cadastre um local no cofre do tipo "MUNIÇÕES" no módulo de Cofres para gerenciar o estoque.
+                </p>
+              </div>
+            ) : (
+              candidateAmmoVaults.map(vault => {
+                const vaultItems = stocksByVault.get(vault.id) || [];
+                const vaultTotal = vaultItems.reduce((acc, curr) => acc + curr.quantity, 0);
+
+                return (
+                  <div key={vault.id} className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
+                    
+                    {/* Vault Header */}
+                    <div className="bg-slate-900/90 border-b border-slate-800 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="flex items-center space-x-3">
+                        <div className="p-2 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                          <Vault className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <div className="flex items-center space-x-2">
+                            <h3 className="text-base font-bold text-slate-100 font-mono tracking-wide">
+                              COFRE: {vault.code}
+                            </h3>
+                            <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                              {vault.type}
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-400">
+                            {vaultItems.length} lote(s) cadastrado(s)
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-3">
+                        <div className="text-right px-3 py-1.5 bg-slate-950/70 rounded-xl border border-slate-800">
+                          <span className="text-[10px] text-slate-400 uppercase font-mono block">Munições no Cofre</span>
+                          <span className="text-sm font-black text-amber-400 font-mono">{vaultTotal.toLocaleString('pt-BR')} un</span>
+                        </div>
+
+                        {canManage && (
+                          <button
+                            onClick={() => handleOpenAddStock(vault.id)}
+                            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition"
+                            title="Adicionar munição neste cofre"
+                          >
+                            <Plus className="w-4 h-4 text-amber-400" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Vault Items Table */}
+                    {vaultItems.length === 0 ? (
+                      <div className="p-8 text-center text-slate-500 text-xs">
+                        Nenhuma munição armazenada neste cofre no momento (Cofre vazio).
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800/80">
+                            <tr>
+                              <th className="py-3 px-4">Calibre</th>
+                              <th className="py-3 px-4">Fabricante / Lote</th>
+                              <th className="py-3 px-4">Tipo / Peso</th>
+                              <th className="py-3 px-4">Ano / Destinação</th>
+                              <th className="py-3 px-4 text-right">Qtd Disponível</th>
+                              <th className="py-3 px-4 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/40">
+                            {vaultItems.map(item => {
+                              const cal = calibers.find(c => c.id === item.caliberId);
+
+                              return (
+                                <tr key={item.id} className="hover:bg-slate-900/40 transition">
+                                  <td className="py-3 px-4 font-bold text-slate-100">
+                                    {cal?.name || 'Munição'}
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-300">
+                                    <span className="font-semibold">{item.fabricante || '-'}</span>
+                                    <span className="text-slate-500 ml-1.5 font-mono text-[11px]">
+                                      Lote: {item.loteMunicao || 'S/L'}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-300">
+                                    <span>{item.tipoMunicao || '-'}</span>
+                                    {item.pesoMunicao && (
+                                      <span className="text-slate-500 ml-1.5 text-[11px]">
+                                        ({item.pesoMunicao})
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-300">
+                                    <span>{item.anoFabricacao || '-'}</span>
+                                    <span className="text-slate-500 ml-1.5">
+                                      • {item.destinacao || 'Operacional'}
+                                    </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-right font-mono font-bold text-amber-400 text-sm">
+                                    {item.quantity.toLocaleString('pt-BR')} <span className="text-[10px] text-slate-500 font-normal">un</span>
+                                  </td>
+                                  <td className="py-3 px-4 text-right">
+                                    <div className="flex items-center justify-end space-x-1.5">
+                                      {canManage && (
+                                        <>
+                                          <button
+                                            onClick={() => handleOpenMovementModal(item, 'Saída')}
+                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
+                                            title="Saída / Baixa rápida"
+                                          >
+                                            <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400" />
+                                          </button>
+
+                                          <button
+                                            onClick={() => handleOpenMovementModal(item, 'Entrada')}
+                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
+                                            title="Entrada / Reabastecimento rápido"
+                                          >
+                                            <ArrowDownCircle className="w-3.5 h-3.5 text-emerald-400" />
+                                          </button>
+
+                                          {/* USER REQUIREMENT: Editar informações e transferir munições entre cofres */}
+                                          <button
+                                            onClick={() => handleOpenEditStock(item)}
+                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
+                                            title="Editar Informações ou Transferir entre Cofres"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5 text-cyan-400" />
+                                          </button>
+
+                                          <button
+                                            onClick={() => {
+                                              setStockToTransferInitially(item);
+                                              setShowTransferModal(true);
+                                            }}
+                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
+                                            title="Transferir para Outra Unidade Policial"
+                                          >
+                                            <Send className="w-3.5 h-3.5 text-sky-400" />
+                                          </button>
+
+                                          <button
+                                            onClick={() => setDeleteConfirmState({
+                                              isOpen: true,
+                                              type: 'stock',
+                                              id: item.id,
+                                              message: `Deseja realmente remover o registro de ${item.quantity} munição(ões) do lote "${item.loteMunicao || 'S/L'}" do cofre ${vault.code}?`
+                                            })}
+                                            className="p-1.5 bg-slate-800/80 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-lg border border-slate-700/60 transition"
+                                            title="Excluir do cofre"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                  </div>
+                );
+              })
             )}
           </div>
 
-          <div className="glass-card rounded-2xl border border-slate-800 overflow-hidden shadow-lg">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950/60 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="py-3 px-4">Data</th>
-                    <th className="py-3 px-4">Origem → Destino</th>
-                    <th className="py-3 px-4">Responsável Transferência</th>
-                    <th className="py-3 px-4">Transportador</th>
-                    <th className="py-3 px-4 text-right">Qtd Total</th>
-                    <th className="py-3 px-4 text-center">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/40">
-                  {unitAmmoTransfers.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-slate-500 text-xs">
-                        Nenhuma transferência registrada nesta unidade.
-                      </td>
-                    </tr>
-                  ) : (
-                    unitAmmoTransfers.map(t => (
-                      <tr key={t.id} className="hover:bg-slate-900/40 transition">
-                        <td className="py-3 px-4 text-slate-400 font-mono text-[11px]">
-                          {t.transferDate}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-slate-200">
-                          {t.originUnitName} <span className="text-amber-400 font-bold">→</span> {t.destinationUnitName}
-                        </td>
-                        <td className="py-3 px-4 text-slate-300">
-                          {t.transferredByUserName} (MASP: {t.transferredByUserMasp})
-                        </td>
-                        <td className="py-3 px-4 text-slate-300">
-                          {t.receiverOrTransporterName}
-                        </td>
-                        <td className="py-3 px-4 text-right font-mono font-bold text-amber-400">
-                          {t.totalQuantity} un
-                        </td>
-                        <td className="py-3 px-4 text-center">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                            t.status === 'Recebido'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                              : t.status === 'Pendente'
-                              ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20 animate-pulse'
-                              : 'bg-red-500/10 text-red-400 border border-red-500/20'
-                          }`}>
-                            {t.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
         </div>
-      )}
+      ) : null}
 
       {/* ============================================================== */}
-      {/* MODAL 1: CADASTRAR / EDITAR / TRANSFERIR ESTOQUE DE MUNIÇÃO */}
+      {/* MODAL: CADASTRAR / EDITAR / TRANSFERIR ESTOQUE DE MUNIÇÃO      */}
       {/* ============================================================== */}
       {showStockModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
@@ -2068,11 +1629,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 2: SELEÇÃO DE COFRES PARA IMPRESSÃO DE RELATÓRIO          */}
-      {/* CRITICAL USER REQUIREMENT:                                     */}
-      {/* - Pergunta se deseja imprimir locais de cofres vazios ou       */}
-      {/*   somente os com munições.                                     */}
-      {/* - Imprime somente assinatura do armeiro responsável.           */}
+      {/* MODAL: SELEÇÃO DE COFRES PARA IMPRESSÃO DE RELATÓRIO           */}
       {/* ============================================================== */}
       {showPrintVaultSelectModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
@@ -2235,7 +1792,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
             <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-[11px] text-slate-400 space-y-1">
               <p>• Cada cofre selecionado será gerado em sua própria página A4 individual.</p>
-              <p>• O relatório conterá <strong>somente a assinatura do armeiro responsável</strong>.</p>
+              <p>• O relatório conterá <strong>somente a assinatura do armeiro responsável</strong>, posicionada logo abaixo da declaração certificadora.</p>
             </div>
 
             <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
@@ -2262,7 +1819,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 3: MOVIMENTAÇÃO (ENTRADA / SAÍDA RÁPIDA)                  */}
+      {/* MODAL: MOVIMENTAÇÃO (ENTRADA / SAÍDA RÁPIDA)                   */}
       {/* ============================================================== */}
       {showMovementModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
@@ -2472,7 +2029,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 4: DEVOLUÇÃO DE MUNIÇÕES NÃO DEFLAGRADAS                 */}
+      {/* MODAL: DEVOLUÇÃO DE MUNIÇÕES NÃO DEFLAGRADAS                   */}
       {/* ============================================================== */}
       {returnTargetMov && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
@@ -2545,7 +2102,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 5: CADASTRAR / EDITAR CALIBRE                            */}
+      {/* MODAL: CADASTRAR / EDITAR CALIBRE                              */}
       {/* ============================================================== */}
       {showCaliberModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
@@ -2650,326 +2207,61 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 6: TRANSFERIR MUNIÇÕES ENTRE UNIDADES                    */}
+      {/* MODAL: TRANSFERÊNCIA DE MUNIÇÕES ENTRE UNIDADES (DEDICADO)     */}
       {/* ============================================================== */}
       {showTransferModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
-            
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-2xl border border-amber-500/20">
-                  <Send className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-100">
-                    Transferir Munições para Outra Unidade
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Origem: {selectedUnitObj?.name || 'Unidade Atual'}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setShowTransferModal(false)}
-                className="text-slate-400 hover:text-slate-200 p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveTransfer} className="space-y-4">
-              
-              {/* Destino */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-950 p-4 rounded-2xl border border-slate-800">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Departamento de Destino *
-                  </label>
-                  <select
-                    value={transfDestDeptId}
-                    onChange={e => {
-                      setTransfDestDeptId(e.target.value);
-                      const dUnits = units.filter(u => u.departmentId === e.target.value && u.id !== selectedUnitId);
-                      setTransfDestUnitId(dUnits[0]?.id || '');
-                    }}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  >
-                    {departments.map(d => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Unidade de Destino *
-                  </label>
-                  <select
-                    value={transfDestUnitId}
-                    onChange={e => setTransfDestUnitId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  >
-                    {units
-                      .filter(u => (!transfDestDeptId || u.departmentId === transfDestDeptId) && u.id !== selectedUnitId)
-                      .map(u => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Lotes Selecionados para Transferir */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-slate-300">
-                    Lotes de Munição a Enviar ({transfItems.length}):
-                  </span>
-                  <span className="text-[11px] text-slate-500">
-                    Clique em "+ Adicionar" nos lotes disponíveis abaixo
-                  </span>
-                </div>
-
-                {transfItems.length === 0 ? (
-                  <div className="p-4 bg-slate-950 rounded-xl border border-slate-800 text-center text-xs text-slate-500">
-                    Nenhum lote adicionado à transferência ainda.
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-40 overflow-y-auto">
-                    {transfItems.map((item, idx) => (
-                      <div key={item.stockId} className="flex items-center justify-between bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs">
-                        <div>
-                          <strong className="text-slate-200">{item.caliberName}</strong>
-                          <span className="text-slate-400 ml-1.5 font-mono text-[11px]">
-                            (Lote: {item.loteMunicao || 'S/L'} • Cofre {item.originVaultCode})
-                          </span>
-                        </div>
-                        <div className="flex items-center space-x-2">
-                          <label className="text-[11px] text-slate-400">Qtd:</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={item.maxQuantity}
-                            value={item.quantity}
-                            onChange={e => {
-                              const val = parseInt(e.target.value, 10) || 1;
-                              setTransfItems(prev => prev.map((it, i) => i === idx ? { ...it, quantity: val } : it));
-                            }}
-                            className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-xs text-amber-400 font-mono font-bold"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setTransfItems(prev => prev.filter((_, i) => i !== idx))}
-                            className="text-red-400 hover:text-red-300 p-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Available stocks in current unit to add */}
-                <div className="pt-2">
-                  <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                    Lotes em Estoque na Unidade Atual:
-                  </span>
-                  <div className="max-h-32 overflow-y-auto space-y-1 bg-slate-950/60 p-2 rounded-xl border border-slate-800">
-                    {filteredStocks.map(stock => {
-                      const cal = calibers.find(c => c.id === stock.caliberId);
-                      const vault = vaultSpaces.find(v => v.id === stock.vaultSpaceId);
-                      const isAdded = transfItems.some(i => i.stockId === stock.id);
-
-                      return (
-                        <div key={stock.id} className="flex items-center justify-between text-xs py-1 px-2 hover:bg-slate-900 rounded">
-                          <div>
-                            <span className="text-slate-200 font-semibold">{cal?.name}</span>
-                            <span className="text-slate-500 text-[11px] ml-1.5">
-                              Lote: {stock.loteMunicao || 'S/L'} • Cofre {vault?.code} (Disp: {stock.quantity})
-                            </span>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={isAdded || stock.quantity <= 0}
-                            onClick={() => handleAddStockToTransfer(stock)}
-                            className="px-2 py-1 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-amber-400 text-[11px] font-bold rounded"
-                          >
-                            {isAdded ? 'Adicionado' : '+ Adicionar'}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-
-              {/* Recebedor / Transportador */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Transportador / Recebedor *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={transfReceiverName}
-                    onChange={e => setTransfReceiverName(e.target.value)}
-                    placeholder="Nome do Policial"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    MASP do Transportador *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={transfReceiverMasp}
-                    onChange={e => setTransfReceiverMasp(e.target.value)}
-                    placeholder="Ex: 1234567"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 font-mono focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Cargo
-                  </label>
-                  <input
-                    type="text"
-                    value={transfReceiverCargo}
-                    onChange={e => setTransfReceiverCargo(e.target.value)}
-                    placeholder="Ex: Investigador"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-              </div>
-
-              {/* Motivo */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Motivo da Transferência *
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={transfReason}
-                  onChange={e => setTransfReason(e.target.value)}
-                  placeholder="Ex: Reforço operacional, treinamento agendado"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowTransferModal(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={transfItems.length === 0}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition flex items-center space-x-1.5 shadow"
-                >
-                  <Send className="w-4 h-4" />
-                  <span>Enviar Transferência</span>
-                </button>
-              </div>
-
-            </form>
-
-          </div>
-        </div>
+        <ModalTransferirMunicao
+          initialStock={stockToTransferInitially}
+          stocks={stocks}
+          calibers={calibers}
+          departments={departments}
+          units={units}
+          vaultSpaces={vaultSpaces}
+          currentUser={currentUser}
+          onClose={() => {
+            setShowTransferModal(false);
+            setStockToTransferInitially(null);
+          }}
+          onTransferSuccess={() => {
+            setSuccessMsg('Transferência de munições despachada com sucesso!');
+            setShowTransferModal(false);
+            setStockToTransferInitially(null);
+            onRefresh();
+          }}
+        />
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 7: RECEBIMENTO DE TRANSFERÊNCIA DE MUNIÇÕES              */}
+      {/* MODAL: HISTÓRICO DE TRANSFERÊNCIAS ENTRE UNIDADES              */}
       {/* ============================================================== */}
-      {receivingTransferId && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
-            
-            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-emerald-500/10 text-emerald-400 rounded-2xl border border-emerald-500/20">
-                  <CheckCircle2 className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-slate-100">
-                    Dar Recibo em Munições Recebidas
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Selecione o cofre da sua unidade onde serão guardadas
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setReceivingTransferId(null)}
-                className="text-slate-400 hover:text-slate-200 p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleConfirmReceiveTransfer} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Cofre de Munição de Destino *
-                </label>
-                <select
-                  required
-                  value={receiveDestVaultId}
-                  onChange={e => setReceiveDestVaultId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                >
-                  {candidateAmmoVaults.map(v => (
-                    <option key={v.id} value={v.id}>
-                      Cofre {v.code} ({v.type})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Observações do Recebimento (Opcional)
-                </label>
-                <input
-                  type="text"
-                  value={receiveObs}
-                  onChange={e => setReceiveObs(e.target.value)}
-                  placeholder="Ex: Material conferido e lacrado em perfeito estado"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setReceivingTransferId(null)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition flex items-center space-x-1.5 shadow"
-                >
-                  <Check className="w-4 h-4" />
-                  <span>Confirmar Entrada no Cofre</span>
-                </button>
-              </div>
-            </form>
-
-          </div>
-        </div>
+      {showTransferHistoryModal && (
+        <ModalHistoricoTransferenciasMunicao
+          transfers={allAmmoTransfers}
+          currentUser={currentUser}
+          selectedUnitId={selectedUnitId}
+          onClose={() => setShowTransferHistoryModal(false)}
+          onOpenNewTransfer={() => {
+            setShowTransferHistoryModal(false);
+            setShowTransferModal(true);
+          }}
+          onRefresh={onRefresh}
+        />
       )}
 
       {/* ============================================================== */}
-      {/* MODAL 8: CONFIRMAR EXCLUSÃO                                    */}
+      {/* MODAL: RECIBO DE MOVIMENTAÇÃO / SAÍDA DE MUNIÇÃO               */}
+      {/* ============================================================== */}
+      {selectedMovForReceipt && (
+        <AmmunitionReceiptModal
+          movement={selectedMovForReceipt}
+          calibers={calibers}
+          vaultSpaces={vaultSpaces}
+          onClose={() => setSelectedMovForReceipt(null)}
+        />
+      )}
+
+      {/* ============================================================== */}
+      {/* MODAL: CONFIRMAR EXCLUSÃO                                      */}
       {/* ============================================================== */}
       <ConfirmDeleteModal
         isOpen={deleteConfirmState.isOpen}
