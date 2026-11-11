@@ -13,7 +13,7 @@ import {
   Disc, Plus, Search, Building, Vault, ArrowRightLeft, Printer, 
   Trash2, Edit2, History, RotateCcw, AlertTriangle, Check, X, 
   ChevronRight, Layers, Package, Send, CheckCircle2, ArrowDownCircle, 
-  ArrowUpCircle, FileText, Sparkles, Filter, Clock
+  ArrowUpCircle, FileText, Sparkles, Filter, Clock, SlidersHorizontal
 } from 'lucide-react';
 
 interface AmmunitionModuleProps {
@@ -51,7 +51,12 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   // Search filter across all ammo fields
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Department & Unit selection (Classic Layout Structure)
+  // Granular Filters requested by User: Cofre, Calibre, Destinação
+  const [filterVaultId, setFilterVaultId] = useState<string>('ALL');
+  const [filterCaliberId, setFilterCaliberId] = useState<string>('ALL');
+  const [filterDestinacao, setFilterDestinacao] = useState<string>('ALL');
+
+  // Department & Unit selection
   const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
     if (isGeral) {
       return departments[0]?.id || '';
@@ -91,6 +96,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   }, [availableUnits, selectedDeptId]);
 
+  // Reset granular filters on department or unit change
+  useEffect(() => {
+    setFilterVaultId('ALL');
+    setFilterCaliberId('ALL');
+    setFilterDestinacao('ALL');
+    setSearchTerm('');
+  }, [selectedDeptId, selectedUnitId]);
+
   const selectedDepartmentObj = useMemo(() => {
     return departments.find(d => d.id === selectedDeptId);
   }, [departments, selectedDeptId]);
@@ -112,6 +125,49 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       return true;
     });
   }, [vaultSpaces, selectedUnitId, selectedDeptId]);
+
+  // Available Calibers present in this unit's stocks for filter dropdown
+  const availableCalibersInUnit = useMemo(() => {
+    const unitCaliberIds = new Set(
+      stocks
+        .filter(s => (!selectedUnitId || s.unitId === selectedUnitId))
+        .map(s => s.caliberId)
+    );
+    return calibers.filter(c => unitCaliberIds.has(c.id));
+  }, [calibers, stocks, selectedUnitId]);
+
+  // Available Destinações present in stocks for filter dropdown
+  const availableDestinacoes = useMemo(() => {
+    const set = new Set<string>();
+    stocks
+      .filter(s => (!selectedUnitId || s.unitId === selectedUnitId))
+      .forEach(s => {
+        if (s.destinacao) set.add(s.destinacao);
+      });
+    if (set.size === 0) {
+      set.add('Treinamento');
+      set.add('Operacional');
+      set.add('Reserva');
+      set.add('Curso de Formação');
+    }
+    return Array.from(set);
+  }, [stocks, selectedUnitId]);
+
+  // Check if any filter is currently active
+  // USER REQUIREMENT: "sempre que um filtro tiver ativado os cofres que não possuírem registros devem ficar invisíveis"
+  const hasActiveFilter = Boolean(
+    searchTerm.trim() || 
+    filterVaultId !== 'ALL' || 
+    filterCaliberId !== 'ALL' || 
+    filterDestinacao !== 'ALL'
+  );
+
+  const clearAllFilters = () => {
+    setSearchTerm('');
+    setFilterVaultId('ALL');
+    setFilterCaliberId('ALL');
+    setFilterDestinacao('ALL');
+  };
 
   // Alerts
   const [errorMsg, setErrorMsg] = useState('');
@@ -188,7 +244,6 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
   // Print Vaults Report Modal State
   const [showPrintVaultSelectModal, setShowPrintVaultSelectModal] = useState(false);
-  // User Requirement: "ao imprimir relatório pergunta se deseja imprimir locais de cofres vazio ou somente os com munições"
   const [printEmptyVaultsOption, setPrintEmptyVaultsOption] = useState<'somente_com_municoes' | 'todos_inclusive_vazios'>('somente_com_municoes');
   const [selectedVaultIdsForReport, setSelectedVaultIdsForReport] = useState<string[]>([]);
 
@@ -209,13 +264,25 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   }, [showPrintVaultSelectModal, printEmptyVaultsOption, candidateAmmoVaults, stocks]);
 
-  // Comprehensive Search across all ammunition fields
+  // Comprehensive Search and Granular Filtering across all ammunition fields
   const filteredStocks = useMemo(() => {
     const q = searchTerm.toLowerCase().trim();
     return stocks.filter(stock => {
       // Must belong to candidate vaults or unit
       if (selectedUnitId && stock.unitId !== selectedUnitId) return false;
       if (selectedDeptId && selectedDeptId !== 'ALL' && stock.departmentId !== selectedDeptId) return false;
+
+      // Filter: Cofre
+      if (filterVaultId !== 'ALL' && stock.vaultSpaceId !== filterVaultId) return false;
+
+      // Filter: Calibre
+      if (filterCaliberId !== 'ALL' && stock.caliberId !== filterCaliberId) return false;
+
+      // Filter: Destinação
+      if (filterDestinacao !== 'ALL') {
+        const d = (stock.destinacao || 'Treinamento').toLowerCase();
+        if (d !== filterDestinacao.toLowerCase()) return false;
+      }
 
       if (!q) return true;
 
@@ -243,7 +310,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
       return searchFields.some(field => field.includes(q));
     });
-  }, [stocks, selectedUnitId, selectedDeptId, searchTerm, calibers, vaultSpaces, units, departments]);
+  }, [stocks, selectedUnitId, selectedDeptId, searchTerm, filterVaultId, filterCaliberId, filterDestinacao, calibers, vaultSpaces, units, departments]);
 
   // Group filtered stocks by vault
   const stocksByVault = useMemo(() => {
@@ -258,6 +325,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     });
     return map;
   }, [candidateAmmoVaults, filteredStocks]);
+
+  // USER REQUIREMENT: "sempre que um filtro tiver ativado os cofres que não possuírem registros devem ficar invisíveis"
+  const visibleVaults = useMemo(() => {
+    return candidateAmmoVaults.filter(vault => {
+      // If a specific cofre is selected in filter, match only that one
+      if (filterVaultId !== 'ALL' && vault.id !== filterVaultId) {
+        return false;
+      }
+      const items = stocksByVault.get(vault.id) || [];
+      if (hasActiveFilter) {
+        return items.length > 0;
+      }
+      return true;
+    });
+  }, [candidateAmmoVaults, filterVaultId, stocksByVault, hasActiveFilter]);
 
   // Pending Incoming Ammo Transfers for the badge
   const pendingTransfers = useMemo(() => {
@@ -560,7 +642,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
    * REGRA DO USUÁRIO:
    * 1. Pergunta se deseja imprimir locais de cofres vazios ou somente os com munições.
    * 2. Imprime um relatório por vez (cada cofre em uma página separada).
-   * 3. O relatório contém SOMENTE a assinatura do armeiro responsável (logo abaixo do texto certificador!).
+   * 3. TODAS as páginas devem conter a assinatura do armeiro, logo abaixo do texto certificador!
    */
   const handlePrintUnitAmmoReport = () => {
     if (selectedVaultIdsForReport.length === 0) {
@@ -666,7 +748,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             Certifico que o inventário acima reflete fielmente o material bélico (munições) sob guarda no espaço do cofre ${vault.code} na presente data, conforme conferência física realizada pelo armeiro responsável.
           </div>
 
-          <!-- ASSINATURA: LOGO ABAIXO DO TEXTO CERTIFICADOR, SOMENTE O ARMEIRO RESPONSÁVEL -->
+          <!-- ASSINATURA DO ARMEIRO: PRESENTE EM TODAS AS PÁGINAS, LOGO ABAIXO DO TEXTO CERTIFICADOR -->
           <div class="signatures">
             <div class="sig-box">
               <div class="sig-line"></div>
@@ -777,6 +859,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             display: flex;
             justify-content: center;
             text-align: center;
+            page-break-inside: avoid;
           }
           .sig-box {
             width: 320px;
@@ -1020,11 +1103,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         </div>
       )}
 
-      {/* STEP 3: Ammo Search Bar & Vaults Stock view */}
+      {/* STEP 3: Ammo Search Bar & Filters */}
       {selectedUnitId ? (
         <div className="space-y-4">
           
-          {/* Search Bar & Summary Card */}
+          {/* Search Bar & Granular Filters: Cofre, Calibre, Destinação */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3.5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               
@@ -1072,6 +1155,146 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               </div>
 
             </div>
+
+            {/* Granular Filters: Cofre, Calibre, Destinação */}
+            <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Filtros do Estoque (Cofre, Calibre, Destinação):</span>
+                </span>
+
+                {hasActiveFilter && (
+                  <button
+                    onClick={clearAllFilters}
+                    className="text-[11px] text-amber-400 hover:text-amber-300 font-semibold flex items-center space-x-1 transition hover:underline"
+                    title="Limpar todos os filtros aplicados"
+                  >
+                    <RotateCcw className="w-3 h-3" />
+                    <span>Limpar Filtros</span>
+                  </button>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                
+                {/* 1. Filtro: Cofre */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Local / Cofre de Munição:
+                  </label>
+                  <select
+                    value={filterVaultId}
+                    onChange={(e) => setFilterVaultId(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterVaultId !== 'ALL'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="ALL" className="bg-slate-900 text-slate-200">
+                      Todos os Cofres da Unidade ({candidateAmmoVaults.length})
+                    </option>
+                    {candidateAmmoVaults.map(v => (
+                      <option key={v.id} value={v.id} className="bg-slate-900 text-slate-200 font-mono">
+                        Cofre {v.code}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. Filtro: Calibre */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Calibre da Munição:
+                  </label>
+                  <select
+                    value={filterCaliberId}
+                    onChange={(e) => setFilterCaliberId(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterCaliberId !== 'ALL'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="ALL" className="bg-slate-900 text-slate-200">
+                      Todos os Calibres
+                    </option>
+                    {availableCalibersInUnit.map(c => (
+                      <option key={c.id} value={c.id} className="bg-slate-900 text-slate-200">
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Filtro: Destinação */}
+                <div>
+                  <label className="block text-[10px] font-semibold text-slate-400 mb-1">
+                    Destinação Operacional:
+                  </label>
+                  <select
+                    value={filterDestinacao}
+                    onChange={(e) => setFilterDestinacao(e.target.value)}
+                    className={`w-full text-xs rounded-xl px-3 py-2 border transition focus:outline-none focus:ring-1 focus:ring-amber-500 ${
+                      filterDestinacao !== 'ALL'
+                        ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
+                        : 'bg-slate-950 border-slate-800 text-slate-200'
+                    }`}
+                  >
+                    <option value="ALL" className="bg-slate-900 text-slate-200">
+                      Todas as Destinações
+                    </option>
+                    {availableDestinacoes.map(d => (
+                      <option key={d} value={d} className="bg-slate-900 text-slate-200">
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+              </div>
+
+              {/* Active Filter Badges */}
+              {hasActiveFilter && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-slate-400 font-semibold">Filtros ativos:</span>
+                  {filterVaultId !== 'ALL' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Cofre: {candidateAmmoVaults.find(v => v.id === filterVaultId)?.code || filterVaultId}</span>
+                      <button onClick={() => setFilterVaultId('ALL')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterCaliberId !== 'ALL' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Calibre: {calibers.find(c => c.id === filterCaliberId)?.name || filterCaliberId}</span>
+                      <button onClick={() => setFilterCaliberId('ALL')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {filterDestinacao !== 'ALL' && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Destinação: {filterDestinacao}</span>
+                      <button onClick={() => setFilterDestinacao('ALL')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                  {searchTerm && (
+                    <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
+                      <span>Busca: "{searchTerm}"</span>
+                      <button onClick={() => setSearchTerm('')} className="hover:text-amber-100 ml-1">
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+
           </div>
 
           {/* Optional: Movimentações Recentes Drawer / Section */}
@@ -1182,7 +1405,12 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             </div>
           )}
 
-          {/* Cofres de Munições da Unidade Selecionada */}
+          {/* Cofres de Munições da Unidade Selecionada
+              CRITICAL USER REQUIREMENTS:
+              1. Sempre que um filtro tiver ativado os cofres que não possuírem registros devem ficar invisíveis.
+              2. As opções entrada e saída de munições não deve ficar visível no cofre.
+              3. Layout restaurado da forma anterior da modificação de hoje.
+          */}
           <div className="space-y-4">
             {candidateAmmoVaults.length === 0 ? (
               <div className="glass-card rounded-2xl p-12 text-center border border-slate-800 space-y-3">
@@ -1192,8 +1420,23 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   Cadastre um local no cofre do tipo "MUNIÇÕES" no módulo de Cofres para gerenciar o estoque.
                 </p>
               </div>
+            ) : visibleVaults.length === 0 ? (
+              <div className="glass-card rounded-2xl p-10 text-center border border-slate-800 space-y-3">
+                <Disc className="w-10 h-10 text-slate-600 mx-auto" />
+                <h3 className="text-base font-bold text-slate-300">Nenhum cofre com munições encontrado para os filtros selecionados</h3>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Tente alterar ou limpar os filtros de cofre, calibre, destinação ou texto de busca.
+                </p>
+                <button
+                  onClick={clearAllFilters}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs rounded-xl transition inline-flex items-center space-x-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Limpar Filtros</span>
+                </button>
+              </div>
             ) : (
-              candidateAmmoVaults.map(vault => {
+              visibleVaults.map(vault => {
                 const vaultItems = stocksByVault.get(vault.id) || [];
                 const vaultTotal = vaultItems.reduce((acc, curr) => acc + curr.quantity, 0);
 
@@ -1216,7 +1459,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                             </span>
                           </div>
                           <span className="text-xs text-slate-400">
-                            {vaultItems.length} lote(s) cadastrado(s)
+                            {vaultItems.length} lote(s) registrado(s)
                           </span>
                         </div>
                       </div>
@@ -1239,7 +1482,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                       </div>
                     </div>
 
-                    {/* Vault Items Table */}
+                    {/* Vault Items Table
+                        USER REQUIREMENT:
+                        - As opções entrada e saída de munições NÃO devem ficar visíveis no cofre!
+                        - Exibe apenas Editar / Transferir e Excluir.
+                    */}
                     {vaultItems.length === 0 ? (
                       <div className="p-8 text-center text-slate-500 text-xs">
                         Nenhuma munição armazenada neste cofre no momento (Cofre vazio).
@@ -1293,23 +1540,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                     <div className="flex items-center justify-end space-x-1.5">
                                       {canManage && (
                                         <>
-                                          <button
-                                            onClick={() => handleOpenMovementModal(item, 'Saída')}
-                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
-                                            title="Saída / Baixa rápida"
-                                          >
-                                            <ArrowUpCircle className="w-3.5 h-3.5 text-amber-400" />
-                                          </button>
-
-                                          <button
-                                            onClick={() => handleOpenMovementModal(item, 'Entrada')}
-                                            className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
-                                            title="Entrada / Reabastecimento rápido"
-                                          >
-                                            <ArrowDownCircle className="w-3.5 h-3.5 text-emerald-400" />
-                                          </button>
-
-                                          {/* USER REQUIREMENT: Editar informações e transferir munições entre cofres */}
+                                          {/* Note: As opções de entrada e saída rápida foram removidas conforme instrução do usuário */}
                                           <button
                                             onClick={() => handleOpenEditStock(item)}
                                             className="p-1.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700/60 transition"
@@ -1657,7 +1888,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
               </button>
             </div>
 
-            {/* CRITICAL QUESTION: Deseja imprimir locais de cofres vazios ou somente os com munições? */}
+            {/* Pergunta se deseja imprimir locais de cofres vazios ou somente os com munições */}
             <div className="bg-slate-950 border border-slate-800 p-4 rounded-2xl space-y-3">
               <label className="block text-xs font-bold text-amber-400 uppercase tracking-wider">
                 Deseja imprimir locais de cofres vazios ou somente os com munições?
@@ -1792,7 +2023,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
             <div className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl text-[11px] text-slate-400 space-y-1">
               <p>• Cada cofre selecionado será gerado em sua própria página A4 individual.</p>
-              <p>• O relatório conterá <strong>somente a assinatura do armeiro responsável</strong>, posicionada logo abaixo da declaração certificadora.</p>
+              <p>• <strong>Todas as páginas</strong> conterão a assinatura do armeiro responsável, posicionada logo abaixo da declaração certificadora.</p>
             </div>
 
             <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">

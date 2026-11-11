@@ -14,21 +14,30 @@ function keepArmorerSignatureOnly(htmlContent: string): string {
   }
 
   if (isArsenalInventory) {
-    const signatureBoxes = Array.from(document.querySelectorAll('.signatures-container .signature-box'));
-    signatureBoxes.slice(1).forEach(box => box.remove());
-  } else {
-    const signatureLines = Array.from(document.querySelectorAll('.signatures .sig-line'));
-    const armorerLine = isAmmoReceipt
-      ? signatureLines.find(line => line.textContent?.includes('Armeiro Operador')) || signatureLines[signatureLines.length - 1]
-      : signatureLines[0];
-
-    signatureLines.forEach(line => {
-      if (line !== armorerLine) line.remove();
+    const containers = Array.from(document.querySelectorAll('.signatures-container'));
+    containers.forEach(container => {
+      const signatureBoxes = Array.from(container.querySelectorAll('.signature-box'));
+      signatureBoxes.slice(1).forEach(box => box.remove());
     });
+  } else {
+    const signatureContainers = Array.from(document.querySelectorAll('.signatures'));
+    signatureContainers.forEach(container => {
+      const signatureBoxes = Array.from(container.querySelectorAll('.sig-box'));
+      if (signatureBoxes.length > 1) {
+        signatureBoxes.slice(1).forEach(box => box.remove());
+      }
 
-    // The unit ammunition inventory uses .sig-box rather than .sig-line.
-    const signatureBoxes = Array.from(document.querySelectorAll('.signatures .sig-box'));
-    signatureBoxes.slice(1).forEach(box => box.remove());
+      const signatureLines = Array.from(container.querySelectorAll('.sig-line'));
+      if (signatureLines.length > 1) {
+        const armorerLine = isAmmoReceipt
+          ? signatureLines.find(line => line.textContent?.includes('Armeiro Operador')) || signatureLines[signatureLines.length - 1]
+          : signatureLines[0];
+
+        signatureLines.forEach(line => {
+          if (line !== armorerLine) line.remove();
+        });
+      }
+    });
   }
 
   const printStyle = document.createElement('style');
