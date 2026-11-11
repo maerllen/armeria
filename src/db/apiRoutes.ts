@@ -9595,11 +9595,15 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
       return res.status(404).json({ error: 'Cautela de arma não encontrada.' });
     }
 
-    const armorer = actor || { id: armorerId, name: armorerName, masp: armorerMasp };
+    const armorer = {
+      id: armorerId || actor?.id,
+      name: armorerName || actor?.name,
+      masp: armorerMasp || actor?.masp
+    };
     const { vaultSpaceId, stockId, seraDevolvida } = req.body;
     const actualCautelaId = cautela.ID_ACAUTELAR_ARMAS;
 
-    // 1. Atualiza status da cautela para AUTORIZADA
+    // 1. Atualiza status da cautela para AUTORIZADA com Armeiro Autorizador
     await pool.query(`
       UPDATE ACAUTELAR_ARMAS SET
         STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA',
@@ -9806,11 +9810,35 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
         armorer.masp
       ]);
 
-      // Vincula na cautela de arma
-      await pool.query(
-        'UPDATE ACAUTELAR_ARMAS SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ? WHERE ID_ACAUTELAR_ARMAS = ?',
-        [newAmmoId, actualCautelaId]
-      );
+      // Vincula na cautela de arma e grava dados da munição vinculada
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS SET 
+             CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ?,
+             MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_TIPO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_PESO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_LOTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = ?
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [
+            newAmmoId,
+            ammoQty,
+            stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || 'CBC',
+            stockDetails?.TIPO_ESTOQUE_MUNICOES || 'Operacional',
+            stockDetails?.PESO_ESTOQUE_MUNICOES || null,
+            stockDetails?.LOTE_ESTOQUE_MUNICOES || 'Lote Unidade',
+            req.body.destinacao || 'Defesa',
+            actualCautelaId
+          ]
+        );
+      } catch (e) {
+        await pool.query(
+          'UPDATE ACAUTELAR_ARMAS SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ? WHERE ID_ACAUTELAR_ARMAS = ?',
+          [newAmmoId, actualCautelaId]
+        );
+      }
 
       // Deduz do estoque
       const effectiveStockId = stockDetails?.ID_ESTOQUE_MUNICOES || stockId;

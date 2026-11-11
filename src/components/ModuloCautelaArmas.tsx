@@ -250,7 +250,94 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return false;
   }, [currentUser]);
 
-  // Filtragem de cautelas de acordo com permissões
+  // Resolve com precisão o armeiro autorizador da cautela (Nome e MASP)
+  const getResolvedArmorer = useCallback((cautela: CautelaArma | null | undefined) => {
+    if (!cautela) return { name: 'Armeiro da Unidade', masp: '', label: 'Armeiro da Unidade' };
+
+    const allUsers = storage.getUsers();
+
+    // 1. Armeiro explícito preenchido na cautela
+    const rawName = (cautela.armorerName || '').trim();
+    const rawMasp = (cautela.armorerMasp || '').trim();
+    const isPlaceholder = !rawName || 
+      rawName.toLowerCase() === 'aguardando autorização' || 
+      rawName.toLowerCase() === 'aguardando autorizacao' || 
+      rawName.toLowerCase() === 'pendente';
+
+    if (!isPlaceholder) {
+      return {
+        name: rawName,
+        masp: rawMasp,
+        label: `${rawName}${rawMasp ? ` (MASP: ${rawMasp})` : ''}`
+      };
+    }
+
+    // 2. Busca por ID do armeiro
+    if (cautela.armorerId) {
+      const u = allUsers.find(x => x.id === cautela.armorerId);
+      if (u) {
+        return {
+          name: u.name,
+          masp: u.masp || '',
+          label: `${u.name}${u.masp ? ` (MASP: ${u.masp})` : ''}`
+        };
+      }
+    }
+
+    // 3. Busca por MASP do armeiro
+    if (rawMasp) {
+      const u = allUsers.find(x => x.masp === rawMasp);
+      if (u) {
+        return {
+          name: u.name,
+          masp: u.masp || rawMasp,
+          label: `${u.name} (MASP: ${u.masp || rawMasp})`
+        };
+      }
+    }
+
+    // 4. Se a cautela estiver autorizada ou devolvida, resolve o armeiro da unidade
+    if (cautela.status === 'AUTORIZADA' || cautela.status === 'DEVOLVIDA') {
+      const targetUnitId = cautela.unitId;
+      const unitArmorer = allUsers.find(u => 
+        (u.role === 'Armeiro' || (u as any).activeRole === 'Armeiro') &&
+        (!targetUnitId || u.unitId === targetUnitId)
+      ) || allUsers.find(u => 
+        (u.role === 'Administrador' || (u as any).activeRole === 'Administrador') &&
+        (!targetUnitId || u.unitId === targetUnitId)
+      ) || allUsers.find(u => u.role === 'Armeiro' || (u as any).activeRole === 'Armeiro')
+        || allUsers.find(u => u.role === 'Administrador');
+
+      if (unitArmorer) {
+        return {
+          name: unitArmorer.name,
+          masp: unitArmorer.masp || '',
+          label: `${unitArmorer.name}${unitArmorer.masp ? ` (MASP: ${unitArmorer.masp})` : ''}`
+        };
+      }
+
+      if (canAuthorize) {
+        return {
+          name: currentUser.name,
+          masp: currentUser.masp || '',
+          label: `${currentUser.name}${currentUser.masp ? ` (MASP: ${currentUser.masp})` : ''}`
+        };
+      }
+
+      return {
+        name: 'Armeiro da Unidade',
+        masp: '',
+        label: 'Armeiro da Unidade'
+      };
+    }
+
+    return {
+      name: 'Aguardando autorização',
+      masp: '',
+      label: 'Aguardando autorização'
+    };
+  }, [currentUser, canAuthorize]);
+
   // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
     let list = [...allCautelas];
@@ -295,6 +382,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             createdAt: new Date().toISOString()
           });
         } else if (isWeaponAcautelada && !list.some(c => c.weaponId === w.id && (c.status === 'AUTORIZADA' || c.status === 'PENDENTE'))) {
+          const allUsers = storage.getUsers();
+          const armorerUser = allUsers.find(u => 
+            (u.role === 'Armeiro' || (u as any).activeRole === 'Armeiro') &&
+            (!w.unitId || u.unitId === w.unitId)
+          ) || allUsers.find(u => 
+            (u.role === 'Administrador' || (u as any).activeRole === 'Administrador') &&
+            (!w.unitId || u.unitId === w.unitId)
+          ) || allUsers.find(u => u.role === 'Armeiro' || (u as any).activeRole === 'Armeiro')
+            || allUsers.find(u => u.role === 'Administrador');
+
+          const linkedMun = (storage.getCautelasMunicoes() || []).find(m => 
+            (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === w.serialNumber) ||
+            ((m as any).weaponId && (m as any).weaponId === w.id) ||
+            (m.requesterMasp && currentUser.masp && m.requesterMasp === currentUser.masp && m.status === 'AUTORIZADA')
+          );
+
           list.unshift({
             id: `caut-active-${w.id}`,
             weaponId: w.id,
@@ -303,7 +406,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             weaponType: w.type,
             weaponCaliber: w.caliber,
             magazineQuantity: w.magazineQuantity || 2,
-            vaultSpaceId: w.vaultSpaceId,
+            vaultSpaceId: w.vaultSpaceId || (w as any).previousVaultSpaceId,
             departmentId: w.departmentId,
             unitId: w.unitId,
             requesterId: currentUser.id,
@@ -315,6 +418,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             requestDate: (w as any).dataModificacao || new Date().toISOString(),
             authorizedAt: (w as any).dataModificacao || new Date().toISOString(),
             status: 'AUTORIZADA',
+            armorerId: (w as any).armorerId || armorerUser?.id,
+            armorerName: (w as any).armorerName || armorerUser?.name || 'Armeiro da Unidade',
+            armorerMasp: (w as any).armorerMasp || armorerUser?.masp || '',
+            linkedAmmoCautelaId: linkedMun?.id,
+            ammoQuantity: linkedMun?.quantity,
+            ammoFabricante: linkedMun?.fabricante,
+            ammoTipo: linkedMun?.tipoMunicao,
+            ammoPeso: linkedMun?.pesoMunicao,
+            ammoLote: linkedMun?.loteMunicao,
+            ammoDestinacao: linkedMun?.destinacao,
             hadShots: false,
             shotsFired: 0,
             isWorking: true,
@@ -398,6 +511,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             createdAt: new Date().toISOString()
           });
         } else if (isWeaponAcautelada && !list.some(c => c.weaponId === w.id && c.status === 'AUTORIZADA')) {
+          const allUsers = storage.getUsers();
+          const armorerUser = allUsers.find(u => 
+            (u.role === 'Armeiro' || (u as any).activeRole === 'Armeiro') &&
+            (!w.unitId || u.unitId === w.unitId)
+          ) || allUsers.find(u => 
+            (u.role === 'Administrador' || (u as any).activeRole === 'Administrador') &&
+            (!w.unitId || u.unitId === w.unitId)
+          ) || currentUser;
+
+          const linkedMun = (storage.getCautelasMunicoes() || []).find(m => 
+            (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === w.serialNumber) ||
+            ((m as any).weaponId && (m as any).weaponId === w.id) ||
+            (reqMasp !== 'N/A' && m.requesterMasp && m.requesterMasp === reqMasp && m.status === 'AUTORIZADA')
+          );
+
           list.unshift({
             id: `caut-active-${w.id}`,
             weaponId: w.id,
@@ -413,9 +541,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             requesterName: reqName || 'Policial da Unidade',
             requesterMasp: reqMasp !== 'N/A' ? reqMasp : 'Masp da Cautela',
             requesterCargo: 'Investigador / Policial',
-            armorerId: currentUser.id,
-            armorerName: currentUser.name,
-            armorerMasp: currentUser.masp,
+            armorerId: (w as any).armorerId || armorerUser?.id || currentUser.id,
+            armorerName: (w as any).armorerName || armorerUser?.name || currentUser.name,
+            armorerMasp: (w as any).armorerMasp || armorerUser?.masp || currentUser.masp || '',
+            linkedAmmoCautelaId: linkedMun?.id,
+            ammoQuantity: linkedMun?.quantity,
+            ammoFabricante: linkedMun?.fabricante,
+            ammoTipo: linkedMun?.tipoMunicao,
+            ammoPeso: linkedMun?.pesoMunicao,
+            ammoLote: linkedMun?.loteMunicao,
+            ammoDestinacao: linkedMun?.destinacao,
             reason: 'Arma acautelada em serviço na unidade',
             requestDate: (w as any).dataModificacao || new Date().toISOString(),
             authorizedAt: (w as any).dataModificacao || new Date().toISOString(),
@@ -584,7 +719,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       m.id === cautela.linkedAmmoCautelaId || 
       (m as any).cautelaArmaId === cautela.id || 
       m.linkedWeaponCautelaId === cautela.id ||
-      (m.requesterId === cautela.requesterId && (m.status === 'PENDENTE' || m.status === 'AUTORIZADA') && Math.abs(new Date(m.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 15000)
+      (m.linkedWeaponSerialNumber && cautela.weaponSerialNumber && m.linkedWeaponSerialNumber === cautela.weaponSerialNumber) ||
+      ((m as any).weaponId && cautela.weaponId && (m as any).weaponId === cautela.weaponId) ||
+      (m.requesterMasp && cautela.requesterMasp && m.requesterMasp === cautela.requesterMasp && (cautela.status === 'AUTORIZADA' ? m.status === 'AUTORIZADA' : true)) ||
+      (m.requesterId === cautela.requesterId && (m.status === 'PENDENTE' || m.status === 'AUTORIZADA') && Math.abs(new Date(m.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 30000)
     ) || null;
   };
 
@@ -956,6 +1094,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}`
       : 'Cofre de Origem da Unidade';
 
+    const armorerInfo = getResolvedArmorer(cautela);
+
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
     const calObj = (linkedAmmo || cautela.weaponCaliber) 
       ? calibers.find(c => c.id === linkedAmmo?.caliberId || c.name === linkedAmmo?.caliberName || c.name === cautela.weaponCaliber) 
@@ -1210,8 +1350,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </tbody>
           </table>
           ` : `
-          <div style="padding: 6px 10px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 10px; color: #475569; margin-bottom: 8px;">
-            Nenhuma munição fornecida em conjunto para esta cautela de armamento.
+          <div style="padding: 8px 12px; background-color: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 4px; font-size: 11px; color: #475569; margin-bottom: 8px;">
+            <strong>Munições Vinculadas:</strong> Nenhuma munição fornecida em conjunto para esta cautela (Apenas armamento e ${cautela.magazineQuantity} carregadores).
           </div>
           `}
         </div>
@@ -1226,7 +1366,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <td style="width: 40%;"><strong>Data/Hora Solicitação:</strong> ${new Date(cautela.requestDate).toLocaleString('pt-BR')}</td>
             </tr>
             <tr>
-              <td><strong>Armeiro Responsável pela Cautela:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
+              <td><strong>Armeiro Autorizador da Cautela:</strong> ${armorerInfo.name} ${armorerInfo.masp ? `(MASP: ${armorerInfo.masp})` : ''}</td>
               <td><strong>Data/Hora Autorização:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : 'Pendente'}</td>
             </tr>
             <tr>
@@ -1270,17 +1410,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <span>Usuário que está recebendo a arma (Policial)</span>
           </div>
           <div class="signature-box">
-            <strong>${cautela.armorerName || 'Armeiro da Unidade'}</strong><br/>
-            ${cautela.armorerMasp ? `MASP: ${cautela.armorerMasp}<br/>` : ''}
-            <span>Armeiro Responsável pela Cautela</span>
+            <strong>${armorerInfo.name}</strong><br/>
+            ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
+            <span>Armeiro Autorizador da Cautela</span>
           </div>
         </div>
 
         <div class="footer-note">
-          Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} ${hasAmmo ? '• (Página 1 de 2)' : ''}
+          Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} ${(hasAmmo && ammoQtd > 0) ? '• (Página 1 de 2)' : ''}
         </div>
 
-        ${hasAmmo ? `
+        ${(hasAmmo && ammoQtd > 0) ? `
           <!-- PÁGINA 2: RECIBO DE FORNECIMENTO DE MUNIÇÕES VINCULADAS -->
           <div class="page-break">
             <div class="header-box">
@@ -1352,7 +1492,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <td style="width: 40%;"><strong>Previsão de Devolução:</strong> ${ammoSeraDevolvida ? 'Sim (munições não deflagradas retornam ao cofre)' : 'Não (consumo operacional/treinamento)'}</td>
                 </tr>
                 <tr>
-                  <td><strong>Armeiro Responsável pela Cautela:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
+                  <td><strong>Armeiro Autorizador da Cautela:</strong> ${armorerInfo.name} ${armorerInfo.masp ? `(MASP: ${armorerInfo.masp})` : ''}</td>
                   <td><strong>Data da Liberação:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')}</td>
                 </tr>
               </table>
@@ -1366,12 +1506,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <div class="signature-box">
                 <strong>${cautela.requesterName}</strong><br/>
                 MASP: ${cautela.requesterMasp}<br/>
-                <span>Usuário que está recebendo a arma (Policial)</span>
+                <span>Usuário que está recebendo as munições (Policial)</span>
               </div>
               <div class="signature-box">
-                <strong>${cautela.armorerName || 'Armeiro da Unidade'}</strong><br/>
-                ${cautela.armorerMasp ? `MASP: ${cautela.armorerMasp}<br/>` : ''}
-                <span>Armeiro Responsável pela Cautela</span>
+                <strong>${armorerInfo.name}</strong><br/>
+                ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
+                <span>Armeiro Autorizador da Cautela</span>
               </div>
             </div>
 
@@ -2209,6 +2349,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                             const linkedAmmo = getLinkedAmmoForCautela(cautela);
                             const hasAmmo = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linkedAmmo);
+                            const armorerInfo = getResolvedArmorer(cautela);
 
                             return (
                               <div
@@ -2275,14 +2416,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                   </div>
                                   <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
                                     <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Autorizador</span>
-                                    <span className="text-slate-200 font-semibold truncate block" title={cautela.armorerName ? `${cautela.armorerName} (MASP: ${cautela.armorerMasp || 'N/A'})` : 'Aguardando autorização'}>
-                                      {cautela.armorerName ? `${cautela.armorerName}${cautela.armorerMasp ? ` (MASP: ${cautela.armorerMasp})` : ''}` : 'Aguardando autorização'}
+                                    <span className="text-slate-200 font-semibold truncate block" title={armorerInfo.label}>
+                                      {armorerInfo.label}
                                     </span>
                                   </div>
                                 </div>
 
                                 {/* Munição Vinculada (Fabricante, Calibre, Tipo, Peso, Lote, Quantidade e Destinação) */}
-                                {hasAmmo && (() => {
+                                {(() => {
                                   const qty = cautela.ammoQuantity || linkedAmmo?.quantity || 0;
                                   const fab = cautela.ammoFabricante || linkedAmmo?.fabricante || 'CBC';
                                   const cal = cautela.weaponCaliber || linkedAmmo?.caliberName || 'Padrão';
@@ -2291,35 +2432,47 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                   const lot = cautela.ammoLote || linkedAmmo?.loteMunicao || 'Lote Unidade';
                                   const des = cautela.ammoDestinacao || linkedAmmo?.destinacao || 'Defesa';
 
+                                  if (hasAmmo && qty > 0) {
+                                    return (
+                                      <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5 text-xs">
+                                        <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
+                                          <span className="font-bold text-amber-300 flex items-center space-x-1.5">
+                                            <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Munição Vinculada à Cautela da Arma</span>
+                                          </span>
+                                          <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/50">
+                                            {qty} munições
+                                          </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                                          <div>
+                                            <span className="text-slate-500 block">Fabricante / Calibre:</span>
+                                            <strong className="text-slate-200">{fab} • {cal}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Tipo / Peso:</span>
+                                            <strong className="text-slate-200">{tip} • {pes}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Lote:</span>
+                                            <strong className="text-slate-200 font-mono">{lot}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Destinação:</span>
+                                            <strong className="text-slate-200">{des}</strong>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  }
+
                                   return (
-                                    <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5 text-xs">
-                                      <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
-                                        <span className="font-bold text-amber-300 flex items-center space-x-1.5">
-                                          <Disc className="w-3.5 h-3.5 text-amber-400" />
-                                          <span>Munição Vinculada à Cautela da Arma</span>
-                                        </span>
-                                        <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/50">
-                                          {qty} munições
-                                        </span>
-                                      </div>
-                                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
-                                        <div>
-                                          <span className="text-slate-500 block">Fabricante / Calibre:</span>
-                                          <strong className="text-slate-200">{fab} • {cal}</strong>
-                                        </div>
-                                        <div>
-                                          <span className="text-slate-500 block">Tipo / Peso:</span>
-                                          <strong className="text-slate-200">{tip} • {pes}</strong>
-                                        </div>
-                                        <div>
-                                          <span className="text-slate-500 block">Lote:</span>
-                                          <strong className="text-slate-200 font-mono">{lot}</strong>
-                                        </div>
-                                        <div>
-                                          <span className="text-slate-500 block">Destinação:</span>
-                                          <strong className="text-slate-200">{des}</strong>
-                                        </div>
-                                      </div>
+                                    <div className="p-2.5 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-xs flex items-center justify-between text-slate-400">
+                                      <span className="flex items-center space-x-1.5">
+                                        <Disc className="w-3.5 h-3.5 text-slate-600" />
+                                        <span>Munições Associadas: <strong className="text-slate-300">Nenhuma munição vinculada</strong> (Apenas arma e carregadores)</span>
+                                      </span>
+                                      <span className="text-[11px] font-mono text-slate-500">0 un.</span>
                                     </div>
                                   );
                                 })()}
