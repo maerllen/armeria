@@ -39,6 +39,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const isArmeiroOrAdmin = !isPolicial && (isGeral || isArmeiro || isAdmin);
   const canAuthorize = isArmeiroOrAdmin;
 
+  const userUnit = useMemo(() => {
+    return units.find(u => u.id === currentUser.unitId);
+  }, [units, currentUser.unitId]);
+
   // Tabs: Minhas Cautelas (Aguardando Ação do Armeiro), Deferidas (Autorizadas/Devolvidas), Indeferidas, Nova
   const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
   const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
@@ -321,18 +325,54 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         }
       });
     } else {
-      // Armeiro / Admin / Geral: abrange a unidade ou departamento
-      if (!isGeral && currentUser.managementScope !== 'department') {
-        list = list.filter(c => !currentUser.unitId || c.unitId === currentUser.unitId || !c.unitId || isUserCautela(c));
+      // Armeiro / Admin / Geral:
+      // O usuário Armeiro poderá ver TODAS as cautelas deferidas, pendentes e indeferidas da unidade que faz parte
+      const targetUnitId = currentUser.unitId;
+
+      if (!isGeral && currentUser.managementScope !== 'department' && targetUnitId) {
+        list = list.filter(c => {
+          // 1. Cautela possui a mesma unidade do armeiro
+          if (c.unitId && c.unitId === targetUnitId) return true;
+
+          // 2. Arma associada pertence à unidade do armeiro
+          const w = (weapons || []).find(x => x.id === c.weaponId || (x.serialNumber && x.serialNumber === c.weaponSerialNumber));
+          if (w && w.unitId === targetUnitId) return true;
+
+          // 3. Cofre de origem ou retorno pertence à unidade do armeiro
+          const vId = c.vaultSpaceId || w?.vaultSpaceId || w?.previousVaultSpaceId;
+          if (vId) {
+            const v = (vaultSpaces || []).find(x => x.id === vId);
+            if (v && v.unitId === targetUnitId) return true;
+          }
+
+          // 4. Se a cautela não tem unidade nem arma definida mas foi criada pelo armeiro atual
+          if (!c.unitId && !w?.unitId) {
+            if (c.armorerId === currentUser.id || c.requesterId === currentUser.id || isUserCautela(c)) return true;
+          }
+
+          return false;
+        });
       }
 
-      // Sincroniza armas da unidade com status Cautela Pendente
+      // Sincroniza armas da unidade com status Cautela Pendente e Acautelada
       (weapons || []).forEach(w => {
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        const matchUnit = isGeral || currentUser.managementScope === 'department' || !currentUser.unitId || w.unitId === currentUser.unitId;
-        if (isWeaponPending && matchUnit && !list.some(c => c.weaponId === w.id)) {
-          const locNote = (w as any).locationNote || '';
-          list.push({
+        const isWeaponAcautelada = w.status === 'Acautelada';
+
+        const matchUnit = isGeral || 
+                          currentUser.managementScope === 'department' || 
+                          !targetUnitId || 
+                          w.unitId === targetUnitId;
+
+        if (!matchUnit) return;
+
+        const locNote = (w as any).locationNote || '';
+        const polAcautelado = (w as any).policialAcautelado || '';
+        const reqName = locNote ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : (polAcautelado || 'Policial');
+        const reqMasp = locNote && locNote.includes('MASP:') ? locNote.split('MASP:')[1].split(')')[0].trim() : 'N/A';
+
+        if (isWeaponPending && !list.some(c => c.weaponId === w.id && isPendingStatus(c.status))) {
+          list.unshift({
             id: `caut-sync-${w.id}`,
             weaponId: w.id,
             weaponSerialNumber: w.serialNumber,
@@ -342,10 +382,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             magazineQuantity: w.magazineQuantity || 2,
             vaultSpaceId: w.vaultSpaceId,
             departmentId: w.departmentId,
-            unitId: w.unitId,
+            unitId: w.unitId || targetUnitId,
             requesterId: (w as any).destinatarioId || 'solicitante',
-            requesterName: locNote ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : 'Policial Solicitante',
-            requesterMasp: locNote && locNote.includes('MASP:') ? locNote.split('MASP:')[1].split(')')[0].trim() : 'Pendente Recibo',
+            requesterName: reqName || 'Policial Solicitante',
+            requesterMasp: reqMasp || 'Pendente',
             requesterCargo: 'Investigador',
             reason: w.status === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo',
             requestDate: new Date().toISOString(),
@@ -357,12 +397,42 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             returnedMagazinesCount: w.magazineQuantity || 2,
             createdAt: new Date().toISOString()
           });
+        } else if (isWeaponAcautelada && !list.some(c => c.weaponId === w.id && c.status === 'AUTORIZADA')) {
+          list.unshift({
+            id: `caut-active-${w.id}`,
+            weaponId: w.id,
+            weaponSerialNumber: w.serialNumber,
+            weaponModel: w.model,
+            weaponType: w.type,
+            weaponCaliber: w.caliber,
+            magazineQuantity: w.magazineQuantity || 2,
+            vaultSpaceId: w.vaultSpaceId || (w as any).previousVaultSpaceId,
+            departmentId: w.departmentId,
+            unitId: w.unitId || targetUnitId,
+            requesterId: (w as any).destinatarioId || 'policial',
+            requesterName: reqName || 'Policial da Unidade',
+            requesterMasp: reqMasp !== 'N/A' ? reqMasp : 'Masp da Cautela',
+            requesterCargo: 'Investigador / Policial',
+            armorerId: currentUser.id,
+            armorerName: currentUser.name,
+            armorerMasp: currentUser.masp,
+            reason: 'Arma acautelada em serviço na unidade',
+            requestDate: (w as any).dataModificacao || new Date().toISOString(),
+            authorizedAt: (w as any).dataModificacao || new Date().toISOString(),
+            status: 'AUTORIZADA',
+            hadShots: false,
+            shotsFired: 0,
+            isWorking: true,
+            hadMalfunction: false,
+            returnedMagazinesCount: w.magazineQuantity || 2,
+            createdAt: (w as any).dataModificacao || new Date().toISOString()
+          });
         }
       });
     }
 
     return list;
-  }, [allCautelas, currentUser, isPolicial, isGeral, weapons, isUserCautela, isUserWeapon]);
+  }, [allCautelas, currentUser, isPolicial, isGeral, weapons, vaultSpaces, isUserCautela, isUserWeapon]);
 
   // Lista a exibir com base na aba ativa
   const displayedCautelas = useMemo(() => {
@@ -1327,14 +1397,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <Crosshair className="w-6 h-6" />
             </div>
             <div>
-              <div className="flex items-center space-x-2.5">
+              <div className="flex items-center space-x-2.5 flex-wrap gap-y-1">
                 <h2 className="text-xl font-bold text-slate-100">Cautela de Armas</h2>
                 <span className="px-2 py-0.5 text-[10px] font-bold uppercase rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
                   {currentUser.role}
                 </span>
+                {userUnit && (
+                  <span className="px-2.5 py-0.5 text-[11px] font-semibold rounded-full bg-slate-800 text-slate-300 border border-slate-700">
+                    Unidade: <strong className="text-amber-400">{userUnit.name}</strong>
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Retirada, autorização por armeiros, controle de carregadores, tiros efetuados e devolução
+                {canAuthorize 
+                  ? `Visualização completa de todas as cautelas da unidade ${userUnit?.name || 'vinculada'} (pendentes, deferidas e indeferidas).`
+                  : 'Retirada, autorização por armeiros, controle de carregadores, tiros efetuados e devolução'}
               </p>
             </div>
           </div>
@@ -1393,7 +1470,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       )}
 
       {/* Alerta de Cautela Recusada / Informação ao Policial */}
-      {unreadRefusedCautelas.length > 0 && (
+      {isPolicial && unreadRefusedCautelas.length > 0 && (
         <div className="bg-red-950/90 border-2 border-red-700/80 rounded-2xl p-4 sm:p-5 shadow-2xl space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-red-800/60 pb-3">
             <div className="flex items-center space-x-3">
@@ -1486,10 +1563,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span>Minhas Cautelas</span>
+          <span>{canAuthorize ? 'Solicitações Pendentes (Unidade)' : 'Minhas Cautelas'}</span>
           {pendingCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
-              {pendingCount} {pendingCount === 1 ? 'aguardando' : 'aguardando'}
+              {pendingCount} {canAuthorize ? (pendingCount === 1 ? 'pendente' : 'pendentes') : (pendingCount === 1 ? 'aguardando' : 'aguardando')}
             </span>
           )}
         </button>
@@ -1503,7 +1580,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Deferidas (Autorizadas/Devolvidas)</span>
+          <span>{canAuthorize ? 'Deferidas / Ativas (Unidade)' : 'Deferidas (Autorizadas/Devolvidas)'}</span>
           {deferidasCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
               {deferidasCount}
@@ -1520,7 +1597,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <XCircle className="w-3.5 h-3.5 text-red-400" />
-          <span>Indeferidas</span>
+          <span>{canAuthorize ? 'Indeferidas (Unidade)' : 'Indeferidas'}</span>
           {indeferidasCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
               {indeferidasCount}
@@ -1907,11 +1984,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       return (
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
                           <Clock className="w-8 h-8 text-amber-500/50 mx-auto mb-2" />
-                          <p className="text-sm font-semibold">Nenhuma cautela aguardando ação do armeiro no momento.</p>
+                          <p className="text-sm font-semibold">
+                            {canAuthorize ? 'Nenhuma solicitação de armamento pendente na unidade.' : 'Nenhuma cautela aguardando ação do armeiro no momento.'}
+                          </p>
                           <p className="text-xs text-slate-500 mt-1">
                             {isPolicial 
                               ? 'Você não possui solicitações de armamento pendentes de autorização.' 
-                              : 'Todas as solicitações de armamento foram devidamente analisadas.'}
+                              : `Não há solicitações de armamento aguardando autorização para a unidade ${userUnit?.name || 'vinculada'}.`}
                           </p>
                         </div>
                       );
@@ -1922,7 +2001,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           <div className="flex items-center space-x-2">
                             <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                             <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                              Solicitações Pendentes (Aguardando Ação do Armeiro)
+                              {canAuthorize 
+                                ? `Solicitações Pendentes de Armamento — ${userUnit?.name || 'Unidade'} (Aguardando Ação do Armeiro)` 
+                                : 'Minhas Solicitações Pendentes (Aguardando Ação do Armeiro)'}
                             </h4>
                           </div>
                           <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-800/60">
@@ -2099,7 +2180,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         <div className="flex items-center space-x-2">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                           <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                            Cautela(s) Ativa(s) em Posse do Policial
+                            {canAuthorize 
+                              ? `Armamentos Acautelados / Cautelas Ativas — ${userUnit?.name || 'Unidade'}` 
+                              : 'Cautela(s) Ativa(s) em Posse do Policial'}
                           </h4>
                         </div>
                         <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60">
@@ -2109,7 +2192,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                       {scopedCautelas.filter(c => c.status === 'AUTORIZADA').length === 0 ? (
                         <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                          Você não possui nenhuma arma acautelada ativa no momento.
+                          {canAuthorize 
+                            ? `Nenhum armamento da unidade ${userUnit?.name || ''} está acautelado no momento.` 
+                            : 'Você não possui nenhuma arma acautelada ativa no momento.'}
                         </div>
                       ) : (
                         <div className="grid grid-cols-1 gap-3">
@@ -2261,7 +2346,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           <div className="flex items-center space-x-2">
                             <XCircle className="w-3.5 h-3.5 text-red-400" />
                             <h4 className="text-xs font-bold text-red-400 uppercase tracking-wider">
-                              Cautelas Recusadas (Solicitações Indeferidas)
+                              {canAuthorize 
+                                ? `Solicitações Indeferidas — ${userUnit?.name || 'Unidade'}` 
+                                : 'Cautelas Recusadas (Minhas Solicitações Indeferidas)'}
                             </h4>
                           </div>
                           <span className="text-xs font-mono font-bold text-red-400 bg-red-950/60 px-2 py-0.5 rounded-md border border-red-800/60">
@@ -2271,7 +2358,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                         {recusadas.length === 0 ? (
                           <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            Nenhuma solicitação de armamento foi recusada.
+                            {canAuthorize 
+                              ? `Nenhuma solicitação de armamento foi indeferida na unidade ${userUnit?.name || ''}.` 
+                              : 'Nenhuma solicitação de armamento foi recusada.'}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
@@ -2332,7 +2421,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           <div className="flex items-center space-x-2">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                              Histórico de Armas Devolvidas
+                              {canAuthorize 
+                                ? `Histórico de Devoluções — ${userUnit?.name || 'Unidade'}` 
+                                : 'Histórico de Armas Devolvidas'}
                             </h4>
                           </div>
                           <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
@@ -2342,7 +2433,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                         {devolvidas.length === 0 ? (
                           <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            Nenhum histórico de devolução de armas registrado.
+                            {canAuthorize 
+                              ? `Nenhum histórico de devolução de armas registrado na unidade ${userUnit?.name || ''}.` 
+                              : 'Nenhum histórico de devolução de armas registrado.'}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">

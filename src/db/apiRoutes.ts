@@ -8965,6 +8965,59 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
           pa.STATUS_ARMAS === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo'
         ]);
       }
+
+      // Auto-sincroniza armas com status 'Acautelada' garantindo que apareçam para o armeiro em Deferidas (Ativas)
+      const [acautArmas]: any = await pool.query(`
+        SELECT a.* 
+        FROM ARMAS a
+        WHERE a.STATUS_ARMAS = 'Acautelada'
+          AND NOT EXISTS (
+            SELECT 1 FROM ACAUTELAR_ARMAS ac 
+            WHERE ac.ARMA_ID_ACAUTELAR_ARMAS = a.ID_ARMAS 
+              AND ac.STATUS_ACAUTELAR_ARMAS IN ('AUTORIZADA')
+          )
+      `);
+
+      for (const aa of (acautArmas || [])) {
+        const syncId = `caut-active-${aa.ID_ARMAS}`;
+        const locNote = aa.LOCALIZACAO_NOTA_ARMAS || aa.OBSERVACOES_ARMAS || '';
+        const reqName = locNote.includes('Acautelada com ')
+          ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim()
+          : 'Policial';
+        const reqMasp = locNote.includes('MASP:')
+          ? locNote.split('MASP:')[1].split(')')[0].trim()
+          : 'N/A';
+
+        await pool.query(`
+          INSERT INTO ACAUTELAR_ARMAS (
+            ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
+            MODELO_ACAUTELAR_ARMAS, TIPO_ARMA_ACAUTELAR_ARMAS, CALIBRE_ACAUTELAR_ARMAS,
+            QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS,
+            DEPARTAMENTO_ID_ACAUTELAR_ARMAS, UNIDADE_ID_ACAUTELAR_ARMAS,
+            REQUERENTE_ID_ACAUTELAR_ARMAS, REQUERENTE_NOME_ACAUTELAR_ARMAS,
+            REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
+            FINALIDADE_MOTIVO_ACAUTELAR_ARMAS, DATA_SOLICITACAO_ACAUTELAR_ARMAS,
+            STATUS_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'AUTORIZADA', NOW(), NOW())
+          ON DUPLICATE KEY UPDATE STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA'
+        `, [
+          syncId,
+          aa.ID_ARMAS,
+          aa.NUMERO_SERIE_ARMAS,
+          aa.MODELO_ARMAS,
+          aa.TIPO_ARMAS || 'Arma de Fogo',
+          aa.CALIBRE_ARMAS,
+          aa.QUANTIDADE_CARREGADORES_ARMAS || 2,
+          aa.COFRE_ID_ARMAS || null,
+          aa.DEPARTAMENTO_ID_ARMAS || null,
+          aa.UNIDADE_ID_ARMAS || null,
+          aa.DESTINATARIO_ID_ARMAS || 'usr-policial',
+          reqName,
+          reqMasp,
+          'Policial',
+          'Arma acautelada em serviço na unidade'
+        ]);
+      }
     } catch (syncErr) {
       // Ignora erro de sincronização se colunas opcionais variarem
     }
