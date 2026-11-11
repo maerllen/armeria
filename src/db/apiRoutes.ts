@@ -8988,6 +8988,46 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
           ? locNote.split('MASP:')[1].split(')')[0].trim()
           : 'N/A';
 
+        let armId: string | null = null;
+        let armName = 'Armeiro da Unidade';
+        let armMasp = '';
+        try {
+          const [armRows]: any = await pool.query(
+            "SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS FROM USUARIOS WHERE PERFIL_USUARIOS IN ('Armeiro', 'Administrador') ORDER BY CASE WHEN UNIDADE_ID_USUARIOS = ? THEN 1 ELSE 2 END ASC LIMIT 1",
+            [aa.UNIDADE_ID_ARMAS || '']
+          );
+          if (armRows && armRows.length > 0) {
+            armId = armRows[0].ID_USUARIOS;
+            armName = armRows[0].NOME_USUARIOS;
+            armMasp = armRows[0].MASP_USUARIOS || '';
+          }
+        } catch (_) {}
+
+        let linkedMunId: string | null = null;
+        let ammoQty = 0;
+        let ammoFab: string | null = null;
+        let ammoTip: string | null = null;
+        let ammoPes: string | null = null;
+        let ammoLot: string | null = null;
+        let ammoDest: string | null = null;
+
+        try {
+          const [mRows]: any = await pool.query(
+            "SELECT * FROM ACAUTELAR_MUNICOES WHERE (NUMERO_SERIE_ARMA_ACAUTELAR_MUNICOES = ? OR ARMA_ID_ACAUTELAR_MUNICOES = ? OR (REQUERENTE_MASP_ACAUTELAR_MUNICOES = ? AND STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA')) ORDER BY DATA_CRIACAO_ACAUTELAR_MUNICOES DESC LIMIT 1",
+            [aa.NUMERO_SERIE_ARMAS, aa.ID_ARMAS, reqMasp]
+          );
+          if (mRows && mRows.length > 0) {
+            const m = mRows[0];
+            linkedMunId = m.ID_ACAUTELAR_MUNICOES;
+            ammoQty = Number(m.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+            ammoFab = m.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null;
+            ammoTip = m.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null;
+            ammoPes = m.PESO_MUNICAO_ACAUTELAR_MUNICOES || null;
+            ammoLot = m.LOTE_MUNICAO_ACAUTELAR_MUNICOES || null;
+            ammoDest = m.DESTINACAO_ACAUTELAR_MUNICOES || null;
+          }
+        } catch (_) {}
+
         await pool.query(`
           INSERT INTO ACAUTELAR_ARMAS (
             ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
@@ -8997,9 +9037,17 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
             REQUERENTE_ID_ACAUTELAR_ARMAS, REQUERENTE_NOME_ACAUTELAR_ARMAS,
             REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
             FINALIDADE_MOTIVO_ACAUTELAR_ARMAS, DATA_SOLICITACAO_ACAUTELAR_ARMAS,
-            STATUS_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'AUTORIZADA', NOW(), NOW())
-          ON DUPLICATE KEY UPDATE STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA'
+            STATUS_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS,
+            ARMEIRO_ID_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS, ARMEIRO_MASP_ACAUTELAR_ARMAS,
+            CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS,
+            MUNICAO_FABRICANTE_ACAUTELAR_ARMAS, MUNICAO_TIPO_ACAUTELAR_ARMAS,
+            MUNICAO_PESO_ACAUTELAR_ARMAS, MUNICAO_LOTE_ACAUTELAR_ARMAS, MUNICAO_DESTINACAO_ACAUTELAR_ARMAS,
+            DATA_CRIACAO_ACAUTELAR_ARMAS
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'AUTORIZADA', NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+          ON DUPLICATE KEY UPDATE 
+            STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA',
+            ARMEIRO_NOME_ACAUTELAR_ARMAS = COALESCE(ARMEIRO_NOME_ACAUTELAR_ARMAS, VALUES(ARMEIRO_NOME_ACAUTELAR_ARMAS)),
+            ARMEIRO_MASP_ACAUTELAR_ARMAS = COALESCE(ARMEIRO_MASP_ACAUTELAR_ARMAS, VALUES(ARMEIRO_MASP_ACAUTELAR_ARMAS))
         `, [
           syncId,
           aa.ID_ARMAS,
@@ -9015,7 +9063,17 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
           reqName,
           reqMasp,
           'Policial',
-          'Arma acautelada em serviço na unidade'
+          'Arma acautelada em serviço na unidade',
+          armId,
+          armName,
+          armMasp,
+          linkedMunId,
+          ammoQty,
+          ammoFab,
+          ammoTip,
+          ammoPes,
+          ammoLot,
+          ammoDest
         ]);
       }
     } catch (syncErr) {
@@ -9048,6 +9106,12 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         DATA_AUTORIZACAO_ACAUTELAR_ARMAS as authorizedAt,
         OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS as authorizationNotes,
         CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS as linkedAmmoCautelaId,
+        MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS as ammoQuantity,
+        MUNICAO_FABRICANTE_ACAUTELAR_ARMAS as ammoFabricante,
+        MUNICAO_TIPO_ACAUTELAR_ARMAS as ammoTipo,
+        MUNICAO_PESO_ACAUTELAR_ARMAS as ammoPeso,
+        MUNICAO_LOTE_ACAUTELAR_ARMAS as ammoLote,
+        MUNICAO_DESTINACAO_ACAUTELAR_ARMAS as ammoDestinacao,
         DATA_DEVOLUCAO_ACAUTELAR_ARMAS as returnDate,
         ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_ARMAS as returnArmorerId,
         ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_ARMAS as returnArmorerName,
@@ -9116,7 +9180,13 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         hadMalfunction: Boolean(r.hadMalfunction),
         magazineQuantity: Number(r.magazineQuantity || 1),
         shotsFired: Number(r.shotsFired || 0),
-        returnedMagazinesCount: Number(r.returnedMagazinesCount || 0)
+        returnedMagazinesCount: Number(r.returnedMagazinesCount || 0),
+        ammoQuantity: Number(r.ammoQuantity || 0),
+        ammoFabricante: r.ammoFabricante || undefined,
+        ammoTipo: r.ammoTipo || undefined,
+        ammoPeso: r.ammoPeso || undefined,
+        ammoLote: r.ammoLote || undefined,
+        ammoDestinacao: r.ammoDestinacao || undefined
       };
     });
 
