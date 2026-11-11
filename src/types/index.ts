@@ -1169,6 +1169,10 @@ export interface CautelaArma {
   linkedAmmoCautelaId?: string;
   ammoQuantity?: number;
   ammoDestinacao?: string;
+  ammoFabricante?: string;
+  ammoTipo?: string;
+  ammoPeso?: string;
+  ammoLote?: string;
   
   // Devolução
   returnDate?: string;

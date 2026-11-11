@@ -39,17 +39,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const isArmeiroOrAdmin = !isPolicial && (isGeral || isArmeiro || isAdmin);
   const canAuthorize = isArmeiroOrAdmin;
 
-  // Tabs
-  const [activeTab, setActiveTab] = useState<'MINHAS' | 'PENDENTES' | 'TODAS' | 'NOVA'>(
-    isArmeiroOrAdmin ? 'PENDENTES' : 'MINHAS'
-  );
-
-  // Redireciona usuário Policial caso tente acessar tabs restritas de armeiro
-  React.useEffect(() => {
-    if (isPolicial && (activeTab === 'PENDENTES' || activeTab === 'TODAS')) {
-      setActiveTab('MINHAS');
-    }
-  }, [isPolicial, activeTab]);
+  // Tabs: Minhas Cautelas (Aguardando Ação do Armeiro), Deferidas (Autorizadas/Devolvidas), Indeferidas, Nova
+  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
+  const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
 
   const [lastDirectCautelaArma, setLastDirectCautelaArma] = useState<CautelaArma | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -255,14 +247,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   }, [currentUser]);
 
   // Filtragem de cautelas de acordo com permissões
+  // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
     let list = [...allCautelas];
 
-    // Se estiver na aba MINHAS ou se for Policial: filtra estritamente as cautelas do próprio usuário
-    if (activeTab === 'MINHAS' || isPolicial) {
+    // Se for Policial: restringe ESTRITAMENTE às armas e cautelas movimentadas com o seu MASP
+    if (isPolicial) {
       list = list.filter(c => isUserCautela(c));
 
-      // Inclui armas que o usuário solicitou ou acautelou mas que ainda não constam na lista
+      // Inclui armas que o policial solicitou ou acautelou que estejam sincronizadas no cofre
       (weapons || []).forEach(w => {
         const isMyWeaponMatch = isUserWeapon(w);
         if (!isMyWeaponMatch) return;
@@ -327,60 +320,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           });
         }
       });
-    } else if (isArmeiro) {
-      if (currentUser.managementScope !== 'department') {
-        list = list.filter(c => c.unitId === currentUser.unitId || isUserCautela(c));
+    } else {
+      // Armeiro / Admin / Geral: abrange a unidade ou departamento
+      if (!isGeral && currentUser.managementScope !== 'department') {
+        list = list.filter(c => !currentUser.unitId || c.unitId === currentUser.unitId || !c.unitId || isUserCautela(c));
       }
-    }
 
-    if (statusFilter === 'DEFERIDAS') {
-      list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLVIDA');
-    } else if (statusFilter === 'INDEFERIDAS') {
-      list = list.filter(c => c.status === 'RECUSADA');
-    } else if (statusFilter === 'TODOS') {
-      if (isPolicial || activeTab === 'MINHAS') {
-        // Cautela recusada deixa de aparecer em Minhas Cautelas e passa a ser mostrada em Indeferidas
-        list = list.filter(c => c.status !== 'RECUSADA');
-      }
-    } else if (statusFilter === 'PENDENTE') {
-      list = list.filter(c => isPendingStatus(c.status));
-    } else if (statusFilter !== 'TODOS') {
-      list = list.filter(c => c.status === statusFilter);
-    }
-
-    if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
-      list = list.filter(c =>
-        c.weaponSerialNumber.toLowerCase().includes(term) ||
-        c.weaponModel.toLowerCase().includes(term) ||
-        c.requesterName.toLowerCase().includes(term) ||
-        c.requesterMasp.toLowerCase().includes(term) ||
-        (c.reason && c.reason.toLowerCase().includes(term))
-      );
-    }
-
-    return list;
-  }, [allCautelas, currentUser, isArmeiro, isPolicial, activeTab, statusFilter, searchTerm, weapons, isUserCautela, isUserWeapon]);
-
-  // Estado para armazenar IDs de recusas dispensadas pelo usuário
-  const [dismissedRefusalIds, setDismissedRefusalIds] = useState<string[]>(() => {
-    try {
-      const stored = localStorage.getItem(`pc_dismissed_refusals_${currentUser.id}`);
-      return stored ? JSON.parse(stored) : [];
-    } catch (e) {
-      return [];
-    }
-  });
-
-  // Lista a exibir com base na aba selecionada (PENDENTES mostra estritamente pendentes de recibo da unidade/departamento)
-  const displayedCautelas = useMemo(() => {
-    if (activeTab === 'PENDENTES') {
-      let list = allCautelas.filter(c => isPendingStatus(c.status));
-
-      // Garante também a inclusão de armas que constem no cofre com status "Cautela Pendente" ou "Pendente de Recibo"
+      // Sincroniza armas da unidade com status Cautela Pendente
       (weapons || []).forEach(w => {
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        if (isWeaponPending && !list.some(c => c.weaponId === w.id)) {
+        const matchUnit = isGeral || currentUser.managementScope === 'department' || !currentUser.unitId || w.unitId === currentUser.unitId;
+        if (isWeaponPending && matchUnit && !list.some(c => c.weaponId === w.id)) {
           const locNote = (w as any).locationNote || '';
           list.push({
             id: `caut-sync-${w.id}`,
@@ -409,78 +359,81 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           });
         }
       });
-
-      if (isArmeiro && currentUser.managementScope !== 'department') {
-        list = list.filter(c => 
-          !currentUser.unitId || 
-          c.unitId === currentUser.unitId || 
-          !c.unitId ||
-          (weapons || []).some(w => w.id === c.weaponId && (w.unitId === currentUser.unitId || !w.unitId))
-        );
-      }
-      if (searchTerm.trim()) {
-        const term = searchTerm.toLowerCase();
-        list = list.filter(c =>
-          c.weaponSerialNumber.toLowerCase().includes(term) ||
-          c.weaponModel.toLowerCase().includes(term) ||
-          c.requesterName.toLowerCase().includes(term) ||
-          c.requesterMasp.toLowerCase().includes(term) ||
-          (c.reason && c.reason.toLowerCase().includes(term))
-        );
-      }
-      return list;
     }
-    return scopedCautelas;
-  }, [activeTab, allCautelas, weapons, isArmeiro, currentUser, searchTerm, scopedCautelas]);
 
-  // Contadores para badges
+    return list;
+  }, [allCautelas, currentUser, isPolicial, isGeral, weapons, isUserCautela, isUserWeapon]);
+
+  // Lista a exibir com base na aba ativa
+  const displayedCautelas = useMemo(() => {
+    let list = [...scopedCautelas];
+
+    if (activeTab === 'MINHAS') {
+      // Aba "Minhas Cautelas": lista estritamente as Cautelas que estão aguardando uma ação do armeiro (status PENDENTE)
+      list = list.filter(c => isPendingStatus(c.status));
+    } else if (activeTab === 'DEFERIDAS') {
+      // Aba "Deferidas (Autorizadas/Devolvidas)": cautelas deferidas (ativas) e histórico das devolvidas
+      list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLVIDA');
+      if (deferidasSubFilter === 'ATIVAS') {
+        list = list.filter(c => c.status === 'AUTORIZADA');
+      } else if (deferidasSubFilter === 'DEVOLVIDAS') {
+        list = list.filter(c => c.status === 'DEVOLVIDA');
+      }
+    } else if (activeTab === 'INDEFERIDAS') {
+      // Aba "Indeferidas": cautelas recusadas
+      list = list.filter(c => c.status === 'RECUSADA');
+    }
+
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase();
+      list = list.filter(c =>
+        (c.weaponSerialNumber && c.weaponSerialNumber.toLowerCase().includes(term)) ||
+        (c.weaponModel && c.weaponModel.toLowerCase().includes(term)) ||
+        (c.weaponCaliber && c.weaponCaliber.toLowerCase().includes(term)) ||
+        (c.requesterName && c.requesterName.toLowerCase().includes(term)) ||
+        (c.requesterMasp && c.requesterMasp.toLowerCase().includes(term)) ||
+        (c.armorerName && c.armorerName.toLowerCase().includes(term)) ||
+        (c.reason && c.reason.toLowerCase().includes(term))
+      );
+    }
+
+    return list;
+  }, [scopedCautelas, activeTab, deferidasSubFilter, searchTerm]);
+
+  // Contadores para badges das abas
   const pendingCount = useMemo(() => {
-    if (currentUser.role === 'Policial' || isPolicial) {
-      const myCautelasPending = allCautelas.filter(c => isUserCautela(c) && isPendingStatus(c.status));
-      const extraPending = (weapons || []).filter(w => {
-        const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        return isWeaponPending && isUserWeapon(w) && !myCautelasPending.some(c => c.weaponId === w.id);
-      });
-      return myCautelasPending.length + extraPending.length;
-    }
-    
-    const myUnitPending = allCautelas.filter(c => {
-      const matchUnit = isGeral || !currentUser.unitId || currentUser.managementScope === 'department' || c.unitId === currentUser.unitId || !c.unitId || (weapons || []).some(w => w.id === c.weaponId && (w.unitId === currentUser.unitId || !w.unitId));
-      return matchUnit && isPendingStatus(c.status);
-    });
+    return scopedCautelas.filter(c => isPendingStatus(c.status)).length;
+  }, [scopedCautelas]);
 
-    const pendingWeaponsNotInCautelas = (weapons || []).filter(w => {
-      const matchUnit = isGeral || !currentUser.unitId || currentUser.managementScope === 'department' || w.unitId === currentUser.unitId;
-      const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-      return matchUnit && isWeaponPending && !myUnitPending.some(c => c.weaponId === w.id);
-    });
+  const deferidasCount = useMemo(() => {
+    return scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLVIDA').length;
+  }, [scopedCautelas]);
 
-    return myUnitPending.length + pendingWeaponsNotInCautelas.length;
-  }, [allCautelas, currentUser, weapons, isGeral, isPolicial, isUserCautela, isUserWeapon]);
+  const activeCautelasCount = useMemo(() => {
+    return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
+  }, [scopedCautelas]);
 
-  const myActiveCount = useMemo(() => {
-    const listFromCautelas = allCautelas.filter(c => isUserCautela(c) && c.status === 'AUTORIZADA');
-    const extraAcauteladas = (weapons || []).filter(w => 
-      w.status === 'Acautelada' && 
-      isUserWeapon(w) && 
-      !listFromCautelas.some(c => c.weaponId === w.id)
-    );
-    return listFromCautelas.length + extraAcauteladas.length;
-  }, [allCautelas, isUserCautela, weapons, isUserWeapon]);
+  const returnedCautelasCount = useMemo(() => {
+    return scopedCautelas.filter(c => c.status === 'DEVOLVIDA').length;
+  }, [scopedCautelas]);
 
-  const myPendingCount = useMemo(() => {
-    const listFromCautelas = allCautelas.filter(c => isUserCautela(c) && isPendingStatus(c.status));
-    const extraPending = (weapons || []).filter(w => 
-      (w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo') && 
-      isUserWeapon(w) && 
-      !listFromCautelas.some(c => c.weaponId === w.id)
-    );
-    return listFromCautelas.length + extraPending.length;
-  }, [allCautelas, isUserCautela, weapons, isUserWeapon]);
+  const indeferidasCount = useMemo(() => {
+    return scopedCautelas.filter(c => c.status === 'RECUSADA').length;
+  }, [scopedCautelas]);
 
   const myRefusedCautelas = useMemo(() => {
-    return allCautelas.filter(c => isUserCautela(c) && c.status === 'RECUSADA');
-  }, [allCautelas, isUserCautela]);
+    return scopedCautelas.filter(c => c.status === 'RECUSADA');
+  }, [scopedCautelas]);
+
+  // Estado para armazenar IDs de recusas dispensadas pelo usuário
+  const [dismissedRefusalIds, setDismissedRefusalIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem(`pc_dismissed_refusals_${currentUser.id}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
 
   // Cautelas recusadas não dispensadas (para notificar imediatamente o policial)
   const unreadRefusedCautelas = useMemo(() => {
@@ -613,18 +566,32 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       };
 
       if (!isPolicial && requestAmmoTogether && Number(ammoQuantity) > 0) {
+        const selectedStock = availableAmmoForSelectedWeapon.find(s => s.id === selectedAmmoStockId);
+        const calObj = calibers.find(c => c.id === selectedStock?.caliberId);
+        const resolvedFab = selectedStock?.fabricante || calObj?.fabricante || 'CBC';
+        const resolvedTipo = ammoType || selectedStock?.tipoMunicao || (ammoDestinacao === 'Defesa' ? 'Defesa / Operacional' : 'Treinamento');
+        const resolvedPeso = selectedStock?.pesoMunicao || calObj?.peso || '124gr';
+        const resolvedLote = isDirect ? ammoLot : (selectedStock?.loteMunicao || 'Lote Unidade');
+
         payload.ammunition = {
+          caliberId: selectedStock?.caliberId || weapon.caliber,
           caliberName: weapon.caliber,
           quantity: Number(ammoQuantity) || 0,
+          fabricante: resolvedFab,
+          tipoMunicao: resolvedTipo,
+          pesoMunicao: resolvedPeso,
+          loteMunicao: resolvedLote,
           destinacao: ammoDestinacao,
-          tipoMunicao: ammoDestinacao === 'Defesa' ? 'Defesa / Operacional' : 'Treinamento',
-          loteMunicao: isDirect ? ammoLot : 'A definir pelo armeiro',
-          vaultSpaceId: isDirect ? (availableAmmoForSelectedWeapon.find(s => s.id === selectedAmmoStockId)?.vaultSpaceId || weapon.vaultSpaceId) : undefined,
+          vaultSpaceId: isDirect ? (selectedStock?.vaultSpaceId || weapon.vaultSpaceId) : undefined,
           reason: `Acautelamento em conjunto com ${weapon.model} Nº ${weapon.serialNumber} (${ammoDestinacao})`,
           seraDevolvida: isDirect ? ammoSeraDevolvida : (ammoDestinacao === 'Defesa')
         };
         payload.ammoQuantity = Number(ammoQuantity) || 0;
         payload.ammoDestinacao = ammoDestinacao;
+        payload.ammoFabricante = resolvedFab;
+        payload.ammoTipo = resolvedTipo;
+        payload.ammoPeso = resolvedPeso;
+        payload.ammoLote = resolvedLote;
       }
 
       const res = await storage.requestCautelaArma(payload);
@@ -655,6 +622,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             armorerId: currentUser.id,
             armorerName: currentUser.name,
             armorerMasp: currentUser.masp,
+            ammoQuantity: payload.ammoQuantity,
+            ammoDestinacao: payload.ammoDestinacao,
+            ammoFabricante: payload.ammoFabricante,
+            ammoTipo: payload.ammoTipo,
+            ammoPeso: payload.ammoPeso,
+            ammoLote: payload.ammoLote,
             hadShots: false,
             shotsFired: 0,
             isWorking: true,
@@ -663,15 +636,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             createdAt: new Date().toISOString()
           };
           setLastDirectCautelaArma(newCautelaObj);
-          setSuccessMsg(`Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso para o policial ${beneficiary.name}! O saldo foi deduzido do cofre e o recibo gerado imediatamente.`);
+          setSuccessMsg(`Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso para o policial ${beneficiary.name}! A cautela foi deferida diretamente e o recibo gerado imediatamente.`);
           setTimeout(() => {
             handlePrintTermo(newCautelaObj);
           }, 150);
-          setActiveTab('TODAS');
+          setActiveTab('DEFERIDAS');
         } else {
-          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A arma está marcada como "Cautela Pendente" e aguarda liberação do armeiro.`);
+          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Minhas Cautelas" aguardando autorização do armeiro.`);
           setActiveTab('MINHAS');
-          setStatusFilter('TODOS');
         }
         setSelectedWeaponId('');
         onRefresh();
@@ -902,6 +874,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   };
 
   // Impressão do Termo Formal de Cautela de Armamento
+  // Impressão do Termo Formal de Cautela de Armamento e Munições
   const handlePrintTermo = (cautela: CautelaArma) => {
     const unitObj = units.find(u => u.id === cautela.unitId);
     const deptObj = departments.find(d => d.id === cautela.departmentId);
@@ -914,10 +887,28 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       : 'Cofre de Origem da Unidade';
 
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
-    const calObj = linkedAmmo ? calibers.find(c => c.id === linkedAmmo.caliberId || c.name === linkedAmmo.caliberName) : null;
+    const calObj = (linkedAmmo || cautela.weaponCaliber) 
+      ? calibers.find(c => c.id === linkedAmmo?.caliberId || c.name === linkedAmmo?.caliberName || c.name === cautela.weaponCaliber) 
+      : null;
     const ammoStock = linkedAmmo ? ammoStocks.find(s => s.id === (linkedAmmo as any).stockId) : null;
     const ammoVault = linkedAmmo?.vaultSpaceId ? vaultSpaces.find(v => v.id === linkedAmmo.vaultSpaceId) : null;
     const ammoVaultUnit = ammoVault ? units.find(u => u.id === ammoVault.unitId) : null;
+
+    const hasAmmo = Boolean(
+      (linkedAmmo && linkedAmmo.quantity > 0) || 
+      (cautela.ammoQuantity && cautela.ammoQuantity > 0) ||
+      cautela.ammoFabricante ||
+      cautela.linkedAmmoCautelaId
+    );
+
+    const ammoQtd = linkedAmmo?.quantity || cautela.ammoQuantity || 0;
+    const ammoFabricante = linkedAmmo?.fabricante || cautela.ammoFabricante || ammoStock?.fabricante || calObj?.fabricante || 'CBC';
+    const ammoCalibre = linkedAmmo?.caliberName || cautela.weaponCaliber || weapon?.caliber || 'N/A';
+    const ammoTipo = linkedAmmo?.tipoMunicao || cautela.ammoTipo || ammoStock?.tipoMunicao || calObj?.tipo || (cautela.ammoDestinacao === 'Treinamento' ? 'Treinamento' : 'Operacional');
+    const ammoPeso = linkedAmmo?.pesoMunicao || cautela.ammoPeso || ammoStock?.pesoMunicao || calObj?.peso || '124gr';
+    const ammoLote = linkedAmmo?.loteMunicao || cautela.ammoLote || ammoStock?.loteMunicao || 'Lote Padrão';
+    const ammoDest = linkedAmmo?.destinacao || cautela.ammoDestinacao || 'Defesa';
+    const ammoSeraDevolvida = linkedAmmo?.seraDevolvida !== undefined ? linkedAmmo.seraDevolvida : (cautela.ammoDestinacao === 'Defesa');
 
     const htmlContent = `
       <!DOCTYPE html>
@@ -1056,21 +1047,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </style>
       </head>
       <body>
-        <!-- PÁGINA 1: TERMO DE CAUTELA DO ARMAMENTO -->
+        <!-- PÁGINA 1: TERMO DE CAUTELA DO ARMAMENTO E MUNIÇÕES -->
         <div class="header-box">
           <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
           <h3 class="header-subtitle-unit">
             ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
           </h3>
           <h1 class="header-doc-title">
-            TERMO DE CAUTELA INDIVIDUAL DE ARMAMENTO
+            TERMO DE CAUTELA INDIVIDUAL DE ARMAMENTO E MUNIÇÕES
           </h1>
           <p class="protocol-tag">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
         </div>
 
         <div>
           <div class="section-banner">
-            1. DADOS DO SERVIDOR CAUTELANTE (RESPONSÁVEL)
+            1. DADOS DO SERVIDOR RECEBEDOR (POLICIAL)
           </div>
           <table class="info-table">
             <tr>
@@ -1095,6 +1086,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <thead>
               <tr>
                 <th>Tipo</th>
+                <th>Fabricante / Marca</th>
                 <th>Modelo</th>
                 <th>Calibre</th>
                 <th>Nº de Série</th>
@@ -1105,6 +1097,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <tbody>
               <tr>
                 <td>${cautela.weaponType || weapon?.type || 'Arma de Fogo'}</td>
+                <td>${(weapon as any)?.fabricante || (weapon as any)?.marca || (weapon as any)?.manufacturer || 'CBC / Taurus'}</td>
                 <td><strong>${cautela.weaponModel}</strong></td>
                 <td>${cautela.weaponCaliber || weapon?.caliber || 'N/A'}</td>
                 <td style="font-family: monospace;"><strong>${cautela.weaponSerialNumber}</strong></td>
@@ -1117,7 +1110,45 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
         <div>
           <div class="section-banner">
-            3. FINALIDADE E AUTORIZAÇÃO
+            3. ESPECIFICAÇÃO DAS MUNIÇÕES FORNECIDAS EM CONJUNTO
+          </div>
+          ${hasAmmo ? `
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Calibre</th>
+                <th style="text-align: center;">Quantidade</th>
+                <th>Fabricante</th>
+                <th>Tipo</th>
+                <th>Peso</th>
+                <th>Lote</th>
+                <th>Destinação</th>
+                <th>Previsão de Retorno</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>${ammoCalibre}</strong></td>
+                <td style="text-align: center; font-weight: bold; font-size: 12px; color: #000;">${ammoQtd} munições</td>
+                <td>${ammoFabricante}</td>
+                <td>${ammoTipo}</td>
+                <td>${ammoPeso}</td>
+                <td style="font-family: monospace;">${ammoLote}</td>
+                <td><strong>${ammoDest}</strong></td>
+                <td>${ammoSeraDevolvida ? 'Devolução posterior (saldo não deflagrado)' : 'Baixa definitiva para consumo'}</td>
+              </tr>
+            </tbody>
+          </table>
+          ` : `
+          <div style="padding: 6px 10px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px; font-size: 10px; color: #475569; margin-bottom: 8px;">
+            Nenhuma munição fornecida em conjunto para esta cautela de armamento.
+          </div>
+          `}
+        </div>
+
+        <div>
+          <div class="section-banner">
+            4. FINALIDADE E AUTORIZAÇÃO
           </div>
           <table class="info-table">
             <tr>
@@ -1125,7 +1156,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <td style="width: 40%;"><strong>Data/Hora Solicitação:</strong> ${new Date(cautela.requestDate).toLocaleString('pt-BR')}</td>
             </tr>
             <tr>
-              <td><strong>Armeiro Autorizador:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
+              <td><strong>Armeiro Responsável pela Cautela:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
               <td><strong>Data/Hora Autorização:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : 'Pendente'}</td>
             </tr>
             <tr>
@@ -1137,7 +1168,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         ${cautela.status === 'DEVOLVIDA' ? `
           <div>
             <div class="section-banner">
-              4. REGISTRO TÉCNICO DE DEVOLUÇÃO
+              5. REGISTRO TÉCNICO DE DEVOLUÇÃO
             </div>
             <table class="info-table">
               <tr>
@@ -1159,27 +1190,27 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         ` : ''}
 
         <div class="commitment-box">
-          <strong>TERMO DE COMPROMISSO E FIEL DEPOSITÁRIO:</strong> O servidor qualificado acima declara ter recebido o armamento e acessórios descritos em perfeitas condições de conservação e funcionamento, comprometendo-se a zelar por sua guarda, segurança e emprego estritamente legal nos termos do regulamento da Polícia Civil de Minas Gerais. Obriga-se a devolver o armamento no cofre de retorno indicado (<strong>${returnVaultAddress}</strong>) findo o período de cautela, prestando as informações técnicas de disparos efetuados e eventuais anomalias.
+          <strong>TERMO DE COMPROMISSO E FIEL DEPOSITÁRIO:</strong> O servidor qualificado acima declara ter recebido o armamento, munições e acessórios discriminados em perfeitas condições de conservação e funcionamento, comprometendo-se a zelar por sua guarda, segurança e emprego estritamente legal nos termos do regulamento da Polícia Civil de Minas Gerais. Obriga-se a devolver o armamento no cofre de retorno indicado (<strong>${returnVaultAddress}</strong>) findo o período de cautela, prestando as informações técnicas de disparos efetuados, eventuais anomalias e restituição dos cartuchos não deflagrados.
         </div>
 
         <div class="signatures-container">
           <div class="signature-box">
             <strong>${cautela.requesterName}</strong><br/>
             MASP: ${cautela.requesterMasp}<br/>
-            Servidor Cautelante
+            <span>Usuário que está recebendo a arma (Policial)</span>
           </div>
           <div class="signature-box">
             <strong>${cautela.armorerName || 'Armeiro da Unidade'}</strong><br/>
             ${cautela.armorerMasp ? `MASP: ${cautela.armorerMasp}<br/>` : ''}
-            Armeiro Autorizador / Responsável pela Cautela
+            <span>Armeiro Responsável pela Cautela</span>
           </div>
         </div>
 
         <div class="footer-note">
-          Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} ${linkedAmmo ? '• (Página 1 de 2)' : ''}
+          Documento emitido eletronicamente pelo Sistema de Gestão de Armas e Munições - PCMG em ${new Date().toLocaleString('pt-BR')} ${hasAmmo ? '• (Página 1 de 2)' : ''}
         </div>
 
-        ${linkedAmmo ? `
+        ${hasAmmo ? `
           <!-- PÁGINA 2: RECIBO DE FORNECIMENTO DE MUNIÇÕES VINCULADAS -->
           <div class="page-break">
             <div class="header-box">
@@ -1190,12 +1221,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <h1 class="header-doc-title">
                 RECIBO DE CAUTELA E FORNECIMENTO DE MUNIÇÕES
               </h1>
-              <p class="protocol-tag">VINCULADO AO ARMAMENTO Nº ${cautela.weaponSerialNumber} • PROTOCOLO MUNIÇÃO: ${linkedAmmo.id.toUpperCase()}</p>
+              <p class="protocol-tag">VINCULADO AO ARMAMENTO Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel}) • PROTOCOLO: ${(linkedAmmo?.id || cautela.id).toUpperCase()}</p>
             </div>
 
             <div>
               <div class="section-banner">
-                1. DADOS DO SERVIDOR REQUISITANTE
+                1. DADOS DO SERVIDOR REQUISITANTE / RECEBEDOR
               </div>
               <table class="info-table">
                 <tr>
@@ -1204,7 +1235,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </tr>
                 <tr>
                   <td><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
-                  <td><strong>Armamento Vinculado:</strong> Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel})</td>
+                  <td><strong>Armamento Vinculado:</strong> Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel} • ${cautela.weaponCaliber || 'N/A'})</td>
                 </tr>
               </table>
             </div>
@@ -1219,19 +1250,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     <th>Calibre</th>
                     <th>Quantidade</th>
                     <th>Fabricante</th>
-                    <th>Tipo / Peso</th>
+                    <th>Tipo</th>
+                    <th>Peso</th>
                     <th>Lote</th>
-                    <th>Destinação / Cofre</th>
+                    <th>Destinação</th>
+                    <th>Cofre</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td><strong>${linkedAmmo.caliberName}</strong></td>
-                    <td style="font-weight: bold; font-size: 12px; color: #000;">${linkedAmmo.quantity} cartuchos</td>
-                    <td>${linkedAmmo.fabricante || ammoStock?.fabricante || calObj?.fabricante || 'CBC'}</td>
-                    <td>${linkedAmmo.tipoMunicao || ammoStock?.tipoMunicao || calObj?.tipo || 'Operacional'}${linkedAmmo.pesoMunicao ? ` • ${linkedAmmo.pesoMunicao}` : ''}</td>
-                    <td style="font-family: monospace;">${linkedAmmo.loteMunicao || ammoStock?.loteMunicao || 'Padrão'}</td>
-                    <td>${linkedAmmo.destinacao || 'Defesa'} • ${ammoVault ? `${ammoVault.code}${ammoVaultUnit ? ` (${ammoVaultUnit.name})` : ''}` : 'Cofre da Unidade'}</td>
+                    <td><strong>${ammoCalibre}</strong></td>
+                    <td style="font-weight: bold; font-size: 12px; color: #000;">${ammoQtd} cartuchos</td>
+                    <td>${ammoFabricante}</td>
+                    <td>${ammoTipo}</td>
+                    <td>${ammoPeso}</td>
+                    <td style="font-family: monospace;">${ammoLote}</td>
+                    <td><strong>${ammoDest}</strong></td>
+                    <td>${ammoVault ? `${ammoVault.code}${ammoVaultUnit ? ` (${ammoVaultUnit.name})` : ''}` : returnVaultAddress}</td>
                   </tr>
                 </tbody>
               </table>
@@ -1244,10 +1279,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <table class="info-table">
                 <tr>
                   <td style="width: 60%;"><strong>Motivo / Emprego:</strong> Fornecimento conjunto para emprego com a arma nº ${cautela.weaponSerialNumber}</td>
-                  <td style="width: 40%;"><strong>Previsão de Devolução:</strong> ${linkedAmmo.seraDevolvida !== false ? 'Sim (munições não deflagradas retornam ao cofre)' : 'Não (consumo operacional/treinamento)'}</td>
+                  <td style="width: 40%;"><strong>Previsão de Devolução:</strong> ${ammoSeraDevolvida ? 'Sim (munições não deflagradas retornam ao cofre)' : 'Não (consumo operacional/treinamento)'}</td>
                 </tr>
                 <tr>
-                  <td><strong>Armeiro Responsável / Fornecedor:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
+                  <td><strong>Armeiro Responsável pela Cautela:</strong> ${cautela.armorerName || 'Armeiro da Unidade'} ${cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}</td>
                   <td><strong>Data da Liberação:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date().toLocaleString('pt-BR')}</td>
                 </tr>
               </table>
@@ -1261,12 +1296,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <div class="signature-box">
                 <strong>${cautela.requesterName}</strong><br/>
                 MASP: ${cautela.requesterMasp}<br/>
-                Servidor Cautelante
+                <span>Usuário que está recebendo a arma (Policial)</span>
               </div>
               <div class="signature-box">
                 <strong>${cautela.armorerName || 'Armeiro da Unidade'}</strong><br/>
                 ${cautela.armorerMasp ? `MASP: ${cautela.armorerMasp}<br/>` : ''}
-                Armeiro Autorizador / Responsável pela Cautela
+                <span>Armeiro Responsável pela Cautela</span>
               </div>
             </div>
 
@@ -1444,72 +1479,66 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       <div className="flex items-center space-x-2 border-b border-slate-800 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveTab('MINHAS')}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === 'MINHAS'
-              ? 'bg-slate-800 text-amber-300 border border-slate-700 shadow-sm'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm'
+              : 'text-slate-400 hover:text-amber-300 hover:bg-slate-900'
           }`}
         >
-          <Shield className="w-3.5 h-3.5" />
+          <Clock className="w-3.5 h-3.5 text-amber-400" />
           <span>Minhas Cautelas</span>
-          {myActiveCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 font-mono">
-              {myActiveCount} ativa{myActiveCount > 1 ? 's' : ''}
-            </span>
-          )}
-          {myPendingCount > 0 && (
-            <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono animate-pulse">
-              {myPendingCount} aguardando
+          {pendingCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
+              {pendingCount} {pendingCount === 1 ? 'aguardando' : 'aguardando'}
             </span>
           )}
         </button>
 
-        {canAuthorize && (
-          <button
-            onClick={() => setActiveTab('PENDENTES')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-              activeTab === 'PENDENTES'
-                ? 'bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm'
-                : 'text-slate-400 hover:text-amber-300 hover:bg-slate-900'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-amber-400" />
-            <span>Solicitações Pendentes (Armeiro)</span>
-            {pendingCount > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
-                {pendingCount}
-              </span>
-            )}
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('DEFERIDAS')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+            activeTab === 'DEFERIDAS'
+              ? 'bg-emerald-950/80 text-emerald-300 border border-emerald-800 shadow-sm'
+              : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-900'
+          }`}
+        >
+          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+          <span>Deferidas (Autorizadas/Devolvidas)</span>
+          {deferidasCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
+              {deferidasCount}
+            </span>
+          )}
+        </button>
 
-        {canAuthorize && (
-          <button
-            onClick={() => setActiveTab('TODAS')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-              activeTab === 'TODAS'
-                ? 'bg-slate-800 text-slate-200 border border-slate-700 shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            <span>Histórico Geral da Unidade</span>
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('INDEFERIDAS')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+            activeTab === 'INDEFERIDAS'
+              ? 'bg-red-950/80 text-red-300 border border-red-800 shadow-sm'
+              : 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
+          }`}
+        >
+          <XCircle className="w-3.5 h-3.5 text-red-400" />
+          <span>Indeferidas</span>
+          {indeferidasCount > 0 && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
+              {indeferidasCount}
+            </span>
+          )}
+        </button>
 
-        {!isPolicial && (
-          <button
-            onClick={() => setActiveTab('NOVA')}
-            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition ${
-              activeTab === 'NOVA'
-                ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
-            }`}
-          >
-            <Crosshair className="w-3.5 h-3.5" />
-            <span>Nova Solicitação</span>
-          </button>
-        )}
+        <button
+          onClick={() => setActiveTab('NOVA')}
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ml-auto ${
+            activeTab === 'NOVA'
+              ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+          }`}
+        >
+          <Crosshair className="w-3.5 h-3.5" />
+          <span>{canAuthorize ? 'Acautelar Arma' : 'Nova Solicitação'}</span>
+        </button>
       </div>
 
       {/* VIEW: NOVA SOLICITAÇÃO */}
@@ -1831,35 +1860,33 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por arma, série ou policial..."
+                placeholder="Buscar por arma, série, calibre ou policial..."
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500"
               />
             </div>
 
-            <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
-              {(isPolicial ? [
-                { id: 'TODOS', label: 'Todas' },
-                { id: 'DEFERIDAS', label: 'Deferidas (Autorizadas / Devolvidas)' },
-                { id: 'INDEFERIDAS', label: `Indeferidas (Recusadas)${myRefusedCautelas.length > 0 ? ` (${myRefusedCautelas.length})` : ''}` }
-              ] : [
-                { id: 'TODOS', label: 'Todas' },
-                { id: 'DEFERIDAS', label: 'Deferidas (Autorizadas / Devolvidas)' },
-                { id: 'INDEFERIDAS', label: 'Indeferidas (Recusadas)' },
-                { id: 'PENDENTE', label: 'Pendentes' }
-              ]).map(item => (
-                <button
-                  key={item.id}
-                  onClick={() => setStatusFilter(item.id as any)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                    statusFilter === item.id
-                      ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
-                      : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                  }`}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
+            {/* Sub-filtros para a aba Deferidas */}
+            {activeTab === 'DEFERIDAS' && (
+              <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
+                {[
+                  { id: 'TODAS', label: `Todas (${deferidasCount})` },
+                  { id: 'ATIVAS', label: `Ativas em Posse (${activeCautelasCount})` },
+                  { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedCautelasCount})` }
+                ].map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => setDeferidasSubFilter(item.id as any)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                      deferidasSubFilter === item.id
+                        ? 'bg-emerald-600 text-slate-950 font-black shadow-sm'
+                        : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Lista de Registros */}
@@ -1871,99 +1898,202 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </div>
           ) : (
             <div className="space-y-6">
-              {activeTab === 'MINHAS' ? (
-                <>
-                  {/* Alerta de Cautela Recusada / Indeferida para Policial */}
-                  {myRefusedCautelas.length > 0 && isPolicial && statusFilter !== 'INDEFERIDAS' && (
-                    <div className="p-4 bg-red-950/70 border border-red-800/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-                      <div className="flex items-start sm:items-center space-x-3.5">
-                        <div className="p-2 bg-red-500/20 text-red-400 rounded-xl shrink-0 border border-red-500/30 mt-0.5 sm:mt-0">
-                          <AlertCircle className="w-5 h-5" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <h4 className="text-xs font-bold text-red-200">
-                            Atenção: Você possui {myRefusedCautelas.length} solicitação(ões) de cautela RECUSADA(S) pelo armeiro.
-                          </h4>
-                          <p className="text-[11px] text-red-300/80">
-                            A arma solicitada não foi liberada e retornou ao cofre no status "No Cofre".
+                  {/* Conteúdo das Abas */}
+
+                  {/* Seção: Solicitações Pendentes (Aba MINHAS CAUTELAS) */}
+                  {activeTab === 'MINHAS' && (() => {
+                    const pendentes = scopedCautelas.filter(c => isPendingStatus(c.status));
+                    if (pendentes.length === 0) {
+                      return (
+                        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
+                          <Clock className="w-8 h-8 text-amber-500/50 mx-auto mb-2" />
+                          <p className="text-sm font-semibold">Nenhuma cautela aguardando ação do armeiro no momento.</p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {isPolicial 
+                              ? 'Você não possui solicitações de armamento pendentes de autorização.' 
+                              : 'Todas as solicitações de armamento foram devidamente analisadas.'}
                           </p>
                         </div>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setStatusFilter('INDEFERIDAS')}
-                        className="px-3.5 py-1.5 bg-red-900/60 hover:bg-red-800 text-red-100 text-xs font-bold rounded-xl border border-red-700/50 transition whitespace-nowrap self-end sm:self-auto shadow-sm"
-                      >
-                        Ver em Indeferidas ({myRefusedCautelas.length})
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Seção: Solicitações Pendentes (Exibida em TODAS ou PENDENTE) */}
-                  {(statusFilter === 'TODOS' || statusFilter === 'PENDENTE') && (() => {
-                    const pendentes = scopedCautelas.filter(c => isPendingStatus(c.status));
-                    if (pendentes.length === 0) return null;
+                      );
+                    }
                     return (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
                             <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                             <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
-                              Solicitações Pendentes (Aguardando Cautela / Resposta do Armeiro)
+                              Solicitações Pendentes (Aguardando Ação do Armeiro)
                             </h4>
                           </div>
                           <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-800/60">
-                            {pendentes.length} aguardando cautela
+                            {pendentes.length} aguardando ação
                           </span>
                         </div>
 
                         <div className="grid grid-cols-1 gap-3">
-                          {pendentes.map(cautela => (
-                            <div
-                              key={cautela.id}
-                              className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md ring-1 ring-amber-500/20"
-                            >
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                                <div className="flex items-center space-x-3">
-                                  <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400">
-                                    <Clock className="w-5 h-5 animate-pulse" />
-                                  </div>
-                                  <div>
-                                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                                      <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
-                                      <span className="font-mono text-xs text-amber-400 font-bold">
-                                        Nº {cautela.weaponSerialNumber}
-                                      </span>
-                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse flex items-center space-x-1">
-                                        <span>●</span>
-                                        <span>Aguardando Cautela</span>
-                                      </span>
+                          {pendentes.map(cautela => {
+                            const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
+                            const returnVaultId = cautela.vaultSpaceId || weapon?.previousVaultSpaceId || weapon?.vaultSpaceId;
+                            const returnVault = vaultSpaces.find(v => v.id === returnVaultId);
+                            const returnUnit = units.find(u => u.id === returnVault?.unitId);
+                            const returnVaultAddress = returnVault 
+                              ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}` 
+                              : 'Cofre de Origem';
+
+                            const linkedAmmo = getLinkedAmmoForCautela(cautela);
+                            const hasAmmo = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linkedAmmo);
+
+                            return (
+                              <div
+                                key={cautela.id}
+                                className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-5 space-y-3 shadow-md ring-1 ring-amber-500/20"
+                              >
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                  <div className="flex items-center space-x-3">
+                                    <div className="p-2.5 rounded-xl border bg-amber-500/10 border-amber-500/30 text-amber-400">
+                                      <Clock className="w-5 h-5 animate-pulse" />
                                     </div>
-                                    <p className="text-xs text-amber-300/90 mt-1 flex items-center space-x-1.5 font-medium">
-                                      <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
-                                      <span>Aguardando resposta do Armeiro para autorização e liberação do armamento</span>
-                                    </p>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">
-                                      Solicitado em {new Date(cautela.requestDate).toLocaleString('pt-BR')} • Motivo: "{cautela.reason || 'Serviço Policial'}"
-                                    </p>
+                                    <div>
+                                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                        <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
+                                        <span className="font-mono text-xs text-amber-400 font-bold">
+                                          Nº {cautela.weaponSerialNumber}
+                                        </span>
+                                        {cautela.weaponCaliber && (
+                                          <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                            {cautela.weaponCaliber}
+                                          </span>
+                                        )}
+                                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse flex items-center space-x-1">
+                                          <span>●</span>
+                                          <span>Aguardando Cautela</span>
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-amber-300/90 mt-1 flex items-center space-x-1.5 font-medium">
+                                        <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                                        <span>Aguardando resposta do Armeiro para autorização e liberação do armamento</span>
+                                      </p>
+                                      <p className="text-[11px] text-slate-400 mt-0.5">
+                                        Solicitante: <strong className="text-amber-300 font-semibold">{cautela.requesterName}</strong> <span className="font-mono text-amber-400">(MASP: {cautela.requesterMasp})</span> • Solicitado em {new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                      </p>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center space-x-2 self-end sm:self-center">
+                                    {canAuthorize ? (
+                                      <>
+                                        <button
+                                          onClick={() => handleOpenAuthorize(cautela)}
+                                          className="flex items-center space-x-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-md"
+                                          title="Autorizar cautela e liberar arma para o policial"
+                                        >
+                                          <Check className="w-4 h-4" />
+                                          <span>Autorizar Cautela</span>
+                                        </button>
+                                        <button
+                                          onClick={() => setNotesModal({ 
+                                            id: cautela.id, 
+                                            action: 'RECUSAR',
+                                            weaponId: cautela.weaponId,
+                                            weaponSerialNumber: cautela.weaponSerialNumber
+                                          })}
+                                          className="flex items-center space-x-1 px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 rounded-xl text-xs font-semibold transition"
+                                          title="Recusar solicitação e retornar arma ao cofre"
+                                        >
+                                          <X className="w-3.5 h-3.5" />
+                                          <span>Recusar</span>
+                                        </button>
+                                      </>
+                                    ) : (
+                                      <span className="px-3 py-1 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
+                                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Pendente de Liberação</span>
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
-                                <div className="self-end sm:self-center">
-                                  <span className="px-3 py-1 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
-                                    <Clock className="w-3.5 h-3.5 text-amber-400" />
-                                    <span>Pendente de Liberação</span>
-                                  </span>
+
+                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Origem</span>
+                                    <span className="font-mono text-slate-200 font-bold truncate block">
+                                      {returnVaultAddress}
+                                    </span>
+                                  </div>
+                                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Carregadores</span>
+                                    <span className="font-bold text-slate-200">{cautela.magazineQuantity} unidade(s)</span>
+                                  </div>
+                                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Solicitação</span>
+                                    <span className="text-slate-300">{new Date(cautela.requestDate).toLocaleString('pt-BR')}</span>
+                                  </div>
+                                  <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Policial Solicitante</span>
+                                    <span className="text-slate-200 font-semibold truncate block">
+                                      {cautela.requesterName} ({cautela.requesterMasp})
+                                    </span>
+                                  </div>
                                 </div>
+
+                                {/* Munições solicitadas em conjunto */}
+                                {hasAmmo && (() => {
+                                  const qty = cautela.ammoQuantity || linkedAmmo?.quantity || 0;
+                                  const fab = cautela.ammoFabricante || linkedAmmo?.fabricante || 'CBC';
+                                  const cal = cautela.weaponCaliber || linkedAmmo?.caliberName || 'Padrão';
+                                  const tip = cautela.ammoTipo || linkedAmmo?.tipoMunicao || 'Operacional';
+                                  const pes = cautela.ammoPeso || linkedAmmo?.pesoMunicao || '124gr';
+                                  const lot = cautela.ammoLote || linkedAmmo?.loteMunicao || 'Lote Unidade';
+                                  const des = cautela.ammoDestinacao || linkedAmmo?.destinacao || 'Defesa';
+
+                                  return (
+                                    <div className="p-3 bg-amber-950/20 border border-amber-800/50 rounded-xl space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between border-b border-amber-800/40 pb-1.5">
+                                        <span className="font-bold text-amber-300 flex items-center space-x-1.5">
+                                          <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>Munições Solicitadas em Conjunto</span>
+                                        </span>
+                                        <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-950/80 px-2 py-0.5 rounded border border-amber-700">
+                                          {qty} munições
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                                        <div>
+                                          <span className="text-slate-500 block">Fabricante / Calibre:</span>
+                                          <strong className="text-slate-200">{fab} • {cal}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Tipo / Peso:</span>
+                                          <strong className="text-slate-200">{tip} • {pes}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Lote:</span>
+                                          <strong className="text-slate-200 font-mono">{lot}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Destinação:</span>
+                                          <strong className="text-slate-200">{des}</strong>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
+                                {cautela.reason && (
+                                  <p className="text-xs text-slate-400 italic">
+                                    Motivo da Solicitação: "{cautela.reason}"
+                                  </p>
+                                )}
                               </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );
                   })()}
 
-                  {/* Seção: Cautelas Ativas (Exibida em TODAS ou DEFERIDAS) */}
-                  {(statusFilter === 'TODOS' || statusFilter === 'DEFERIDAS') && (
+                  {/* Seção: Cautelas Ativas (Aba DEFERIDAS) */}
+                  {activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS') && (
                     <div className="space-y-3">
                       <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                         <div className="flex items-center space-x-2">
@@ -1991,6 +2121,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             const returnVaultAddress = returnVault 
                               ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}` 
                               : 'Cofre de Origem';
+
+                            const linkedAmmo = getLinkedAmmoForCautela(cautela);
+                            const hasAmmo = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linkedAmmo);
 
                             return (
                               <div
@@ -2063,6 +2196,49 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                   </div>
                                 </div>
 
+                                {/* Munição Vinculada (Fabricante, Calibre, Tipo, Peso, Lote, Quantidade e Destinação) */}
+                                {hasAmmo && (() => {
+                                  const qty = cautela.ammoQuantity || linkedAmmo?.quantity || 0;
+                                  const fab = cautela.ammoFabricante || linkedAmmo?.fabricante || 'CBC';
+                                  const cal = cautela.weaponCaliber || linkedAmmo?.caliberName || 'Padrão';
+                                  const tip = cautela.ammoTipo || linkedAmmo?.tipoMunicao || 'Operacional';
+                                  const pes = cautela.ammoPeso || linkedAmmo?.pesoMunicao || '124gr';
+                                  const lot = cautela.ammoLote || linkedAmmo?.loteMunicao || 'Lote Unidade';
+                                  const des = cautela.ammoDestinacao || linkedAmmo?.destinacao || 'Defesa';
+
+                                  return (
+                                    <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5 text-xs">
+                                      <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5">
+                                        <span className="font-bold text-amber-300 flex items-center space-x-1.5">
+                                          <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>Munição Vinculada à Cautela da Arma</span>
+                                        </span>
+                                        <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/50">
+                                          {qty} munições
+                                        </span>
+                                      </div>
+                                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                                        <div>
+                                          <span className="text-slate-500 block">Fabricante / Calibre:</span>
+                                          <strong className="text-slate-200">{fab} • {cal}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Tipo / Peso:</span>
+                                          <strong className="text-slate-200">{tip} • {pes}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Lote:</span>
+                                          <strong className="text-slate-200 font-mono">{lot}</strong>
+                                        </div>
+                                        <div>
+                                          <span className="text-slate-500 block">Destinação:</span>
+                                          <strong className="text-slate-200">{des}</strong>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })()}
+
                                 {cautela.reason && (
                                   <p className="text-xs text-slate-400 italic">
                                     Motivo: "{cautela.reason}"
@@ -2076,8 +2252,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     </div>
                   )}
 
-                  {/* Seção: Cautelas Recusadas (Exibida SOMENTE em INDEFERIDAS) */}
-                  {statusFilter === 'INDEFERIDAS' && (() => {
+                  {/* Seção: Cautelas Recusadas (Aba INDEFERIDAS) */}
+                  {activeTab === 'INDEFERIDAS' && (() => {
                     const recusadas = scopedCautelas.filter(c => c.status === 'RECUSADA');
                     return (
                       <div className="space-y-3">
@@ -2147,8 +2323,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção 4: Histórico de Cautelas Devolvidas (Exibida em TODAS ou DEFERIDAS) */}
-                  {(statusFilter === 'TODOS' || statusFilter === 'DEFERIDAS') && (() => {
+                  {/* Seção 4: Histórico de Cautelas Devolvidas (Aba DEFERIDAS) */}
+                  {activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS') && (() => {
                     const devolvidas = scopedCautelas.filter(c => c.status === 'DEVOLVIDA');
                     return (
                       <div className="space-y-3 pt-4 border-t border-slate-800">
@@ -2270,280 +2446,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       </div>
                     );
                   })()}
-                </>
-              ) : (
-                /* Aba PENDENTES ou TODAS */
-                displayedCautelas.length === 0 ? (
-                  <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
-                    {activeTab === 'PENDENTES' ? (
-                      <>
-                        <Clock className="w-8 h-8 text-amber-500/50 mx-auto mb-2" />
-                        <p className="text-sm font-semibold">Nenhuma solicitação de armamento pendente de autorização.</p>
-                        <p className="text-xs text-slate-500 mt-1">Todas as armas no cofre da unidade estão no status "No Cofre" ou já foram devidamente acauteladas.</p>
-                      </>
-                    ) : (
-                      <>
-                        <Crosshair className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                        <p className="text-sm font-semibold">Nenhuma cautela de armamento encontrada no histórico da unidade.</p>
-                      </>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {activeTab === 'PENDENTES' && (
-                      <div className="bg-amber-950/40 border border-amber-800/60 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
-                        <div className="flex items-center space-x-3">
-                          <div className="p-2 bg-amber-500/20 text-amber-400 rounded-xl border border-amber-500/30">
-                            <Clock className="w-5 h-5 animate-pulse" />
-                          </div>
-                          <div>
-                            <h4 className="text-sm font-bold text-amber-300">
-                              Solicitações Pendentes (Armeiro)
-                            </h4>
-                            <p className="text-xs text-amber-200/80">
-                              Armas no cofre da unidade com status <strong>"Cautela Pendente"</strong> aguardando autorização para saída ou recusa.
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-xs font-mono font-bold text-amber-400 bg-amber-950 px-3 py-1.5 rounded-xl border border-amber-800 shrink-0">
-                          {displayedCautelas.length} armamento(s) pendente(s)
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-1 gap-3">
-                      {displayedCautelas.map(cautela => {
-                        const isAuthorized = cautela.status === 'AUTORIZADA';
-                        const isPending = cautela.status === 'PENDENTE';
-                        const isReturned = cautela.status === 'DEVOLVIDA';
-                        const isRefused = cautela.status === 'RECUSADA';
-                        const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
-                        const returnVaultId = cautela.vaultSpaceId || weapon?.previousVaultSpaceId || weapon?.vaultSpaceId;
-                        const returnVault = vaultSpaces.find(v => v.id === returnVaultId);
-                        const returnUnit = units.find(u => u.id === returnVault?.unitId);
-                        const returnVaultAddress = returnVault 
-                          ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}` 
-                          : 'Cofre de Origem';
-
-                        return (
-                          <div
-                            key={cautela.id}
-                            className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 transition space-y-3 ${
-                              isPending
-                                ? 'border-amber-800/70 hover:border-amber-600/80 shadow-md ring-1 ring-amber-500/20'
-                                : 'border-slate-800 hover:border-slate-700'
-                            }`}
-                          >
-                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                              <div className="flex items-center space-x-3">
-                                <div className={`p-2.5 rounded-xl border ${
-                                  isAuthorized
-                                    ? 'bg-purple-500/10 border-purple-500/20 text-purple-400'
-                                    : isPending
-                                    ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                                    : isReturned
-                                    ? 'bg-slate-800 border-slate-700 text-slate-300'
-                                    : 'bg-red-500/10 border-red-500/20 text-red-400'
-                                }`}>
-                                  <Crosshair className="w-5 h-5" />
-                                </div>
-                                <div>
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
-                                    <span className="font-mono text-xs text-amber-400 font-bold">
-                                      Nº {cautela.weaponSerialNumber}
-                                    </span>
-                                    {cautela.weaponCaliber && (
-                                      <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
-                                        {cautela.weaponCaliber}
-                                      </span>
-                                    )}
-                                    <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold uppercase border flex items-center space-x-1 ${
-                                      isAuthorized
-                                        ? 'bg-purple-950 text-purple-300 border-purple-800'
-                                        : isPending
-                                        ? 'bg-amber-950 text-amber-300 border-amber-800 animate-pulse'
-                                        : isReturned
-                                        ? 'bg-slate-800 text-slate-300 border-slate-700'
-                                        : 'bg-red-950 text-red-300 border-red-800'
-                                    }`}>
-                                      {isPending && <Clock className="w-3 h-3 text-amber-400" />}
-                                      <span>
-                                        {isAuthorized
-                                          ? `Acautelada — ${cautela.requesterName} (MASP: ${cautela.requesterMasp})`
-                                          : isPending
-                                          ? 'Cautela Pendente'
-                                          : isReturned
-                                          ? 'Devolvida ao Cofre'
-                                          : 'Recusada (No Cofre)'}
-                                      </span>
-                                    </span>
-                                  </div>
-                                  <p className="text-xs text-slate-300 mt-1">
-                                    Solicitante: <strong className="text-amber-300 font-bold">{cautela.requesterName}</strong> <span className="font-mono font-bold text-amber-400">(MASP: {cautela.requesterMasp})</span> • Cargo: <strong className="text-slate-200">{cautela.requesterCargo || 'Policial'}</strong>
-                                  </p>
-                                </div>
-                              </div>
-
-                              {/* Ações */}
-                              <div className="flex items-center space-x-2 self-end sm:self-center">
-                                {(isAuthorized || isReturned) && (
-                                  <button
-                                    onClick={() => handlePrintTermo(cautela)}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
-                                    title="Imprimir Termo de Cautela de Armamento"
-                                  >
-                                    <Printer className="w-3.5 h-3.5 text-amber-400" />
-                                    <span>Imprimir Termo</span>
-                                  </button>
-                                )}
-
-                                {isAuthorized && (
-                                  <button
-                                    onClick={() => handleOpenReturnModal(cautela)}
-                                    className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
-                                  >
-                                    <RotateCcw className="w-3.5 h-3.5" />
-                                    <span>Devolver ao Cofre</span>
-                                  </button>
-                                )}
-
-                                {isPending && canAuthorize && (
-                                  <div className="flex items-center space-x-2">
-                                    <button
-                                      onClick={() => handleOpenAuthorize(cautela)}
-                                      className="flex items-center space-x-1.5 px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-md"
-                                      title="Autorizar cautela e liberar arma para o policial"
-                                    >
-                                      <Check className="w-4 h-4" />
-                                      <span>Autorizar Cautela</span>
-                                    </button>
-                                    <button
-                                      onClick={() => setNotesModal({ 
-                                        id: cautela.id, 
-                                        action: 'RECUSAR',
-                                        weaponId: cautela.weaponId,
-                                        weaponSerialNumber: cautela.weaponSerialNumber
-                                      })}
-                                      className="flex items-center space-x-1 px-3 py-2 bg-red-950/80 hover:bg-red-900 border border-red-700 text-red-200 rounded-xl text-xs font-semibold transition"
-                                      title="Recusar solicitação e retornar arma ao cofre"
-                                    >
-                                      <X className="w-3.5 h-3.5" />
-                                      <span>Recusar</span>
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                <span className="text-[10px] text-slate-500 uppercase block font-semibold">
-                                  {isPending ? 'Condição no Cofre' : 'Cofre de Retorno'}
-                                </span>
-                                <span className="font-mono text-slate-200 font-bold truncate block" title={returnVault ? `Cofre ${returnVault.code} - ${returnUnit?.name || 'Unidade'}` : 'Cofre de Origem'}>
-                                  {isPending ? `Cautela Pendente (${returnVaultAddress})` : returnVaultAddress}
-                                </span>
-                              </div>
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                <span className="text-[10px] text-slate-500 uppercase block font-semibold">Carregadores</span>
-                                <span className="font-bold text-slate-200">{cautela.magazineQuantity} unidade(s)</span>
-                              </div>
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                <span className="text-[10px] text-slate-500 uppercase block font-semibold">
-                                  {isPending ? 'Data da Solicitação' : 'Data da Retirada'}
-                                </span>
-                                <span className="text-slate-300">
-                                  {cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date(cautela.requestDate).toLocaleString('pt-BR')}
-                                </span>
-                              </div>
-                              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                <span className="text-[10px] text-slate-500 uppercase block font-semibold">
-                                  {isPending ? 'Policial Responsável' : 'Armeiro Autorizador'}
-                                </span>
-                                <span className="text-slate-200 font-semibold truncate block" title={isPending ? `${cautela.requesterName} (MASP: ${cautela.requesterMasp})` : (cautela.armorerName ? `${cautela.armorerName} (MASP: ${cautela.armorerMasp || 'N/A'})` : 'Aguardando autorização')}>
-                                  {isPending 
-                                    ? `${cautela.requesterName} (${cautela.requesterMasp})` 
-                                    : (cautela.armorerName ? `${cautela.armorerName}${cautela.armorerMasp ? ` (MASP: ${cautela.armorerMasp})` : ''}` : 'Aguardando autorização')}
-                                </span>
-                              </div>
-                            </div>
-
-                            {isPending && (
-                              <div className="p-2.5 bg-amber-950/25 border border-amber-800/40 rounded-xl text-xs flex flex-wrap items-center justify-between gap-2 text-amber-200/90 font-mono">
-                                <span>Arma retida no cofre com status <strong>"Cautela Pendente"</strong>. Ao autorizar, o status passará para <strong>"Acautelada"</strong> com {cautela.requesterName} (MASP: {cautela.requesterMasp}).</span>
-                              </div>
-                            )}
-
-                            {/* Seção com detalhes da munição conjunta solicitada */}
-                          {(() => {
-                            const linked = getLinkedAmmoForCautela(cautela);
-                            const hasMun = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linked);
-                            if (!hasMun) return null;
-                            const qty = cautela.ammoQuantity || linked?.quantity || 'N/I';
-                            const dest = cautela.ammoDestinacao || linked?.destinacao || 'Defesa';
-                            return (
-                              <div className="p-3 bg-amber-950/30 border border-amber-800/60 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs text-amber-200">
-                                <div className="flex items-center space-x-2">
-                                  <Disc className="w-4 h-4 text-amber-400 shrink-0" />
-                                  <span>
-                                    Munições Solicitadas: <strong>{qty} un.</strong> • Destinação: <strong>{dest}</strong>
-                                    {linked?.seraDevolvida !== undefined && (
-                                      <span className="text-[11px] text-slate-300 ml-2">
-                                        ({linked.seraDevolvida ? 'Irá devolver depois' : 'Retirada permanente / baixa definitiva'})
-                                      </span>
-                                    )}
-                                  </span>
-                                </div>
-                                {linked?.status && (
-                                  <span className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded border ${
-                                    linked.status === 'AUTORIZADA' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-slate-900 text-slate-300 border-slate-700'
-                                  }`}>
-                                    Munição {linked.status}
-                                  </span>
-                                )}
-                              </div>
-                            );
-                          })()}
-
-                          {isReturned && (
-                            <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                              <div className="flex items-center space-x-3">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  cautela.hadShots ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'
-                                }`}>
-                                  {cautela.hadShots ? `${cautela.shotsFired} tiros efetuados` : 'Zero tiros'}
-                                </span>
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  cautela.isWorking ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                                }`}>
-                                  {cautela.isWorking ? 'Em Condições de Uso' : 'Apresenta Defeito (Manutenção)'}
-                                </span>
-                                {cautela.hadMalfunction && (
-                                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">
-                                    Pane Relatada
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[11px] text-slate-400">
-                                Devolvido em {new Date(cautela.returnDate || cautela.updatedAt || '').toLocaleString('pt-BR')} por {cautela.returnArmorerName || 'Armeiro'}
-                              </div>
-                            </div>
-                          )}
-
-                          {cautela.reason && (
-                            <p className="text-xs text-slate-400 italic">
-                              Motivo: "{cautela.reason}"
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )
-            )}
-          </div>
+            </div>
           )}
         </div>
       )}

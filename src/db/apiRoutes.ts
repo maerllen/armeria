@@ -9215,6 +9215,29 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
       ammoCautelaId
     ]);
 
+    if (ammunition && Number(ammunition.quantity) > 0) {
+      try {
+        await pool.query(`
+          UPDATE ACAUTELAR_ARMAS SET
+            MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = ?,
+            MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = ?,
+            MUNICAO_TIPO_ACAUTELAR_ARMAS = ?,
+            MUNICAO_PESO_ACAUTELAR_ARMAS = ?,
+            MUNICAO_LOTE_ACAUTELAR_ARMAS = ?,
+            MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = ?
+          WHERE ID_ACAUTELAR_ARMAS = ?
+        `, [
+          parseInt(String(ammunition.quantity || 0), 10),
+          ammunition.fabricante || null,
+          ammunition.tipoMunicao || null,
+          ammunition.pesoMunicao || null,
+          ammunition.loteMunicao || null,
+          ammunition.destinacao || null,
+          id
+        ]);
+      } catch (_) {}
+    }
+
     if (isDirect) {
       let vaultCode = '';
       if (vaultSpaceId) {
