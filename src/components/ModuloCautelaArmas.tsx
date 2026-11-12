@@ -93,6 +93,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
   const [authNotes, setAuthNotes] = useState('');
 
+  // Indicação Informativa de Munição pelo Policial (Opcional - meramente informativa)
+  const [policialWantsAmmo, setPolicialWantsAmmo] = useState(false);
+  const [policialAmmoTipo, setPolicialAmmoTipo] = useState('Operacional');
+  const [policialAmmoPeso, setPolicialAmmoPeso] = useState('124 gr');
+
   // Available officers in unit (strict unit restriction for direct checkout)
   const availableUnitOfficers = useMemo(() => {
     const allUsers = storage.getUsers();
@@ -119,6 +124,65 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return matchUnit && matchCaliber && st.quantity > 0;
     });
   }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
+
+  // Tipos e pesos de munição disponíveis para seleção informativa pelo policial
+  // (Sem jamais expor local do cofre ou quantidade de munições em estoque)
+  const availablePoliceTipos = useMemo(() => {
+    const calName = (selectedWeapon?.caliber || '').trim().toLowerCase();
+    const set = new Set<string>();
+    calibers
+      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.tipo)
+      .forEach(c => set.add(c.tipo!.trim()));
+    availableAmmoForSelectedWeapon.forEach(st => {
+      if (st.tipoMunicao && st.tipoMunicao.trim()) {
+        set.add(st.tipoMunicao.trim());
+      }
+    });
+    ['Operacional', 'Treinamento', 'Expansiva', 'ETOG', 'Treino', 'Defesa'].forEach(t => set.add(t));
+    return Array.from(set);
+  }, [selectedWeapon, calibers, availableAmmoForSelectedWeapon]);
+
+  const availablePolicePesos = useMemo(() => {
+    const calName = (selectedWeapon?.caliber || '').trim().toLowerCase();
+    const set = new Set<string>();
+    calibers
+      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.peso)
+      .forEach(c => set.add(c.peso!.trim()));
+    availableAmmoForSelectedWeapon.forEach(st => {
+      if (st.pesoMunicao && st.pesoMunicao.trim()) {
+        set.add(st.pesoMunicao.trim());
+      }
+    });
+    if (calName.includes('9mm') || calName.includes('9x19')) {
+      ['124 gr', '115 gr', '147 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('40')) {
+      ['180 gr', '165 gr', '155 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('380')) {
+      ['95 gr', '90 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('5,56') || calName.includes('5.56') || calName.includes('223')) {
+      ['55 gr', '62 gr', '77 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('12')) {
+      ['Balote', 'SG 3T', 'SG 2T', 'Chumbo 3'].forEach(p => set.add(p));
+    } else if (calName.includes('38')) {
+      ['158 gr', '125 gr'].forEach(p => set.add(p));
+    } else {
+      ['124 gr', '180 gr', '55 gr', 'Padrão'].forEach(p => set.add(p));
+    }
+    return Array.from(set);
+  }, [selectedWeapon, calibers, availableAmmoForSelectedWeapon]);
+
+  // Sincroniza automaticamente o tipo e peso selecionados quando o armamento muda
+  React.useEffect(() => {
+    if (availablePoliceTipos.length > 0 && !availablePoliceTipos.includes(policialAmmoTipo)) {
+      setPolicialAmmoTipo(availablePoliceTipos[0]);
+    }
+  }, [availablePoliceTipos, policialAmmoTipo]);
+
+  React.useEffect(() => {
+    if (availablePolicePesos.length > 0 && !availablePolicePesos.includes(policialAmmoPeso)) {
+      setPolicialAmmoPeso(availablePolicePesos[0]);
+    }
+  }, [availablePolicePesos, policialAmmoPeso]);
 
   // Auto-sync ammo stock selection when available ammo changes
   React.useEffect(() => {
@@ -835,6 +899,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         payload.ammoLote = resolvedLote;
       }
 
+      // Regra de Negócio: Se for policial e informou preferência de munição,
+      // salva meramente informativa em OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS
+      // sem gerar cautela de munições em conjunto e sem deduzir do cofre
+      if (isPolicial && policialWantsAmmo) {
+        const calStr = weapon.caliber || 'Padrão';
+        payload.authorizationNotes = `Solicito munição tipo: ${calStr}, ${policialAmmoTipo}, ${policialAmmoPeso}`;
+      }
+
       const res = await storage.requestCautelaArma(payload);
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao registrar solicitação de cautela.');
@@ -888,6 +960,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         }
         setSelectedWeaponId('');
         setReason('');
+        setPolicialWantsAmmo(false);
         onRefresh();
       }
     } catch (err: any) {
@@ -907,7 +980,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const isTreinamento = (cautela.ammoDestinacao === 'Treinamento' || linkedAmmo?.destinacao === 'Treinamento');
     setAuthAmmoDestinacao(isTreinamento ? 'Treinamento' : 'Defesa');
     setAuthSeraDevolvida(!isTreinamento);
-    setAuthNotes('');
+    setAuthNotes(cautela.authorizationNotes || '');
   };
 
   // Confirmar autorização com seleção de cofre/lote e permanente vs devolver depois
@@ -1951,7 +2024,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             </div>
                           </div>
                           <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60">
-                            <span>Local: {vault ? vault.code : 'Cofre'}</span>
+                            <span>{isPolicial ? 'Disponível na Unidade' : `Local: ${vault ? vault.code : 'Cofre'}`}</span>
                             <span>{w.magazineQuantity || 1} carregadores</span>
                           </div>
                         </div>
@@ -2116,21 +2189,99 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   </div>
                 </>
               ) : (
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    MOTIVO / FINALIDADE DO USO (OPCIONAL)
-                  </label>
-                  <select
-                    value={reason}
-                    onChange={(e) => setReason(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
-                  >
-                    <option value="">Selecione o motivo (opcional)</option>
-                    <option value="Operação">Operação</option>
-                    <option value="Plantão">Plantão</option>
-                    <option value="Serviço ordinário">Serviço ordinário</option>
-                    <option value="Treinamento">Treinamento</option>
-                  </select>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      MOTIVO / FINALIDADE DO USO (OPCIONAL)
+                    </label>
+                    <select
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
+                    >
+                      <option value="">Selecione o motivo (opcional)</option>
+                      <option value="Operação">Operação</option>
+                      <option value="Plantão">Plantão</option>
+                      <option value="Serviço ordinário">Serviço ordinário</option>
+                      <option value="Treinamento">Treinamento</option>
+                    </select>
+                  </div>
+
+                  {/* Seção Informativa de Munição Desejada (Opcional para Policial) */}
+                  <div className="pt-2 border-t border-slate-800 space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="policialAmmoRequest"
+                        checked={policialWantsAmmo}
+                        onChange={(e) => setPolicialWantsAmmo(e.target.checked)}
+                        className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700 cursor-pointer"
+                      />
+                      <label htmlFor="policialAmmoRequest" className="text-xs font-bold text-slate-200 cursor-pointer">
+                        Informar ao armeiro especificação da munição que deseja cautelar (Opcional)
+                      </label>
+                    </div>
+
+                    {policialWantsAmmo && (
+                      <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5 animate-in fade-in">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {/* Calibre (correspondente ao armamento escolhido) */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Calibre Correspondente
+                            </label>
+                            <input
+                              type="text"
+                              readOnly
+                              disabled
+                              value={selectedWeapon?.caliber || 'Calibre da Arma'}
+                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                            />
+                          </div>
+
+                          {/* Tipo de Munição */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Tipo de Munição
+                            </label>
+                            <select
+                              value={policialAmmoTipo}
+                              onChange={(e) => setPolicialAmmoTipo(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                            >
+                              {availablePoliceTipos.map(t => (
+                                <option key={t} value={t}>{t}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Peso da Munição */}
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Peso do Projétil
+                            </label>
+                            <select
+                              value={policialAmmoPeso}
+                              onChange={(e) => setPolicialAmmoPeso(e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                            >
+                              {availablePolicePesos.map(p => (
+                                <option key={p} value={p}>{p}</option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-slate-900/70 border border-slate-800 rounded-lg text-[11px] text-slate-400 flex items-start space-x-2">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                          <span>
+                            Esta indicação é <strong>meramente informativa</strong> para a análise do armeiro. <strong>Não gera cautela de munições em conjunto</strong> e <strong>não deduz do cofre</strong>.
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   <p className="text-[11px] text-slate-400 mt-1">
                     Ao confirmar, a solicitação ficará marcada como <strong>Cautela Pendente</strong> aguardando autorização do armeiro. O armeiro definirá a entrega de carregadores e terá a opção de acautelar munições junto com a arma.
                   </p>
@@ -2345,9 +2496,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                   <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Origem</span>
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">{isPolicial ? 'Unidade' : 'Cofre de Origem'}</span>
                                     <span className="font-mono text-slate-200 font-bold truncate block">
-                                      {returnVaultAddress}
+                                      {isPolicial ? (returnUnit?.name || userUnit?.name || 'Unidade Policial') : returnVaultAddress}
                                     </span>
                                   </div>
                                   <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
@@ -2365,6 +2516,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                     </span>
                                   </div>
                                 </div>
+
+                                {/* Indicação Informativa de Munição pelo Policial */}
+                                {cautela.authorizationNotes && (
+                                  <div className="p-3 bg-amber-950/25 border border-amber-800/50 rounded-xl space-y-1 text-xs">
+                                    <div className="flex items-center space-x-2 text-amber-300 font-bold">
+                                      <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>Indicação do Policial (Informativa):</span>
+                                    </div>
+                                    <p className="text-amber-200/95 font-mono text-[11px] pl-5">
+                                      {cautela.authorizationNotes}
+                                    </p>
+                                  </div>
+                                )}
 
                                 {/* Munições solicitadas em conjunto */}
                                 {hasAmmo && (() => {
@@ -2508,9 +2672,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                   <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Retorno</span>
-                                    <span className="font-mono text-slate-200 font-bold truncate block" title={returnVault ? `Cofre ${returnVault.code} - ${returnUnit?.name || 'Unidade'}` : 'Cofre de Origem'}>
-                                      {returnVaultAddress}
+                                    <span className="text-[10px] text-slate-500 uppercase block font-semibold">{isPolicial ? 'Unidade de Retorno' : 'Cofre de Retorno'}</span>
+                                    <span className="font-mono text-slate-200 font-bold truncate block" title={isPolicial ? (returnUnit?.name || userUnit?.name || 'Unidade Policial') : (returnVault ? `Cofre ${returnVault.code} - ${returnUnit?.name || 'Unidade'}` : 'Cofre de Origem')}>
+                                      {isPolicial ? (returnUnit?.name || userUnit?.name || 'Unidade Policial') : returnVaultAddress}
                                     </span>
                                   </div>
                                   <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
@@ -3203,6 +3367,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/80">
                     <span>Motivo/Finalidade:</span>
                     <span className="italic">{authorizingCautela.reason}</span>
+                  </div>
+                )}
+                {authorizingCautela.authorizationNotes && (
+                  <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-xs flex items-start space-x-2">
+                    <Disc className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <div>
+                      <strong className="block text-amber-200 uppercase text-[10px] tracking-wider">Munição Indicada pelo Policial:</strong>
+                      <span className="font-mono text-xs">{authorizingCautela.authorizationNotes}</span>
+                    </div>
                   </div>
                 )}
               </div>

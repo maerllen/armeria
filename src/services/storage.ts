@@ -3119,6 +3119,7 @@ class StorageService {
       requesterCargo: payload.requesterCargo,
       requesterPhone: payload.requesterPhone,
       reason: payload.reason,
+      authorizationNotes: payload.authorizationNotes || payload.notes,
       status: payload.directAuthorized ? 'AUTORIZADA' : 'PENDENTE',
       requestDate: new Date().toISOString(),
       authorizedAt: payload.directAuthorized ? new Date().toISOString() : undefined,
@@ -3254,6 +3255,9 @@ class StorageService {
       target.armorerId = (opts as any).armorerId || this.state.currentUser?.id;
       target.armorerName = (opts as any).armorerName || this.state.currentUser?.name;
       target.armorerMasp = (opts as any).armorerMasp || this.state.currentUser?.masp;
+      if (opts.notes && opts.notes.trim()) {
+        target.authorizationNotes = opts.notes.trim();
+      }
       const weap = (this.state.weapons || []).find(w => w.id === target.weaponId);
       if (weap) {
         weap.status = 'Acautelada';

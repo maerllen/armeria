@@ -9335,8 +9335,8 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
         REQUERENTE_TELEFONE_ACAUTELAR_ARMAS, FINALIDADE_MOTIVO_ACAUTELAR_ARMAS,
         DATA_SOLICITACAO_ACAUTELAR_ARMAS, STATUS_ACAUTELAR_ARMAS,
         ARMEIRO_ID_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS, ARMEIRO_MASP_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS,
-        CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, ?, NOW())
+        CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, ?, ?, NOW())
     `, [
       id,
       weaponId,
@@ -9358,7 +9358,8 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
       isDirect && armorer ? armorer.id : null,
       isDirect && armorer ? armorer.name : null,
       isDirect && armorer ? armorer.masp : null,
-      ammoCautelaId
+      ammoCautelaId,
+      req.body.authorizationNotes || req.body.notes || null
     ]);
 
     if (ammunition && Number(ammunition.quantity) > 0) {
@@ -9634,7 +9635,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
         ARMEIRO_NOME_ACAUTELAR_ARMAS = ?,
         ARMEIRO_MASP_ACAUTELAR_ARMAS = ?,
         DATA_AUTORIZACAO_ACAUTELAR_ARMAS = NOW(),
-        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = ?,
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS),
         DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
       WHERE ID_ACAUTELAR_ARMAS = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, actualCautelaId]);
@@ -9951,7 +9952,7 @@ apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response)
         ARMEIRO_ID_ACAUTELAR_ARMAS = ?,
         ARMEIRO_NOME_ACAUTELAR_ARMAS = ?,
         ARMEIRO_MASP_ACAUTELAR_ARMAS = ?,
-        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = ?,
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS),
         DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
       WHERE ID_ACAUTELAR_ARMAS = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, actualCautelaId]);
