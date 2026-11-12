@@ -126,14 +126,52 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     });
   }, [vaultSpaces, selectedUnitId, selectedDeptId]);
 
-  // Available Calibers present in this unit's stocks for filter dropdown
-  const availableCalibersInUnit = useMemo(() => {
-    const unitCaliberIds = new Set(
-      stocks
-        .filter(s => (!selectedUnitId || s.unitId === selectedUnitId))
-        .map(s => s.caliberId)
+  // Available Caliber + Tipo options present in this unit's stocks for filter dropdown
+  // REGRA DO USUÁRIO: "o filtro 'Calibre da Munição:' deve conter além do calibre, o tipo da munição"
+  const availableCaliberOptionsInUnit = useMemo(() => {
+    const optionsMap = new Map<string, { key: string; caliberId: string; caliberName: string; tipo: string; label: string }>();
+
+    const unitStocks = stocks.filter(s => (!selectedUnitId || s.unitId === selectedUnitId));
+
+    unitStocks.forEach(s => {
+      const cal = calibers.find(c => c.id === s.caliberId);
+      const calName = cal?.name || 'Munição';
+      const tipo = (s.tipoMunicao || cal?.tipo || '').trim();
+      const key = tipo ? `${s.caliberId}:::${tipo}` : s.caliberId;
+      const label = tipo ? `${calName} - ${tipo}` : calName;
+
+      if (!optionsMap.has(key)) {
+        optionsMap.set(key, {
+          key,
+          caliberId: s.caliberId,
+          caliberName: calName,
+          tipo,
+          label
+        });
+      }
+    });
+
+    // If unit has no stocks registered yet, fallback to catalog calibers
+    if (optionsMap.size === 0) {
+      calibers.forEach(c => {
+        const tipo = (c.tipo || '').trim();
+        const key = tipo ? `${c.id}:::${tipo}` : c.id;
+        const label = tipo ? `${c.name} - ${tipo}` : c.name;
+        if (!optionsMap.has(key)) {
+          optionsMap.set(key, {
+            key,
+            caliberId: c.id,
+            caliberName: c.name,
+            tipo,
+            label
+          });
+        }
+      });
+    }
+
+    return Array.from(optionsMap.values()).sort((a, b) => 
+      a.caliberName.localeCompare(b.caliberName) || a.tipo.localeCompare(b.tipo)
     );
-    return calibers.filter(c => unitCaliberIds.has(c.id));
   }, [calibers, stocks, selectedUnitId]);
 
   // Available Destinações present in stocks for filter dropdown
@@ -276,8 +314,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       // Filter: Cofre
       if (filterVaultId !== 'ALL' && stock.vaultSpaceId !== filterVaultId) return false;
 
-      // Filter: Calibre
-      if (filterCaliberId !== 'ALL' && stock.caliberId !== filterCaliberId) return false;
+      // Filter: Calibre e Tipo da Munição
+      if (filterCaliberId !== 'ALL') {
+        if (filterCaliberId.includes(':::')) {
+          const [targetCalId, targetTipo] = filterCaliberId.split(':::');
+          if (stock.caliberId !== targetCalId) return false;
+          if (targetTipo) {
+            const stockTipo = (stock.tipoMunicao || calibers.find(c => c.id === stock.caliberId)?.tipo || '').trim().toLowerCase();
+            if (stockTipo !== targetTipo.trim().toLowerCase()) return false;
+          }
+        } else {
+          if (stock.caliberId !== filterCaliberId) return false;
+        }
+      }
 
       // Filter: Destinação
       if (filterDestinacao !== 'ALL') {
@@ -1246,9 +1295,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                     <option value="ALL" className="bg-slate-900 text-slate-200">
                       Todos os Calibres
                     </option>
-                    {availableCalibersInUnit.map(c => (
-                      <option key={c.id} value={c.id} className="bg-slate-900 text-slate-200">
-                        {c.name}
+                    {availableCaliberOptionsInUnit.map(opt => (
+                      <option key={opt.key} value={opt.key} className="bg-slate-900 text-slate-200">
+                        {opt.label}
                       </option>
                     ))}
                   </select>
@@ -1295,7 +1344,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   )}
                   {filterCaliberId !== 'ALL' && (
                     <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
-                      <span>Calibre: {calibers.find(c => c.id === filterCaliberId)?.name || filterCaliberId}</span>
+                      <span>
+                        Calibre: {availableCaliberOptionsInUnit.find(opt => opt.key === filterCaliberId)?.label || calibers.find(c => c.id === filterCaliberId)?.name || filterCaliberId}
+                      </span>
                       <button onClick={() => setFilterCaliberId('ALL')} className="hover:text-amber-100 ml-1">
                         <X className="w-3 h-3" />
                       </button>
