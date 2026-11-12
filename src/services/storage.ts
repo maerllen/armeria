@@ -3642,6 +3642,96 @@ class StorageService {
     }
   }
 
+  public async updateActiveCautelaArma(
+    id: string,
+    updates: {
+      weaponId: string;
+      weaponSerialNumber: string;
+      weaponModel: string;
+      weaponType?: string;
+      weaponCaliber?: string;
+      magazineQuantity: number;
+      reason: string;
+      requesterId?: string;
+      requesterName?: string;
+      requesterMasp?: string;
+      requesterCargo?: string;
+      departmentId?: string;
+      unitId?: string;
+      withAmmo: boolean;
+      ammoQuantity?: number;
+      destinacao?: 'Treinamento' | 'Defesa' | 'Ensaio';
+      stockId?: string;
+      vaultSpaceId?: string;
+      seraDevolvida?: boolean;
+      caliberId?: string;
+      caliberName?: string;
+      fabricante?: string;
+      tipoMunicao?: string;
+      pesoMunicao?: string;
+      loteMunicao?: string;
+      anoFabricacao?: number | string;
+      notes?: string;
+      armorerJustification?: string;
+      cautelaId?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanId = id
+      .replace(/^caut-active-/, '')
+      .replace(/^caut-weapon-sync-/, '')
+      .replace(/^caut-sync-/, '')
+      .replace(/^caut-arma-/, '')
+      .replace(/^caut-/, '');
+
+    const target = (this.state.cautelasArmas || []).find(
+      c =>
+        c.id === id ||
+        c.id === cleanId ||
+        c.id === `caut-sync-${cleanId}` ||
+        c.id === `caut-active-${cleanId}` ||
+        (updates.cautelaId && c.id === updates.cautelaId)
+    );
+
+    if (target) {
+      const refIso = target.authorizedAt || target.createdAt || target.requestDate;
+      const authTimeMs = refIso ? new Date(refIso).getTime() : NaN;
+      if (!Number.isFinite(authTimeMs) || Date.now() - authTimeMs > 15 * 60 * 1000) {
+        return {
+          success: false,
+          error: 'O prazo máximo de 15 minutos após a autorização expirou. Esta cautela não pode mais ser alterada.'
+        };
+      }
+    }
+
+    try {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${encodeURIComponent(actualId)}/editar-ativa`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...updates,
+          cautelaId: target?.id || updates.cautelaId || id,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        await this.refreshFromServer();
+        return {
+          success: false,
+          error: data.error || 'Erro ao editar cautela ativa.'
+        };
+      }
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.message || 'Erro de comunicação ao editar cautela ativa.'
+      };
+    }
+  }
+
   public async cancelCautelaArma(
     id: string,
     extra?: { weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string }

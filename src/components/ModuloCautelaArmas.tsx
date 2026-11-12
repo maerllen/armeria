@@ -111,6 +111,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
   const [authNotes, setAuthNotes] = useState('');
 
+  // Modal de Edição de Cautela Deferida/Ativa pelo Armeiro (permitida somente em até 15 minutos após a autorização)
+  const [editingActiveCautela, setEditingActiveCautela] = useState<CautelaArma | null>(null);
+  const [activeEditRequesterId, setActiveEditRequesterId] = useState('');
+  const [activeEditWeaponId, setActiveEditWeaponId] = useState('');
+  const [activeEditMagazines, setActiveEditMagazines] = useState<number>(2);
+  const [activeEditReason, setActiveEditReason] = useState('');
+  const [activeEditWithAmmo, setActiveEditWithAmmo] = useState(false);
+  const [activeEditAmmoQty, setActiveEditAmmoQty] = useState<number>(30);
+  const [activeEditAmmoDestinacao, setActiveEditAmmoDestinacao] = useState<'Treinamento' | 'Defesa' | 'Ensaio'>('Defesa');
+  const [activeEditStockId, setActiveEditStockId] = useState('');
+  const [activeEditSeraDevolvida, setActiveEditSeraDevolvida] = useState(true);
+  const [activeEditNotes, setActiveEditNotes] = useState('');
+  const [nowTickMs, setNowTickMs] = useState<number>(() => Date.now());
+
   // Indicação Informativa de Munição pelo Policial ("Desejo solicitar munições")
   const [policialWantsAmmo, setPolicialWantsAmmo] = useState(false);
   const [policialAmmoTipo, setPolicialAmmoTipo] = useState('');
@@ -2051,6 +2065,475 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao processar edição da cautela.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Janela máxima de 15 minutos após a autorização para edição de cautela ativa pelo Armeiro
+  const ACTIVE_CAUTELA_EDIT_LIMIT_MS = 15 * 60 * 1000;
+
+  React.useEffect(() => {
+    if (!canAuthorize || (activeTab !== 'DEFERIDAS' && !editingActiveCautela)) return;
+    setNowTickMs(Date.now());
+    const intervalId = window.setInterval(() => {
+      setNowTickMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [canAuthorize, activeTab, editingActiveCautela]);
+
+  const getActiveCautelaEditWindow = useCallback(
+    (cautela: CautelaArma | null | undefined, refNowMs: number = nowTickMs) => {
+      if (!cautela || cautela.status !== 'AUTORIZADA') {
+        return {
+          canEdit: false,
+          remainingMs: 0,
+          remainingLabel: '00:00',
+          expired: true
+        };
+      }
+      const refIso = cautela.authorizedAt || cautela.createdAt || cautela.requestDate;
+      const authMs = refIso ? new Date(refIso).getTime() : NaN;
+      if (!Number.isFinite(authMs)) {
+        return {
+          canEdit: false,
+          remainingMs: 0,
+          remainingLabel: '00:00',
+          expired: true
+        };
+      }
+      const elapsedMs = Math.max(0, refNowMs - authMs);
+      const remainingMs = Math.max(0, ACTIVE_CAUTELA_EDIT_LIMIT_MS - elapsedMs);
+      const canEdit = elapsedMs <= ACTIVE_CAUTELA_EDIT_LIMIT_MS;
+      const totalSecs = Math.ceil(remainingMs / 1000);
+      const mins = Math.floor(totalSecs / 60);
+      const secs = totalSecs % 60;
+      const remainingLabel = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+      return {
+        canEdit,
+        remainingMs,
+        remainingLabel,
+        expired: !canEdit
+      };
+    },
+    [nowTickMs, ACTIVE_CAUTELA_EDIT_LIMIT_MS]
+  );
+
+  // Armas disponíveis para troca pelo Armeiro na edição da cautela ativa (arma atual + armas "No Cofre" da unidade)
+  const editableActiveWeapons = useMemo(() => {
+    if (!editingActiveCautela) return [];
+    const targetUnitId = editingActiveCautela.unitId || currentUser.unitId;
+    return weapons.filter(w => {
+      const matchUnit = isGeral ? true : (!targetUnitId || w.unitId === targetUnitId);
+      if (!matchUnit) return false;
+      return w.id === editingActiveCautela.weaponId || w.status === 'No Cofre';
+    });
+  }, [editingActiveCautela, weapons, currentUser.unitId, isGeral]);
+
+  const activeEditSelectedWeapon = useMemo(() => {
+    if (!activeEditWeaponId) return null;
+    return (
+      editableActiveWeapons.find(w => w.id === activeEditWeaponId) ||
+      weapons.find(w => w.id === activeEditWeaponId) ||
+      null
+    );
+  }, [editableActiveWeapons, weapons, activeEditWeaponId]);
+
+  const activeEditCurrentAmmoDetails = useMemo(() => {
+    if (!editingActiveCautela) return null;
+    return getRescuedAmmoDetails(editingActiveCautela);
+  }, [editingActiveCautela, localSyncTick]);
+
+  // Lotes disponíveis para edição de munição na cautela ativa (considerando saldo restituível caso seja o mesmo lote atual)
+  const availableAmmoForActiveEdit = useMemo(() => {
+    if (!editingActiveCautela) return [] as Array<AmmunitionStock & { effectiveQuantity: number }>;
+    const normPlain = (s?: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const targetUnitId = editingActiveCautela.unitId || currentUser.unitId;
+    const weaponCaliber =
+      activeEditSelectedWeapon?.caliber || editingActiveCautela.weaponCaliber || '';
+    const selCal = normPlain(weaponCaliber);
+
+    const curAmmo = activeEditCurrentAmmoDetails;
+    const curHasAmmo = Boolean(curAmmo?.hasAmmo && Number(curAmmo.quantity) > 0);
+    const curVaultId = curAmmo?.vaultSpaceId || editingActiveCautela.vaultSpaceId || '';
+    const curLoteNorm = normPlain(curAmmo?.loteMunicao || '');
+
+    const result: Array<AmmunitionStock & { effectiveQuantity: number }> = [];
+
+    ammoStocks.forEach(st => {
+      const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+      const stUnitId = st.unitId || stVault?.unitId || '';
+      const matchUnit = isGeral ? true : (!targetUnitId || stUnitId === targetUnitId);
+      if (!matchUnit) return;
+
+      const cal = calibers.find(
+        c => c.id === st.caliberId || normPlain(c.name) === normPlain(st.caliberId)
+      );
+      const calName = normPlain(cal?.name || st.caliberId || '');
+      const matchCaliber =
+        !selCal ||
+        calName === selCal ||
+        Boolean(calName && (calName.includes(selCal) || selCal.includes(calName))) ||
+        st.caliberId === weaponCaliber;
+      if (!matchCaliber) return;
+
+      const isSameCurrentLot = Boolean(
+        curHasAmmo &&
+          (!curVaultId || st.vaultSpaceId === curVaultId) &&
+          (!curLoteNorm || normPlain(st.loteMunicao || '') === curLoteNorm)
+      );
+      const effectiveQuantity =
+        Number(st.quantity || 0) + (isSameCurrentLot ? Number(curAmmo?.quantity || 0) : 0);
+      if (effectiveQuantity <= 0) return;
+
+      if (activeEditAmmoDestinacao !== 'Ensaio') {
+        const destNorm = normPlain(st.destinacao || '');
+        const tipoNorm = normPlain(st.tipoMunicao || cal?.tipo || '');
+        const isTrainingByTipo =
+          tipoNorm.includes('treinamento') ||
+          tipoNorm.includes('treino') ||
+          tipoNorm.includes('ogival') ||
+          tipoNorm.includes('etog') ||
+          tipoNorm.includes('chog') ||
+          tipoNorm.includes('nta') ||
+          tipoNorm.includes('canto vivo');
+
+        if (activeEditAmmoDestinacao === 'Treinamento') {
+          const okTreino = destNorm
+            ? destNorm.includes('treinamento') ||
+              destNorm.includes('treino') ||
+              destNorm.includes('instrucao') ||
+              destNorm.includes('curso de formacao')
+            : isTrainingByTipo;
+          if (!okTreino) return;
+        } else {
+          const okDefesa = destNorm
+            ? destNorm.includes('defesa') || destNorm.includes('operacional')
+            : !isTrainingByTipo;
+          if (!okDefesa) return;
+        }
+      }
+
+      result.push({
+        ...st,
+        effectiveQuantity
+      });
+    });
+
+    return result;
+  }, [
+    editingActiveCautela,
+    activeEditSelectedWeapon,
+    activeEditCurrentAmmoDetails,
+    ammoStocks,
+    vaultSpaces,
+    calibers,
+    currentUser.unitId,
+    isGeral,
+    activeEditAmmoDestinacao
+  ]);
+
+  React.useEffect(() => {
+    if (!editingActiveCautela) return;
+    if (availableAmmoForActiveEdit.length > 0) {
+      if (!availableAmmoForActiveEdit.some(s => s.id === activeEditStockId)) {
+        const curAmmo = activeEditCurrentAmmoDetails;
+        const matchedExistingLot = curAmmo?.hasAmmo
+          ? availableAmmoForActiveEdit.find(
+              st =>
+                (!curAmmo.vaultSpaceId || st.vaultSpaceId === curAmmo.vaultSpaceId) &&
+                (!curAmmo.loteMunicao ||
+                  (st.loteMunicao || '').trim().toLowerCase() ===
+                    curAmmo.loteMunicao.trim().toLowerCase())
+            )
+          : undefined;
+        setActiveEditStockId((matchedExistingLot || availableAmmoForActiveEdit[0]).id);
+      }
+    } else if (activeEditStockId !== '') {
+      setActiveEditStockId('');
+    }
+  }, [editingActiveCautela, availableAmmoForActiveEdit, activeEditStockId, activeEditCurrentAmmoDetails]);
+
+  const activeEditAmmoComparison = useMemo(() => {
+    const normComp = (s?: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const baseObs = ((editingActiveCautela?.authorizationNotes || '').split('|')[0] || '').trim();
+    const cleanedObs = baseObs
+      .replace(/^Solicito\s+muni[cç][aã]o(?:\s+tipo)?\s*:\s*/i, '')
+      .trim();
+
+    let reqCaliber = '';
+    let reqTipo = '';
+    if (cleanedObs) {
+      const weaponCalRaw = (editingActiveCautela?.weaponCaliber || '').trim();
+      if (weaponCalRaw && cleanedObs.toLowerCase().startsWith(`${weaponCalRaw.toLowerCase()},`)) {
+        reqCaliber = weaponCalRaw;
+        const rest = cleanedObs.slice(weaponCalRaw.length + 1).trim();
+        const restParts = rest.split(/,\s+/).map(p => p.trim()).filter(Boolean);
+        reqTipo = restParts[0] || rest;
+      } else {
+        const parts = cleanedObs.split(/,\s+/).map(p => p.trim()).filter(Boolean);
+        reqCaliber = parts[0] || '';
+        reqTipo = parts[1] || '';
+      }
+    }
+
+    const selectedStock = activeEditWithAmmo
+      ? availableAmmoForActiveEdit.find(s => s.id === activeEditStockId)
+      : undefined;
+    const selectedCalObj = selectedStock
+      ? calibers.find(
+          c => c.id === selectedStock.caliberId || normComp(c.name) === normComp(selectedStock.caliberId)
+        )
+      : undefined;
+
+    const selectedCaliberDisplay = (
+      selectedCalObj?.name ||
+      selectedStock?.caliberId ||
+      activeEditSelectedWeapon?.caliber ||
+      editingActiveCautela?.weaponCaliber ||
+      'Padrão'
+    ).trim();
+    const selectedTipoDisplay = (
+      selectedStock?.tipoMunicao ||
+      selectedCalObj?.tipo ||
+      'Comum'
+    ).trim();
+
+    const selCalNorm = normComp(selectedCaliberDisplay);
+    const reqCalNorm = normComp(reqCaliber);
+    const selTipoNorm = normComp(selectedTipoDisplay);
+    const reqTipoNorm = normComp(reqTipo);
+
+    const sameCaliber = Boolean(
+      reqCalNorm &&
+        selCalNorm &&
+        (selCalNorm === reqCalNorm ||
+          selCalNorm.includes(reqCalNorm) ||
+          reqCalNorm.includes(selCalNorm))
+    );
+    const sameTipo = Boolean(reqTipoNorm && selTipoNorm && selTipoNorm === reqTipoNorm);
+    const isSameRequestedCaliberAndTipo = Boolean(
+      selectedStock && baseObs && sameCaliber && sameTipo
+    );
+
+    const requestedAmmoConstant = cleanedObs || baseObs || 'Nenhuma munição solicitada';
+    const showDivergenceJustification = Boolean(
+      activeEditWithAmmo && selectedStock && !isSameRequestedCaliberAndTipo
+    );
+
+    return {
+      baseObs,
+      requestedAmmoConstant,
+      selectedStock,
+      selectedCalObj,
+      selectedCaliberDisplay,
+      selectedTipoDisplay,
+      showDivergenceJustification
+    };
+  }, [
+    editingActiveCautela,
+    activeEditWithAmmo,
+    activeEditStockId,
+    availableAmmoForActiveEdit,
+    calibers,
+    activeEditSelectedWeapon
+  ]);
+
+  const handleOpenEditActiveCautela = (cautela: CautelaArma) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (!canAuthorize) {
+      setErrorMsg('Apenas o armeiro da unidade pode editar cautelas na aba Deferidas/Ativas.');
+      return;
+    }
+    const win = getActiveCautelaEditWindow(cautela, Date.now());
+    if (!win.canEdit) {
+      setErrorMsg(
+        'O prazo máximo de 15 minutos após a autorização expirou. Esta cautela não pode mais ser alterada.'
+      );
+      return;
+    }
+
+    const resolvedReq = getResolvedRequester(cautela);
+    const allUsers = storage.getAllUsersForLookup();
+    const reqDigits = cleanDigits(resolvedReq.masp);
+    const matchedOfficer =
+      (cautela.requesterId ? allUsers.find(u => u.id === cautela.requesterId) : undefined) ||
+      (reqDigits ? allUsers.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+      allUsers.find(u => normalizeStr(u.name) === normalizeStr(resolvedReq.name));
+
+    const curAmmo = getRescuedAmmoDetails(cautela);
+    const curDestRaw = curAmmo.destinacao || cautela.ammoDestinacao || 'Defesa';
+    const resolvedDest: 'Treinamento' | 'Defesa' | 'Ensaio' =
+      curDestRaw === 'Ensaio'
+        ? 'Ensaio'
+        : curDestRaw === 'Treinamento'
+          ? 'Treinamento'
+          : 'Defesa';
+
+    const existingJustifPart = ((cautela.authorizationNotes || '').split('|')[1] || '')
+      .replace(/^Justificativa do Armeiro\s*\([^)]*\)\s*:\s*/i, '')
+      .trim();
+
+    setEditingActiveCautela(cautela);
+    setActiveEditRequesterId(matchedOfficer?.id || cautela.requesterId || '');
+    setActiveEditWeaponId(cautela.weaponId);
+    setActiveEditMagazines(cautela.magazineQuantity || 2);
+    setActiveEditReason(getResolvedMotivoFinalidade(cautela) || 'Serviço Ordinário');
+    setActiveEditWithAmmo(Boolean(curAmmo.hasAmmo && curAmmo.quantity > 0));
+    setActiveEditAmmoQty(curAmmo.quantity > 0 ? curAmmo.quantity : 30);
+    setActiveEditAmmoDestinacao(resolvedDest);
+    setActiveEditSeraDevolvida(curAmmo.hasAmmo ? curAmmo.seraDevolvida : resolvedDest === 'Defesa');
+    setActiveEditStockId('');
+    setActiveEditNotes(existingJustifPart);
+    setNowTickMs(Date.now());
+  };
+
+  const handleConfirmEditActiveCautela = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingActiveCautela) return;
+
+    const win = getActiveCautelaEditWindow(editingActiveCautela, Date.now());
+    if (!win.canEdit) {
+      setErrorMsg(
+        'O prazo máximo de 15 minutos após a autorização expirou. Esta cautela não pode mais ser alterada.'
+      );
+      setEditingActiveCautela(null);
+      return;
+    }
+
+    const chosenWeapon =
+      editableActiveWeapons.find(w => w.id === activeEditWeaponId) ||
+      weapons.find(w => w.id === activeEditWeaponId);
+    if (!chosenWeapon) {
+      setErrorMsg('Selecione um armamento válido para a cautela.');
+      return;
+    }
+
+    if (!activeEditReason.trim()) {
+      setErrorMsg('Selecione o Motivo / Finalidade da cautela.');
+      return;
+    }
+
+    const selectedStock = activeEditAmmoComparison.selectedStock;
+    if (activeEditWithAmmo) {
+      if (availableAmmoForActiveEdit.length === 0 || !selectedStock) {
+        setErrorMsg(
+          `Não há lote de munições disponível para a destinação "${activeEditAmmoDestinacao}" no calibre ${chosenWeapon.caliber}.`
+        );
+        return;
+      }
+      if (!activeEditAmmoQty || Number(activeEditAmmoQty) < 1) {
+        setErrorMsg('Informe uma quantidade válida de munições.');
+        return;
+      }
+      if (Number(activeEditAmmoQty) > Number(selectedStock.effectiveQuantity)) {
+        setErrorMsg(
+          `A quantidade informada (${activeEditAmmoQty}) excede o saldo disponível para este lote (${selectedStock.effectiveQuantity} un.).`
+        );
+        return;
+      }
+      if (activeEditAmmoComparison.showDivergenceJustification && !activeEditNotes.trim()) {
+        setErrorMsg(
+          `Justifique o depósito da munição ${activeEditAmmoComparison.selectedCaliberDisplay} - ${activeEditAmmoComparison.selectedTipoDisplay}.`
+        );
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      const allUsers = storage.getAllUsersForLookup();
+      const selectedOfficer = activeEditRequesterId
+        ? allUsers.find(u => u.id === activeEditRequesterId)
+        : undefined;
+      const fallbackReq = getResolvedRequester(editingActiveCautela);
+
+      const finalReqId = selectedOfficer?.id || editingActiveCautela.requesterId;
+      const finalReqName = selectedOfficer?.name || fallbackReq.name;
+      const finalReqMasp = selectedOfficer?.masp || fallbackReq.masp;
+      const finalReqCargo =
+        selectedOfficer?.cargo || fallbackReq.cargo || editingActiveCautela.requesterCargo;
+
+      const justificationText =
+        activeEditWithAmmo &&
+        activeEditAmmoComparison.showDivergenceJustification &&
+        activeEditNotes.trim()
+          ? activeEditNotes.trim()
+          : undefined;
+
+      const notesToPersist = justificationText
+        ? activeEditAmmoComparison.baseObs
+          ? `${activeEditAmmoComparison.baseObs} | Justificativa do Armeiro (${activeEditAmmoComparison.selectedCaliberDisplay} - ${activeEditAmmoComparison.selectedTipoDisplay}): ${justificationText}`
+          : `Justificativa do Armeiro (${activeEditAmmoComparison.selectedCaliberDisplay} - ${activeEditAmmoComparison.selectedTipoDisplay}): ${justificationText}`
+        : activeEditAmmoComparison.baseObs || undefined;
+
+      const res = await storage.updateActiveCautelaArma(editingActiveCautela.id, {
+        weaponId: chosenWeapon.id,
+        weaponSerialNumber: chosenWeapon.serialNumber,
+        weaponModel: chosenWeapon.model,
+        weaponType: chosenWeapon.type,
+        weaponCaliber: chosenWeapon.caliber,
+        magazineQuantity: Math.max(1, Number(activeEditMagazines) || 1),
+        reason: activeEditReason.trim(),
+        requesterId: finalReqId,
+        requesterName: finalReqName,
+        requesterMasp: finalReqMasp,
+        requesterCargo: finalReqCargo,
+        departmentId: editingActiveCautela.departmentId || chosenWeapon.departmentId,
+        unitId: editingActiveCautela.unitId || chosenWeapon.unitId,
+        withAmmo: activeEditWithAmmo,
+        ammoQuantity: activeEditWithAmmo ? Number(activeEditAmmoQty) : 0,
+        destinacao: activeEditWithAmmo ? activeEditAmmoDestinacao : undefined,
+        stockId: activeEditWithAmmo ? selectedStock?.id : undefined,
+        vaultSpaceId: activeEditWithAmmo
+          ? (selectedStock?.vaultSpaceId || editingActiveCautela.vaultSpaceId)
+          : editingActiveCautela.vaultSpaceId,
+        seraDevolvida: activeEditWithAmmo ? activeEditSeraDevolvida : undefined,
+        caliberId: activeEditWithAmmo ? selectedStock?.caliberId : undefined,
+        caliberName: activeEditWithAmmo ? activeEditAmmoComparison.selectedCaliberDisplay : undefined,
+        fabricante: activeEditWithAmmo
+          ? (selectedStock?.fabricante || activeEditAmmoComparison.selectedCalObj?.fabricante || 'CBC')
+          : undefined,
+        tipoMunicao: activeEditWithAmmo ? activeEditAmmoComparison.selectedTipoDisplay : undefined,
+        pesoMunicao: activeEditWithAmmo
+          ? (selectedStock?.pesoMunicao || activeEditAmmoComparison.selectedCalObj?.peso)
+          : undefined,
+        loteMunicao: activeEditWithAmmo ? selectedStock?.loteMunicao : undefined,
+        anoFabricacao: activeEditWithAmmo ? selectedStock?.anoFabricacao : undefined,
+        notes: notesToPersist,
+        armorerJustification: justificationText,
+        cautelaId: editingActiveCautela.id
+      });
+
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao salvar alterações na cautela ativa.');
+      } else {
+        setSuccessMsg(
+          `Cautela ativa atualizada com sucesso dentro do prazo de 15 minutos! Arma: ${chosenWeapon.model} (Série: ${chosenWeapon.serialNumber}) — Policial: ${finalReqName} (MASP: ${finalReqMasp}).`
+        );
+        setEditingActiveCautela(null);
+        setLocalSyncTick(t => t + 1);
+        await onRefresh();
+        setLocalSyncTick(t => t + 1);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao editar cautela ativa.');
     } finally {
       setIsSubmitting(false);
     }
@@ -4780,7 +5263,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       </div>
                                     </div>
 
-                                    <div className="flex items-center space-x-2 self-end sm:self-center">
+                                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                                      {canAuthorize && !isDevPendente && (() => {
+                                        const editWin = getActiveCautelaEditWindow(cautela);
+                                        return editWin.canEdit ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenEditActiveCautela(cautela)}
+                                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
+                                            title="Editar cautela (permitido em até 15 minutos após a autorização)"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5" />
+                                            <span>Editar ({editWin.remainingLabel})</span>
+                                          </button>
+                                        ) : (
+                                          <span
+                                            className="flex items-center space-x-1.5 px-2.5 py-1.5 bg-slate-950 border border-slate-800 text-slate-500 rounded-xl text-[11px] font-semibold cursor-not-allowed select-none"
+                                            title="O prazo de 15 minutos após a autorização foi encerrado. Esta cautela não pode mais ser alterada."
+                                          >
+                                            <Lock className="w-3.5 h-3.5 text-slate-600" />
+                                            <span>Edição encerrada (15 min)</span>
+                                          </span>
+                                        );
+                                      })()}
+
                                       <button
                                         onClick={() => handlePrintTermo(cautela)}
                                         className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
@@ -6573,6 +7079,373 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           </div>
         </div>
       )}
+
+      {/* Modal de Edição de Cautela Deferida/Ativa pelo Armeiro (Permitido em até 15 minutos após a autorização) */}
+      {editingActiveCautela && (() => {
+        const activeModalWin = getActiveCautelaEditWindow(editingActiveCautela);
+        const currentReqResolved = getResolvedRequester(editingActiveCautela);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto animate-in fade-in">
+            <div className="bg-slate-900 border border-sky-600/60 rounded-2xl max-w-2xl w-full p-5 sm:p-6 my-auto space-y-4 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-start justify-between border-b border-slate-800 pb-3 gap-3">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2.5 bg-sky-500/15 border border-sky-500/30 rounded-xl text-sky-400">
+                    <Edit2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100">
+                      Editar Cautela Deferida / Ativa
+                    </h3>
+                    <p className="text-xs text-slate-400">
+                      Edição permitida ao armeiro em até 15 minutos após o deferimento da cautela
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2 shrink-0">
+                  <span
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border flex items-center space-x-1.5 ${
+                      activeModalWin.canEdit
+                        ? 'bg-sky-950/70 border-sky-600/60 text-sky-300'
+                        : 'bg-red-950/70 border-red-700 text-red-300'
+                    }`}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                    <span>
+                      {activeModalWin.canEdit
+                        ? `Restam ${activeModalWin.remainingLabel}`
+                        : 'Prazo encerrado'}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setEditingActiveCautela(null)}
+                    className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 transition"
+                    title="Fechar"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              {!activeModalWin.canEdit && (
+                <div className="p-3 bg-red-950/50 border border-red-700 rounded-xl text-xs text-red-200 flex items-center space-x-2">
+                  <Lock className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>
+                    O prazo máximo de <strong>15 minutos</strong> após a autorização expirou. Esta cautela não pode mais ser alterada.
+                  </span>
+                </div>
+              )}
+
+              <form onSubmit={handleConfirmEditActiveCautela} className="space-y-4">
+                {/* 1. Policial Responsável pela Cautela */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Policial Solicitante / Responsável
+                    </label>
+                    <select
+                      value={activeEditRequesterId}
+                      onChange={(e) => setActiveEditRequesterId(e.target.value)}
+                      disabled={!activeModalWin.canEdit}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-sky-500 disabled:opacity-60"
+                    >
+                      {!availableUnitOfficers.some(u => u.id === activeEditRequesterId) && (
+                        <option value={activeEditRequesterId}>
+                          {currentReqResolved.name} — MASP: {currentReqResolved.masp}
+                        </option>
+                      )}
+                      {availableUnitOfficers.map(u => (
+                        <option key={`act-req-${u.id}`} value={u.id}>
+                          {u.name} — MASP: {u.masp} ({u.cargo || 'Policial'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Carregadores
+                    </label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="10"
+                      value={activeEditMagazines}
+                      onChange={(e) =>
+                        setActiveEditMagazines(Math.max(1, parseInt(e.target.value, 10) || 1))
+                      }
+                      disabled={!activeModalWin.canEdit}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono font-bold focus:border-sky-500 disabled:opacity-60"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Armamento e Motivo / Finalidade */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Armamento Acautelado
+                    </label>
+                    <select
+                      value={activeEditWeaponId}
+                      onChange={(e) => {
+                        const nextId = e.target.value;
+                        setActiveEditWeaponId(nextId);
+                        const nextW = editableActiveWeapons.find(w => w.id === nextId);
+                        if (nextW && nextW.id !== editingActiveCautela.weaponId && nextW.magazineQuantity) {
+                          setActiveEditMagazines(nextW.magazineQuantity);
+                        }
+                        setActiveEditStockId('');
+                      }}
+                      disabled={!activeModalWin.canEdit}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-sky-500 disabled:opacity-60"
+                      required
+                    >
+                      {editableActiveWeapons.map(w => (
+                        <option key={`act-w-${w.id}`} value={w.id}>
+                          {w.model} • Nº {w.serialNumber} ({w.caliber}){w.id === editingActiveCautela.weaponId ? ' [Atual]' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Motivo / Finalidade
+                    </label>
+                    <select
+                      value={activeEditReason}
+                      onChange={(e) => setActiveEditReason(e.target.value)}
+                      disabled={!activeModalWin.canEdit}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-sky-500 disabled:opacity-60"
+                      required
+                    >
+                      <option value="Treinamento">Treinamento</option>
+                      <option value="Operação">Operação</option>
+                      <option value="Plantão">Plantão</option>
+                      <option value="Serviço Ordinário">Serviço Ordinário</option>
+                      {activeEditReason &&
+                        !['Treinamento', 'Operação', 'Plantão', 'Serviço Ordinário'].includes(
+                          activeEditReason
+                        ) && <option value={activeEditReason}>{activeEditReason}</option>}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 3. Munições vinculadas à cautela */}
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-amber-600/40 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center space-x-2.5 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={activeEditWithAmmo}
+                        onChange={(e) => setActiveEditWithAmmo(e.target.checked)}
+                        disabled={!activeModalWin.canEdit}
+                        className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-900 border-slate-700"
+                      />
+                      <span className="text-xs font-bold text-slate-100">
+                        Acautelar munições junto com a arma?
+                      </span>
+                    </label>
+                    <span
+                      className={`text-[10px] font-semibold ${
+                        activeEditWithAmmo ? 'text-amber-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {activeEditWithAmmo
+                        ? 'Munições vinculadas ativas'
+                        : 'Somente armamento (sem munição)'}
+                    </span>
+                  </div>
+                </div>
+
+                {activeEditWithAmmo && (
+                  <div className="space-y-3 pt-1 border-t border-slate-800">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Quantidade de Munições
+                        </label>
+                        <input
+                          type="number"
+                          min="1"
+                          max="300"
+                          value={activeEditAmmoQty}
+                          onChange={(e) =>
+                            setActiveEditAmmoQty(Math.max(1, parseInt(e.target.value, 10) || 1))
+                          }
+                          disabled={!activeModalWin.canEdit}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono font-bold focus:border-amber-500 disabled:opacity-60"
+                          required={activeEditWithAmmo}
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Destinação
+                        </label>
+                        <select
+                          value={activeEditAmmoDestinacao}
+                          onChange={(e) => {
+                            const nextDest = e.target.value as 'Treinamento' | 'Defesa' | 'Ensaio';
+                            setActiveEditAmmoDestinacao(nextDest);
+                            setActiveEditSeraDevolvida(nextDest === 'Defesa');
+                            setActiveEditStockId('');
+                          }}
+                          disabled={!activeModalWin.canEdit}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium focus:border-amber-500 disabled:opacity-60"
+                        >
+                          <option value="Treinamento">Treinamento</option>
+                          <option value="Defesa">Defesa</option>
+                          <option value="Ensaio">Ensaio</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                        <span>De qual cofre / lote vai tirar as munições?</span>
+                        <span className="text-[10px] text-amber-400 font-mono font-normal">
+                          {availableAmmoForActiveEdit.length} lote(s) disponível(is)
+                        </span>
+                      </label>
+
+                      {availableAmmoForActiveEdit.length === 0 ? (
+                        <div className="p-3 bg-red-950/40 border border-red-800 text-xs text-red-300 rounded-xl">
+                          ⚠ Não há munições disponíveis para a destinação{' '}
+                          <strong>{activeEditAmmoDestinacao}</strong> no calibre{' '}
+                          <strong>
+                            {activeEditSelectedWeapon?.caliber || editingActiveCautela.weaponCaliber}
+                          </strong>{' '}
+                          nesta unidade.
+                        </div>
+                      ) : (
+                        <select
+                          value={activeEditStockId}
+                          onChange={(e) => setActiveEditStockId(e.target.value)}
+                          disabled={!activeModalWin.canEdit}
+                          className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500 disabled:opacity-60"
+                          required={activeEditWithAmmo}
+                        >
+                          {availableAmmoForActiveEdit.map(st => {
+                            const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+                            const cal = calibers.find(c => c.id === st.caliberId);
+                            return (
+                              <option key={`act-st-${st.id}`} value={st.id}>
+                                {vault ? vault.code : 'Cofre'} • {st.fabricante || 'CBC'} • Calibre:{' '}
+                                {cal
+                                  ? cal.name
+                                  : st.caliberId ||
+                                    activeEditSelectedWeapon?.caliber ||
+                                    editingActiveCautela.weaponCaliber}{' '}
+                                • Tipo: {st.tipoMunicao || 'Comum'} • Peso: {st.pesoMunicao || 'N/I'}{' '}
+                                • Lote: {st.loteMunicao || 'S/L'} — Saldo disp.: {st.effectiveQuantity}{' '}
+                                un.
+                              </option>
+                            );
+                          })}
+                        </select>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2">
+                      <label className="block text-xs font-bold text-slate-200 uppercase tracking-wider">
+                        Tipo de Retirada da Munição
+                      </label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                        <label
+                          className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
+                            activeEditSeraDevolvida
+                              ? 'bg-amber-950/40 border-amber-500 text-slate-100'
+                              : 'bg-slate-900 border-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="activeEditRetiradaTipo"
+                            checked={activeEditSeraDevolvida}
+                            onChange={() => setActiveEditSeraDevolvida(true)}
+                            disabled={!activeModalWin.canEdit}
+                            className="text-amber-500"
+                          />
+                          <span className="font-bold">Irá devolver depois</span>
+                        </label>
+
+                        <label
+                          className={`p-2.5 rounded-xl border cursor-pointer transition flex items-center space-x-2 ${
+                            !activeEditSeraDevolvida
+                              ? 'bg-amber-950/40 border-amber-500 text-slate-100'
+                              : 'bg-slate-900 border-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="activeEditRetiradaTipo"
+                            checked={!activeEditSeraDevolvida}
+                            onChange={() => setActiveEditSeraDevolvida(false)}
+                            disabled={!activeModalWin.canEdit}
+                            className="text-amber-500"
+                          />
+                          <span className="font-bold">Retirada permanente</span>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {activeEditAmmoComparison.showDivergenceJustification && (
+                  <div className="bg-amber-950/20 border border-amber-700/40 rounded-xl p-3 space-y-1.5">
+                    <label className="block text-xs font-semibold text-amber-200 tracking-wide">
+                      Usuário solicitou munição: {activeEditAmmoComparison.requestedAmmoConstant}
+                    </label>
+                    <textarea
+                      value={activeEditNotes}
+                      onChange={(e) => setActiveEditNotes(e.target.value)}
+                      disabled={!activeModalWin.canEdit}
+                      placeholder={`Justifique o depósito da munição ${activeEditAmmoComparison.selectedCaliberDisplay} - ${activeEditAmmoComparison.selectedTipoDisplay}`}
+                      className="w-full bg-slate-950 border border-amber-700/50 focus:border-amber-500 rounded-xl p-2.5 text-xs text-slate-100 placeholder:text-amber-300/70 disabled:opacity-60"
+                      rows={2}
+                      required
+                    />
+                  </div>
+                )}
+
+                <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    disabled={isSubmitting}
+                    onClick={() => setEditingActiveCautela(null)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      !activeModalWin.canEdit ||
+                      isSubmitting ||
+                      !activeEditWeaponId ||
+                      (activeEditWithAmmo &&
+                        (availableAmmoForActiveEdit.length === 0 || !activeEditStockId))
+                    }
+                    className="flex items-center space-x-1.5 px-5 py-2.5 bg-sky-500 hover:bg-sky-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition shadow-md"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>
+                      {isSubmitting
+                        ? 'Salvando...'
+                        : activeModalWin.canEdit
+                          ? 'Salvar Alterações da Cautela'
+                          : 'Prazo de 15 min Encerrado'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal de Confirmação para Excluir Solicitação de Cautela Pendente */}
       {cancelPendingModal && (
