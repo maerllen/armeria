@@ -43,10 +43,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return units.find(u => u.id === currentUser.unitId);
   }, [units, currentUser.unitId]);
 
-  // Tabs: Minhas Cautelas (Aguardando Ação do Armeiro), Deferidas (Autorizadas/Devolvidas), Indeferidas, Nova
-  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
+  // Tabs: Minhas Cautelas (Aguardando Ação do Armeiro), Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Indeferidas, Nova
+  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
   const [pendentesSubFilter, setPendentesSubFilter] = useState<'TODAS' | 'SOLICITACOES' | 'DEVOLUCOES'>('TODAS');
   const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
+  const [propriaSubFilter, setPropriaSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
 
   const [lastDirectCautelaArma, setLastDirectCautelaArma] = useState<CautelaArma | null>(null);
   const [lastReceivedReturnInfo, setLastReceivedReturnInfo] = useState<{
@@ -685,6 +686,54 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     };
   }, [weapons, currentUser, parseWeaponLocationRequester]);
 
+  // Verifica se o próprio usuário logado (ex: Armeiro) é o destinatário/usuário que ficará com a arma na cautela
+  const isOwnRecipientCautela = useCallback(
+    (cautela: CautelaArma | null | undefined): boolean => {
+      if (!cautela) return false;
+
+      const reqId = (cautela.requesterId || '').trim();
+      const isSyntheticReqId =
+        !reqId ||
+        reqId === 'policial' ||
+        reqId === 'solicitante' ||
+        reqId === 'usr-policial' ||
+        reqId === 'usr-solicitante';
+
+      if (!isSyntheticReqId && currentUser.id) {
+        if (reqId === currentUser.id) return true;
+        const allUsers = storage.getAllUsersForLookup();
+        const distinctUser = allUsers.find(u => u.id === reqId);
+        if (distinctUser) {
+          const dDigits = cleanDigits(distinctUser.masp);
+          const uDigits = cleanDigits(currentUser.masp);
+          if (dDigits && uDigits && dDigits === uDigits) return true;
+          return false;
+        }
+      }
+
+      const resolvedReq = getResolvedRequester(cautela);
+      const userDigits = cleanDigits(currentUser.masp);
+      const cDigits = cleanDigits(cautela.requesterMasp);
+      const rDigits = cleanDigits(resolvedReq.masp);
+
+      if (userDigits && userDigits.length >= 4) {
+        if (cDigits && cDigits === userDigits) return true;
+        if (rDigits && rDigits === userDigits) return true;
+      }
+
+      const userNorm = normalizeStr(currentUser.name);
+      if (userNorm && userNorm.length >= 4) {
+        const cNorm = normalizeStr(cautela.requesterName);
+        const rNorm = normalizeStr(resolvedReq.name);
+        if (cNorm && cNorm === userNorm) return true;
+        if (rNorm && rNorm !== 'usuario nao identificado' && rNorm === userNorm) return true;
+      }
+
+      return false;
+    },
+    [currentUser, getResolvedRequester]
+  );
+
   // Resolve o Motivo/Finalidade solicitado pelo usuário ("Treinamento, Operação, Plantão, Serviço Ordinário")
   const getResolvedMotivoFinalidade = useCallback((cautela: CautelaArma | null | undefined): string => {
     if (!cautela) return '';
@@ -991,17 +1040,33 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         // Aba "Minhas Cautelas" (Policial): exibe por padrão estritamente as cautelas ATIVAS EM POSSE (sem histórico de devolvidas)
         list = list.filter(c => c.status === 'AUTORIZADA');
       } else {
-        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): mantém visão de AUTORIZADA, DEVOLUCAO_PENDENTE e DEVOLVIDA
-        list = list.filter(c =>
-          c.status === 'AUTORIZADA' ||
-          c.status === 'DEVOLUCAO_PENDENTE' ||
-          c.status === 'DEVOLVIDA'
+        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): exibe as cautelas da unidade cujo detentor da arma NÃO seja o próprio armeiro
+        list = list.filter(
+          c =>
+            (c.status === 'AUTORIZADA' ||
+              c.status === 'DEVOLUCAO_PENDENTE' ||
+              c.status === 'DEVOLVIDA') &&
+            !isOwnRecipientCautela(c)
         );
         if (deferidasSubFilter === 'ATIVAS') {
           list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
         } else if (deferidasSubFilter === 'DEVOLVIDAS') {
           list = list.filter(c => c.status === 'DEVOLVIDA');
         }
+      }
+    } else if (activeTab === 'DEFERIDAS_PROPRIA') {
+      // Aba "Deferidas/Ativas Própria" (Armeiro): exibe as cautelas em que o próprio armeiro é o usuário que ficará com a arma
+      list = list.filter(
+        c =>
+          (c.status === 'AUTORIZADA' ||
+            c.status === 'DEVOLUCAO_PENDENTE' ||
+            c.status === 'DEVOLVIDA') &&
+          isOwnRecipientCautela(c)
+      );
+      if (propriaSubFilter === 'ATIVAS') {
+        list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+      } else if (propriaSubFilter === 'DEVOLVIDAS') {
+        list = list.filter(c => c.status === 'DEVOLVIDA');
       }
     } else if (activeTab === 'INDEFERIDAS') {
       if (canAuthorize) {
@@ -1086,12 +1151,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     activeTab,
     pendentesSubFilter,
     deferidasSubFilter,
+    propriaSubFilter,
     searchTerm,
     canAuthorize,
     historyDecisionFilter,
     historyWeaponFilter,
     historyDateFilter,
-    getResolvedRequester
+    getResolvedRequester,
+    isOwnRecipientCautela
   ]);
 
   // Lista de armas distintas presentes no histórico do policial (para o filtro por arma em "Meu Histórico")
@@ -1130,23 +1197,61 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     if (!canAuthorize) {
       return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
     }
-    return scopedCautelas.filter(c =>
-      c.status === 'AUTORIZADA' ||
-      c.status === 'DEVOLUCAO_PENDENTE' ||
-      c.status === 'DEVOLVIDA'
+    return scopedCautelas.filter(
+      c =>
+        (c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA') &&
+        !isOwnRecipientCautela(c)
     ).length;
-  }, [scopedCautelas, canAuthorize]);
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
   const activeCautelasCount = useMemo(() => {
-    return scopedCautelas.filter(c =>
-      c.status === 'AUTORIZADA' ||
-      (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE')
+    if (!canAuthorize) {
+      return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
+    }
+    return scopedCautelas.filter(
+      c =>
+        (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
+        !isOwnRecipientCautela(c)
     ).length;
-  }, [scopedCautelas, canAuthorize]);
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
   const returnedCautelasCount = useMemo(() => {
-    return scopedCautelas.filter(c => c.status === 'DEVOLVIDA').length;
-  }, [scopedCautelas]);
+    if (!canAuthorize) {
+      return scopedCautelas.filter(c => c.status === 'DEVOLVIDA').length;
+    }
+    return scopedCautelas.filter(
+      c => c.status === 'DEVOLVIDA' && !isOwnRecipientCautela(c)
+    ).length;
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
+
+  const deferidasPropriaCount = useMemo(() => {
+    if (!canAuthorize) return 0;
+    return scopedCautelas.filter(
+      c =>
+        (c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA') &&
+        isOwnRecipientCautela(c)
+    ).length;
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
+
+  const activePropriaCount = useMemo(() => {
+    if (!canAuthorize) return 0;
+    return scopedCautelas.filter(
+      c =>
+        (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
+        isOwnRecipientCautela(c)
+    ).length;
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
+
+  const returnedPropriaCount = useMemo(() => {
+    if (!canAuthorize) return 0;
+    return scopedCautelas.filter(
+      c => c.status === 'DEVOLVIDA' && isOwnRecipientCautela(c)
+    ).length;
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
   const indeferidasCount = useMemo(() => {
     return scopedCautelas.filter(c => c.status === 'RECUSADA').length;
@@ -1771,12 +1876,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             returnedMagazinesCount: payload.magazineQuantity,
             createdAt: new Date().toISOString()
           };
+          const isOwnDirect =
+            beneficiary.id === currentUser.id || isOwnRecipientCautela(newCautelaObj);
           setLastDirectCautelaArma(newCautelaObj);
-          setSuccessMsg(`Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso para o policial ${beneficiary.name}! A cautela foi deferida diretamente e o recibo gerado imediatamente.`);
+          setSuccessMsg(
+            isOwnDirect
+              ? `Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso em seu próprio nome (${beneficiary.name})! O registro consta na aba "Deferidas/Ativas Própria" e o recibo foi gerado imediatamente.`
+              : `Arma ${weapon.model} (Série: ${weapon.serialNumber}) acautelada com sucesso para o policial ${beneficiary.name}! A cautela foi deferida diretamente e o recibo gerado imediatamente.`
+          );
           setTimeout(() => {
             handlePrintTermo(newCautelaObj);
           }, 150);
-          setActiveTab('DEFERIDAS');
+          setActiveTab(isOwnDirect ? 'DEFERIDAS_PROPRIA' : 'DEFERIDAS');
         } else {
           setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Cautela de arma em análise" aguardando comando do armeiro.`);
           setActiveTab('MINHAS');
@@ -1919,12 +2030,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar acautelamento.');
       } else {
+        const isOwnAuth =
+          resolvedRequesterId === currentUser.id || isOwnRecipientCautela(authorizingCautela);
         setSuccessMsg(
           `Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${
             authWithAmmo
               ? ` Cautela de munições (${authAmmoQty} un. • Destinação: ${authAmmoDestinacao}) gerada em nome de ${resolvedAuthReq.name}.`
               : ' Cautela exclusiva do armamento (sem geração de cautela de munições).'
-          }`
+          }${isOwnAuth ? ' Disponível na aba "Deferidas/Ativas Própria".' : ''}`
         );
         setAuthorizingCautela(null);
         setLocalSyncTick(t => t + 1);
@@ -2135,7 +2248,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const ACTIVE_CAUTELA_EDIT_LIMIT_MS = 15 * 60 * 1000;
 
   React.useEffect(() => {
-    if (!canAuthorize || (activeTab !== 'DEFERIDAS' && !editingActiveCautela)) return;
+    if (
+      !canAuthorize ||
+      (activeTab !== 'DEFERIDAS' &&
+        activeTab !== 'DEFERIDAS_PROPRIA' &&
+        !editingActiveCautela)
+    ) {
+      return;
+    }
     setNowTickMs(Date.now());
     const intervalId = window.setInterval(() => {
       setNowTickMs(Date.now());
@@ -2585,9 +2705,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao salvar alterações na cautela ativa.');
       } else {
+        const becameOwn =
+          finalReqId === currentUser.id ||
+          (cleanDigits(finalReqMasp) &&
+            cleanDigits(finalReqMasp) === cleanDigits(currentUser.masp));
         setSuccessMsg(
           `Cautela ativa atualizada com sucesso dentro do prazo de 15 minutos! Arma: ${chosenWeapon.model} (Série: ${chosenWeapon.serialNumber}) — Policial: ${finalReqName} (MASP: ${finalReqMasp}).`
         );
+        if (becameOwn && activeTab === 'DEFERIDAS') {
+          setActiveTab('DEFERIDAS_PROPRIA');
+        } else if (!becameOwn && activeTab === 'DEFERIDAS_PROPRIA') {
+          setActiveTab('DEFERIDAS');
+        }
         setEditingActiveCautela(null);
         setLocalSyncTick(t => t + 1);
         await onRefresh();
@@ -4820,6 +4949,26 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           )}
         </button>
 
+        {canAuthorize && (
+          <button
+            onClick={() => setActiveTab('DEFERIDAS_PROPRIA')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+              activeTab === 'DEFERIDAS_PROPRIA'
+                ? 'bg-teal-950/80 text-teal-300 border border-teal-700 shadow-sm'
+                : 'text-slate-400 hover:text-teal-300 hover:bg-slate-900'
+            }`}
+            title="Cautelas em que o próprio armeiro é o usuário que ficará com a arma"
+          >
+            <Shield className="w-3.5 h-3.5 text-teal-400" />
+            <span>Deferidas/Ativas Própria</span>
+            {deferidasPropriaCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-teal-500/20 text-teal-300 border border-teal-500/40 font-mono">
+                {deferidasPropriaCount}
+              </span>
+            )}
+          </button>
+        )}
+
         <button
           onClick={() => setActiveTab('INDEFERIDAS')}
           className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
@@ -5400,6 +5549,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 )
               )}
 
+              {/* Sub-filtros para a aba Deferidas/Ativas Própria (Cautelas em que o próprio Armeiro ficará com a arma) */}
+              {canAuthorize && activeTab === 'DEFERIDAS_PROPRIA' && (
+                <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
+                  {[
+                    { id: 'TODAS', label: `Todas (${deferidasPropriaCount})` },
+                    { id: 'ATIVAS', label: `Ativas em Posse (${activePropriaCount})` },
+                    { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedPropriaCount})` }
+                  ].map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setPropriaSubFilter(item.id as 'TODAS' | 'ATIVAS' | 'DEVOLVIDAS')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                        propriaSubFilter === item.id
+                          ? 'bg-teal-500 text-slate-950 font-black shadow-sm'
+                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Sub-filtros de Decisão para "Meu Histórico" (Policial) */}
               {!canAuthorize && activeTab === 'INDEFERIDAS' && (
                 <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
@@ -5938,30 +6111,42 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção: Minhas Cautelas Ativas em Posse (Policial) / Cautelas Ativas (Armeiro) */}
-                  {activeTab === 'DEFERIDAS' && (!canAuthorize || deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS') && (() => {
+                  {/* Seção: Minhas Cautelas Ativas em Posse (Policial) / Cautelas Ativas da Unidade ou Próprias (Armeiro) */}
+                  {(
+                    (activeTab === 'DEFERIDAS' && (!canAuthorize || deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS')) ||
+                    (canAuthorize && activeTab === 'DEFERIDAS_PROPRIA' && (propriaSubFilter === 'TODAS' || propriaSubFilter === 'ATIVAS'))
+                  ) && (() => {
+                    const isPropriaView = canAuthorize && activeTab === 'DEFERIDAS_PROPRIA';
                     const ativasList = displayedCautelas.filter(c => c.status === 'AUTORIZADA' || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
                     return (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                            <span className={`w-2.5 h-2.5 rounded-full animate-pulse ${isPropriaView ? 'bg-teal-400' : 'bg-emerald-500'}`}></span>
                             <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                              {canAuthorize 
-                                ? `Armamentos Acautelados / Cautelas Ativas — ${userUnit?.name || 'Unidade'}` 
-                                : 'Minhas Cautelas — Ativas em Posse'}
+                              {isPropriaView
+                                ? `Deferidas/Ativas Própria — Armas Acauteladas pelo Próprio Armeiro (${currentUser.name})`
+                                : canAuthorize
+                                  ? `Armamentos Acautelados / Cautelas Ativas — ${userUnit?.name || 'Unidade'}`
+                                  : 'Minhas Cautelas — Ativas em Posse'}
                             </h4>
                           </div>
-                          <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60">
+                          <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded-md border ${
+                            isPropriaView
+                              ? 'text-teal-300 bg-teal-950/60 border-teal-800/60'
+                              : 'text-emerald-400 bg-emerald-950/60 border-emerald-800/60'
+                          }`}>
                             {ativasList.length} arma(s) ativa(s)
                           </span>
                         </div>
 
                         {ativasList.length === 0 ? (
                           <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            {canAuthorize 
-                              ? `Nenhum armamento da unidade ${userUnit?.name || ''} está acautelado no momento.` 
-                              : 'Você não possui nenhuma arma acautelada ativa no momento.'}
+                            {isPropriaView
+                              ? `Nenhuma cautela ativa em que você (${currentUser.name}) seja o usuário detentor da arma no momento.`
+                              : canAuthorize
+                                ? `Nenhum armamento da unidade ${userUnit?.name || ''} está acautelado para outros policiais no momento.`
+                                : 'Você não possui nenhuma arma acautelada ativa no momento.'}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
@@ -6571,18 +6756,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção 4: Histórico de Cautelas Devolvidas (Exclusivo para Armeiro; Policial não exibe div Histórico) */}
-                  {canAuthorize && activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS') && (() => {
-                    const devolvidas = scopedCautelas.filter(c => c.status === 'DEVOLVIDA');
+                  {/* Seção 4: Histórico de Cautelas Devolvidas (Exclusivo para Armeiro nas abas Deferidas da Unidade e Deferidas/Ativas Própria) */}
+                  {canAuthorize && (
+                    (activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS')) ||
+                    (activeTab === 'DEFERIDAS_PROPRIA' && (propriaSubFilter === 'TODAS' || propriaSubFilter === 'DEVOLVIDAS'))
+                  ) && (() => {
+                    const isPropriaHistory = activeTab === 'DEFERIDAS_PROPRIA';
+                    const devolvidas = displayedCautelas.filter(c => c.status === 'DEVOLVIDA');
                     return (
                       <div className="space-y-3 pt-4 border-t border-slate-800">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
                             <Clock className="w-3.5 h-3.5 text-slate-400" />
                             <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                              {canAuthorize 
-                                ? `Histórico de Devoluções — ${userUnit?.name || 'Unidade'}` 
-                                : 'Histórico de Armas Devolvidas'}
+                              {isPropriaHistory
+                                ? `Histórico de Devoluções Próprias — ${currentUser.name}`
+                                : `Histórico de Devoluções — ${userUnit?.name || 'Unidade'}`}
                             </h4>
                           </div>
                           <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
@@ -6592,9 +6781,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                         {devolvidas.length === 0 ? (
                           <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            {canAuthorize 
-                              ? `Nenhum histórico de devolução de armas registrado na unidade ${userUnit?.name || ''}.` 
-                              : 'Nenhum histórico de devolução de armas registrado.'}
+                            {isPropriaHistory
+                              ? `Nenhum histórico de devolução de cautelas próprias registrado em nome de ${currentUser.name}.`
+                              : `Nenhum histórico de devolução de armas registrado na unidade ${userUnit?.name || ''}.`}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
