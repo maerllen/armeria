@@ -625,6 +625,32 @@ class StorageService {
     return user;
   }
 
+  public async importUsersFromExcel(
+    rows: Array<{
+      name: string;
+      masp: string;
+      cargo: string;
+      unitName?: string;
+      unitId?: string;
+    }>
+  ): Promise<{
+    success: boolean;
+    importedCount: number;
+    importedUsers: Array<{ id: string; name: string; masp: string; cargo: string; unitId: string; unitName: string }>;
+    alreadyRegisteredCount: number;
+    alreadyRegisteredUsers: Array<{ name: string; existingName: string; masp: string; cargo: string; unitName: string }>;
+  }> {
+    const res = await fetch('/api/users/import-excel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ users: rows, actor: this.state.currentUser })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao importar planilha de usuários.');
+    await this.refreshFromServer();
+    return data;
+  }
+
   public async updateUser(id: string, updates: Partial<User>): Promise<boolean> {
     const res = await fetch(`/api/users/${id}`, {
       method: 'PUT',

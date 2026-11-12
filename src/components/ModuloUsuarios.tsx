@@ -1,9 +1,34 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp, Lock } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+
+interface ParsedExcelUserRow {
+  rowIndex: number;
+  name: string;
+  masp: string;
+  cargo: string;
+  rawUnitName: string;
+  matchedUnitId: string;
+  matchedUnitName: string;
+  alreadyRegistered: boolean;
+  existingSystemName?: string;
+}
+
+interface ExcelImportResult {
+  importedCount: number;
+  alreadyRegisteredCount: number;
+  alreadyRegisteredUsers: Array<{
+    name: string;
+    existingName: string;
+    masp: string;
+    cargo: string;
+    unitName: string;
+  }>;
+}
 
 interface UserModuleProps {
   currentUser: User;
@@ -65,6 +90,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [deleteTargetUser, setDeleteTargetUser] = useState<{ type: 'user' | 'course'; id: string; name: string } | null>(null);
+
+  // Excel Import states
+  const [showExcelImportModal, setShowExcelImportModal] = useState(false);
+  const [excelFileName, setExcelFileName] = useState('');
+  const [excelRows, setExcelRows] = useState<ParsedExcelUserRow[]>([]);
+  const [excelModalError, setExcelModalError] = useState('');
+  const [isImportingExcel, setIsImportingExcel] = useState(false);
+  const [excelImportResult, setExcelImportResult] = useState<ExcelImportResult | null>(null);
+  const excelFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Todos os perfis que o usuário logado possui
   const currentUserRoles: UserRole[] = (currentUser.roles && currentUser.roles.length > 0)
@@ -378,7 +412,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
     e.preventDefault();
     if (!newCourseName.trim()) return;
     if (selectedModels.length === 0 || selectedCalibers.length === 0) {
-      alert('Selecione ao menos um modelo e um calibre abrangido pelo curso.');
+      setErrorMsg('Selecione ao menos um modelo e um calibre abrangido pelo curso.');
       return;
     }
 
@@ -395,7 +429,282 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setShowCourseAddForm(false);
       onRefresh();
     } catch (err: any) {
-      alert(err.message || 'Erro ao criar curso');
+      setErrorMsg(err.message || 'Erro ao criar curso');
+    }
+  };
+
+  // --- EXCEL IMPORT HELPERS ---
+  const allSystemUnits = storage.getAllUnits();
+  const allowedUnitsForExcel = isGeral
+    ? allSystemUnits
+    : allSystemUnits.filter(u => u.departmentId === currentUser.departmentId);
+
+  const normalizeStr = (val: string) =>
+    String(val || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const normalizeAlphaNum = (val: string) =>
+    normalizeStr(val).replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  const resolveExcelUnit = (rawUnit: string): Unit | undefined => {
+    const target = normalizeStr(rawUnit);
+    if (!target) {
+      if (currentUser.unitId) {
+        return allowedUnitsForExcel.find(u => u.id === currentUser.unitId) || allSystemUnits.find(u => u.id === currentUser.unitId);
+      }
+      return undefined;
+    }
+    const exact = allowedUnitsForExcel.find(u => normalizeStr(u.name) === target);
+    if (exact) return exact;
+
+    const targetClean = normalizeAlphaNum(target);
+    const cleanMatch = allowedUnitsForExcel.find(u => normalizeAlphaNum(u.name) === targetClean);
+    if (cleanMatch) return cleanMatch;
+
+    const tokenMatch = allowedUnitsForExcel.find(u => {
+      const tokens = normalizeStr(u.name).split(/[-–—/()]/).map(t => t.trim()).filter(Boolean);
+      return tokens.includes(target) || tokens.some(t => normalizeAlphaNum(t) === targetClean);
+    });
+    if (tokenMatch) return tokenMatch;
+
+    const partial = allowedUnitsForExcel.filter(u => {
+      const uClean = normalizeAlphaNum(u.name);
+      return uClean.includes(targetClean) || targetClean.includes(uClean);
+    });
+    if (partial.length === 1) return partial[0];
+
+    return undefined;
+  };
+
+  const normalizeExcelCargo = (rawCargo: string): string => {
+    const c = normalizeStr(rawCargo);
+    if (!c) return 'INVESTIGADOR';
+    if (c.includes('DELEGAD') || c === 'DPC') return 'DELEGADO';
+    if (c.includes('ESCRIV') || c === 'EPC') return 'ESCRIVÃO';
+    if (c.includes('PERIT')) return 'PERITO';
+    if (c.includes('INVESTIGAD') || c === 'IPC' || c === 'INV') return 'INVESTIGADOR';
+    if (c.includes('MEDICO') || c.includes('LEGISTA')) return 'Médico Legista';
+    if (c.includes('EXPLOSIV')) return 'Explosivista';
+    if (c.includes('VETERINAR')) return 'Veterinário';
+    if (c.includes('CAES') || c.includes('CANIN')) return 'Condutor de Cães';
+    if (c.includes('OPERADOR')) return 'Operador';
+    return rawCargo.trim().toUpperCase();
+  };
+
+  const handleOpenExcelImportModal = () => {
+    setShowUserModal(false);
+    setExcelFileName('');
+    setExcelRows([]);
+    setExcelModalError('');
+    setExcelImportResult(null);
+    setShowExcelImportModal(true);
+  };
+
+  const handleDownloadExcelTemplate = () => {
+    const sampleUnitName =
+      allowedUnitsForExcel.find(u => u.id === currentUser.unitId)?.name ||
+      allowedUnitsForExcel[0]?.name ||
+      'COE';
+    const wsData = [
+      ['NOME', 'MASP', 'CARGO', 'UNIDADE'],
+      ['JOÃO DA SILVA', '12345678', 'INVESTIGADOR', sampleUnitName]
+    ];
+    const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 20 }, { wch: 28 }];
+    XLSX.utils.book_append_sheet(wb, ws, 'Usuários');
+    XLSX.writeFile(wb, 'usuarios.xlsx');
+  };
+
+  const handleExcelFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setExcelModalError('');
+    setExcelImportResult(null);
+    setExcelFileName(file.name);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const buffer = evt.target?.result;
+        if (!buffer) {
+          setExcelModalError('Não foi possível ler o arquivo selecionado.');
+          return;
+        }
+
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        if (!workbook.SheetNames || workbook.SheetNames.length === 0) {
+          setExcelModalError('A planilha anexada não possui abas válidas.');
+          return;
+        }
+
+        // Prioriza aba com nome "usuários" / "usuarios", caso exista; senão usa a primeira aba não vazia
+        const preferredSheetName =
+          workbook.SheetNames.find(sn => normalizeStr(sn).includes('USUARIO')) ||
+          workbook.SheetNames[0];
+
+        const worksheet = workbook.Sheets[preferredSheetName];
+        const rawMatrix: any[][] = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+        if (!rawMatrix || rawMatrix.length === 0) {
+          setExcelModalError('A tabela Excel anexada está vazia.');
+          return;
+        }
+
+        // Localiza a linha de cabeçalho contendo NOME e MASP nas primeiras 10 linhas
+        let headerRowIdx = -1;
+        let colIdxNome = -1;
+        let colIdxMasp = -1;
+        let colIdxCargo = -1;
+        let colIdxUnidade = -1;
+
+        for (let r = 0; r < Math.min(rawMatrix.length, 10); r++) {
+          const rowCells = (rawMatrix[r] || []).map(cell => normalizeStr(String(cell ?? '')));
+          const nIdx = rowCells.findIndex(c => c === 'NOME' || c === 'NOME COMPLETO' || c === 'POLICIAL' || c === 'USUARIO' || c === 'NOME DO USUARIO' || c.startsWith('NOME'));
+          const mIdx = rowCells.findIndex(c => c === 'MASP' || c.includes('MASP') || c === 'MATRICULA');
+          if (nIdx !== -1 && mIdx !== -1) {
+            headerRowIdx = r;
+            colIdxNome = nIdx;
+            colIdxMasp = mIdx;
+            colIdxCargo = rowCells.findIndex(c => c === 'CARGO' || c.includes('CARGO') || c === 'CARREIRA' || c === 'FUNCAO');
+            colIdxUnidade = rowCells.findIndex(c => c === 'UNIDADE' || c.includes('UNIDADE') || c === 'LOTACAO' || c === 'DELEGACIA' || c === 'SETOR');
+            break;
+          }
+        }
+
+        if (headerRowIdx === -1 || colIdxNome === -1 || colIdxMasp === -1) {
+          setExcelModalError('Cabeçalho inválido. Certifique-se de que a tabela contenha as colunas NOME, MASP, CARGO e UNIDADE.');
+          setExcelRows([]);
+          return;
+        }
+
+        const allExistingUsers = storage.getAllUsersForLookup();
+        const existingMaspMap = new Map<string, User>();
+        for (const u of allExistingUsers) {
+          const d = cleanMasp(u.masp);
+          if (d) existingMaspMap.set(d, u);
+          const rawD = (u.masp || '').replace(/\D/g, '');
+          if (rawD) existingMaspMap.set(rawD, u);
+        }
+
+        const seenMaspsInSheet = new Map<string, string>();
+        const parsedRows: ParsedExcelUserRow[] = [];
+
+        for (let r = headerRowIdx + 1; r < rawMatrix.length; r++) {
+          const row = rawMatrix[r] || [];
+          const rawName = String(row[colIdxNome] ?? '').trim();
+          const rawMaspCell = String(row[colIdxMasp] ?? '').trim();
+          const cleanedMaspVal = cleanMasp(rawMaspCell);
+
+          // Ignora linhas totalmente em branco
+          if (!rawName && !cleanedMaspVal) continue;
+          if (!rawName || !cleanedMaspVal) continue;
+
+          const rawCargo = colIdxCargo !== -1 ? String(row[colIdxCargo] ?? '').trim() : '';
+          const rawUnit = colIdxUnidade !== -1 ? String(row[colIdxUnidade] ?? '').trim() : '';
+          const normalizedCargo = normalizeExcelCargo(rawCargo);
+          const matchedUnit = resolveExcelUnit(rawUnit);
+
+          const existingUser = existingMaspMap.get(cleanedMaspVal);
+          const duplicateInSheetName = seenMaspsInSheet.get(cleanedMaspVal);
+          const isAlready = Boolean(existingUser || duplicateInSheetName);
+
+          if (!isAlready) {
+            seenMaspsInSheet.set(cleanedMaspVal, rawName);
+          }
+
+          parsedRows.push({
+            rowIndex: r + 1,
+            name: rawName,
+            masp: cleanedMaspVal,
+            cargo: normalizedCargo,
+            rawUnitName: rawUnit,
+            matchedUnitId: matchedUnit?.id || '',
+            matchedUnitName: matchedUnit?.name || '',
+            alreadyRegistered: isAlready,
+            existingSystemName: existingUser?.name || duplicateInSheetName
+          });
+        }
+
+        if (parsedRows.length === 0) {
+          setExcelModalError('Nenhum registro com NOME e MASP válidos foi encontrado na tabela.');
+          setExcelRows([]);
+          return;
+        }
+
+        setExcelRows(parsedRows);
+      } catch (err: any) {
+        setExcelModalError(err.message || 'Erro ao processar o arquivo Excel.');
+        setExcelRows([]);
+      } finally {
+        if (excelFileInputRef.current) {
+          excelFileInputRef.current.value = '';
+        }
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
+  const handleChangeRowUnit = (rowIndex: number, rawUnitName: string, newUnitId: string) => {
+    const selectedUnit = allowedUnitsForExcel.find(u => u.id === newUnitId);
+    const normRaw = normalizeStr(rawUnitName);
+    setExcelRows(prev =>
+      prev.map(row => {
+        if (row.rowIndex === rowIndex || (normRaw && normalizeStr(row.rawUnitName) === normRaw && !row.matchedUnitId)) {
+          return {
+            ...row,
+            matchedUnitId: selectedUnit?.id || '',
+            matchedUnitName: selectedUnit?.name || ''
+          };
+        }
+        return row;
+      })
+    );
+  };
+
+  const handleConfirmExcelImport = async () => {
+    if (excelRows.length === 0) return;
+    setExcelModalError('');
+
+    const missingUnitRows = excelRows.filter(r => !r.alreadyRegistered && !r.matchedUnitId);
+    if (missingUnitRows.length > 0) {
+      setExcelModalError(
+        `Existem ${missingUnitRows.length} novo(s) usuário(s) cuja unidade da planilha não foi localizada automaticamente. Selecione a unidade correspondente na tabela abaixo antes de gravar.`
+      );
+      return;
+    }
+
+    setIsImportingExcel(true);
+    try {
+      const payload = excelRows.map(r => ({
+        name: r.name,
+        masp: r.masp,
+        cargo: r.cargo,
+        unitName: r.matchedUnitName || r.rawUnitName,
+        unitId: r.matchedUnitId || undefined
+      }));
+
+      const result = await storage.importUsersFromExcel(payload);
+      setExcelImportResult({
+        importedCount: result.importedCount,
+        alreadyRegisteredCount: result.alreadyRegisteredCount,
+        alreadyRegisteredUsers: result.alreadyRegisteredUsers || []
+      });
+
+      if (result.importedCount > 0) {
+        setSuccessMsg(`${result.importedCount} usuário(s) cadastrado(s) via Excel com sucesso.`);
+      }
+      onRefresh();
+    } catch (err: any) {
+      setExcelModalError(err.message || 'Erro ao gravar usuários da planilha.');
+    } finally {
+      setIsImportingExcel(false);
     }
   };
 
@@ -438,16 +747,27 @@ export const UserModule: React.FC<UserModuleProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-3">
-          {/* New User Button */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Attach Excel Users Button & New User Button */}
           {!isPolicial && (
-            <button
-              onClick={() => handleOpenUserModal()}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Policial</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleOpenExcelImportModal}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+                title="Anexar tabela do Excel (usuários) com NOME, MASP, CARGO e UNIDADE"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Anexar Excel (Usuários)</span>
+              </button>
+              <button
+                onClick={() => handleOpenUserModal()}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Policial</span>
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -720,9 +1040,21 @@ export const UserModule: React.FC<UserModuleProps> = ({
       {showUserModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl my-8">
-            <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800">
-              {editingUser ? 'Editar Policial' : 'Novo Policial'}
-            </h3>
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-2 border-b border-slate-800">
+              <h3 className="text-lg font-bold text-slate-100">
+                {editingUser ? 'Editar Policial' : 'Novo Policial'}
+              </h3>
+              {!editingUser && !isPolicial && (
+                <button
+                  type="button"
+                  onClick={handleOpenExcelImportModal}
+                  className="bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 font-bold text-xs px-3 py-1.5 rounded-xl transition flex items-center space-x-1.5"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Anexar Tabela Excel (Usuários)</span>
+                </button>
+              )}
+            </div>
 
             <form onSubmit={handleSaveUser} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1407,6 +1739,310 @@ export const UserModule: React.FC<UserModuleProps> = ({
                 Sim, Tornar Professor
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Users Import Modal */}
+      {showExcelImportModal && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-4xl shadow-2xl my-8 space-y-5 max-h-[92vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between gap-4 pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 rounded-xl">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-100">
+                    Importar Tabela do Excel — Usuários
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Anexe uma planilha Excel (<span className="font-mono text-slate-300">.xlsx</span>, <span className="font-mono text-slate-300">.xls</span> ou <span className="font-mono text-slate-300">.csv</span>) contendo as colunas <strong>NOME</strong>, <strong>MASP</strong>, <strong>CARGO</strong> e <strong>UNIDADE</strong>.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExcelImportModal(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Post-Save Completion Result View */}
+            {excelImportResult ? (
+              <div className="space-y-4">
+                <div className="bg-emerald-950/60 border border-emerald-700/60 rounded-xl p-4 flex items-start space-x-3">
+                  <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400 shrink-0 mt-0.5">
+                    <Check className="w-5 h-5" />
+                  </div>
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-bold text-emerald-200">
+                      Gravação Concluída!
+                    </h4>
+                    <p className="text-xs text-emerald-300/90">
+                      Foram gravados <strong>{excelImportResult.importedCount}</strong> novo(s) usuário(s) no sistema com perfil <strong>Policial</strong>, abrangência <strong>Apenas Unidade</strong>, acesso ao sistema <strong>SIM</strong> e permissão para movimentar armas e munições <strong>SIM</strong>.
+                    </p>
+                  </div>
+                </div>
+
+                {excelImportResult.alreadyRegisteredUsers.length > 0 ? (
+                  <div className="bg-amber-950/30 border border-amber-700/50 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center space-x-2 text-amber-300">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                      <span className="text-xs font-bold uppercase tracking-wider">
+                        Os seguintes usuários ({excelImportResult.alreadyRegisteredUsers.length}) já estavam cadastrados no sistema e foram ignorados:
+                      </span>
+                    </div>
+                    <div className="max-h-72 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950/80">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                          <tr>
+                            <th className="py-2.5 px-3.5">Usuário (Planilha / Sistema)</th>
+                            <th className="py-2.5 px-3.5">MASP</th>
+                            <th className="py-2.5 px-3.5">Cargo</th>
+                            <th className="py-2.5 px-3.5">Unidade</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/70">
+                          {excelImportResult.alreadyRegisteredUsers.map((u, idx) => (
+                            <tr key={`${u.masp}-${idx}`} className="hover:bg-slate-900/50">
+                              <td className="py-2 px-3.5">
+                                <span className="font-bold text-slate-100">{u.existingName || u.name}</span>
+                                {u.name && u.existingName && normalizeStr(u.name) !== normalizeStr(u.existingName) && (
+                                  <span className="block text-[10px] text-slate-400">
+                                    Na planilha: {u.name}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3.5 font-mono text-amber-400 font-semibold">
+                                {formatMasp(u.masp)}
+                              </td>
+                              <td className="py-2 px-3.5 text-slate-300">{u.cargo || '-'}</td>
+                              <td className="py-2 px-3.5 text-slate-400">{u.unitName || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 text-xs text-slate-300">
+                    Nenhum MASP da planilha constava previamente cadastrado no sistema.
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setExcelImportResult(null);
+                      setExcelRows([]);
+                      setExcelFileName('');
+                    }}
+                    className="px-4 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 rounded-xl transition"
+                  >
+                    Anexar Outra Planilha
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowExcelImportModal(false)}
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2 rounded-xl shadow transition"
+                  >
+                    Concluir
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* Attachment & Preview View */
+              <div className="space-y-4">
+                {/* Default Rules Info Card */}
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400">
+                      Configurações Padrão Aplicadas Automaticamente
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleDownloadExcelTemplate}
+                      className="text-[11px] font-semibold text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 px-2.5 py-1 rounded-lg transition flex items-center space-x-1"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Baixar Modelo (usuarios.xlsx)</span>
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-[11px]">
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400 block text-[10px]">Perfil</span>
+                      <strong className="text-emerald-300">Policial</strong>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400 block text-[10px]">Abrangência</span>
+                      <strong className="text-slate-200">Apenas Unidade</strong>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400 block text-[10px]">Acesso ao Sistema</span>
+                      <strong className="text-emerald-400">SIM</strong>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400 block text-[10px]">Movimentar Munições</span>
+                      <strong className="text-emerald-400">SIM</strong>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <span className="text-slate-400 block text-[10px]">Movimentar Armas</span>
+                      <strong className="text-emerald-400">SIM</strong>
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Caso conste na tabela algum <strong>MASP</strong> já cadastrado no sistema, ele será ignorado automaticamente e listado ao término da gravação. A senha inicial dos novos usuários será o número do MASP.
+                  </p>
+                </div>
+
+                {/* File Input Dropzone */}
+                <input
+                  ref={excelFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handleExcelFileSelected}
+                  className="hidden"
+                />
+
+                <div
+                  onClick={() => excelFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-700 hover:border-emerald-500/60 bg-slate-950/60 hover:bg-slate-950 rounded-2xl p-6 text-center cursor-pointer transition group"
+                >
+                  <Upload className="w-8 h-8 mx-auto text-emerald-400 group-hover:scale-105 transition mb-2" />
+                  <p className="text-sm font-bold text-slate-200">
+                    {excelFileName
+                      ? `Planilha selecionada: ${excelFileName}`
+                      : 'Clique aqui para anexar a tabela do Excel de Usuários'}
+                  </p>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Colunas esperadas: <span className="font-mono text-amber-400">NOME</span>, <span className="font-mono text-amber-400">MASP</span>, <span className="font-mono text-amber-400">CARGO</span> e <span className="font-mono text-amber-400">UNIDADE</span>
+                  </p>
+                </div>
+
+                {excelModalError && (
+                  <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>{excelModalError}</span>
+                  </div>
+                )}
+
+                {/* Parsed Rows Preview */}
+                {excelRows.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="bg-slate-800 text-slate-200 px-2.5 py-1 rounded-lg font-semibold">
+                          Total lido: <strong>{excelRows.length}</strong>
+                        </span>
+                        <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-1 rounded-lg font-semibold">
+                          Novos para gravar: <strong>{excelRows.filter(r => !r.alreadyRegistered).length}</strong>
+                        </span>
+                        {excelRows.some(r => r.alreadyRegistered) && (
+                          <span className="bg-amber-950 text-amber-300 border border-amber-800 px-2.5 py-1 rounded-lg font-semibold">
+                            Já cadastrados (serão ignorados): <strong>{excelRows.filter(r => r.alreadyRegistered).length}</strong>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="max-h-72 overflow-y-auto border border-slate-800 rounded-xl bg-slate-950/80">
+                      <table className="w-full text-left text-xs text-slate-300">
+                        <thead className="bg-slate-900 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                          <tr>
+                            <th className="py-2.5 px-3">Nome</th>
+                            <th className="py-2.5 px-3">MASP</th>
+                            <th className="py-2.5 px-3">Cargo</th>
+                            <th className="py-2.5 px-3">Unidade</th>
+                            <th className="py-2.5 px-3 text-right">Situação</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/70">
+                          {excelRows.map((row) => (
+                            <tr
+                              key={row.rowIndex}
+                              className={row.alreadyRegistered ? 'bg-slate-900/40 opacity-75' : 'hover:bg-slate-900/60'}
+                            >
+                              <td className="py-2 px-3 font-semibold text-slate-100">{row.name}</td>
+                              <td className="py-2 px-3 font-mono text-amber-400">{formatMasp(row.masp)}</td>
+                              <td className="py-2 px-3">{row.cargo}</td>
+                              <td className="py-2 px-3">
+                                {row.alreadyRegistered ? (
+                                  <span className="text-slate-400">{row.matchedUnitName || row.rawUnitName || '-'}</span>
+                                ) : row.matchedUnitId ? (
+                                  <span className="text-emerald-300 font-medium">{row.matchedUnitName}</span>
+                                ) : (
+                                  <div className="space-y-1">
+                                    {row.rawUnitName && (
+                                      <span className="block text-[10px] text-amber-400">
+                                        Planilha: &quot;{row.rawUnitName}&quot;
+                                      </span>
+                                    )}
+                                    <select
+                                      value={row.matchedUnitId}
+                                      onChange={(e) => handleChangeRowUnit(row.rowIndex, row.rawUnitName, e.target.value)}
+                                      className="bg-slate-900 border border-amber-500/60 rounded-lg px-2 py-1 text-[11px] text-slate-100 w-full max-w-[220px]"
+                                    >
+                                      <option value="">Selecione a unidade...</option>
+                                      {allowedUnitsForExcel.map((u) => (
+                                        <option key={u.id} value={u.id}>
+                                          {u.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 text-right">
+                                {row.alreadyRegistered ? (
+                                  <span className="inline-block bg-slate-800 text-amber-300 border border-slate-700 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    Já cadastrado (ignorar)
+                                  </span>
+                                ) : (
+                                  <span className="inline-block bg-emerald-950 text-emerald-400 border border-emerald-800 px-2 py-0.5 rounded text-[10px] font-bold">
+                                    Novo cadastro
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Footer Actions */}
+                <div className="flex justify-end items-center gap-3 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowExcelImportModal(false)}
+                    disabled={isImportingExcel}
+                    className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmExcelImport}
+                    disabled={excelRows.length === 0 || isImportingExcel}
+                    className={`font-bold text-xs px-5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5 ${
+                      excelRows.length === 0 || isImportingExcel
+                        ? 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                        : 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                    }`}
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{isImportingExcel ? 'Gravando Usuários...' : 'Gravar Usuários'}</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

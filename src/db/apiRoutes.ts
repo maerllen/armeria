@@ -645,6 +645,238 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
   }
 });
 
+apiRouter.post('/users/import-excel', async (req: Request, res: Response) => {
+  try {
+    const { users, actor } = req.body;
+    if (!Array.isArray(users) || users.length === 0) {
+      return res.status(400).json({ error: 'Nenhum usuário válido encontrado na planilha para importação.' });
+    }
+
+    let isActorGeral = false;
+    if (actor) {
+      const actorRoles = parseUserRoles(actor.roles, actor.role);
+      isActorGeral = actorRoles.includes('Geral') || actor.role === 'Geral';
+      const isOnlyPolicial = actorRoles.length === 1 && actorRoles[0] === 'Policial';
+      if (isOnlyPolicial) {
+        return res.status(403).json({ error: 'Seu perfil não possui permissão para cadastrar usuários em lote.' });
+      }
+    }
+
+    const pool = getPool();
+
+    const [existingRows]: any = await pool.query(
+      'SELECT ID_USUARIOS as id, MASP_USUARIOS as masp, NOME_USUARIOS as name FROM USUARIOS'
+    );
+    const existingByMasp = new Map<string, { id: string; masp: string; name: string }>();
+    for (const row of existingRows || []) {
+      const rawDigits = String(row.masp || '').replace(/\D/g, '');
+      const slicedDigits = rawDigits.slice(0, 8);
+      if (rawDigits) existingByMasp.set(rawDigits, row);
+      if (slicedDigits) existingByMasp.set(slicedDigits, row);
+    }
+
+    const [unitRows]: any = await pool.query(
+      'SELECT ID_UNIDADES as id, NOME_UNIDADES as name, DEPARTAMENTO_ID_UNIDADES as department_id FROM UNIDADES'
+    );
+    const allUnits: Array<{ id: string; name: string; department_id: string }> = unitRows || [];
+    const allowedUnits = (!isActorGeral && actor?.departmentId)
+      ? allUnits.filter(u => u.department_id === actor.departmentId)
+      : allUnits;
+
+    const normText = (val: string) =>
+      String(val || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .trim()
+        .replace(/\s+/g, ' ');
+
+    const normAlphaNum = (val: string) => normText(val).replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    const matchUnit = (unitId?: string, unitName?: string) => {
+      if (unitId) {
+        const byId = allowedUnits.find(u => u.id === unitId) || (isActorGeral ? allUnits.find(u => u.id === unitId) : undefined);
+        if (byId) return byId;
+      }
+      const target = normText(unitName || '');
+      if (!target) {
+        if (actor?.unitId) {
+          return allowedUnits.find(u => u.id === actor.unitId) || allUnits.find(u => u.id === actor.unitId);
+        }
+        return undefined;
+      }
+      const exact = allowedUnits.find(u => normText(u.name) === target);
+      if (exact) return exact;
+
+      const targetClean = normAlphaNum(target);
+      const cleanMatch = allowedUnits.find(u => normAlphaNum(u.name) === targetClean);
+      if (cleanMatch) return cleanMatch;
+
+      const tokenMatch = allowedUnits.find(u => {
+        const tokens = normText(u.name).split(/[-–—/()]/).map(t => t.trim()).filter(Boolean);
+        return tokens.includes(target) || tokens.some(t => normAlphaNum(t) === targetClean);
+      });
+      if (tokenMatch) return tokenMatch;
+
+      const partialMatches = allowedUnits.filter(u => {
+        const uClean = normAlphaNum(u.name);
+        return uClean.includes(targetClean) || targetClean.includes(uClean);
+      });
+      if (partialMatches.length === 1) return partialMatches[0];
+
+      return undefined;
+    };
+
+    const normalizeCargo = (rawCargo: string): string => {
+      const c = normText(rawCargo);
+      if (!c) return 'INVESTIGADOR';
+      if (c.includes('DELEGAD') || c === 'DPC') return 'DELEGADO';
+      if (c.includes('ESCRIV') || c === 'EPC') return 'ESCRIVÃO';
+      if (c.includes('PERIT')) return 'PERITO';
+      if (c.includes('INVESTIGAD') || c === 'IPC' || c === 'INV') return 'INVESTIGADOR';
+      if (c.includes('MEDICO') || c.includes('LEGISTA')) return 'Médico Legista';
+      if (c.includes('EXPLOSIV')) return 'Explosivista';
+      if (c.includes('VETERINAR')) return 'Veterinário';
+      if (c.includes('CAES') || c.includes('CANIN')) return 'Condutor de Cães';
+      if (c.includes('OPERADOR')) return 'Operador';
+      return String(rawCargo).trim().toUpperCase().slice(0, 64);
+    };
+
+    // Verifica antes se alguma linha nova possui unidade inválida/não encontrada
+    const unmatchedUnitNames = new Set<string>();
+    for (const item of users) {
+      const digits = String(item.masp || '').replace(/\D/g, '').slice(0, 8);
+      if (!digits) continue;
+      // Mesmo se o MASP já existir ele será ignorado; valida unidade apenas para novos cadastros
+      if (existingByMasp.has(digits)) continue;
+      const resolved = matchUnit(item.unitId, item.unitName);
+      if (!resolved) {
+        unmatchedUnitNames.add(String(item.unitName || '(Sem Unidade)').trim());
+      }
+    }
+
+    if (unmatchedUnitNames.size > 0) {
+      return res.status(400).json({
+        error: `Unidade(s) não encontrada(s) no sistema: ${Array.from(unmatchedUnitNames).join(', ')}. Verifique o nome da unidade na planilha ou selecione a unidade correspondente.`
+      });
+    }
+
+    const importedUsers: Array<{ id: string; name: string; masp: string; cargo: string; unitId: string; unitName: string }> = [];
+    const alreadyRegisteredMap = new Map<string, { name: string; existingName: string; masp: string; cargo: string; unitName: string }>();
+    const seenInBatch = new Map<string, string>();
+    const rolesJson = JSON.stringify(['Policial']);
+
+    for (let i = 0; i < users.length; i++) {
+      const item = users[i];
+      const cleanMaspVal = String(item.masp || '').replace(/\D/g, '').slice(0, 8);
+      const userName = String(item.name || '').trim();
+      if (!cleanMaspVal || !userName) continue;
+
+      const userCargo = normalizeCargo(item.cargo);
+      const matchedUnit = matchUnit(item.unitId, item.unitName);
+      const resolvedUnitName = matchedUnit?.name || String(item.unitName || '').trim();
+
+      const existingDbUser = existingByMasp.get(cleanMaspVal);
+      if (existingDbUser) {
+        if (!alreadyRegisteredMap.has(cleanMaspVal)) {
+          alreadyRegisteredMap.set(cleanMaspVal, {
+            name: userName || existingDbUser.name,
+            existingName: existingDbUser.name,
+            masp: cleanMaspVal,
+            cargo: userCargo,
+            unitName: resolvedUnitName
+          });
+        }
+        continue;
+      }
+
+      if (seenInBatch.has(cleanMaspVal)) {
+        if (!alreadyRegisteredMap.has(cleanMaspVal)) {
+          alreadyRegisteredMap.set(cleanMaspVal, {
+            name: userName,
+            existingName: seenInBatch.get(cleanMaspVal) || userName,
+            masp: cleanMaspVal,
+            cargo: userCargo,
+            unitName: resolvedUnitName
+          });
+        }
+        continue;
+      }
+
+      const id = `usr-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 6)}`;
+      const hashedDefaultPass = hashPassword(cleanMaspVal);
+      const targetDeptId = matchedUnit?.department_id || actor?.departmentId || null;
+      const targetUnitId = matchedUnit?.id || actor?.unitId || null;
+
+      // Padrões exigidos para importação via Excel:
+      // PERFIL = 'Policial', Abrangência = 'unit' (Apenas Unidade),
+      // ACESSO AO SISTEMA = 1 (SIM), PODE MOVIMENTAR MUNIÇÕES = 1 (SIM), PODE MOVIMENTAR ARMAS = 1 (SIM)
+      try {
+        await pool.query(
+          `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+           VALUES (?, ?, ?, ?, NULL, ?, 'Policial', ?, ?, ?, 'unit', 1, 1, 1, 0, NULL, NULL, 1, NOW())`,
+          [
+            id,
+            cleanMaspVal,
+            hashedDefaultPass,
+            userName,
+            userCargo,
+            rolesJson,
+            targetDeptId,
+            targetUnitId
+          ]
+        );
+      } catch {
+        await pool.query(
+          `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
+           VALUES (?, ?, ?, ?, NULL, ?, 'Policial', ?, ?, 'unit', 1, 1, 1, 0, NULL, NULL, 1, NOW())`,
+          [
+            id,
+            cleanMaspVal,
+            hashedDefaultPass,
+            userName,
+            userCargo,
+            targetDeptId,
+            targetUnitId
+          ]
+        );
+      }
+
+      seenInBatch.set(cleanMaspVal, userName);
+      importedUsers.push({
+        id,
+        name: userName,
+        masp: cleanMaspVal,
+        cargo: userCargo,
+        unitId: targetUnitId || '',
+        unitName: resolvedUnitName
+      });
+    }
+
+    const alreadyRegisteredUsers = Array.from(alreadyRegisteredMap.values());
+
+    if (importedUsers.length > 0) {
+      await insertAuditLog(
+        'Usuários',
+        'Importar Excel',
+        `Importados ${importedUsers.length} policial(is) via planilha Excel (${alreadyRegisteredUsers.length} já cadastrado(s) ignorado(s)).`,
+        actor,
+        req.ip
+      );
+    }
+
+    return res.json({
+      success: true,
+      importedCount: importedUsers.length,
+      importedUsers,
+      alreadyRegisteredCount: alreadyRegisteredUsers.length,
+      alreadyRegisteredUsers
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 apiRouter.put('/users/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
