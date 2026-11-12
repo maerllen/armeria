@@ -543,7 +543,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       );
     };
 
-    const allUsers = storage.getUsers();
+    const allUsers = storage.getAllUsersForLookup();
     const parsedStored = parseWeaponLocationRequester(cautela.requesterName);
 
     const directUserById =
@@ -5635,9 +5635,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 const authRequesterInfo = getResolvedRequester(authorizingCautela);
                 return (
                   <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Solicitante:</span>
-                      <strong className="text-slate-100">{authRequesterInfo.name} — MASP: {authRequesterInfo.masp}</strong>
+                    <div className="flex items-center justify-between gap-3 text-slate-300">
+                      <span className="shrink-0">Policial Solicitante:</span>
+                      <strong className="text-slate-100 text-right">
+                        {authRequesterInfo.name} — MASP: {authRequesterInfo.masp}
+                      </strong>
                     </div>
                     <div className="flex items-center justify-between text-slate-300">
                       <span>Arma Solicitada:</span>

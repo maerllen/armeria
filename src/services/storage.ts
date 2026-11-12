@@ -551,6 +551,10 @@ class StorageService {
   }
 
   // --- USERS ---
+  public getAllUsersForLookup(): User[] {
+    return this.state.users || [];
+  }
+
   public getUsers(currentUser?: User | null): User[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
