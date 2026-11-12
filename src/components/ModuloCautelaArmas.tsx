@@ -648,6 +648,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     };
   }, [weapons, currentUser, parseWeaponLocationRequester]);
 
+  // Resolve o Motivo/Finalidade solicitado pelo usuário ("Treinamento, Operação, Plantão, Serviço Ordinário")
+  const getResolvedMotivoFinalidade = useCallback((cautela: CautelaArma | null | undefined): string => {
+    if (!cautela) return '';
+    const raw = (cautela.reason || '').trim();
+    const norm = normalizeStr(raw);
+
+    const isSystemPlaceholder =
+      !norm ||
+      norm === 'solicitacao de acautelamento pendente de recibo' ||
+      norm === 'armamento pendente de recibo' ||
+      norm === 'solicitacao de acautelamento - aguardando cautela';
+
+    if (!isSystemPlaceholder) {
+      if (norm === 'treinamento') return 'Treinamento';
+      if (norm === 'operacao') return 'Operação';
+      if (norm === 'plantao') return 'Plantão';
+      if (norm === 'servico ordinario') return 'Serviço Ordinário';
+      return raw;
+    }
+
+    if (cautela.ammoDestinacao === 'Treinamento') return 'Treinamento';
+    return '';
+  }, []);
+
   // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
     let list = [...allCautelas];
@@ -1390,6 +1414,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return;
     }
 
+    if (!reason.trim()) {
+      setErrorMsg('Selecione o Motivo / Finalidade da cautela (Treinamento, Operação, Plantão ou Serviço Ordinário).');
+      return;
+    }
+
     const beneficiary = (canAuthorize && isDirectCautela && targetOfficerId)
       ? (availableUnitOfficers.find(u => u.id === targetOfficerId) || currentUser)
       : currentUser;
@@ -1541,11 +1570,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
     const hasAmmo = Boolean(cautela.linkedAmmoCautelaId || (cautela.ammoQuantity && cautela.ammoQuantity > 0) || linkedAmmo);
     const hasAmmoSuggestion = Boolean((cautela.authorizationNotes || '').trim());
+    const resolvedMotivo = getResolvedMotivoFinalidade(cautela);
     setAuthStockId('');
     setAuthorizingCautela(cautela);
     setAuthWithAmmo(hasAmmo || hasAmmoSuggestion);
     setAuthAmmoQty(cautela.ammoQuantity || linkedAmmo?.quantity || 30);
-    const isTreinamento = (cautela.ammoDestinacao === 'Treinamento' || linkedAmmo?.destinacao === 'Treinamento');
+    const isTreinamento = (
+      resolvedMotivo === 'Treinamento' ||
+      cautela.ammoDestinacao === 'Treinamento' ||
+      linkedAmmo?.destinacao === 'Treinamento'
+    );
     setAuthAmmoDestinacao(isTreinamento ? 'Treinamento' : 'Defesa');
     setAuthSeraDevolvida(!isTreinamento);
     setAuthNotes(cautela.authorizationNotes || '');
@@ -1675,10 +1709,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setEditingCautela(cautela);
     setEditWeaponId(cautela.weaponId);
 
-    const cleanReason =
-      cautela.reason && cautela.reason !== 'Solicitação de acautelamento - Aguardando Cautela'
-        ? cautela.reason
-        : '';
+    const cleanReason = getResolvedMotivoFinalidade(cautela);
     setEditReason(cleanReason);
 
     const rawNotes = (cautela.authorizationNotes || '').trim();
@@ -1723,6 +1754,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const chosenWeapon = editableUnitWeapons.find(w => w.id === editWeaponId);
     if (!chosenWeapon) {
       setErrorMsg('Armamento selecionado não encontrado.');
+      return;
+    }
+
+    if (!editReason.trim()) {
+      setErrorMsg('Selecione o Motivo / Finalidade da cautela (Treinamento, Operação, Plantão ou Serviço Ordinário).');
       return;
     }
 
@@ -3554,18 +3590,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                        MOTIVO / FINALIDADE DO USO (OPCIONAL)
+                        MOTIVO / FINALIDADE DO USO
                       </label>
                       <select
                         value={reason}
                         onChange={(e) => setReason(e.target.value)}
+                        required
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-amber-500 cursor-pointer"
                       >
-                        <option value="">Selecione o motivo (opcional)</option>
+                        <option value="">Selecione o motivo / finalidade</option>
+                        <option value="Treinamento">Treinamento</option>
                         <option value="Operação">Operação</option>
                         <option value="Plantão">Plantão</option>
-                        <option value="Serviço ordinário">Serviço ordinário</option>
-                        <option value="Treinamento">Treinamento</option>
+                        <option value="Serviço Ordinário">Serviço Ordinário</option>
                       </select>
                     </div>
                   </div>
@@ -3681,18 +3718,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <div className="space-y-4">
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                      MOTIVO / FINALIDADE DO USO (OPCIONAL)
+                      MOTIVO / FINALIDADE DO USO
                     </label>
                     <select
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
+                      required
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
                     >
-                      <option value="">Selecione o motivo (opcional)</option>
+                      <option value="">Selecione o motivo / finalidade</option>
+                      <option value="Treinamento">Treinamento</option>
                       <option value="Operação">Operação</option>
                       <option value="Plantão">Plantão</option>
-                      <option value="Serviço ordinário">Serviço ordinário</option>
-                      <option value="Treinamento">Treinamento</option>
+                      <option value="Serviço Ordinário">Serviço Ordinário</option>
                     </select>
                   </div>
 
@@ -4404,11 +4442,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       );
                                     })()}
 
-                                    {cautela.reason && (
-                                      <p className="text-xs text-slate-400 italic">
-                                        Motivo da Solicitação: "{cautela.reason}"
-                                      </p>
-                                    )}
+                                    {(() => {
+                                      const motivoSolicitado = getResolvedMotivoFinalidade(cautela);
+                                      if (!motivoSolicitado) return null;
+                                      return (
+                                        <p className="text-xs text-slate-300">
+                                          Motivo/Finalidade: <strong className="text-slate-100">{motivoSolicitado}</strong>
+                                        </p>
+                                      );
+                                    })()}
                                   </div>
                                 );
                               })}
@@ -5645,12 +5687,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       <span>Arma Solicitada:</span>
                       <strong className="text-slate-100 font-mono">{authorizingCautela.weaponModel} - Série: {authorizingCautela.weaponSerialNumber} ({authorizingCautela.weaponCaliber})</strong>
                     </div>
-                    {authorizingCautela.reason && (
-                      <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/80">
-                        <span>Motivo/Finalidade:</span>
-                        <span className="italic">{authorizingCautela.reason}</span>
-                      </div>
-                    )}
+                    {(() => {
+                      const authMotivoFinalidade = getResolvedMotivoFinalidade(authorizingCautela);
+                      return (
+                        <div className="flex items-center justify-between gap-3 text-slate-300 pt-1 border-t border-slate-800/80">
+                          <span className="shrink-0">Motivo/Finalidade:</span>
+                          <strong className="text-slate-100 text-right">
+                            {authMotivoFinalidade || 'Não informado'}
+                          </strong>
+                        </div>
+                      );
+                    })()}
                     {(() => {
                       const authSugestaoMunicao = (authorizingCautela.authorizationNotes || '').trim();
                       const authLinkedAmmo = getLinkedAmmoForCautela(authorizingCautela);
@@ -6123,20 +6170,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               {/* 2. Motivo / Finalidade do Uso */}
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  2. Motivo / Finalidade do Uso (Opcional)
+                  2. Motivo / Finalidade do Uso
                 </label>
                 <select
                   value={editReason}
                   onChange={(e) => setEditReason(e.target.value)}
+                  required
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
                 >
-                  <option value="">Selecione o motivo (opcional)</option>
+                  <option value="">Selecione o motivo / finalidade</option>
+                  <option value="Treinamento">Treinamento</option>
                   <option value="Operação">Operação</option>
                   <option value="Plantão">Plantão</option>
-                  <option value="Serviço ordinário">Serviço ordinário</option>
-                  <option value="Treinamento">Treinamento</option>
+                  <option value="Serviço Ordinário">Serviço Ordinário</option>
                   {editReason &&
-                    !['Operação', 'Plantão', 'Serviço ordinário', 'Treinamento'].includes(editReason) && (
+                    !['Treinamento', 'Operação', 'Plantão', 'Serviço Ordinário'].includes(editReason) && (
                       <option value={editReason}>{editReason}</option>
                     )}
                 </select>
