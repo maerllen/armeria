@@ -9362,16 +9362,15 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         : r.status;
 
       const cleanedFromStored = parseUserFromWeaponNote(r.requesterName);
-      let finalReqName = !isPlaceholderRequesterName(cleanedFromStored.name) ? cleanedFromStored.name : '';
-      let finalReqMasp = !isPlaceholderRequesterMasp(r.requesterMasp)
-        ? String(r.requesterMasp).trim()
-        : (!isPlaceholderRequesterMasp(cleanedFromStored.masp) ? cleanedFromStored.masp : '');
-      let finalReqCargo = r.requesterCargo || r.dbUserCargo || undefined;
-
-      if ((!finalReqName || !finalReqMasp) && (r.dbUserName || r.dbUserMasp)) {
-        if (!finalReqName && r.dbUserName) finalReqName = r.dbUserName;
-        if (!finalReqMasp && r.dbUserMasp) finalReqMasp = r.dbUserMasp;
-      }
+      let finalReqName =
+        (r.dbUserName && !isPlaceholderRequesterName(r.dbUserName) ? String(r.dbUserName).trim() : '') ||
+        (!isPlaceholderRequesterName(cleanedFromStored.name) ? cleanedFromStored.name : '');
+      let finalReqMasp =
+        (r.dbUserMasp && !isPlaceholderRequesterMasp(r.dbUserMasp) ? String(r.dbUserMasp).trim() : '') ||
+        (!isPlaceholderRequesterMasp(r.requesterMasp)
+          ? String(r.requesterMasp).trim()
+          : (!isPlaceholderRequesterMasp(cleanedFromStored.masp) ? cleanedFromStored.masp : ''));
+      let finalReqCargo = r.dbUserCargo || r.requesterCargo || undefined;
 
       if ((!finalReqName || !finalReqMasp) && r.weaponLocationNote) {
         const parsedNote = parseUserFromWeaponNote(r.weaponLocationNote);

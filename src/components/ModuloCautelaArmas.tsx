@@ -546,18 +546,27 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const allUsers = storage.getUsers();
     const parsedStored = parseWeaponLocationRequester(cautela.requesterName);
 
-    let resolvedName = !isGenericName(parsedStored.name) ? parsedStored.name : '';
-    let resolvedMasp = !isGenericMasp(cautela.requesterMasp)
-      ? String(cautela.requesterMasp).trim()
-      : (!isGenericMasp(parsedStored.masp) ? parsedStored.masp : '');
-    let resolvedCargo: string = cautela.requesterCargo || '';
+    const directUserById =
+      cautela.requesterId && !isGenericName(cautela.requesterId)
+        ? allUsers.find(u => u.id === cautela.requesterId)
+        : undefined;
+
+    let resolvedName =
+      (directUserById?.name && !isGenericName(directUserById.name) ? directUserById.name.trim() : '') ||
+      (!isGenericName(parsedStored.name) ? parsedStored.name : '');
+    let resolvedMasp =
+      (directUserById?.masp && !isGenericMasp(directUserById.masp) ? String(directUserById.masp).trim() : '') ||
+      (!isGenericMasp(cautela.requesterMasp)
+        ? String(cautela.requesterMasp).trim()
+        : (!isGenericMasp(parsedStored.masp) ? parsedStored.masp : ''));
+    let resolvedCargo: string = directUserById?.cargo || cautela.requesterCargo || '';
 
     // 1. Busca direta em usuários cadastrados (por ID, dígitos do MASP ou Nome)
     if (!resolvedName || !resolvedMasp || !resolvedCargo) {
       const reqDigits = cleanDigits(resolvedMasp || cautela.requesterMasp);
       const reqNorm = normalizeStr(resolvedName);
       const matchedUser =
-        (cautela.requesterId ? allUsers.find(u => u.id === cautela.requesterId) : undefined) ||
+        directUserById ||
         (reqDigits ? allUsers.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
         (reqNorm ? allUsers.find(u => normalizeStr(u.name) === reqNorm) : undefined);
 
@@ -630,8 +639,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     }
 
+    const fallbackStoredName = !isGenericName(cautela.requesterName) ? (cautela.requesterName || '').trim() : '';
+
     return {
-      name: resolvedName || (cautela.requesterName || '').trim() || 'Usuário não identificado',
+      name: resolvedName || fallbackStoredName || 'Usuário não identificado',
       masp: resolvedMasp || 'N/I',
       cargo: resolvedCargo || 'Policial'
     };
@@ -4284,9 +4295,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         <span className="text-slate-300">{new Date(cautela.requestDate).toLocaleString('pt-BR')}</span>
                                       </div>
                                       <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                        <span className="text-[10px] text-slate-500 uppercase block font-semibold">Solicitante</span>
-                                        <span className="text-slate-200 font-semibold truncate block" title={`${requesterInfo.name} — MASP: ${requesterInfo.masp}`}>
-                                          {requesterInfo.name} <span className="font-mono text-amber-400">• MASP: {requesterInfo.masp}</span>
+                                        <span className="text-[10px] text-slate-500 uppercase block font-semibold">Policial Solicitante</span>
+                                        <span className="text-slate-200 font-semibold truncate block" title={requesterInfo.name}>
+                                          {requesterInfo.name}
                                         </span>
                                       </div>
                                     </div>
