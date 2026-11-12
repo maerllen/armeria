@@ -6,7 +6,7 @@ import { storage } from '../services/storage';
 import { 
   Shield, Crosshair, Disc, AlertCircle, Check, Clock, Search, 
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
-  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X
+  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -83,6 +83,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
+  const [cancelPendingModal, setCancelPendingModal] = useState<CautelaArma | null>(null);
   const [activeCautelaWarningModal, setActiveCautelaWarningModal] = useState<CautelaArma[] | null>(null);
   const [hasDismissedActiveWarning, setHasDismissedActiveWarning] = useState(false);
   const [authWithAmmo, setAuthWithAmmo] = useState(false);
@@ -1008,6 +1009,32 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao recusar.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Cancelar e Apagar Solicitação de Cautela Pendente (Policial antes da análise do armeiro)
+  const handleCancelPendingCautela = async (cautela: CautelaArma) => {
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      const res = await storage.cancelCautelaArma(cautela.id, {
+        weaponId: cautela.weaponId,
+        weaponSerialNumber: cautela.weaponSerialNumber,
+        cautelaId: cautela.id,
+        requesterName: cautela.requesterName,
+        requesterMasp: cautela.requesterMasp
+      });
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao cancelar solicitação de cautela.');
+      } else {
+        setSuccessMsg(`Solicitação de cautela da arma ${cautela.weaponModel} (Série: ${cautela.weaponSerialNumber}) cancelada e apagada com sucesso! O armamento retornou ao cofre no status "No Cofre".`);
+        setCancelPendingModal(null);
+        onRefresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao processar cancelamento.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2298,10 +2325,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         </button>
                                       </>
                                     ) : (
-                                      <span className="px-3 py-1 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
-                                        <Clock className="w-3.5 h-3.5 text-amber-400" />
-                                        <span>Pendente de Liberação</span>
-                                      </span>
+                                      <div className="flex items-center space-x-2">
+                                        <span className="px-3 py-1.5 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
+                                          <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>Aguardando Armeiro</span>
+                                        </span>
+                                        <button
+                                          onClick={() => setCancelPendingModal(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-700 hover:border-red-500 text-red-200 rounded-xl text-xs font-bold transition shadow-sm"
+                                          title="Cancelar e apagar esta solicitação de cautela"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                          <span>Cancelar Solicitação</span>
+                                        </button>
+                                      </div>
                                     )}
                                   </div>
                                 </div>
@@ -3507,6 +3544,57 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           </div>
         </div>
       )}
-    </div>
+
+      {/* Modal de Confirmação para Cancelar e Apagar Solicitação Pendente */}
+      {cancelPendingModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+            <div className="bg-slate-900 border border-red-800/80 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
+              <div className="flex items-center space-x-3 text-red-400">
+                <div className="p-3 bg-red-950/60 rounded-xl border border-red-800">
+                  <Trash2 className="w-6 h-6 text-red-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">Cancelar Solicitação de Cautela</h3>
+                  <p className="text-xs text-slate-400">Ação imediata antes da análise do armeiro</p>
+                </div>
+              </div>
+
+              <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2.5">
+                <p>
+                  Você tem certeza que deseja cancelar e apagar a solicitação de cautela do armamento:
+                </p>
+                <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-slate-200 space-y-1">
+                  <div><strong>Modelo:</strong> {cancelPendingModal.weaponModel}</div>
+                  <div><strong>Nº de Série:</strong> <span className="text-amber-400 font-bold">{cancelPendingModal.weaponSerialNumber}</span></div>
+                  <div><strong>Calibre:</strong> {cancelPendingModal.weaponCaliber}</div>
+                </div>
+                <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-[11px] leading-relaxed">
+                  ● Ao cancelar, esta solicitação será apagada e a arma voltará a ficar disponível no cofre (status "No Cofre") da sua unidade.
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-2">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setCancelPendingModal(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  Manter Solicitação
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => handleCancelPendingCautela(cancelPendingModal)}
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-red-950/40"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Cancelando...' : 'Sim, Cancelar e Apagar'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
   );
 };

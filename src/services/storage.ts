@@ -3433,6 +3433,66 @@ class StorageService {
     }
   }
 
+  public async cancelCautelaArma(
+    id: string,
+    extra?: { weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string }
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanId = id.replace(/^caut-active-/, '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '').replace(/^caut-arma-/, '').replace(/^caut-/, '');
+    
+    // Atualização otimista imediata no estado local
+    const targetIdx = (this.state.cautelasArmas || []).findIndex(c => 
+      c.id === id || 
+      c.id === cleanId || 
+      c.id === `caut-sync-${cleanId}` ||
+      c.weaponId === id || 
+      c.weaponId === cleanId ||
+      (extra?.weaponId && c.weaponId === extra.weaponId)
+    );
+
+    let target: CautelaArma | undefined;
+    if (targetIdx !== -1) {
+      target = this.state.cautelasArmas[targetIdx];
+      this.state.cautelasArmas.splice(targetIdx, 1);
+    }
+
+    // Restaura a arma para No Cofre
+    const weapId = target?.weaponId || extra?.weaponId || cleanId;
+    const weap = (this.state.weapons || []).find(w => w.id === weapId || (target?.weaponSerialNumber && w.serialNumber === target.weaponSerialNumber));
+    if (weap) {
+      weap.status = 'No Cofre';
+      weap.vaultSpaceId = target?.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+      delete (weap as any).locationNote;
+    }
+
+    // Se houver munição vinculada no estado local, remove também
+    if (target?.linkedAmmoCautelaId) {
+      const munIdx = (this.state.cautelasMunicoes || []).findIndex(m => m.id === target?.linkedAmmoCautelaId);
+      if (munIdx !== -1) {
+        this.state.cautelasMunicoes.splice(munIdx, 1);
+      }
+    }
+
+    try {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${actualId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          weaponId: extra?.weaponId || target?.weaponId,
+          weaponSerialNumber: extra?.weaponSerialNumber || target?.weaponSerialNumber,
+          cautelaId: target?.id || id,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: true }; // Local state updated
+    }
+  }
+
   public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
     const cleanId = id.replace(/^caut-active-/, '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '').replace(/^caut-arma-/, '').replace(/^caut-/, '');
     const target = (this.state.cautelasArmas || []).find(c => 
