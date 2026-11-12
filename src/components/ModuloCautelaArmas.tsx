@@ -50,6 +50,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [lastDirectCautelaArma, setLastDirectCautelaArma] = useState<CautelaArma | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA'>('TODOS');
+  const [historyWeaponFilter, setHistoryWeaponFilter] = useState<string>('TODAS');
+  const [historyDateFilter, setHistoryDateFilter] = useState<string>('');
+  const [historyDecisionFilter, setHistoryDecisionFilter] = useState<'TODAS' | 'DEFERIDA' | 'INDEFERIDAS'>('TODAS');
   
   // Modal de Devolução
   const [returningCautela, setReturningCautela] = useState<CautelaArma | null>(null);
@@ -660,21 +663,60 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       // exibe todas as cautelas de armas aguardando algum comando do armeiro (autorização inicial ou recibo de devolução)
       list = list.filter(c => isAwaitingArmorerCommand(c.status));
     } else if (activeTab === 'DEFERIDAS') {
-      // Aba "Deferidas (Autorizadas/Devolvidas)": para Policial exibe AUTORIZADA e DEVOLVIDA (pois DEVOLUCAO_PENDENTE fica em análise);
-      // para Armeiro mantém visão de AUTORIZADA, DEVOLUCAO_PENDENTE e DEVOLVIDA
-      list = list.filter(c =>
-        c.status === 'AUTORIZADA' ||
-        (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE') ||
-        c.status === 'DEVOLVIDA'
-      );
-      if (deferidasSubFilter === 'ATIVAS') {
-        list = list.filter(c => c.status === 'AUTORIZADA' || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
-      } else if (deferidasSubFilter === 'DEVOLVIDAS') {
-        list = list.filter(c => c.status === 'DEVOLVIDA');
+      if (!canAuthorize) {
+        // Aba "Minhas Cautelas" (Policial): exibe por padrão estritamente as cautelas ATIVAS EM POSSE (sem histórico de devolvidas)
+        list = list.filter(c => c.status === 'AUTORIZADA');
+      } else {
+        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): mantém visão de AUTORIZADA, DEVOLUCAO_PENDENTE e DEVOLVIDA
+        list = list.filter(c =>
+          c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA'
+        );
+        if (deferidasSubFilter === 'ATIVAS') {
+          list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+        } else if (deferidasSubFilter === 'DEVOLVIDAS') {
+          list = list.filter(c => c.status === 'DEVOLVIDA');
+        }
       }
     } else if (activeTab === 'INDEFERIDAS') {
-      // Aba "Indeferidas": cautelas recusadas
-      list = list.filter(c => c.status === 'RECUSADA');
+      if (canAuthorize) {
+        // Aba "Indeferidas (Unidade)" (Armeiro): cautelas recusadas da unidade
+        list = list.filter(c => c.status === 'RECUSADA');
+      } else {
+        // Aba "Meu Histórico" (Policial): histórico completo de armas em seu nome (inclusive indeferidas)
+        if (historyDecisionFilter === 'DEFERIDA') {
+          list = list.filter(c =>
+            c.status === 'AUTORIZADA' ||
+            c.status === 'DEVOLUCAO_PENDENTE' ||
+            c.status === 'DEVOLVIDA'
+          );
+        } else if (historyDecisionFilter === 'INDEFERIDAS') {
+          list = list.filter(c => c.status === 'RECUSADA');
+        }
+
+        if (historyWeaponFilter !== 'TODAS') {
+          list = list.filter(c => {
+            const key = c.weaponSerialNumber || c.weaponId || c.weaponModel || '';
+            return key === historyWeaponFilter;
+          });
+        }
+
+        if (historyDateFilter) {
+          const toLocalYMD = (iso?: string) => {
+            if (!iso) return '';
+            const d = new Date(iso);
+            if (isNaN(d.getTime())) return '';
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+          };
+          list = list.filter(c =>
+            toLocalYMD(c.requestDate) === historyDateFilter ||
+            toLocalYMD(c.authorizedAt) === historyDateFilter ||
+            toLocalYMD(c.returnDate) === historyDateFilter ||
+            toLocalYMD(c.createdAt) === historyDateFilter
+          );
+        }
+      }
     }
 
     if (searchTerm.trim()) {
@@ -686,12 +728,54 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         (c.requesterName && c.requesterName.toLowerCase().includes(term)) ||
         (c.requesterMasp && c.requesterMasp.toLowerCase().includes(term)) ||
         (c.armorerName && c.armorerName.toLowerCase().includes(term)) ||
-        (c.reason && c.reason.toLowerCase().includes(term))
+        (c.reason && c.reason.toLowerCase().includes(term)) ||
+        (c.authorizationNotes && c.authorizationNotes.toLowerCase().includes(term))
       );
     }
 
+    // Na aba "Meu Histórico" do policial, a cautela ativa fica SEMPRE fixa como primeiro resultado
+    if (!canAuthorize && activeTab === 'INDEFERIDAS') {
+      list.sort((a, b) => {
+        const aIsAtiva = a.status === 'AUTORIZADA' ? 1 : 0;
+        const bIsAtiva = b.status === 'AUTORIZADA' ? 1 : 0;
+        if (aIsAtiva !== bIsAtiva) return bIsAtiva - aIsAtiva;
+
+        const getTs = (item: CautelaArma) => {
+          const raw = item.returnDate || item.authorizedAt || item.requestDate || item.createdAt || '';
+          const t = raw ? new Date(raw).getTime() : 0;
+          return isNaN(t) ? 0 : t;
+        };
+        return getTs(b) - getTs(a);
+      });
+    }
+
     return list;
-  }, [scopedCautelas, activeTab, deferidasSubFilter, searchTerm, canAuthorize]);
+  }, [
+    scopedCautelas,
+    activeTab,
+    deferidasSubFilter,
+    searchTerm,
+    canAuthorize,
+    historyDecisionFilter,
+    historyWeaponFilter,
+    historyDateFilter
+  ]);
+
+  // Lista de armas distintas presentes no histórico do policial (para o filtro por arma em "Meu Histórico")
+  const userHistoryWeapons = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    scopedCautelas.forEach(c => {
+      const key = c.weaponSerialNumber || c.weaponId || c.weaponModel || '';
+      if (!key || map.has(key)) return;
+      const calPart = c.weaponCaliber ? ` (${c.weaponCaliber})` : '';
+      const serPart = c.weaponSerialNumber ? ` — Nº ${c.weaponSerialNumber}` : '';
+      map.set(key, {
+        key,
+        label: `${c.weaponModel || 'Armamento'}${serPart}${calPart}`
+      });
+    });
+    return Array.from(map.values());
+  }, [scopedCautelas]);
 
   // Contadores para badges das abas
   const pendingCount = useMemo(() => {
@@ -699,9 +783,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   }, [scopedCautelas]);
 
   const deferidasCount = useMemo(() => {
+    if (!canAuthorize) {
+      return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
+    }
     return scopedCautelas.filter(c =>
       c.status === 'AUTORIZADA' ||
-      (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE') ||
+      c.status === 'DEVOLUCAO_PENDENTE' ||
       c.status === 'DEVOLVIDA'
     ).length;
   }, [scopedCautelas, canAuthorize]);
@@ -719,6 +806,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   const indeferidasCount = useMemo(() => {
     return scopedCautelas.filter(c => c.status === 'RECUSADA').length;
+  }, [scopedCautelas]);
+
+  const meuHistoricoTotalCount = useMemo(() => {
+    return scopedCautelas.length;
+  }, [scopedCautelas]);
+
+  const meuHistoricoDeferidasCount = useMemo(() => {
+    return scopedCautelas.filter(c =>
+      c.status === 'AUTORIZADA' ||
+      c.status === 'DEVOLUCAO_PENDENTE' ||
+      c.status === 'DEVOLVIDA'
+    ).length;
   }, [scopedCautelas]);
 
   const myRefusedCautelas = useMemo(() => {
@@ -1946,7 +2045,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       </span>
                     </div>
                     <p className="text-slate-300">
-                      Recusada por: <strong className="text-red-200">{c.armorerName || 'Armeiro'}</strong> {c.armorerMasp ? `(MASP: ${c.armorerMasp})` : ''} • Retornou ao: <strong className="text-slate-100">{vault ? vault.code : 'Cofre de Origem'}</strong>
+                      Recusada por: <strong className="text-red-200">{c.armorerName || 'Armeiro'}</strong> {c.armorerMasp ? `(MASP: ${c.armorerMasp})` : ''}
+                      {!isPolicial && (
+                        <> • Retornou ao: <strong className="text-slate-100">{vault ? vault.code : 'Cofre de Origem'}</strong></>
+                      )}
                     </p>
                     {c.authorizationNotes && (
                       <p className="text-amber-200/90 italic bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-800">
@@ -1959,13 +2061,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        setActiveTab('MINHAS');
-                        setStatusFilter('INDEFERIDAS');
+                        setActiveTab('INDEFERIDAS');
+                        setHistoryDecisionFilter('INDEFERIDAS');
                         handleDismissRefusal(c.id);
                       }}
                       className="px-3 py-1.5 bg-red-800 hover:bg-red-700 text-white font-bold text-xs rounded-xl transition shadow-sm"
                     >
-                      Ver em Indeferidas
+                      Ver em Meu Histórico
                     </button>
                     <button
                       type="button"
@@ -2011,7 +2113,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{canAuthorize ? 'Deferidas / Ativas (Unidade)' : 'Deferidas (Autorizadas/Devolvidas)'}</span>
+          <span>{canAuthorize ? 'Deferidas / Ativas (Unidade)' : 'Minhas Cautelas'}</span>
           {deferidasCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
               {deferidasCount}
@@ -2023,16 +2125,32 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           onClick={() => setActiveTab('INDEFERIDAS')}
           className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
             activeTab === 'INDEFERIDAS'
-              ? 'bg-red-950/80 text-red-300 border border-red-800 shadow-sm'
-              : 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
+              ? canAuthorize
+                ? 'bg-red-950/80 text-red-300 border border-red-800 shadow-sm'
+                : 'bg-sky-950/80 text-sky-300 border border-sky-800 shadow-sm'
+              : canAuthorize
+                ? 'text-slate-400 hover:text-red-300 hover:bg-slate-900'
+                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-900'
           }`}
         >
-          <XCircle className="w-3.5 h-3.5 text-red-400" />
-          <span>{canAuthorize ? 'Indeferidas (Unidade)' : 'Indeferidas'}</span>
-          {indeferidasCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
-              {indeferidasCount}
-            </span>
+          {canAuthorize ? (
+            <XCircle className="w-3.5 h-3.5 text-red-400" />
+          ) : (
+            <FileText className="w-3.5 h-3.5 text-sky-400" />
+          )}
+          <span>{canAuthorize ? 'Indeferidas (Unidade)' : 'Meu Histórico'}</span>
+          {canAuthorize ? (
+            indeferidasCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
+                {indeferidasCount}
+              </span>
+            )
+          ) : (
+            meuHistoricoTotalCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/40 font-mono">
+                {meuHistoricoTotalCount}
+              </span>
+            )
           )}
         </button>
 
@@ -2478,38 +2596,125 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       {activeTab !== 'NOVA' && (
         <div className="space-y-4">
           {/* Barra de Filtro e Busca */}
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
-            <div className="relative w-full sm:w-80">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="Buscar por arma, série, calibre ou policial..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500"
-              />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Buscar por arma, série, calibre ou motivo..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500"
+                />
+              </div>
+
+              {/* Sub-filtros para a aba Deferidas (Apenas para Armeiro; para Policial o padrão fixo é Ativas em Posse sem filtros de Todas/Devolvidas) */}
+              {activeTab === 'DEFERIDAS' && (
+                canAuthorize ? (
+                  <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
+                    {[
+                      { id: 'TODAS', label: `Todas (${deferidasCount})` },
+                      { id: 'ATIVAS', label: `Ativas em Posse (${activeCautelasCount})` },
+                      { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedCautelasCount})` }
+                    ].map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => setDeferidasSubFilter(item.id as any)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                          deferidasSubFilter === item.id
+                            ? 'bg-emerald-600 text-slate-950 font-black shadow-sm'
+                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex items-center space-x-2 self-start sm:self-auto">
+                    <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 text-slate-950 shadow-sm whitespace-nowrap">
+                      Ativas em Posse ({activeCautelasCount})
+                    </span>
+                  </div>
+                )
+              )}
+
+              {/* Sub-filtros de Decisão para "Meu Histórico" (Policial) */}
+              {!canAuthorize && activeTab === 'INDEFERIDAS' && (
+                <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
+                  {[
+                    { id: 'TODAS', label: `Todas (${meuHistoricoTotalCount})`, activeClass: 'bg-sky-500 text-slate-950 font-black shadow-sm' },
+                    { id: 'DEFERIDA', label: `Deferida (${meuHistoricoDeferidasCount})`, activeClass: 'bg-emerald-500 text-slate-950 font-black shadow-sm' },
+                    { id: 'INDEFERIDAS', label: `Indeferidas (${indeferidasCount})`, activeClass: 'bg-red-500 text-white font-black shadow-sm' }
+                  ].map(item => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setHistoryDecisionFilter(item.id as 'TODAS' | 'DEFERIDA' | 'INDEFERIDAS')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                        historyDecisionFilter === item.id
+                          ? item.activeClass
+                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Sub-filtros para a aba Deferidas */}
-            {activeTab === 'DEFERIDAS' && (
-              <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
-                {[
-                  { id: 'TODAS', label: `Todas (${deferidasCount})` },
-                  { id: 'ATIVAS', label: `Ativas em Posse (${activeCautelasCount})` },
-                  { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedCautelasCount})` }
-                ].map(item => (
-                  <button
-                    key={item.id}
-                    onClick={() => setDeferidasSubFilter(item.id as any)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                      deferidasSubFilter === item.id
-                        ? 'bg-emerald-600 text-slate-950 font-black shadow-sm'
-                        : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                    }`}
+            {/* Filtros por Arma e por Data exclusivos da aba "Meu Histórico" (Policial) */}
+            {!canAuthorize && activeTab === 'INDEFERIDAS' && (
+              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Arma:
+                  </label>
+                  <select
+                    value={historyWeaponFilter}
+                    onChange={(e) => setHistoryWeaponFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-sky-500"
                   >
-                    {item.label}
-                  </button>
-                ))}
+                    <option value="TODAS">Todas as Armas ({userHistoryWeapons.length})</option>
+                    {userHistoryWeapons.map(w => (
+                      <option key={w.key} value={w.key}>
+                        {w.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Data:
+                  </label>
+                  <input
+                    type="date"
+                    value={historyDateFilter}
+                    onChange={(e) => setHistoryDateFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end">
+                  {(historyWeaponFilter !== 'TODAS' || historyDateFilter || historyDecisionFilter !== 'TODAS' || searchTerm.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setHistoryWeaponFilter('TODAS');
+                        setHistoryDateFilter('');
+                        setHistoryDecisionFilter('TODAS');
+                        setSearchTerm('');
+                      }}
+                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 border border-slate-700"
+                    >
+                      <X className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Limpar Filtros</span>
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -2909,9 +3114,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção: Cautelas Ativas e Devoluções Pendentes de Recibo (Aba DEFERIDAS) */}
-                  {activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS') && (() => {
-                    const ativasList = displayedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+                  {/* Seção: Minhas Cautelas Ativas em Posse (Policial) / Cautelas Ativas (Armeiro) */}
+                  {activeTab === 'DEFERIDAS' && (!canAuthorize || deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS') && (() => {
+                    const ativasList = displayedCautelas.filter(c => c.status === 'AUTORIZADA' || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
                     return (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
@@ -2920,7 +3125,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
                               {canAuthorize 
                                 ? `Armamentos Acautelados / Cautelas Ativas — ${userUnit?.name || 'Unidade'}` 
-                                : 'Cautela(s) Ativa(s) em Posse do Policial'}
+                                : 'Minhas Cautelas — Ativas em Posse'}
                             </h4>
                           </div>
                           <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-md border border-emerald-800/60">
@@ -3151,71 +3356,327 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção: Cautelas Recusadas (Aba INDEFERIDAS) */}
+                  {/* Seção: "Meu Histórico" (Policial) / "Solicitações Indeferidas" (Armeiro) */}
                   {activeTab === 'INDEFERIDAS' && (() => {
-                    const recusadas = scopedCautelas.filter(c => c.status === 'RECUSADA');
+                    if (canAuthorize) {
+                      const recusadas = displayedCautelas.filter(c => c.status === 'RECUSADA');
+                      return (
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                            <div className="flex items-center space-x-2">
+                              <XCircle className="w-3.5 h-3.5 text-red-400" />
+                              <h4 className="text-xs font-bold text-red-400 uppercase tracking-wider">
+                                Solicitações Indeferidas — {userUnit?.name || 'Unidade'}
+                              </h4>
+                            </div>
+                            <span className="text-xs font-mono font-bold text-red-400 bg-red-950/60 px-2 py-0.5 rounded-md border border-red-800/60">
+                              {recusadas.length} recusada(s)
+                            </span>
+                          </div>
+
+                          {recusadas.length === 0 ? (
+                            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
+                              Nenhuma solicitação de armamento foi indeferida na unidade {userUnit?.name || ''}.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 gap-3">
+                              {recusadas.map(cautela => {
+                                const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+
+                                return (
+                                  <div
+                                    key={cautela.id}
+                                    className="bg-slate-900 border border-red-900/40 rounded-2xl p-4 sm:p-5 space-y-3 opacity-90"
+                                  >
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+                                      <div className="flex items-center space-x-3">
+                                        <div className="p-2.5 rounded-xl border bg-red-500/10 border-red-500/20 text-red-400">
+                                          <Crosshair className="w-5 h-5" />
+                                        </div>
+                                        <div>
+                                          <div className="flex items-center space-x-2">
+                                            <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
+                                            <span className="font-mono text-xs text-red-400 font-bold">
+                                              Nº {cautela.weaponSerialNumber}
+                                            </span>
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-red-500/20 text-red-300 border-red-500/30">
+                                              Recusada
+                                            </span>
+                                          </div>
+                                          <p className="text-xs text-slate-400 mt-0.5">
+                                            Solicitante: <strong className="text-slate-200">{cautela.requesterName}</strong> ({cautela.requesterMasp}) • Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong>
+                                          </p>
+                                        </div>
+                                      </div>
+
+                                      <div className="text-xs text-red-300 bg-red-950/40 border border-red-900/40 px-3 py-1.5 rounded-xl">
+                                        Recusada por {cautela.armorerName || 'Armeiro'} {cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}
+                                      </div>
+                                    </div>
+
+                                    {cautela.authorizationNotes && (
+                                      <div className="p-3 bg-red-950/20 border border-red-900/30 rounded-xl text-xs text-red-300">
+                                        <strong>Motivo da Recusa:</strong> {cautela.authorizationNotes}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    }
+
+                    // Visão do Policial: "Meu Histórico" (Histórico de Armas completo em seu nome, com cautela ativa fixa em 1º lugar como ATIVA)
+                    const historicoList = displayedCautelas;
+
                     return (
                       <div className="space-y-3">
                         <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
-                            <XCircle className="w-3.5 h-3.5 text-red-400" />
-                            <h4 className="text-xs font-bold text-red-400 uppercase tracking-wider">
-                              {canAuthorize 
-                                ? `Solicitações Indeferidas — ${userUnit?.name || 'Unidade'}` 
-                                : 'Cautelas Recusadas (Minhas Solicitações Indeferidas)'}
+                            <FileText className="w-3.5 h-3.5 text-sky-400" />
+                            <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                              Meu Histórico — Histórico Completo de Cautelas de Armas
                             </h4>
                           </div>
-                          <span className="text-xs font-mono font-bold text-red-400 bg-red-950/60 px-2 py-0.5 rounded-md border border-red-800/60">
-                            {recusadas.length} recusada(s)
+                          <span className="text-xs font-mono font-bold text-sky-300 bg-sky-950/60 px-2.5 py-0.5 rounded-md border border-sky-800/60">
+                            {historicoList.length} registro(s)
                           </span>
                         </div>
 
-                        {recusadas.length === 0 ? (
-                          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            {canAuthorize 
-                              ? `Nenhuma solicitação de armamento foi indeferida na unidade ${userUnit?.name || ''}.` 
-                              : 'Nenhuma solicitação de armamento foi recusada.'}
+                        {historicoList.length === 0 ? (
+                          <div className="p-8 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-xs text-slate-400 space-y-2">
+                            <FileText className="w-7 h-7 text-slate-600 mx-auto" />
+                            <p className="font-semibold text-slate-300">
+                              Nenhum registro de cautela encontrado para os filtros selecionados.
+                            </p>
+                            {(historyWeaponFilter !== 'TODAS' || historyDateFilter || historyDecisionFilter !== 'TODAS' || searchTerm.trim()) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHistoryWeaponFilter('TODAS');
+                                  setHistoryDateFilter('');
+                                  setHistoryDecisionFilter('TODAS');
+                                  setSearchTerm('');
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-xs font-bold transition"
+                              >
+                                Exibir todo o histórico
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
-                            {recusadas.map(cautela => {
-                              const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+                            {historicoList.map(cautela => {
+                              const isAtiva = cautela.status === 'AUTORIZADA';
+                              const isDevolvida = cautela.status === 'DEVOLVIDA';
+                              const isDevPendente = cautela.status === 'DEVOLUCAO_PENDENTE';
+                              const isRecusada = cautela.status === 'RECUSADA';
+                              const isPendente = isPendingStatus(cautela.status);
+                              const isDeferida = isAtiva || isDevolvida || isDevPendente;
+
+                              const cautelaUnit = units.find(u => u.id === cautela.unitId) || userUnit;
+                              const armorerInfo = getResolvedArmorer(cautela);
+                              const ammoDetails = getRescuedAmmoDetails(cautela);
 
                               return (
                                 <div
-                                  key={cautela.id}
-                                  className="bg-slate-900 border border-red-900/40 rounded-2xl p-4 sm:p-5 space-y-3 opacity-90"
+                                  key={`hist-${cautela.id}`}
+                                  className={`bg-slate-900 rounded-2xl p-4 sm:p-5 space-y-3 transition ${
+                                    isAtiva
+                                      ? 'border-2 border-emerald-500/70 ring-2 ring-emerald-500/20 shadow-lg'
+                                      : isRecusada
+                                        ? 'border border-red-900/50 opacity-95'
+                                        : isDevPendente || isPendente
+                                          ? 'border border-amber-600/40'
+                                          : 'border border-slate-800 hover:border-slate-700'
+                                  }`}
                                 >
                                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                                     <div className="flex items-center space-x-3">
-                                      <div className="p-2.5 rounded-xl border bg-red-500/10 border-red-500/20 text-red-400">
+                                      <div className={`p-2.5 rounded-xl border ${
+                                        isAtiva
+                                          ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                          : isRecusada
+                                            ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                                            : isDevPendente || isPendente
+                                              ? 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                                              : 'bg-slate-800 border-slate-700 text-slate-300'
+                                      }`}>
                                         <Crosshair className="w-5 h-5" />
                                       </div>
+
                                       <div>
-                                        <div className="flex items-center space-x-2">
+                                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                          {isAtiva && (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500 text-slate-950 shadow-sm tracking-wider">
+                                              ● ATIVA
+                                            </span>
+                                          )}
+
                                           <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
-                                          <span className="font-mono text-xs text-red-400 font-bold">
+                                          <span className="font-mono text-xs text-amber-400 font-bold">
                                             Nº {cautela.weaponSerialNumber}
                                           </span>
-                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-red-500/20 text-red-300 border-red-500/30">
-                                            Recusada
-                                          </span>
+
+                                          {cautela.weaponCaliber && (
+                                            <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                              {cautela.weaponCaliber}
+                                            </span>
+                                          )}
+
+                                          {isDeferida && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                                              Deferida
+                                            </span>
+                                          )}
+
+                                          {isDevolvida && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-slate-800 text-slate-300 border-slate-700">
+                                              Devolvida ao Cofre
+                                            </span>
+                                          )}
+
+                                          {isDevPendente && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                                              Devolução em Análise
+                                            </span>
+                                          )}
+
+                                          {isPendente && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40">
+                                              Solicitação em Análise
+                                            </span>
+                                          )}
+
+                                          {isRecusada && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-red-500/20 text-red-300 border-red-500/30">
+                                              Indeferida
+                                            </span>
+                                          )}
                                         </div>
+
                                         <p className="text-xs text-slate-400 mt-0.5">
-                                          Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong>
+                                          {isAtiva
+                                            ? 'Cautela ativa em posse do policial (fixada no topo do histórico)'
+                                            : isDevolvida
+                                              ? `Devolvida em ${cautela.returnDate ? new Date(cautela.returnDate).toLocaleString('pt-BR') : 'N/A'} • Recebida por ${cautela.returnArmorerName || armorerInfo.name}`
+                                              : isRecusada
+                                                ? `Indeferida por ${cautela.armorerName || 'Armeiro'}${cautela.armorerMasp ? ` (MASP: ${cautela.armorerMasp})` : ''}`
+                                                : isDevPendente
+                                                  ? 'Devolução encaminhada e aguardando recibo pelo armeiro'
+                                                  : 'Solicitação encaminhada e aguardando análise do armeiro'}
                                         </p>
                                       </div>
                                     </div>
 
-                                    <div className="text-xs text-red-300 bg-red-950/40 border border-red-900/40 px-3 py-1.5 rounded-xl">
-                                      Recusada por {cautela.armorerName || 'Armeiro'} {cautela.armorerMasp ? `(MASP: ${cautela.armorerMasp})` : ''}
+                                    <div className="flex items-center space-x-2 self-end sm:self-center">
+                                      {isDeferida && (
+                                        <button
+                                          onClick={() => handlePrintTermo(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                                          title="Imprimir Termo de Cautela"
+                                        >
+                                          <Printer className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>Imprimir Termo</span>
+                                        </button>
+                                      )}
+
+                                      {isAtiva && (
+                                        <button
+                                          onClick={() => handleOpenReturnModal(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-600 hover:bg-amber-500 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
+                                        >
+                                          <RotateCcw className="w-3.5 h-3.5" />
+                                          <span>Devolver ao Cofre</span>
+                                        </button>
+                                      )}
                                     </div>
                                   </div>
 
-                                  {cautela.authorizationNotes && (
-                                    <div className="p-3 bg-red-950/20 border border-red-900/30 rounded-xl text-xs text-red-300">
-                                      <strong>Motivo da Recusa:</strong> {cautela.authorizationNotes}
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Unidade</span>
+                                      <span className="font-mono text-slate-200 font-bold truncate block">
+                                        {cautelaUnit?.name || 'Unidade Policial'}
+                                      </span>
                                     </div>
+                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Carregadores</span>
+                                      <span className="font-bold text-slate-200">{cautela.magazineQuantity} unidade(s)</span>
+                                    </div>
+                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        {isDeferida ? 'Data da Retirada' : 'Data da Solicitação'}
+                                      </span>
+                                      <span className="text-slate-300">
+                                        {isDeferida && cautela.authorizedAt
+                                          ? new Date(cautela.authorizedAt).toLocaleString('pt-BR')
+                                          : new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                      </span>
+                                    </div>
+                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        {isRecusada ? 'Armeiro Analista' : 'Armeiro Autorizador'}
+                                      </span>
+                                      <span className="text-slate-200 font-semibold truncate block" title={armorerInfo.label}>
+                                        {isRecusada
+                                          ? `${cautela.armorerName || 'Armeiro'}${cautela.armorerMasp ? ` (MASP: ${cautela.armorerMasp})` : ''}`
+                                          : armorerInfo.label}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {isDevolvida && (
+                                    <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          cautela.hadShots ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'
+                                        }`}>
+                                          {cautela.hadShots ? `${cautela.shotsFired} tiro(s) efetuado(s)` : 'Zero tiros'}
+                                        </span>
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                          cautela.isWorking !== false ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
+                                        }`}>
+                                          {cautela.isWorking !== false ? 'Em Condições de Uso' : 'Apresentou Defeito'}
+                                        </span>
+                                        {cautela.hadMalfunction && (
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">
+                                            Pane Relatada
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="text-[11px] text-slate-400">
+                                        Devolvido em {cautela.returnDate ? new Date(cautela.returnDate).toLocaleString('pt-BR') : 'N/A'}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {isRecusada && cautela.authorizationNotes && (
+                                    <div className="p-3 bg-red-950/25 border border-red-900/40 rounded-xl text-xs text-red-200">
+                                      <strong className="text-red-300">Motivo do Indeferimento:</strong> {cautela.authorizationNotes}
+                                    </div>
+                                  )}
+
+                                  {ammoDetails.hasAmmo && ammoDetails.quantity > 0 && (
+                                    <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                      <span className="text-amber-300 font-semibold flex items-center space-x-1.5">
+                                        <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>
+                                          Munição vinculada: <strong>{ammoDetails.quantity} un.</strong> ({ammoDetails.caliberName} • {ammoDetails.tipoMunicao} • {ammoDetails.pesoMunicao})
+                                        </span>
+                                      </span>
+                                      <span className="text-slate-400 font-mono">
+                                        Lote: {ammoDetails.loteMunicao} • {ammoDetails.destinacao}
+                                      </span>
+                                    </div>
+                                  )}
+
+                                  {cautela.reason && (
+                                    <p className="text-xs text-slate-400 italic">
+                                      Motivo / Finalidade: "{cautela.reason}"
+                                    </p>
                                   )}
                                 </div>
                               );
@@ -3226,8 +3687,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção 4: Histórico de Cautelas Devolvidas (Aba DEFERIDAS) */}
-                  {activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS') && (() => {
+                  {/* Seção 4: Histórico de Cautelas Devolvidas (Exclusivo para Armeiro; Policial não exibe div Histórico) */}
+                  {canAuthorize && activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS') && (() => {
                     const devolvidas = scopedCautelas.filter(c => c.status === 'DEVOLVIDA');
                     return (
                       <div className="space-y-3 pt-4 border-t border-slate-800">
@@ -4164,7 +4625,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               </div>
 
               <div className="p-3 bg-slate-950/50 border border-slate-800 rounded-xl text-xs text-slate-300 leading-normal">
-                Deseja <strong>continuar mesmo assim</strong> com uma nova solicitação ou deseja <strong>ir para sua cautela</strong> em Deferidas?
+                Deseja <strong>continuar mesmo assim</strong> com uma nova solicitação ou deseja <strong>ir para Minhas Cautelas</strong>?
               </div>
             </div>
 
