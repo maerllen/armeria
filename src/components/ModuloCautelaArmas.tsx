@@ -396,8 +396,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
           const linkedMun = (storage.getCautelasMunicoes() || []).find(m => 
             (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === w.serialNumber) ||
-            ((m as any).weaponId && (m as any).weaponId === w.id) ||
-            (m.requesterMasp && currentUser.masp && m.requesterMasp === currentUser.masp && m.status === 'AUTORIZADA')
+            ((m as any).weaponId && (m as any).weaponId === w.id)
           );
 
           list.unshift({
@@ -524,8 +523,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
           const linkedMun = (storage.getCautelasMunicoes() || []).find(m => 
             (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === w.serialNumber) ||
-            ((m as any).weaponId && (m as any).weaponId === w.id) ||
-            (reqMasp !== 'N/A' && m.requesterMasp && m.requesterMasp === reqMasp && m.status === 'AUTORIZADA')
+            ((m as any).weaponId && (m as any).weaponId === w.id)
           );
 
           list.unshift({
@@ -722,9 +720,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       (m as any).cautelaArmaId === cautela.id || 
       m.linkedWeaponCautelaId === cautela.id ||
       (m.linkedWeaponSerialNumber && cautela.weaponSerialNumber && m.linkedWeaponSerialNumber === cautela.weaponSerialNumber) ||
-      ((m as any).weaponId && cautela.weaponId && (m as any).weaponId === cautela.weaponId) ||
-      (m.requesterMasp && cautela.requesterMasp && m.requesterMasp === cautela.requesterMasp && (cautela.status === 'AUTORIZADA' ? m.status === 'AUTORIZADA' : true)) ||
-      (m.requesterId === cautela.requesterId && (m.status === 'PENDENTE' || m.status === 'AUTORIZADA') && Math.abs(new Date(m.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 30000)
+      ((m as any).weaponId && cautela.weaponId && (m as any).weaponId === cautela.weaponId)
     ) || null;
   };
 

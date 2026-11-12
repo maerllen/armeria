@@ -525,14 +525,6 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
       weaponCautela = cautelasArmas.find(c => c.weaponSerialNumber === cautela.linkedWeaponSerialNumber);
     }
 
-    if (!weaponCautela && cautela.requesterId) {
-      weaponCautela = cautelasArmas.find(c => 
-        (c.requesterId === cautela.requesterId || c.requesterMasp === cautela.requesterMasp) &&
-        (c.status === 'AUTORIZADA' || c.status === 'PENDENTE') &&
-        Math.abs(new Date(c.requestDate).getTime() - new Date(cautela.requestDate).getTime()) < 60000
-      );
-    }
-
     if (weaponCautela) {
       const weapon = weapons.find(w => w.id === weaponCautela?.weaponId || w.serialNumber === weaponCautela?.weaponSerialNumber);
       const desc = weapon ? `${weapon.model} (${weapon.type || 'Arma'})` : (weaponCautela.weaponModel || 'Armamento');
