@@ -1311,7 +1311,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   }
 
   // 4. Explosivista
-  if (role === 'Explosivista' || isUserExplosivista(user)) {
+  if (role === 'Explosivista') {
     return [
       'meu-perfil',
       'cautela-armas',
@@ -1337,8 +1337,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     const policeModules: ModuleType[] = [
       'meu-perfil',
       'cautela-armas',
-      'cautela-municoes',
-      'materiais'
+      'cautela-municoes'
     ];
     if (isUserExplosivista(user)) {
       policeModules.push('explosivos');

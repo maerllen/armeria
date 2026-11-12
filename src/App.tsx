@@ -604,7 +604,7 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'materiais' && effectiveUser && (
+          {activeModule === 'materiais' && effectiveUser && getAllowedModulesForUser(effectiveUser).includes('materiais') && (
             <MaterialModule
               currentUser={effectiveUser}
               departments={departments}
