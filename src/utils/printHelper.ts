@@ -98,7 +98,10 @@ export function printDocumentInPage(htmlContent: string) {
   frameDoc.write(keepArmorerSignatureOnly(htmlContent));
   frameDoc.close();
 
-  setTimeout(() => {
+  let hasPrinted = false;
+  const triggerPrint = () => {
+    if (hasPrinted) return;
+    hasPrinted = true;
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
@@ -110,5 +113,26 @@ export function printDocumentInPage(htmlContent: string) {
         iframe.remove();
       } catch (e) {}
     }, 2000);
-  }, 300);
+  };
+
+  const images = Array.from(frameDoc.images || []);
+  const pendingImages = images.filter(img => !img.complete);
+
+  if (pendingImages.length === 0) {
+    setTimeout(triggerPrint, 250);
+  } else {
+    let remaining = pendingImages.length;
+    const onImgSettled = () => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        setTimeout(triggerPrint, 120);
+      }
+    };
+    pendingImages.forEach(img => {
+      img.addEventListener('load', onImgSettled, { once: true });
+      img.addEventListener('error', onImgSettled, { once: true });
+    });
+    // Fallback caso alguma imagem demore mais que o esperado
+    setTimeout(triggerPrint, 1200);
+  }
 }

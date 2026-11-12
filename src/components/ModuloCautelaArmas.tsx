@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { 
-  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department 
+  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo 
 } from '../types';
 import { storage } from '../services/storage';
 import { 
@@ -1774,15 +1774,25 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Impressão do Termo Formal de Cautela de Armamento
   // Impressão do Termo Formal de Cautela de Armamento e Munições
   const handlePrintTermo = (cautela: CautelaArma) => {
-    const unitObj = units.find(u => u.id === cautela.unitId);
-    const deptObj = departments.find(d => d.id === cautela.departmentId);
+    const unitObj = units.find(u => u.id === cautela.unitId) || userUnit;
+    const deptObj = departments.find(d => d.id === (cautela.departmentId || unitObj?.departmentId));
+    const termoLogo = getSystemLogo(unitObj, deptObj);
     const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
     const returnVaultId = cautela.vaultSpaceId || weapon?.previousVaultSpaceId || weapon?.vaultSpaceId;
     const returnVault = vaultSpaces.find(v => v.id === returnVaultId);
     const returnUnit = units.find(u => u.id === returnVault?.unitId);
-    const returnVaultAddress = returnVault 
-      ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}`
-      : 'Cofre de Origem da Unidade';
+    const returnVaultAddress = isPolicial
+      ? (unitObj ? unitObj.name : 'Unidade Policial')
+      : returnVault
+        ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}`
+        : 'Cofre de Origem da Unidade';
+
+    const storedReqUser = storage.getUsers().find(u => u.id === cautela.requesterId);
+    const storedLoggedUser = storage.getUsers().find(u => u.id === currentUser.id);
+    const requesterCareer = (cautela.requesterCargo || (isPolicial ? currentUser.cargo : undefined) || storedReqUser?.cargo || 'Policial Civil').trim();
+    const signerName = isPolicial ? currentUser.name : cautela.requesterName;
+    const signerCareer = isPolicial ? (currentUser.cargo || storedLoggedUser?.cargo || requesterCareer || 'Policial Civil').trim() : requesterCareer;
+    const signerMasp = isPolicial ? (currentUser.masp || cautela.requesterMasp) : cautela.requesterMasp;
 
     const armorerInfo = getResolvedArmorer(cautela);
 
@@ -1836,14 +1846,27 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             line-height: 1.45;
           }
           .header-box {
-            text-align: center;
+            display: flex;
+            align-items: center;
+            gap: 14px;
             border-bottom: 2px solid #0f172a;
             padding-bottom: 10px;
             margin-bottom: 14px;
           }
+          .header-logo {
+            height: 58px;
+            width: auto;
+            max-width: 72px;
+            object-fit: contain;
+            flex-shrink: 0;
+          }
+          .header-center {
+            flex: 1;
+            text-align: center;
+          }
           .header-title-org {
             margin: 0;
-            font-size: 16px;
+            font-size: 15px;
             font-weight: bold;
             text-transform: uppercase;
             letter-spacing: 0.5px;
@@ -1851,14 +1874,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }
           .header-subtitle-unit {
             margin: 3px 0 0 0;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 600;
             text-transform: uppercase;
             color: #334155;
           }
           .header-doc-title {
-            margin: 12px 0 0 0;
-            font-size: 15px;
+            margin: 8px 0 0 0;
+            font-size: 14px;
             font-weight: bold;
             text-decoration: underline;
             letter-spacing: 0.5px;
@@ -1949,14 +1972,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       <body>
         <!-- PÁGINA 1: TERMO DE CAUTELA DO ARMAMENTO E MUNIÇÕES -->
         <div class="header-box">
-          <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
-          <h3 class="header-subtitle-unit">
-            ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
-          </h3>
-          <h1 class="header-doc-title">
-            TERMO DE CAUTELA INDIVIDUAL DE ARMAMENTO E MUNIÇÕES
-          </h1>
-          <p class="protocol-tag">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
+          <img src="${termoLogo}" alt="Logo da Unidade" class="header-logo" />
+          <div class="header-center">
+            <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+            <h3 class="header-subtitle-unit">
+              ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
+            </h3>
+            <h1 class="header-doc-title">
+              TERMO DE CAUTELA INDIVIDUAL DE ARMAMENTO E MUNIÇÕES
+            </h1>
+            <p class="protocol-tag">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
+          </div>
         </div>
 
         <div>
@@ -1969,7 +1995,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
             </tr>
             <tr>
-              <td><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
+              <td><strong>Cargo/Função:</strong> ${requesterCareer}</td>
               <td><strong>Telefone/Contato:</strong> ${cautela.requesterPhone || 'N/A'}</td>
             </tr>
             <tr>
@@ -1991,7 +2017,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <th>Calibre</th>
                 <th>Nº de Série</th>
                 <th style="text-align: center;">Carregadores</th>
-                <th>Cofre de Retorno (Origem)</th>
+                <th>${isPolicial ? 'Unidade de Origem / Retorno' : 'Cofre de Retorno (Origem)'}</th>
               </tr>
             </thead>
             <tbody>
@@ -2060,7 +2086,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <td><strong>Data/Hora Autorização:</strong> ${cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : 'Pendente'}</td>
             </tr>
             <tr>
-              <td colspan="2"><strong>Cofre Físico de Origem/Retorno:</strong> ${returnVaultAddress}</td>
+              <td colspan="2"><strong>${isPolicial ? 'Unidade de Origem / Retorno:' : 'Cofre Físico de Origem/Retorno:'}</strong> ${returnVaultAddress}</td>
             </tr>
           </table>
         </div>
@@ -2090,20 +2116,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         ` : ''}
 
         <div class="commitment-box">
-          <strong>TERMO DE COMPROMISSO E FIEL DEPOSITÁRIO:</strong> O servidor qualificado acima declara ter recebido o armamento, munições e acessórios discriminados em perfeitas condições de conservação e funcionamento, comprometendo-se a zelar por sua guarda, segurança e emprego estritamente legal nos termos do regulamento da Polícia Civil de Minas Gerais. Obriga-se a devolver o armamento no cofre de retorno indicado (<strong>${returnVaultAddress}</strong>) findo o período de cautela, prestando as informações técnicas de disparos efetuados, eventuais anomalias e restituição dos cartuchos não deflagrados.
+          <strong>TERMO DE COMPROMISSO E FIEL DEPOSITÁRIO:</strong> O servidor qualificado acima declara ter recebido o armamento, munições e acessórios discriminados em perfeitas condições de conservação e funcionamento, comprometendo-se a zelar por sua guarda, segurança e emprego estritamente legal nos termos do regulamento da Polícia Civil de Minas Gerais. Obriga-se a devolver o armamento ${isPolicial ? `na unidade indicada (<strong>${returnVaultAddress}</strong>)` : `no cofre de retorno indicado (<strong>${returnVaultAddress}</strong>)`} findo o período de cautela, prestando as informações técnicas de disparos efetuados, eventuais anomalias e restituição dos cartuchos não deflagrados.
         </div>
 
-        <div class="signatures-container">
+        <div class="signatures-container" ${isPolicial ? 'style="justify-content: center;"' : ''}>
           <div class="signature-box">
-            <strong>${cautela.requesterName}</strong><br/>
-            MASP: ${cautela.requesterMasp}<br/>
-            <span>Usuário que está recebendo a arma (Policial)</span>
+            <strong>${signerName}</strong><br/>
+            ${signerCareer}<br/>
+            MASP: ${signerMasp}
           </div>
-          <div class="signature-box">
-            <strong>${armorerInfo.name}</strong><br/>
-            ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
-            <span>Armeiro Autorizador da Cautela</span>
-          </div>
+          ${!isPolicial ? `
+            <div class="signature-box">
+              <strong>${armorerInfo.name}</strong><br/>
+              ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
+              <span>Armeiro Autorizador da Cautela</span>
+            </div>
+          ` : ''}
         </div>
 
         <div class="footer-note">
@@ -2114,14 +2142,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           <!-- PÁGINA 2: RECIBO DE FORNECIMENTO DE MUNIÇÕES VINCULADAS -->
           <div class="page-break">
             <div class="header-box">
-              <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
-              <h3 class="header-subtitle-unit">
-                ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
-              </h3>
-              <h1 class="header-doc-title">
-                RECIBO DE CAUTELA E FORNECIMENTO DE MUNIÇÕES
-              </h1>
-              <p class="protocol-tag">VINCULADO AO ARMAMENTO Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel}) • PROTOCOLO: ${(linkedAmmo?.id || cautela.id).toUpperCase()}</p>
+              <img src="${termoLogo}" alt="Logo da Unidade" class="header-logo" />
+              <div class="header-center">
+                <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+                <h3 class="header-subtitle-unit">
+                  ${deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA'} • ${unitObj ? unitObj.name : 'UNIDADE POLICIAL'}
+                </h3>
+                <h1 class="header-doc-title">
+                  RECIBO DE CAUTELA E FORNECIMENTO DE MUNIÇÕES
+                </h1>
+                <p class="protocol-tag">VINCULADO AO ARMAMENTO Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel}) • PROTOCOLO: ${(linkedAmmo?.id || cautela.id).toUpperCase()}</p>
+              </div>
             </div>
 
             <div>
@@ -2134,7 +2165,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
                 </tr>
                 <tr>
-                  <td><strong>Cargo/Função:</strong> ${cautela.requesterCargo || 'Policial'}</td>
+                  <td><strong>Cargo/Função:</strong> ${requesterCareer}</td>
                   <td><strong>Armamento Vinculado:</strong> Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel} • ${cautela.weaponCaliber || 'N/A'})</td>
                 </tr>
               </table>
@@ -2154,7 +2185,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     <th>Peso</th>
                     <th>Lote</th>
                     <th>Destinação</th>
-                    <th>Cofre</th>
+                    ${!isPolicial ? '<th>Cofre</th>' : ''}
                   </tr>
                 </thead>
                 <tbody>
@@ -2166,7 +2197,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     <td>${ammoPeso}</td>
                     <td style="font-family: monospace;">${ammoLote}</td>
                     <td><strong>${ammoDest}</strong></td>
-                    <td>${ammoVault ? `${ammoVault.code}${ammoVaultUnit ? ` (${ammoVaultUnit.name})` : ''}` : returnVaultAddress}</td>
+                    ${!isPolicial ? `<td>${ammoVault ? `${ammoVault.code}${ammoVaultUnit ? ` (${ammoVaultUnit.name})` : ''}` : returnVaultAddress}</td>` : ''}
                   </tr>
                 </tbody>
               </table>
@@ -2192,17 +2223,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               <strong>TERMO DE RESPONSABILIDADE DE MUNIÇÃO:</strong> O servidor declara o recebimento dos cartuchos acima discriminados, comprometendo-se ao uso estritamente legal em serviço e à prestação de contas dos cartuchos deflagrados e devolução dos cartuchos íntegros remanescentes junto à Armaria da Unidade.
             </div>
 
-            <div class="signatures-container">
+            <div class="signatures-container" ${isPolicial ? 'style="justify-content: center;"' : ''}>
               <div class="signature-box">
-                <strong>${cautela.requesterName}</strong><br/>
-                MASP: ${cautela.requesterMasp}<br/>
-                <span>Usuário que está recebendo as munições (Policial)</span>
+                <strong>${signerName}</strong><br/>
+                ${signerCareer}<br/>
+                MASP: ${signerMasp}
               </div>
-              <div class="signature-box">
-                <strong>${armorerInfo.name}</strong><br/>
-                ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
-                <span>Armeiro Autorizador da Cautela</span>
-              </div>
+              ${!isPolicial ? `
+                <div class="signature-box">
+                  <strong>${armorerInfo.name}</strong><br/>
+                  ${armorerInfo.masp ? `MASP: ${armorerInfo.masp}<br/>` : ''}
+                  <span>Armeiro Autorizador da Cautela</span>
+                </div>
+              ` : ''}
             </div>
 
             <div class="footer-note">
@@ -2329,7 +2362,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setIsPrintHistoryModalOpen(true);
   };
 
-  // Impressão do Relatório de Histórico de Cautelas do Policial (Completo ou Filtrado, com Munições Vinculadas)
+  // Impressão do Relatório de Cautela / Histórico do Policial
+  // (1 registro de cautela por página, logo da unidade à esquerda no cabeçalho e assinatura de 3 linhas em todas as páginas)
   const handlePrintPolicialHistory = (forceComplete?: boolean) => {
     const isComplete = forceComplete === true || (forceComplete !== false && printMode === 'COMPLETO');
     const reportList = buildPolicialPrintList(isComplete);
@@ -2349,16 +2383,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     };
 
     const deptObj = userUnit ? departments.find(d => d.id === userUnit.departmentId) : undefined;
+    const defaultUnitLogo = getSystemLogo(userUnit, deptObj);
+    const storedCurrentUser = storage.getUsers().find(u => u.id === currentUser.id);
+    const userCareer = (currentUser.cargo || storedCurrentUser?.cargo || 'Policial Civil').trim();
+    const emittedAtStr = new Date().toLocaleString('pt-BR');
 
     const totalCount = reportList.length;
     const ativasCount = reportList.filter(c => c.status === 'AUTORIZADA').length;
     const devolvidasCount = reportList.filter(c => c.status === 'DEVOLVIDA' || c.status === 'DEVOLUCAO_PENDENTE').length;
     const indeferidasReportCount = reportList.filter(c => c.status === 'RECUSADA').length;
-    const emAnaliseCount = reportList.filter(c => isPendingStatus(c.status)).length;
-    const comMunicaoCount = reportList.filter(c => {
-      const ad = getRescuedAmmoDetails(c);
-      return ad.hasAmmo && ad.quantity > 0;
-    }).length;
 
     const statusLabelMap: Record<typeof printStatusFilter, string> = {
       TODAS: 'Todas (Ativas, Devolvidas e Indeferidas)',
@@ -2370,19 +2403,71 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
     const selectedWeaponObj = userHistoryWeapons.find(w => w.key === printWeaponFilter);
     const periodLabel = isComplete
-      ? 'Todo o Período (Histórico Completo: Ativas, Devolvidas e Indeferidas)'
+      ? 'Todo o Período (Ativas, Devolvidas e Indeferidas)'
       : (printStartDate || printEndDate)
         ? `${printStartDate ? `De ${formatDateBr(printStartDate)}` : 'Desde o início'}${printEndDate ? ` até ${formatDateBr(printEndDate)}` : ' até a presente data'}`
         : 'Todo o Período';
 
     const filterSummaryText = isComplete
-      ? 'Relatório Completo — Todo o Período (Inclui Cautelas Ativas, Devolvidas e Indeferidas)'
-      : `Situação: ${statusLabelMap[printStatusFilter]} • Armamento: ${selectedWeaponObj ? selectedWeaponObj.label : 'Todas as Armas'} • Período: ${periodLabel}`;
+      ? 'Relatório Completo — Todo o Período (Ativas, Devolvidas e Indeferidas)'
+      : `Situação: ${statusLabelMap[printStatusFilter]} • Arma: ${selectedWeaponObj ? selectedWeaponObj.label : 'Todas as Armas'} • Período: ${periodLabel}`;
 
-    const rowsHtml = reportList.length === 0
+    const renderPageSignatureAndFooter = (pageNum: number, totalPages: number) => `
+      <div class="signature-section">
+        <div class="signature-line"></div>
+        <div class="signature-name">${escapeHtml(currentUser.name)}</div>
+        <div class="signature-career">${escapeHtml(userCareer)}</div>
+        <div class="signature-masp">MASP: ${escapeHtml(currentUser.masp || '—')}</div>
+      </div>
+
+      <div class="footer-note">
+        Página ${pageNum} de ${totalPages} • Relatório de Cautela de Armas emitido em ${escapeHtml(emittedAtStr)} • Sistema de Gestão de Armas e Munições - PCMG
+      </div>
+    `;
+
+    const pagesHtml = reportList.length === 0
       ? `
-        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 18px; text-align: center; color: #475569; margin-top: 10px;">
-          Nenhum registro de cautela encontrado para os parâmetros selecionados.
+        <div class="cautela-report-page">
+          <div class="page-header">
+            <div class="header-left">
+              <img src="${escapeHtml(defaultUnitLogo)}" alt="Logo da Unidade" class="unit-logo" />
+              <div class="header-titles">
+                <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+                <h3 class="header-subtitle-dept">${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')}</h3>
+                <div class="header-subtitle-unit">${escapeHtml(userUnit ? userUnit.name : 'UNIDADE POLICIAL')}</div>
+              </div>
+            </div>
+            <div class="header-badge">
+              RELATÓRIO DE CAUTELA<br/>
+              <span>PÁGINA 1 DE 1</span>
+            </div>
+          </div>
+
+          <div class="doc-title-bar">
+            <h1 class="header-doc-title">RELATÓRIO DE CAUTELA DE ARMAS DA UNIDADE</h1>
+            <div class="filter-banner">${escapeHtml(filterSummaryText)}</div>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <div class="section-banner">1. IDENTIFICAÇÃO DO SERVIDOR POLICIAL</div>
+            <table class="info-table">
+              <tr>
+                <td style="width: 45%;"><strong>Servidor:</strong> ${escapeHtml(currentUser.name)}</td>
+                <td style="width: 30%;"><strong>Carreira:</strong> ${escapeHtml(userCareer)}</td>
+                <td style="width: 25%;"><strong>MASP:</strong> ${escapeHtml(currentUser.masp)}</td>
+              </tr>
+              <tr>
+                <td><strong>Unidade de Lotação:</strong> ${escapeHtml(userUnit ? userUnit.name : 'Unidade Vinculada')}</td>
+                <td colspan="2"><strong>Data/Hora da Emissão:</strong> ${escapeHtml(emittedAtStr)}</td>
+              </tr>
+            </table>
+          </div>
+
+          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 24px; text-align: center; color: #475569; margin: 18px 0;">
+            Nenhum registro de cautela encontrado para os parâmetros selecionados.
+          </div>
+
+          ${renderPageSignatureAndFooter(1, 1)}
         </div>
       `
       : reportList.map((cautela, index) => {
@@ -2421,6 +2506,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               : 'border: 1px solid #94a3b8; background: #ffffff;';
 
           const cautelaUnit = units.find(u => u.id === cautela.unitId) || userUnit;
+          const cautelaDept = departments.find(d => d.id === (cautelaUnit?.departmentId || cautela.departmentId)) || deptObj;
+          const pageUnitLogo = getSystemLogo(cautelaUnit, cautelaDept);
+
           const armorerInfo = getResolvedArmorer(cautela);
           const ammoDetails = getRescuedAmmoDetails(cautela);
           const hasLinkedAmmo = ammoDetails.hasAmmo && ammoDetails.quantity > 0;
@@ -2432,98 +2520,157 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 ? Number((ammoDetails.linkedAmmo as any).returnedQuantity)
                 : null;
 
+          const isLastPage = index === reportList.length - 1;
+
           return `
-            <div class="cautela-card" style="${cardBorderStyle}">
-              <div class="cautela-card-header">
-                <div>
-                  <span style="font-weight: 800; font-size: 11px; color: #0f172a;">
-                    #${index + 1} — ${escapeHtml(cautela.weaponModel || 'Armamento')}
-                  </span>
-                  <span style="font-family: monospace; font-weight: 700; font-size: 11px; margin-left: 8px; color: #1e293b;">
-                    Nº Série: ${escapeHtml(cautela.weaponSerialNumber || 'N/I')}
-                  </span>
-                  ${cautela.weaponCaliber ? `<span style="margin-left: 8px; font-size: 10px; padding: 1px 6px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f1f5f9;">Calibre: <strong>${escapeHtml(cautela.weaponCaliber)}</strong></span>` : ''}
+            <div class="cautela-report-page ${!isLastPage ? 'page-break' : ''}">
+              <div class="page-header">
+                <div class="header-left">
+                  <img src="${escapeHtml(pageUnitLogo)}" alt="Logo da Unidade" class="unit-logo" />
+                  <div class="header-titles">
+                    <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+                    <h3 class="header-subtitle-dept">${escapeHtml(cautelaDept ? cautelaDept.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')}</h3>
+                    <div class="header-subtitle-unit">${escapeHtml(cautelaUnit ? cautelaUnit.name : 'UNIDADE POLICIAL')}</div>
+                  </div>
                 </div>
-                <span style="padding: 2px 8px; border-radius: 4px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; ${statusStyle}">
-                  ${escapeHtml(statusText)}
-                </span>
+                <div class="header-badge">
+                  RELATÓRIO DE CAUTELA<br/>
+                  <span>REGISTRO ${index + 1} DE ${totalCount}</span>
+                </div>
               </div>
 
-              <table class="info-table" style="margin-bottom: ${hasLinkedAmmo ? '6px' : '0'};">
-                <tr>
-                  <td style="width: 34%;"><strong>Espécie / Tipo:</strong> ${escapeHtml(cautela.weaponType || 'Arma de Fogo')}</td>
-                  <td style="width: 33%;"><strong>Carregadores:</strong> ${escapeHtml(cautela.magazineQuantity ?? 0)} un.</td>
-                  <td style="width: 33%;"><strong>Unidade:</strong> ${escapeHtml(cautelaUnit?.name || 'Unidade Policial')}</td>
-                </tr>
-                <tr>
-                  <td><strong>Data da Solicitação:</strong> ${cautela.requestDate ? escapeHtml(new Date(cautela.requestDate).toLocaleString('pt-BR')) : 'N/I'}</td>
-                  <td><strong>Data da Autorização:</strong> ${cautela.authorizedAt ? escapeHtml(new Date(cautela.authorizedAt).toLocaleString('pt-BR')) : (isRecusada ? 'Indeferida' : 'Aguardando')}</td>
-                  <td><strong>Data da Devolução:</strong> ${cautela.returnDate ? escapeHtml(new Date(cautela.returnDate).toLocaleString('pt-BR')) : (isAtiva ? 'Em posse (Ativa)' : '—')}</td>
-                </tr>
-                <tr>
-                  <td><strong>Armeiro Responsável:</strong> ${isPend ? 'Aguardando análise' : `${escapeHtml(armorerInfo.name)}${armorerInfo.masp ? ` (MASP: ${escapeHtml(armorerInfo.masp)})` : ''}`}</td>
-                  <td colspan="2"><strong>Motivo / Finalidade:</strong> ${escapeHtml(cautela.reason || 'Serviço Policial')}</td>
-                </tr>
-                ${(isDevolvida || isDevPendente) ? `
-                  <tr>
-                    <td><strong>Disparos na Devolução:</strong> ${cautela.hadShots ? `Sim (${escapeHtml(cautela.shotsFired || 0)} disparos)` : 'Não houve disparos'}</td>
-                    <td><strong>Condição na Devolução:</strong> ${cautela.isWorking !== false ? 'Em perfeito funcionamento' : `Com defeito (${escapeHtml(cautela.defectDescription || 'Relatado')})`}</td>
-                    <td><strong>Recebedor Devolução:</strong> ${isDevPendente ? 'Aguardando recibo do Armeiro' : escapeHtml(cautela.returnArmorerName || armorerInfo.name)}</td>
-                  </tr>
-                ` : ''}
-                ${isRecusada && cautela.authorizationNotes ? `
-                  <tr>
-                    <td colspan="3" style="color: #991b1b; background: #fef2f2;">
-                      <strong>Justificativa do Indeferimento:</strong> ${escapeHtml(cautela.authorizationNotes)}
-                    </td>
-                  </tr>
-                ` : ''}
-                ${!isRecusada && cautela.authorizationNotes ? `
-                  <tr>
-                    <td colspan="3">
-                      <strong>Observações do Registro:</strong> ${escapeHtml(cautela.authorizationNotes)}
-                    </td>
-                  </tr>
-                ` : ''}
-              </table>
+              <div class="doc-title-bar">
+                <h1 class="header-doc-title">RELATÓRIO DE CAUTELA DE ARMAS DA UNIDADE</h1>
+                <div class="filter-banner">
+                  ${escapeHtml(filterSummaryText)} • Total: ${totalCount} (Ativas: ${ativasCount} | Devolvidas: ${devolvidasCount} | Indeferidas: ${indeferidasReportCount})
+                </div>
+              </div>
 
-              ${hasLinkedAmmo ? `
-                <div class="ammo-linked-box">
-                  <div class="ammo-linked-title">
-                    DADOS DAS MUNIÇÕES DA CAUTELA VINCULADA ${ammoDetails.linkedCautelaId ? `(PROTOCOLO: ${escapeHtml(ammoDetails.linkedCautelaId.toUpperCase())})` : ''}
+              <div style="margin-bottom: 10px;">
+                <div class="section-banner">1. IDENTIFICAÇÃO DO SERVIDOR POLICIAL</div>
+                <table class="info-table">
+                  <tr>
+                    <td style="width: 44%;"><strong>Servidor:</strong> ${escapeHtml(currentUser.name)}</td>
+                    <td style="width: 31%;"><strong>Carreira:</strong> ${escapeHtml(userCareer)}</td>
+                    <td style="width: 25%;"><strong>MASP:</strong> ${escapeHtml(currentUser.masp)}</td>
+                  </tr>
+                  <tr>
+                    <td><strong>Unidade de Lotação:</strong> ${escapeHtml(userUnit ? userUnit.name : (cautelaUnit?.name || 'Unidade Vinculada'))}</td>
+                    <td colspan="2"><strong>Data/Hora da Emissão:</strong> ${escapeHtml(emittedAtStr)}</td>
+                  </tr>
+                </table>
+              </div>
+
+              <div>
+                <div class="section-banner" style="border-bottom: 1px solid #94a3b8; margin-bottom: 8px;">
+                  2. REGISTRO INDIVIDUAL DA CAUTELA DE ARMAMENTO (#${index + 1} DE ${totalCount})
+                </div>
+
+                <div class="cautela-card" style="${cardBorderStyle}">
+                  <div class="cautela-card-header">
+                    <div>
+                      <span style="font-weight: 800; font-size: 12px; color: #0f172a;">
+                        ${escapeHtml(cautela.weaponModel || 'Armamento')}
+                      </span>
+                      <span style="font-family: monospace; font-weight: 700; font-size: 11.5px; margin-left: 8px; color: #1e293b;">
+                        Nº Série: ${escapeHtml(cautela.weaponSerialNumber || 'N/I')}
+                      </span>
+                      ${cautela.weaponCaliber ? `<span style="margin-left: 8px; font-size: 10.5px; padding: 1px 6px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f1f5f9;">Calibre: <strong>${escapeHtml(cautela.weaponCaliber)}</strong></span>` : ''}
+                    </div>
+                    <span style="padding: 3px 9px; border-radius: 4px; font-size: 10px; font-weight: 800; text-transform: uppercase; ${statusStyle}">
+                      ${escapeHtml(statusText)}
+                    </span>
                   </div>
-                  <table class="data-table">
-                    <thead>
+
+                  <table class="info-table" style="margin-bottom: ${hasLinkedAmmo ? '8px' : '0'};">
+                    <tr>
+                      <td style="width: 34%;"><strong>Espécie / Tipo:</strong> ${escapeHtml(cautela.weaponType || 'Arma de Fogo')}</td>
+                      <td style="width: 33%;"><strong>Carregadores:</strong> ${escapeHtml(cautela.magazineQuantity ?? 0)} un.</td>
+                      <td style="width: 33%;"><strong>Unidade da Cautela:</strong> ${escapeHtml(cautelaUnit?.name || 'Unidade Policial')}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Data da Solicitação:</strong> ${cautela.requestDate ? escapeHtml(new Date(cautela.requestDate).toLocaleString('pt-BR')) : 'N/I'}</td>
+                      <td><strong>Data da Autorização:</strong> ${cautela.authorizedAt ? escapeHtml(new Date(cautela.authorizedAt).toLocaleString('pt-BR')) : (isRecusada ? 'Indeferida' : 'Aguardando')}</td>
+                      <td><strong>Data da Devolução:</strong> ${cautela.returnDate ? escapeHtml(new Date(cautela.returnDate).toLocaleString('pt-BR')) : (isAtiva ? 'Em posse (Ativa)' : '—')}</td>
+                    </tr>
+                    <tr>
+                      <td><strong>Armeiro Responsável:</strong> ${isPend ? 'Aguardando análise' : `${escapeHtml(armorerInfo.name)}${armorerInfo.masp ? ` (MASP: ${escapeHtml(armorerInfo.masp)})` : ''}`}</td>
+                      <td colspan="2"><strong>Motivo / Finalidade:</strong> ${escapeHtml(cautela.reason || 'Serviço Policial')}</td>
+                    </tr>
+                    ${(isDevolvida || isDevPendente) ? `
                       <tr>
-                        <th>Calibre</th>
-                        <th>Qtd. Acautelada</th>
-                        <th>Fabricante</th>
-                        <th>Tipo</th>
-                        <th>Peso</th>
-                        <th>Lote</th>
-                        <th>Destinação</th>
-                        <th>Regime / Devolução</th>
+                        <td><strong>Disparos na Devolução:</strong> ${cautela.hadShots ? `Sim (${escapeHtml(cautela.shotsFired || 0)} disparos)` : 'Não houve disparos'}</td>
+                        <td><strong>Condição na Devolução:</strong> ${cautela.isWorking !== false ? 'Em perfeito funcionamento' : `Com defeito (${escapeHtml(cautela.defectDescription || 'Relatado')})`}</td>
+                        <td><strong>Recebedor Devolução:</strong> ${isDevPendente ? 'Aguardando recibo do Armeiro' : escapeHtml(cautela.returnArmorerName || armorerInfo.name)}</td>
                       </tr>
-                    </thead>
-                    <tbody>
+                      ${cautela.hadMalfunction ? `
+                        <tr>
+                          <td colspan="3" style="color: #92400e;"><strong>Pane Relatada:</strong> ${escapeHtml(cautela.malfunctionDescription || 'Sim')}</td>
+                        </tr>
+                      ` : ''}
+                      ${cautela.returnObservations ? `
+                        <tr>
+                          <td colspan="3"><strong>Observações da Devolução:</strong> ${escapeHtml(cautela.returnObservations)}</td>
+                        </tr>
+                      ` : ''}
+                    ` : ''}
+                    ${isRecusada && cautela.authorizationNotes ? `
                       <tr>
-                        <td><strong>${escapeHtml(ammoDetails.caliberName)}</strong></td>
-                        <td><strong>${escapeHtml(ammoDetails.quantity)} un.</strong></td>
-                        <td>${escapeHtml(ammoDetails.fabricante)}</td>
-                        <td>${escapeHtml(ammoDetails.tipoMunicao)}</td>
-                        <td>${escapeHtml(ammoDetails.pesoMunicao)}</td>
-                        <td style="font-family: monospace;">${escapeHtml(ammoDetails.loteMunicao)}</td>
-                        <td>${escapeHtml(ammoDetails.destinacao)}</td>
-                        <td>
-                          ${ammoDetails.seraDevolvida
-                            ? `Passiva de Devolução${(isDevolvida || isDevPendente) && returnedAmmoVal !== null ? ` (Devolvidas: ${escapeHtml(returnedAmmoVal)} un.)` : ''}`
-                            : 'Retirada Permanente / Consumo'}
+                        <td colspan="3" style="color: #991b1b; background: #fef2f2;">
+                          <strong>Justificativa do Indeferimento:</strong> ${escapeHtml(cautela.authorizationNotes)}
                         </td>
                       </tr>
-                    </tbody>
+                    ` : ''}
+                    ${!isRecusada && cautela.authorizationNotes ? `
+                      <tr>
+                        <td colspan="3">
+                          <strong>Observações do Registro:</strong> ${escapeHtml(cautela.authorizationNotes)}
+                        </td>
+                      </tr>
+                    ` : ''}
                   </table>
+
+                  ${hasLinkedAmmo ? `
+                    <div class="ammo-linked-box">
+                      <div class="ammo-linked-title">
+                        3. DADOS DAS MUNIÇÕES DA CAUTELA VINCULADA ${ammoDetails.linkedCautelaId ? `(PROTOCOLO: ${escapeHtml(ammoDetails.linkedCautelaId.toUpperCase())})` : ''}
+                      </div>
+                      <table class="data-table">
+                        <thead>
+                          <tr>
+                            <th>Calibre</th>
+                            <th>Qtd. Acautelada</th>
+                            <th>Fabricante</th>
+                            <th>Tipo</th>
+                            <th>Peso</th>
+                            <th>Lote</th>
+                            <th>Destinação</th>
+                            <th>Regime / Devolução</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td><strong>${escapeHtml(ammoDetails.caliberName)}</strong></td>
+                            <td><strong>${escapeHtml(ammoDetails.quantity)} un.</strong></td>
+                            <td>${escapeHtml(ammoDetails.fabricante)}</td>
+                            <td>${escapeHtml(ammoDetails.tipoMunicao)}</td>
+                            <td>${escapeHtml(ammoDetails.pesoMunicao)}</td>
+                            <td style="font-family: monospace;">${escapeHtml(ammoDetails.loteMunicao)}</td>
+                            <td>${escapeHtml(ammoDetails.destinacao)}</td>
+                            <td>
+                              ${ammoDetails.seraDevolvida
+                                ? `Passiva de Devolução${(isDevolvida || isDevPendente) && returnedAmmoVal !== null ? ` (Devolvidas: ${escapeHtml(returnedAmmoVal)} un.)` : ''}`
+                                : 'Retirada Permanente / Consumo'}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  ` : ''}
                 </div>
-              ` : ''}
+              </div>
+
+              ${renderPageSignatureAndFooter(index + 1, totalCount)}
             </div>
           `;
         }).join('');
@@ -2537,7 +2684,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         <style>
           @page {
             size: A4 portrait;
-            margin: 11mm;
+            margin: 12mm 14mm;
           }
           * {
             box-sizing: border-box;
@@ -2549,54 +2696,108 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             color: #0f172a !important;
             font-family: Arial, Helvetica, sans-serif !important;
             margin: 0;
-            padding: 6px;
+            padding: 0;
             font-size: 10.5px;
-            line-height: 1.4;
+            line-height: 1.42;
           }
-          .header-box {
-            text-align: center;
+          .cautela-report-page {
+            padding: 4px 2px;
+            page-break-inside: avoid;
+            break-inside: avoid;
+          }
+          .page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 14px;
             border-bottom: 2px solid #0f172a;
-            padding-bottom: 8px;
-            margin-bottom: 12px;
+            padding-bottom: 10px;
+            margin-bottom: 10px;
+          }
+          .header-left {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+          }
+          .unit-logo {
+            height: 58px;
+            width: auto;
+            max-width: 75px;
+            object-fit: contain;
+            flex-shrink: 0;
+          }
+          .header-titles {
+            text-align: left;
           }
           .header-title-org {
             margin: 0;
-            font-size: 15px;
-            font-weight: 800;
-            letter-spacing: 0.5px;
+            font-size: 13.5px;
+            font-weight: 900;
+            letter-spacing: 0.4px;
             text-transform: uppercase;
             color: #000000;
           }
-          .header-subtitle-unit {
-            margin: 3px 0 0 0;
-            font-size: 11.5px;
+          .header-subtitle-dept {
+            margin: 2px 0 0 0;
+            font-size: 11px;
             font-weight: 700;
             color: #1e293b;
             text-transform: uppercase;
           }
+          .header-subtitle-unit {
+            margin: 2px 0 0 0;
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #334155;
+            text-transform: uppercase;
+          }
+          .header-badge {
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: monospace;
+            text-align: right;
+            font-size: 9.5px;
+            font-weight: 800;
+            color: #0f172a;
+            flex-shrink: 0;
+          }
+          .header-badge span {
+            font-size: 10.5px;
+            color: #000000;
+          }
+          .doc-title-bar {
+            text-align: center;
+            margin-bottom: 12px;
+          }
           .header-doc-title {
-            margin: 6px 0 2px 0;
-            font-size: 13px;
+            margin: 0 0 4px 0;
+            font-size: 12.5px;
             font-weight: 800;
             color: #000000;
             text-decoration: underline;
             text-transform: uppercase;
           }
           .filter-banner {
-            margin: 4px auto 0 auto;
-            font-size: 10px;
+            margin: 2px auto 0 auto;
+            font-size: 9.5px;
             font-weight: 700;
             color: #1e293b;
-            background: #f1f5f9;
+            background: #f8fafc;
             border: 1px solid #cbd5e1;
             border-radius: 4px;
-            padding: 4px 8px;
+            padding: 3px 8px;
             display: inline-block;
           }
           .section-banner {
             background-color: #e2e8f0 !important;
             color: #0f172a !important;
-            padding: 4px 8px;
+            padding: 5px 8px;
             font-weight: 800;
             font-size: 10.5px;
             border: 1px solid #94a3b8;
@@ -2608,9 +2809,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             border-collapse: collapse;
           }
           .info-table td {
-            padding: 4px 7px;
+            padding: 5px 8px;
             border: 1px solid #cbd5e1;
-            font-size: 10px;
+            font-size: 10.5px;
             color: #0f172a;
             vertical-align: top;
           }
@@ -2618,7 +2819,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             background-color: #f1f5f9 !important;
             color: #0f172a !important;
             border: 1px solid #94a3b8;
-            padding: 4px 5px;
+            padding: 5px 6px;
             text-align: left;
             font-size: 9.5px;
             font-weight: 700;
@@ -2626,38 +2827,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }
           .data-table td {
             border: 1px solid #cbd5e1;
-            padding: 4px 5px;
-            font-size: 9.5px;
+            padding: 5px 6px;
+            font-size: 10px;
             color: #0f172a;
-          }
-          .summary-grid {
-            display: table;
-            width: 100%;
-            table-layout: fixed;
-            border-collapse: collapse;
-            margin-bottom: 12px;
-          }
-          .summary-cell {
-            display: table-cell;
-            border: 1px solid #94a3b8;
-            padding: 6px 8px;
-            text-align: center;
-            background: #f8fafc;
-          }
-          .summary-cell strong {
-            display: block;
-            font-size: 13px;
-            color: #0f172a;
-          }
-          .summary-cell span {
-            font-size: 9px;
-            text-transform: uppercase;
-            font-weight: 700;
-            color: #475569;
           }
           .cautela-card {
             border-radius: 5px;
-            padding: 7px;
+            padding: 10px;
             margin-bottom: 10px;
             page-break-inside: avoid;
           }
@@ -2665,38 +2841,55 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding-bottom: 5px;
-            margin-bottom: 5px;
+            padding-bottom: 6px;
+            margin-bottom: 8px;
             border-bottom: 1px solid #cbd5e1;
           }
           .ammo-linked-box {
             background: #f8fafc;
             border: 1px solid #94a3b8;
             border-radius: 4px;
-            padding: 5px;
-            margin-top: 4px;
+            padding: 6px;
+            margin-top: 6px;
           }
           .ammo-linked-title {
-            font-size: 9.5px;
+            font-size: 10px;
             font-weight: 800;
             color: #0f172a;
             text-transform: uppercase;
-            margin-bottom: 4px;
+            margin-bottom: 5px;
           }
           .signature-section {
-            margin-top: 28px;
+            margin-top: 44px;
             page-break-inside: avoid;
             text-align: center;
           }
           .signature-line {
-            width: 60%;
-            margin: 0 auto;
+            width: 280px;
+            max-width: 70%;
+            margin: 0 auto 6px auto;
             border-top: 1px solid #000000;
-            padding-top: 6px;
+          }
+          .signature-name {
+            font-size: 11px;
+            font-weight: 800;
+            color: #000000;
+            line-height: 1.35;
+          }
+          .signature-career {
             font-size: 10.5px;
+            font-weight: 600;
+            color: #1e293b;
+            line-height: 1.35;
+          }
+          .signature-masp {
+            font-size: 10.5px;
+            font-weight: 700;
+            color: #0f172a;
+            line-height: 1.35;
           }
           .footer-note {
-            margin-top: 14px;
+            margin-top: 18px;
             border-top: 1px dashed #cbd5e1;
             padding-top: 6px;
             text-align: center;
@@ -2706,80 +2899,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </style>
       </head>
       <body>
-        <div class="header-box">
-          <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
-          <h3 class="header-subtitle-unit">
-            ${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA')} • ${escapeHtml(userUnit ? userUnit.name : 'UNIDADE POLICIAL')}
-          </h3>
-          <h1 class="header-doc-title">
-            RELATÓRIO DE HISTÓRICO INDIVIDUAL DE CAUTELAS DE ARMAS
-          </h1>
-          <div class="filter-banner">
-            ${escapeHtml(filterSummaryText)}
-          </div>
-        </div>
-
-        <div style="margin-bottom: 10px;">
-          <div class="section-banner">1. IDENTIFICAÇÃO DO SERVIDOR POLICIAL</div>
-          <table class="info-table">
-            <tr>
-              <td style="width: 45%;"><strong>Servidor:</strong> ${escapeHtml(currentUser.name)}</td>
-              <td style="width: 25%;"><strong>MASP:</strong> ${escapeHtml(currentUser.masp)}</td>
-              <td style="width: 30%;"><strong>Cargo/Perfil:</strong> ${escapeHtml((currentUser as any).cargo || currentUser.role)}</td>
-            </tr>
-            <tr>
-              <td><strong>Unidade de Lotação:</strong> ${escapeHtml(userUnit ? userUnit.name : 'Unidade Vinculada')}</td>
-              <td colspan="2"><strong>Data/Hora da Emissão:</strong> ${escapeHtml(new Date().toLocaleString('pt-BR'))}</td>
-            </tr>
-          </table>
-        </div>
-
-        <div class="summary-grid">
-          <div class="summary-cell">
-            <strong>${totalCount}</strong>
-            <span>Total no Relatório</span>
-          </div>
-          <div class="summary-cell" style="background: #f0fdf4;">
-            <strong style="color: #15803d;">${ativasCount}</strong>
-            <span>Ativas (Em Posse)</span>
-          </div>
-          <div class="summary-cell">
-            <strong>${devolvidasCount}</strong>
-            <span>Devolvidas</span>
-          </div>
-          <div class="summary-cell" style="background: #fef2f2;">
-            <strong style="color: #b91c1c;">${indeferidasReportCount}</strong>
-            <span>Indeferidas</span>
-          </div>
-          ${emAnaliseCount > 0 ? `
-            <div class="summary-cell" style="background: #fffbeb;">
-              <strong style="color: #b45309;">${emAnaliseCount}</strong>
-              <span>Em Análise</span>
-            </div>
-          ` : ''}
-          <div class="summary-cell">
-            <strong>${comMunicaoCount}</strong>
-            <span>C/ Munição Vinculada</span>
-          </div>
-        </div>
-
-        <div>
-          <div class="section-banner" style="border-bottom: 1px solid #94a3b8; margin-bottom: 8px;">
-            2. REGISTROS DE CAUTELAS DE ARMAMENTO ${ativasCount > 0 ? '(CAUTELAS ATIVAS FIXADAS NO TOPO)' : ''}
-          </div>
-          ${rowsHtml}
-        </div>
-
-        <div class="signature-section">
-          <div class="signature-line">
-            <strong>${escapeHtml(currentUser.name)}</strong><br/>
-            MASP: ${escapeHtml(currentUser.masp)} — ${escapeHtml(userUnit ? userUnit.name : 'Polícia Civil de Minas Gerais')}
-          </div>
-        </div>
-
-        <div class="footer-note">
-          Relatório de Histórico de Cautelas de Armas emitido em ${escapeHtml(new Date().toLocaleString('pt-BR'))} • Sistema de Gestão de Armas e Munições - PCMG
-        </div>
+        ${pagesHtml}
       </body>
       </html>
     `;
