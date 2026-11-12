@@ -11281,13 +11281,20 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       ? Number(linkedAmmoRow.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0)
       : Number(cautela.MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS || 0);
 
-    const isAmmoPassivaDevolucao = linkedAmmoRow
+    const forceReturnAmmo = Boolean(
+      req.body.forceReturnAmmoToVault &&
+      returnedAmmoQuantity !== undefined &&
+      returnedAmmoQuantity !== null &&
+      Number(returnedAmmoQuantity) > 0
+    );
+
+    const isAmmoPassivaDevolucao = forceReturnAmmo || (linkedAmmoRow
       ? Boolean(linkedAmmoRow.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES)
       : totalLinkedAmmo > 0
         ? (cautela.MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS !== undefined && cautela.MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS !== null
             ? Boolean(cautela.MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS)
             : (cautela.MUNICAO_DESTINACAO_ACAUTELAR_ARMAS || 'Defesa') !== 'Treinamento')
-        : false;
+        : false);
 
     let resolvedReturnedAmmo: number | null = null;
     if ((linkedAmmoRow || totalLinkedAmmo > 0) && isAmmoPassivaDevolucao && totalLinkedAmmo > 0) {
@@ -11423,12 +11430,13 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       finalObs = finalObs ? `${finalObs} | Local alterado na devolução: ${targetVaultCode}` : `Local alterado na devolução: ${targetVaultCode}`;
     }
 
-    // 1. Atualiza registro da cautela como DEVOLVIDA com todos os dados técnicos de uso e recibo do armeiro
+    // 1. Atualiza registro da cautela como DEVOLVIDA com o cofre de retorno determinado pelo armeiro e dados técnicos
     try {
       await pool.query(`
         UPDATE ACAUTELAR_ARMAS SET
           STATUS_ACAUTELAR_ARMAS = 'DEVOLVIDA',
           DATA_DEVOLUCAO_ACAUTELAR_ARMAS = NOW(),
+          COFRE_ORIGEM_ID_ACAUTELAR_ARMAS = COALESCE(?, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS),
           ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_ARMAS = ?,
           ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_ARMAS = ?,
           ARMEIRO_RECEBIMENTO_MASP_ACAUTELAR_ARMAS = ?,
@@ -11444,6 +11452,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
           DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
         WHERE ID_ACAUTELAR_ARMAS = ?
       `, [
+        targetVaultId || null,
         armorer.id,
         armorer.name,
         armorer.masp,
@@ -11463,6 +11472,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
         UPDATE ACAUTELAR_ARMAS SET
           STATUS_ACAUTELAR_ARMAS = 'DEVOLVIDA',
           DATA_DEVOLUCAO_ACAUTELAR_ARMAS = NOW(),
+          COFRE_ORIGEM_ID_ACAUTELAR_ARMAS = COALESCE(?, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS),
           ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_ARMAS = ?,
           ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_ARMAS = ?,
           ARMEIRO_RECEBIMENTO_MASP_ACAUTELAR_ARMAS = ?,
@@ -11477,6 +11487,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
           DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
         WHERE ID_ACAUTELAR_ARMAS = ?
       `, [
+        targetVaultId || null,
         armorer.id,
         armorer.name,
         armorer.masp,

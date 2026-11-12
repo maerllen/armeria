@@ -3831,6 +3831,10 @@ class StorageService {
         target.returnArmorerId = this.state.currentUser?.id;
         target.returnArmorerName = this.state.currentUser?.name;
         target.returnArmorerMasp = this.state.currentUser?.masp;
+        const chosenWeaponVault = returnData.destinationVaultSpaceId || returnData.vaultSpaceId;
+        if (chosenWeaponVault) {
+          target.vaultSpaceId = chosenWeaponVault;
+        }
       }
       target.hadShots = Boolean(returnData.hadShots);
       target.shotsFired = Number(returnData.shotsFired || 0);
@@ -3871,7 +3875,7 @@ class StorageService {
           linkedMun.returnedQuantity = Math.max(0, Number(returnData.returnedAmmoQuantity));
         }
       } else {
-        const isPassiva = Boolean(linkedMun.seraDevolvida);
+        const isPassiva = Boolean(linkedMun.seraDevolvida || (returnData.forceReturnAmmoToVault && Number(returnData.returnedAmmoQuantity || 0) > 0));
         const retQty = isPassiva ? Math.max(0, Number(returnData.returnedAmmoQuantity ?? 0)) : 0;
         linkedMun.status = isPassiva ? 'DEVOLVIDA' : 'CONSUMIDA';
         linkedMun.returnedQuantity = retQty;
