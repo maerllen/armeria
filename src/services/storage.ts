@@ -181,6 +181,7 @@ class StorageService {
         auxiliarTabelaEquipeRes,
         certificadosRes,
         weaponTransfersRes,
+        ammoTransfersRes,
         tiposMateriaisRes,
         materiaisRes,
         cautelasMateriaisRes,
@@ -259,7 +260,7 @@ class StorageService {
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
-      this.state.ammoTransfers = (await fetchSync('/api/ammo-transfers')) || [];
+      this.state.ammoTransfers = ammoTransfersRes || [];
       this.state.tiposMateriais = tiposMateriaisRes || [];
       this.state.materiais = materiaisRes || [];
       this.state.cautelasMateriais = cautelasMateriaisRes || [];
@@ -3478,8 +3479,8 @@ class StorageService {
 
     try {
       const actualId = target?.id || id;
-      const res = await fetch(`/api/cautelas-armas/${actualId}`, {
-        method: 'DELETE',
+      const res = await fetch(`/api/cautelas-armas/${encodeURIComponent(actualId)}/cancelar`, {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           weaponId: extra?.weaponId || target?.weaponId,
@@ -3497,7 +3498,7 @@ class StorageService {
     }
   }
 
-  public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+  public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; pendingReceipt?: boolean; error?: string }> {
     const cleanId = id.replace(/^caut-active-/, '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '').replace(/^caut-arma-/, '').replace(/^caut-/, '');
     const target = (this.state.cautelasArmas || []).find(c => 
       c.id === id || 
@@ -3513,15 +3514,30 @@ class StorageService {
       (returnData?.weaponSerialNumber && w.serialNumber === returnData.weaponSerialNumber)
     );
 
+    const effectiveRole = this.state.currentUser?.activeRole || this.state.currentUser?.role;
+    const isPendingReceipt = Boolean(returnData?.pendingReceipt || effectiveRole === 'Policial');
+
     if (target) {
-      target.status = 'DEVOLVIDA';
-      target.returnDate = new Date().toISOString();
+      target.status = isPendingReceipt ? 'DEVOLUCAO_PENDENTE' : 'DEVOLVIDA';
+      if (!isPendingReceipt) {
+        target.returnDate = new Date().toISOString();
+      }
       target.hadShots = Boolean(returnData.hadShots);
       target.shotsFired = Number(returnData.shotsFired || 0);
       target.isWorking = Boolean(returnData.isWorking);
+      target.defectDescription = returnData.defectDescription || undefined;
+      target.hadMalfunction = Boolean(returnData.hadMalfunction);
+      target.malfunctionDescription = returnData.malfunctionDescription || undefined;
+      target.returnedMagazinesCount = Number(returnData.returnedMagazinesCount ?? target.magazineQuantity ?? 1);
+      if (returnData.returnedAmmoQuantity !== undefined && returnData.returnedAmmoQuantity !== null) {
+        target.returnedAmmoQuantity = Number(returnData.returnedAmmoQuantity);
+      }
+      if (returnData.returnObservations !== undefined) {
+        target.returnObservations = returnData.returnObservations;
+      }
     }
 
-    if (weap) {
+    if (weap && !isPendingReceipt) {
       const destVault = returnData.destinationVaultSpaceId || returnData.vaultSpaceId || target?.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
       weap.vaultSpaceId = destVault;
       weap.previousVaultSpaceId = destVault;
@@ -3533,28 +3549,31 @@ class StorageService {
     }
 
     try {
-      const res = await fetch(`/api/cautelas-armas/${id}/devolver`, {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${encodeURIComponent(actualId)}/devolver`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...returnData,
+          pendingReceipt: isPendingReceipt,
+          actorRole: effectiveRole,
           weaponId: returnData?.weaponId || target?.weaponId || weap?.id,
           weaponSerialNumber: returnData?.weaponSerialNumber || target?.weaponSerialNumber || weap?.serialNumber,
           cautelaId: target?.id || id,
           requesterName: target?.requesterName || returnData?.requesterName,
           requesterMasp: target?.requesterMasp || returnData?.requesterMasp,
-          returnArmorerId: this.state.currentUser?.id,
-          returnArmorerName: this.state.currentUser?.name,
-          returnArmorerMasp: this.state.currentUser?.masp,
+          returnArmorerId: isPendingReceipt ? undefined : this.state.currentUser?.id,
+          returnArmorerName: isPendingReceipt ? undefined : this.state.currentUser?.name,
+          returnArmorerMasp: isPendingReceipt ? undefined : this.state.currentUser?.masp,
           actor: this.state.currentUser
         })
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
-      return { success: true };
+      return { success: true, pendingReceipt: Boolean(data.pendingReceipt ?? isPendingReceipt) };
     } catch (err: any) {
-      return { success: true };
+      return { success: true, pendingReceipt: isPendingReceipt };
     }
   }
 

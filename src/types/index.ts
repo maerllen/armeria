@@ -1144,7 +1144,7 @@ export interface MovimentacaoVeterinaria {
   createdAt: string;
 }
 
-export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'RECUSADA';
+export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA';
 
 export interface CautelaArma {
@@ -1178,6 +1178,8 @@ export interface CautelaArma {
   ammoTipo?: string;
   ammoPeso?: string;
   ammoLote?: string;
+  ammoCaliberName?: string;
+  ammoSeraDevolvida?: boolean;
   
   // Devolução
   returnDate?: string;
@@ -1191,6 +1193,7 @@ export interface CautelaArma {
   hadMalfunction: boolean;
   malfunctionDescription?: string;
   returnedMagazinesCount: number;
+  returnedAmmoQuantity?: number;
   returnObservations?: string;
   
   createdAt: string;
