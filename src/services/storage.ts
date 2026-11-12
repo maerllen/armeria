@@ -3438,44 +3438,139 @@ class StorageService {
     }
   }
 
+  public async updatePendingCautelaArma(
+    id: string,
+    updates: {
+      weaponId: string;
+      weaponSerialNumber: string;
+      weaponModel: string;
+      weaponType?: string;
+      weaponCaliber?: string;
+      magazineQuantity?: number;
+      vaultSpaceId?: string;
+      reason?: string;
+      authorizationNotes?: string | null;
+      originalWeaponId?: string;
+      originalWeaponSerialNumber?: string;
+      cautelaId?: string;
+    }
+  ): Promise<{ success: boolean; error?: string }> {
+    const cleanId = id
+      .replace(/^caut-active-/, '')
+      .replace(/^caut-weapon-sync-/, '')
+      .replace(/^caut-sync-/, '')
+      .replace(/^caut-arma-/, '')
+      .replace(/^caut-/, '');
+
+    const target = (this.state.cautelasArmas || []).find(
+      c =>
+        c.id === id ||
+        c.id === cleanId ||
+        c.id === `caut-sync-${cleanId}` ||
+        (updates.cautelaId && c.id === updates.cautelaId) ||
+        (updates.originalWeaponId && c.weaponId === updates.originalWeaponId && c.status === 'PENDENTE')
+    );
+
+    try {
+      const actualId = target?.id || id;
+      const res = await fetch(`/api/cautelas-armas/${encodeURIComponent(actualId)}/editar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...updates,
+          cautelaId: target?.id || updates.cautelaId || id,
+          originalWeaponId: updates.originalWeaponId || target?.weaponId,
+          originalWeaponSerialNumber: updates.originalWeaponSerialNumber || target?.weaponSerialNumber,
+          actor: this.state.currentUser
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        await this.refreshFromServer();
+        return { success: false, error: data.error || 'Erro ao editar solicitação de cautela.' };
+      }
+
+      // Aplica também no estado local caso o refresh seja assíncrono/offline
+      if (target) {
+        const oldWId = target.weaponId;
+        if (updates.weaponId && updates.weaponId !== oldWId) {
+          const oldW = (this.state.weapons || []).find(w => w.id === oldWId);
+          if (oldW) {
+            oldW.status = 'No Cofre';
+            oldW.vaultSpaceId = target.vaultSpaceId || oldW.previousVaultSpaceId || oldW.vaultSpaceId;
+            delete (oldW as any).locationNote;
+          }
+          const newW = (this.state.weapons || []).find(w => w.id === updates.weaponId);
+          if (newW) {
+            newW.status = 'Cautela Pendente';
+            target.vaultSpaceId = newW.vaultSpaceId;
+          }
+        }
+        target.weaponId = updates.weaponId;
+        target.weaponSerialNumber = updates.weaponSerialNumber;
+        target.weaponModel = updates.weaponModel;
+        if (updates.weaponType !== undefined) target.weaponType = updates.weaponType;
+        if (updates.weaponCaliber !== undefined) target.weaponCaliber = updates.weaponCaliber;
+        if (updates.magazineQuantity !== undefined) target.magazineQuantity = updates.magazineQuantity;
+        target.reason = updates.reason || '';
+        target.authorizationNotes = updates.authorizationNotes || undefined;
+      }
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      if (target) {
+        const st = (target.status || '').toUpperCase();
+        if (st !== 'PENDENTE' && st !== 'CAUTELA PENDENTE') {
+          return {
+            success: false,
+            error: 'Esta cautela já foi analisada pelo armeiro da unidade e não pode mais ser editada.'
+          };
+        }
+        const oldWId = target.weaponId;
+        if (updates.weaponId && updates.weaponId !== oldWId) {
+          const oldW = (this.state.weapons || []).find(w => w.id === oldWId);
+          if (oldW) {
+            oldW.status = 'No Cofre';
+            oldW.vaultSpaceId = target.vaultSpaceId || oldW.previousVaultSpaceId || oldW.vaultSpaceId;
+            delete (oldW as any).locationNote;
+          }
+          const newW = (this.state.weapons || []).find(w => w.id === updates.weaponId);
+          if (newW) {
+            newW.status = 'Cautela Pendente';
+            target.vaultSpaceId = newW.vaultSpaceId;
+          }
+        }
+        target.weaponId = updates.weaponId;
+        target.weaponSerialNumber = updates.weaponSerialNumber;
+        target.weaponModel = updates.weaponModel;
+        if (updates.weaponType !== undefined) target.weaponType = updates.weaponType;
+        if (updates.weaponCaliber !== undefined) target.weaponCaliber = updates.weaponCaliber;
+        if (updates.magazineQuantity !== undefined) target.magazineQuantity = updates.magazineQuantity;
+        target.reason = updates.reason || '';
+        target.authorizationNotes = updates.authorizationNotes || undefined;
+        return { success: true };
+      }
+      return { success: false, error: err.message || 'Erro de comunicação ao editar cautela.' };
+    }
+  }
+
   public async cancelCautelaArma(
     id: string,
     extra?: { weaponId?: string; weaponSerialNumber?: string; cautelaId?: string; requesterName?: string; requesterMasp?: string }
   ): Promise<{ success: boolean; error?: string }> {
     const cleanId = id.replace(/^caut-active-/, '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '').replace(/^caut-arma-/, '').replace(/^caut-/, '');
     
-    // Atualização otimista imediata no estado local
     const targetIdx = (this.state.cautelasArmas || []).findIndex(c => 
       c.id === id || 
       c.id === cleanId || 
       c.id === `caut-sync-${cleanId}` ||
       c.weaponId === id || 
       c.weaponId === cleanId ||
-      (extra?.weaponId && c.weaponId === extra.weaponId)
+      (extra?.weaponId && c.weaponId === extra.weaponId && c.status === 'PENDENTE')
     );
 
-    let target: CautelaArma | undefined;
-    if (targetIdx !== -1) {
-      target = this.state.cautelasArmas[targetIdx];
-      this.state.cautelasArmas.splice(targetIdx, 1);
-    }
-
-    // Restaura a arma para No Cofre
-    const weapId = target?.weaponId || extra?.weaponId || cleanId;
-    const weap = (this.state.weapons || []).find(w => w.id === weapId || (target?.weaponSerialNumber && w.serialNumber === target.weaponSerialNumber));
-    if (weap) {
-      weap.status = 'No Cofre';
-      weap.vaultSpaceId = target?.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
-      delete (weap as any).locationNote;
-    }
-
-    // Se houver munição vinculada no estado local, remove também
-    if (target?.linkedAmmoCautelaId) {
-      const munIdx = (this.state.cautelasMunicoes || []).findIndex(m => m.id === target?.linkedAmmoCautelaId);
-      if (munIdx !== -1) {
-        this.state.cautelasMunicoes.splice(munIdx, 1);
-      }
-    }
+    const target = targetIdx !== -1 ? this.state.cautelasArmas[targetIdx] : undefined;
 
     try {
       const actualId = target?.id || id;
@@ -3490,11 +3585,45 @@ class StorageService {
         })
       });
       const data = await res.json();
-      if (!res.ok) return { success: false, error: data.error };
+      if (!res.ok) {
+        await this.refreshFromServer();
+        return { success: false, error: data.error };
+      }
+
+      // Atualização imediata no estado local após confirmação do servidor
+      if (targetIdx !== -1) {
+        this.state.cautelasArmas.splice(targetIdx, 1);
+      }
+      const weapId = target?.weaponId || extra?.weaponId || cleanId;
+      const weap = (this.state.weapons || []).find(w => w.id === weapId || (target?.weaponSerialNumber && w.serialNumber === target.weaponSerialNumber));
+      if (weap) {
+        weap.status = 'No Cofre';
+        weap.vaultSpaceId = target?.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+        delete (weap as any).locationNote;
+      }
+      if (target?.linkedAmmoCautelaId) {
+        const munIdx = (this.state.cautelasMunicoes || []).findIndex(m => m.id === target?.linkedAmmoCautelaId);
+        if (munIdx !== -1) {
+          this.state.cautelasMunicoes.splice(munIdx, 1);
+        }
+      }
+
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
-      return { success: true }; // Local state updated
+      // Fallback offline local caso ainda esteja pendente
+      if (target && (target.status === 'PENDENTE' || (target.status as string) === 'Cautela Pendente')) {
+        if (targetIdx !== -1) this.state.cautelasArmas.splice(targetIdx, 1);
+        const weapId = target.weaponId || extra?.weaponId || cleanId;
+        const weap = (this.state.weapons || []).find(w => w.id === weapId || (target.weaponSerialNumber && w.serialNumber === target.weaponSerialNumber));
+        if (weap) {
+          weap.status = 'No Cofre';
+          weap.vaultSpaceId = target.vaultSpaceId || weap.previousVaultSpaceId || weap.vaultSpaceId;
+          delete (weap as any).locationNote;
+        }
+        return { success: true };
+      }
+      return { success: false, error: err.message || 'Erro ao excluir solicitação de cautela.' };
     }
   }
 

@@ -10066,7 +10066,170 @@ apiRouter.put('/cautelas-armas/:id/recusar', async (req: Request, res: Response)
   }
 });
 
-// Cancelar / Apagar solicitação de cautela pendente (Policial ou Armeiro antes da análise)
+// Editar solicitação de cautela pendente (Policial enquanto o armeiro da unidade não Deferir/Indeferir)
+async function handleUpdatePendingCautelaArma(req: Request, res: Response) {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const {
+      weaponId,
+      weaponSerialNumber,
+      weaponModel,
+      weaponType,
+      weaponCaliber,
+      magazineQuantity,
+      vaultSpaceId,
+      reason,
+      authorizationNotes,
+      originalWeaponId,
+      originalWeaponSerialNumber,
+      cautelaId,
+      actor
+    } = req.body || {};
+
+    const cautela = await findCautelaArmaRecord(pool, id, {
+      cautelaId: cautelaId || id,
+      weaponId: originalWeaponId || weaponId,
+      weaponSerialNumber: originalWeaponSerialNumber
+    });
+
+    if (!cautela) {
+      return res.status(404).json({ error: 'Solicitação de cautela não encontrada.' });
+    }
+
+    const actualCautelaId = cautela.ID_ACAUTELAR_ARMAS;
+    const statusAtual = (cautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase();
+    const isStillPending =
+      statusAtual === 'PENDENTE' ||
+      statusAtual === 'CAUTELA PENDENTE' ||
+      statusAtual === 'PENDENTE DE RECIBO' ||
+      statusAtual === 'PENDENTE RECIBO';
+
+    if (!isStillPending) {
+      return res.status(400).json({
+        error: 'Esta cautela já foi analisada (deferida ou indeferida) pelo armeiro da unidade e não pode mais ser editada.'
+      });
+    }
+
+    const oldWeaponId = cautela.ARMA_ID_ACAUTELAR_ARMAS;
+    const targetWeaponId = weaponId || oldWeaponId;
+
+    let resolvedSerial = weaponSerialNumber || cautela.NUMERO_SERIE_ACAUTELAR_ARMAS;
+    let resolvedModel = weaponModel || cautela.MODELO_ACAUTELAR_ARMAS;
+    let resolvedType = weaponType !== undefined ? weaponType : cautela.TIPO_ARMA_ACAUTELAR_ARMAS;
+    let resolvedCaliber = weaponCaliber !== undefined ? weaponCaliber : cautela.CALIBRE_ACAUTELAR_ARMAS;
+    let resolvedMagazines = parseInt(String(magazineQuantity ?? cautela.QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS ?? 2), 10);
+    let resolvedOriginVaultId = cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS;
+
+    // Se o policial trocou o armamento solicitado na cautela pendente
+    if (targetWeaponId && targetWeaponId !== oldWeaponId) {
+      const [newWRows]: any = await pool.query('SELECT * FROM ARMAS WHERE ID_ARMAS = ?', [targetWeaponId]);
+      if (!newWRows || newWRows.length === 0) {
+        return res.status(404).json({ error: 'Novo armamento selecionado não encontrado.' });
+      }
+      const newW = newWRows[0];
+      const newWStatus = (newW.STATUS_ARMAS || '').trim().toLowerCase();
+      if (newWStatus !== 'no cofre' && newWStatus !== 'nocofre') {
+        return res.status(400).json({
+          error: 'O novo armamento selecionado não está mais disponível com status "No Cofre".'
+        });
+      }
+
+      // 1. Libera o armamento anterior de volta para o status "No Cofre" no cofre de origem
+      if (oldWeaponId) {
+        await pool.query(
+          `UPDATE ARMAS SET 
+            STATUS_ARMAS = 'No Cofre',
+            COFRE_ID_ARMAS = COALESCE(?, COFRE_ID_ARMAS),
+            OBSERVACAO_LOCALIZACAO_ARMAS = NULL
+           WHERE ID_ARMAS = ?`,
+          [cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS, oldWeaponId]
+        );
+      }
+
+      // 2. Reserva o novo armamento com status "Cautela Pendente"
+      const reqName = cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS || actor?.name || 'Policial';
+      const reqMasp = cautela.REQUERENTE_MASP_ACAUTELAR_ARMAS || actor?.masp || '';
+      const pendingNote = `Cautela Pendente — Solicitante: ${reqName} (MASP: ${reqMasp})`;
+      try {
+        await pool.query(
+          `UPDATE ARMAS SET STATUS_ARMAS = 'Cautela Pendente', OBSERVACAO_LOCALIZACAO_ARMAS = ? WHERE ID_ARMAS = ?`,
+          [pendingNote, targetWeaponId]
+        );
+      } catch (_) {
+        await pool.query(
+          `UPDATE ARMAS SET STATUS_ARMAS = 'Cautela Pendente' WHERE ID_ARMAS = ?`,
+          [targetWeaponId]
+        );
+      }
+
+      resolvedSerial = newW.NUMERO_SERIE_ARMAS || resolvedSerial;
+      resolvedModel = newW.MODELO_ARMAS || resolvedModel;
+      resolvedType = newW.TIPO_ARMAS || resolvedType;
+      resolvedCaliber = newW.CALIBRE_ARMAS || resolvedCaliber;
+      resolvedMagazines = parseInt(String(magazineQuantity ?? newW.QUANTIDADE_CARREGADORES_ARMAS ?? 2), 10);
+      resolvedOriginVaultId = newW.COFRE_ID_ARMAS || vaultSpaceId || null;
+    }
+
+    const updatedNotes =
+      authorizationNotes !== undefined
+        ? (authorizationNotes && String(authorizationNotes).trim() ? String(authorizationNotes).trim() : null)
+        : cautela.OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS;
+
+    const updatedReason =
+      reason !== undefined
+        ? (reason && String(reason).trim() ? String(reason).trim() : null)
+        : cautela.FINALIDADE_MOTIVO_ACAUTELAR_ARMAS;
+
+    await pool.query(
+      `UPDATE ACAUTELAR_ARMAS SET
+        ARMA_ID_ACAUTELAR_ARMAS = ?,
+        NUMERO_SERIE_ACAUTELAR_ARMAS = ?,
+        MODELO_ACAUTELAR_ARMAS = ?,
+        TIPO_ARMA_ACAUTELAR_ARMAS = ?,
+        CALIBRE_ACAUTELAR_ARMAS = ?,
+        QUANTIDADE_CARREGADORES_ACAUTELAR_ARMAS = ?,
+        COFRE_ORIGEM_ID_ACAUTELAR_ARMAS = ?,
+        FINALIDADE_MOTIVO_ACAUTELAR_ARMAS = ?,
+        OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS = ?,
+        DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+       WHERE ID_ACAUTELAR_ARMAS = ?`,
+      [
+        targetWeaponId,
+        resolvedSerial,
+        resolvedModel,
+        resolvedType || null,
+        resolvedCaliber || null,
+        resolvedMagazines,
+        resolvedOriginVaultId || null,
+        updatedReason,
+        updatedNotes,
+        actualCautelaId
+      ]
+    );
+
+    const polNome = cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS || actor?.name || 'Policial';
+    const polMasp = cautela.REQUERENTE_MASP_ACAUTELAR_ARMAS || actor?.masp || '';
+
+    await insertAuditLog(
+      'Cautelas',
+      'Editar Solicitação',
+      `Solicitação de cautela pendente (${actualCautelaId}) editada pelo policial ${polNome} (MASP: ${polMasp}) — Arma: ${resolvedModel} Nº ${resolvedSerial}.`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      id: actualCautelaId,
+      message: 'Solicitação de cautela atualizada com sucesso.'
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+}
+
+// Cancelar / Excluir solicitação de cautela pendente (Policial ou Armeiro antes do Deferimento/Indeferimento)
 async function handleCancelCautelaArma(req: Request, res: Response) {
   try {
     const { id } = req.params;
@@ -10092,15 +10255,15 @@ async function handleCancelCautelaArma(req: Request, res: Response) {
           WHERE ID_ARMAS = ? AND STATUS_ARMAS IN ('Cautela Pendente', 'Pendente de Recibo', 'Pendente Recibo')
         `, [weaponId]);
       }
-      return res.json({ success: true, message: 'Solicitação cancelada e arma liberada no cofre.' });
+      return res.json({ success: true, message: 'Solicitação excluída e arma liberada no cofre.' });
     }
 
     const actualCautelaId = cautela.ID_ACAUTELAR_ARMAS;
 
-    // Apenas cautelas pendentes podem ser canceladas e apagadas antes da análise do armeiro
+    // Apenas cautelas pendentes (enquanto o armeiro não Deferir/Indeferir) podem ser excluídas
     const statusAtual = (cautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase();
     if (statusAtual !== 'PENDENTE' && statusAtual !== 'CAUTELA PENDENTE' && statusAtual !== 'PENDENTE DE RECIBO' && statusAtual !== 'PENDENTE RECIBO') {
-      return res.status(400).json({ error: 'Apenas solicitações com status "Pendente" podem ser canceladas antes da análise do armeiro.' });
+      return res.status(400).json({ error: 'Esta cautela já foi analisada (deferida ou indeferida) pelo armeiro da unidade e não pode mais ser excluída.' });
     }
 
     // 1. Libera a arma de volta para o cofre de origem
@@ -10130,17 +10293,19 @@ async function handleCancelCautelaArma(req: Request, res: Response) {
     await insertAuditLog(
       'Cautelas',
       'Cancelar/Excluir',
-      `Solicitação de cautela pendente da arma Nº ${armSerial} cancelada e apagada pelo policial ${polNome} (MASP: ${polMasp}). Arma retornada ao status "No Cofre".`,
+      `Solicitação de cautela pendente da arma Nº ${armSerial} excluída pelo policial ${polNome} (MASP: ${polMasp}). Arma retornada ao status "No Cofre".`,
       actor,
       req.ip
     );
 
-    return res.json({ success: true, message: 'Solicitação de cautela cancelada e apagada com sucesso.' });
+    return res.json({ success: true, message: 'Solicitação de cautela excluída com sucesso.' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 }
 
+apiRouter.put('/cautelas-armas/:id', handleUpdatePendingCautelaArma);
+apiRouter.put('/cautelas-armas/:id/editar', handleUpdatePendingCautelaArma);
 apiRouter.delete('/cautelas-armas/:id', handleCancelCautelaArma);
 apiRouter.put('/cautelas-armas/:id/cancelar', handleCancelCautelaArma);
 

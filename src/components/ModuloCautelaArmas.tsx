@@ -6,7 +6,7 @@ import { storage } from '../services/storage';
 import { 
   Shield, Crosshair, Disc, AlertCircle, Check, Clock, Search, 
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
-  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2
+  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -88,6 +88,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
   const [cancelPendingModal, setCancelPendingModal] = useState<CautelaArma | null>(null);
+  const [editingCautela, setEditingCautela] = useState<CautelaArma | null>(null);
+  const [editWeaponId, setEditWeaponId] = useState('');
+  const [editReason, setEditReason] = useState('');
+  const [editWantsAmmo, setEditWantsAmmo] = useState(false);
+  const [editAmmoTipo, setEditAmmoTipo] = useState('Operacional');
+  const [editAmmoPeso, setEditAmmoPeso] = useState('124 gr');
   const [activeCautelaWarningModal, setActiveCautelaWarningModal] = useState<CautelaArma[] | null>(null);
   const [hasDismissedActiveWarning, setHasDismissedActiveWarning] = useState(false);
   const [authWithAmmo, setAuthWithAmmo] = useState(false);
@@ -872,6 +878,108 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
   }, [weapons, currentUser.unitId, currentUser.departmentId, isGeral]);
 
+  // Armas selecionáveis durante a edição de uma cautela pendente (inclui a arma atual da cautela + armas "No Cofre" da unidade)
+  const editableUnitWeapons = useMemo(() => {
+    if (!editingCautela) return userUnitWeapons;
+    const sourceWeapons = (weapons && weapons.length > 0) ? weapons : storage.getAllWeapons();
+    const currentWeapon = sourceWeapons.find(
+      w => w.id === editingCautela.weaponId || (editingCautela.weaponSerialNumber && w.serialNumber === editingCautela.weaponSerialNumber)
+    );
+    const list = [...userUnitWeapons];
+    if (currentWeapon && !list.some(w => w.id === currentWeapon.id)) {
+      list.unshift(currentWeapon);
+    } else if (!currentWeapon && editingCautela.weaponId) {
+      list.unshift({
+        id: editingCautela.weaponId,
+        serialNumber: editingCautela.weaponSerialNumber,
+        model: editingCautela.weaponModel,
+        type: editingCautela.weaponType || 'Arma de Fogo',
+        caliber: editingCautela.weaponCaliber || 'Padrão',
+        magazineQuantity: editingCautela.magazineQuantity || 2,
+        status: 'Cautela Pendente',
+        vaultSpaceId: editingCautela.vaultSpaceId,
+        departmentId: editingCautela.departmentId || currentUser.departmentId || '',
+        unitId: editingCautela.unitId || currentUser.unitId || '',
+        shotCount: 0,
+        createdAt: editingCautela.createdAt || new Date().toISOString()
+      } as Weapon);
+    }
+    return list;
+  }, [editingCautela, userUnitWeapons, weapons, currentUser.departmentId, currentUser.unitId]);
+
+  const editSelectedWeapon = useMemo(() => {
+    return editableUnitWeapons.find(w => w.id === editWeaponId) || null;
+  }, [editableUnitWeapons, editWeaponId]);
+
+  // Tipos e pesos disponíveis no modal de edição da cautela (sem expor cofre ou saldo de estoque)
+  const availableEditPoliceTipos = useMemo(() => {
+    const calName = (editSelectedWeapon?.caliber || '').trim().toLowerCase();
+    const set = new Set<string>();
+    calibers
+      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.tipo)
+      .forEach(c => set.add(c.tipo!.trim()));
+    ammoStocks
+      .filter(st => {
+        const matchUnit = isGeral ? true : st.unitId === (editSelectedWeapon?.unitId || currentUser.unitId);
+        const cal = calibers.find(c => c.id === st.caliberId);
+        const cName = (cal?.name || '').toLowerCase().trim();
+        const matchCal = !calName || (cal && (cName.includes(calName) || calName.includes(cName))) || st.caliberId === editSelectedWeapon?.caliber;
+        return matchUnit && matchCal && st.quantity > 0;
+      })
+      .forEach(st => {
+        if (st.tipoMunicao && st.tipoMunicao.trim()) set.add(st.tipoMunicao.trim());
+      });
+    ['Operacional', 'Treinamento', 'Expansiva', 'ETOG', 'Treino', 'Defesa'].forEach(t => set.add(t));
+    return Array.from(set);
+  }, [editSelectedWeapon, calibers, ammoStocks, isGeral, currentUser.unitId]);
+
+  const availableEditPolicePesos = useMemo(() => {
+    const calName = (editSelectedWeapon?.caliber || '').trim().toLowerCase();
+    const set = new Set<string>();
+    calibers
+      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.peso)
+      .forEach(c => set.add(c.peso!.trim()));
+    ammoStocks
+      .filter(st => {
+        const matchUnit = isGeral ? true : st.unitId === (editSelectedWeapon?.unitId || currentUser.unitId);
+        const cal = calibers.find(c => c.id === st.caliberId);
+        const cName = (cal?.name || '').toLowerCase().trim();
+        const matchCal = !calName || (cal && (cName.includes(calName) || calName.includes(cName))) || st.caliberId === editSelectedWeapon?.caliber;
+        return matchUnit && matchCal && st.quantity > 0;
+      })
+      .forEach(st => {
+        if (st.pesoMunicao && st.pesoMunicao.trim()) set.add(st.pesoMunicao.trim());
+      });
+    if (calName.includes('9mm') || calName.includes('9x19')) {
+      ['124 gr', '115 gr', '147 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('40')) {
+      ['180 gr', '165 gr', '155 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('380')) {
+      ['95 gr', '90 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('5,56') || calName.includes('5.56') || calName.includes('223')) {
+      ['55 gr', '62 gr', '77 gr'].forEach(p => set.add(p));
+    } else if (calName.includes('12')) {
+      ['Balote', 'SG 3T', 'SG 2T', 'Chumbo 3'].forEach(p => set.add(p));
+    } else if (calName.includes('38')) {
+      ['158 gr', '125 gr'].forEach(p => set.add(p));
+    } else {
+      ['124 gr', '180 gr', '55 gr', 'Padrão'].forEach(p => set.add(p));
+    }
+    return Array.from(set);
+  }, [editSelectedWeapon, calibers, ammoStocks, isGeral, currentUser.unitId]);
+
+  React.useEffect(() => {
+    if (editingCautela && availableEditPoliceTipos.length > 0 && !availableEditPoliceTipos.includes(editAmmoTipo)) {
+      setEditAmmoTipo(availableEditPoliceTipos[0]);
+    }
+  }, [editingCautela, availableEditPoliceTipos, editAmmoTipo]);
+
+  React.useEffect(() => {
+    if (editingCautela && availableEditPolicePesos.length > 0 && !availableEditPolicePesos.includes(editAmmoPeso)) {
+      setEditAmmoPeso(availableEditPolicePesos[0]);
+    }
+  }, [editingCautela, availableEditPolicePesos, editAmmoPeso]);
+
 
   const availableAmmoInUnit = useMemo(() => {
     if (!selectedWeapon) return [];
@@ -1275,7 +1383,111 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   };
 
-  // Cancelar e Apagar Solicitação de Cautela Pendente (Policial antes da análise do armeiro)
+  // Abrir modal de edição de solicitação de cautela pendente (Policial antes de Deferir/Indeferir)
+  const handleOpenEditPendingCautela = (cautela: CautelaArma) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (!isPendingStatus(cautela.status)) {
+      setErrorMsg('Esta cautela já foi analisada pelo armeiro da unidade e não pode mais ser editada.');
+      return;
+    }
+
+    setEditingCautela(cautela);
+    setEditWeaponId(cautela.weaponId);
+
+    const cleanReason =
+      cautela.reason && cautela.reason !== 'Solicitação de acautelamento - Aguardando Cautela'
+        ? cautela.reason
+        : '';
+    setEditReason(cleanReason);
+
+    const rawNotes = (cautela.authorizationNotes || '').trim();
+    const normNotes = rawNotes.toLowerCase();
+    if (normNotes.startsWith('solicito munição tipo:') || normNotes.startsWith('solicito municao tipo:')) {
+      const afterColon = rawNotes.split(':').slice(1).join(':').trim();
+      const parts = afterColon.split(',').map(p => p.trim()).filter(Boolean);
+      setEditWantsAmmo(true);
+      if (parts.length >= 3) {
+        setEditAmmoTipo(parts[1]);
+        setEditAmmoPeso(parts.slice(2).join(', '));
+      } else if (parts.length === 2) {
+        setEditAmmoTipo(parts[0]);
+        setEditAmmoPeso(parts[1]);
+      } else {
+        setEditAmmoTipo('Operacional');
+        setEditAmmoPeso('124 gr');
+      }
+    } else {
+      setEditWantsAmmo(false);
+      setEditAmmoTipo('Operacional');
+      setEditAmmoPeso('124 gr');
+    }
+  };
+
+  // Salvar edição de solicitação de cautela pendente (enquanto o armeiro não Deferir/Indeferir)
+  const handleConfirmEditPendingCautela = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingCautela) return;
+
+    if (!isPendingStatus(editingCautela.status)) {
+      setErrorMsg('Esta cautela já foi analisada pelo armeiro da unidade e não pode mais ser editada.');
+      setEditingCautela(null);
+      return;
+    }
+
+    if (!editWeaponId) {
+      setErrorMsg('Selecione um armamento válido para atualizar a solicitação de cautela.');
+      return;
+    }
+
+    const chosenWeapon = editableUnitWeapons.find(w => w.id === editWeaponId);
+    if (!chosenWeapon) {
+      setErrorMsg('Armamento selecionado não encontrado.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    setErrorMsg('');
+    try {
+      const calStr = chosenWeapon.caliber || 'Padrão';
+      const updatedAuthNotes = editWantsAmmo
+        ? `Solicito munição tipo: ${calStr}, ${editAmmoTipo}, ${editAmmoPeso}`
+        : null;
+
+      const res = await storage.updatePendingCautelaArma(editingCautela.id, {
+        weaponId: chosenWeapon.id,
+        weaponSerialNumber: chosenWeapon.serialNumber,
+        weaponModel: chosenWeapon.model,
+        weaponType: chosenWeapon.type,
+        weaponCaliber: chosenWeapon.caliber,
+        magazineQuantity: chosenWeapon.magazineQuantity || editingCautela.magazineQuantity || 2,
+        vaultSpaceId: chosenWeapon.vaultSpaceId || editingCautela.vaultSpaceId,
+        reason: editReason.trim(),
+        authorizationNotes: updatedAuthNotes,
+        originalWeaponId: editingCautela.weaponId,
+        originalWeaponSerialNumber: editingCautela.weaponSerialNumber,
+        cautelaId: editingCautela.id
+      });
+
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao salvar alterações na solicitação de cautela.');
+      } else {
+        setSuccessMsg(
+          `Solicitação de cautela atualizada com sucesso! Arma: ${chosenWeapon.model} (Série: ${chosenWeapon.serialNumber}). A cautela permanece em análise aguardando decisão do armeiro da unidade.`
+        );
+        setEditingCautela(null);
+        setLocalSyncTick(t => t + 1);
+        await onRefresh();
+        setLocalSyncTick(t => t + 1);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao processar edição da cautela.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Excluir Solicitação de Cautela Pendente (Policial enquanto o armeiro não Deferir/Indeferir)
   const handleCancelPendingCautela = async (cautela: CautelaArma) => {
     setIsSubmitting(true);
     setErrorMsg('');
@@ -1288,16 +1500,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         requesterMasp: cautela.requesterMasp
       });
       if (!res.success) {
-        setErrorMsg(res.error || 'Erro ao cancelar solicitação de cautela.');
+        setErrorMsg(res.error || 'Erro ao excluir solicitação de cautela.');
+        setCancelPendingModal(null);
+        await onRefresh();
       } else {
-        setSuccessMsg(`Solicitação de cautela da arma ${cautela.weaponModel} (Série: ${cautela.weaponSerialNumber}) cancelada e apagada com sucesso! O armamento retornou ao cofre no status "No Cofre".`);
+        setSuccessMsg(`Solicitação de cautela da arma ${cautela.weaponModel} (Série: ${cautela.weaponSerialNumber}) excluída com sucesso! O armamento retornou ao cofre no status "No Cofre".`);
         setCancelPendingModal(null);
         setLocalSyncTick(t => t + 1);
         await onRefresh();
         setLocalSyncTick(t => t + 1);
       }
     } catch (err: any) {
-      setErrorMsg(err.message || 'Erro ao processar cancelamento.');
+      setErrorMsg(err.message || 'Erro ao processar exclusão.');
     } finally {
       setIsSubmitting(false);
     }
@@ -2315,9 +2529,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <div>
                     Arma selecionada: <strong>{selectedWeapon.model}</strong> (Série: <span className="font-mono">{selectedWeapon.serialNumber}</span>) - Calibre: <strong>{selectedWeapon.caliber}</strong>
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    Retorno no cofre: <strong>{vaultSpaces.find(v => v.id === selectedWeapon.vaultSpaceId)?.code || 'Origem'}</strong>
-                  </div>
+                  {!isPolicial && (
+                    <div className="text-[10px] text-slate-400">
+                      Retorno no cofre: <strong>{vaultSpaces.find(v => v.id === selectedWeapon.vaultSpaceId)?.code || 'Origem'}</strong>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -3002,18 +3218,24 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             </button>
                                           </>
                                         ) : (
-                                          <div className="flex items-center space-x-2">
-                                            <span className="px-3 py-1.5 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
-                                              <Clock className="w-3.5 h-3.5 text-amber-400" />
-                                              <span>Aguardando Armeiro</span>
-                                            </span>
+                                          <div className="flex flex-wrap items-center gap-2">
                                             <button
+                                              type="button"
+                                              onClick={() => handleOpenEditPendingCautela(cautela)}
+                                              className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 hover:border-amber-400 text-amber-200 rounded-xl text-xs font-bold transition shadow-sm"
+                                              title="Editar solicitação de cautela enquanto o armeiro da unidade não deferir ou indeferir"
+                                            >
+                                              <Edit2 className="w-3.5 h-3.5 text-amber-400" />
+                                              <span>Editar Cautela</span>
+                                            </button>
+                                            <button
+                                              type="button"
                                               onClick={() => setCancelPendingModal(cautela)}
                                               className="flex items-center space-x-1.5 px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-700 hover:border-red-500 text-red-200 rounded-xl text-xs font-bold transition shadow-sm"
-                                              title="Cancelar e apagar esta solicitação de cautela antes da análise do armeiro"
+                                              title="Excluir solicitação de cautela enquanto o armeiro da unidade não deferir ou indeferir"
                                             >
                                               <Trash2 className="w-3.5 h-3.5 text-red-400" />
-                                              <span>Cancelar / Apagar</span>
+                                              <span>Excluir Cautela</span>
                                             </button>
                                           </div>
                                         )}
@@ -3571,7 +3793,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       </div>
                                     </div>
 
-                                    <div className="flex items-center space-x-2 self-end sm:self-center">
+                                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                                      {isPendente && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenEditPendingCautela(cautela)}
+                                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/50 hover:border-amber-400 text-amber-200 rounded-xl text-xs font-bold transition shadow-sm"
+                                            title="Editar solicitação de cautela enquanto o armeiro da unidade não deferir ou indeferir"
+                                          >
+                                            <Edit2 className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Editar Cautela</span>
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => setCancelPendingModal(cautela)}
+                                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-red-950/80 hover:bg-red-900 border border-red-700 hover:border-red-500 text-red-200 rounded-xl text-xs font-bold transition shadow-sm"
+                                            title="Excluir solicitação de cautela enquanto o armeiro da unidade não deferir ou indeferir"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5 text-red-400" />
+                                            <span>Excluir Cautela</span>
+                                          </button>
+                                        </>
+                                      )}
+
                                       {isDeferida && (
                                         <button
                                           onClick={() => handlePrintTermo(cautela)}
@@ -3650,6 +3895,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       <div className="text-[11px] text-slate-400">
                                         Devolvido em {cautela.returnDate ? new Date(cautela.returnDate).toLocaleString('pt-BR') : 'N/A'}
                                       </div>
+                                    </div>
+                                  )}
+
+                                  {isPendente && cautela.authorizationNotes && (
+                                    <div className="p-3 bg-amber-950/25 border border-amber-800/50 rounded-xl space-y-1 text-xs">
+                                      <div className="flex items-center space-x-2 text-amber-300 font-bold">
+                                        <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>Indicação do Policial (Informativa):</span>
+                                      </div>
+                                      <p className="text-amber-200/95 font-mono text-[11px] pl-5">
+                                        {cautela.authorizationNotes}
+                                      </p>
                                     </div>
                                   )}
 
@@ -4607,9 +4864,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           </span>
                         </div>
                         <div>
-                          <span className="text-slate-500 block">Cofre de Retorno:</span>
-                          <span className="text-slate-300 font-mono truncate block" title={returnVaultAddress}>
-                            {returnVaultAddress}
+                          <span className="text-slate-500 block">{isPolicial ? 'Unidade:' : 'Cofre de Retorno:'}</span>
+                          <span className="text-slate-300 font-mono truncate block">
+                            {isPolicial ? (returnUnit?.name || userUnit?.name || 'Unidade Policial') : returnVaultAddress}
                           </span>
                         </div>
                       </div>
@@ -4653,7 +4910,211 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </div>
       )}
 
-      {/* Modal de Confirmação para Cancelar e Apagar Solicitação Pendente */}
+      {/* Modal de Edição de Solicitação de Cautela Pendente (Policial enquanto o armeiro não Deferir/Indeferir) */}
+      {editingCautela && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-sm overflow-y-auto animate-in fade-in">
+          <div className="bg-slate-900 border border-amber-600/60 rounded-2xl max-w-2xl w-full p-5 sm:p-6 my-auto space-y-5 shadow-2xl animate-in zoom-in-95">
+            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-amber-500/15 border border-amber-500/30 rounded-xl text-amber-400">
+                  <Edit2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">Editar Solicitação de Cautela de Arma</h3>
+                  <p className="text-xs text-slate-400">
+                    Edição permitida enquanto o armeiro da unidade ainda não deferiu ou indeferiu a cautela
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingCautela(null)}
+                className="text-slate-400 hover:text-slate-200 p-1 rounded-lg hover:bg-slate-800 transition"
+                title="Fechar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmEditPendingCautela} className="space-y-4">
+              {/* 1. Seleção do Armamento */}
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
+                  1. Armamento Solicitado ({editableUnitWeapons.length} opção{editableUnitWeapons.length === 1 ? '' : 'ões'} disponível{editableUnitWeapons.length === 1 ? '' : 'is'})
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto p-1">
+                  {editableUnitWeapons.map(w => {
+                    const isSelected = editWeaponId === w.id;
+                    const isOriginalWeapon = w.id === editingCautela.weaponId;
+                    const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+                    return (
+                      <div
+                        key={`edit-w-${w.id}`}
+                        onClick={() => setEditWeaponId(w.id)}
+                        className={`p-3 rounded-xl border text-left cursor-pointer transition flex flex-col justify-between ${
+                          isSelected
+                            ? 'bg-amber-950/70 border-amber-500 shadow-md ring-1 ring-amber-500'
+                            : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-slate-100">{w.model}</span>
+                            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                              {w.caliber}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between mt-0.5">
+                            <span className="text-[11px] font-mono text-amber-400">
+                              Série: {w.serialNumber}
+                            </span>
+                            {isOriginalWeapon && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                                Atual
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60">
+                          <span>
+                            {isPolicial
+                              ? (isOriginalWeapon ? 'Reservada nesta solicitação' : 'Disponível na Unidade')
+                              : `Local: ${vault ? vault.code : 'Cofre'}`}
+                          </span>
+                          <span>{w.magazineQuantity || 1} carregadores</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {editSelectedWeapon && (
+                <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-xs text-amber-200 flex items-center justify-between">
+                  <div>
+                    Arma selecionada: <strong>{editSelectedWeapon.model}</strong> (Série: <span className="font-mono">{editSelectedWeapon.serialNumber}</span>) - Calibre: <strong>{editSelectedWeapon.caliber}</strong>
+                  </div>
+                </div>
+              )}
+
+              {/* 2. Motivo / Finalidade do Uso */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  2. Motivo / Finalidade do Uso (Opcional)
+                </label>
+                <select
+                  value={editReason}
+                  onChange={(e) => setEditReason(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
+                >
+                  <option value="">Selecione o motivo (opcional)</option>
+                  <option value="Operação">Operação</option>
+                  <option value="Plantão">Plantão</option>
+                  <option value="Serviço ordinário">Serviço ordinário</option>
+                  <option value="Treinamento">Treinamento</option>
+                  {editReason &&
+                    !['Operação', 'Plantão', 'Serviço ordinário', 'Treinamento'].includes(editReason) && (
+                      <option value={editReason}>{editReason}</option>
+                    )}
+                </select>
+              </div>
+
+              {/* 3. Indicação Informativa de Munição Desejada */}
+              <div className="pt-2 border-t border-slate-800 space-y-3">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="editPolicialAmmoRequest"
+                    checked={editWantsAmmo}
+                    onChange={(e) => setEditWantsAmmo(e.target.checked)}
+                    className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700 cursor-pointer"
+                  />
+                  <label htmlFor="editPolicialAmmoRequest" className="text-xs font-bold text-slate-200 cursor-pointer">
+                    Informar ao armeiro especificação da munição que deseja cautelar (Opcional)
+                  </label>
+                </div>
+
+                {editWantsAmmo && (
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                          Calibre Correspondente
+                        </label>
+                        <input
+                          type="text"
+                          readOnly
+                          disabled
+                          value={editSelectedWeapon?.caliber || 'Calibre da Arma'}
+                          className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                          Tipo de Munição
+                        </label>
+                        <select
+                          value={editAmmoTipo}
+                          onChange={(e) => setEditAmmoTipo(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                        >
+                          {availableEditPoliceTipos.map(t => (
+                            <option key={`edit-t-${t}`} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                          Peso do Projétil
+                        </label>
+                        <select
+                          value={editAmmoPeso}
+                          onChange={(e) => setEditAmmoPeso(e.target.value)}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                        >
+                          {availableEditPolicePesos.map(p => (
+                            <option key={`edit-p-${p}`} value={p}>{p}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="p-2.5 bg-slate-900/70 border border-slate-800 rounded-lg text-[11px] text-slate-400 flex items-start space-x-2">
+                      <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                      <span>
+                        Esta indicação é <strong>meramente informativa</strong> para a análise do armeiro. <strong>Não gera cautela de munições em conjunto</strong> e <strong>não deduz do cofre</strong>.
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => setEditingCautela(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={!editWeaponId || isSubmitting}
+                  className="flex items-center space-x-1.5 px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold rounded-xl text-xs transition shadow-md"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{isSubmitting ? 'Salvando...' : 'Salvar Alterações'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação para Excluir Solicitação de Cautela Pendente */}
       {cancelPendingModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
             <div className="bg-slate-900 border border-red-800/80 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl animate-in zoom-in-95">
@@ -4662,14 +5123,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <Trash2 className="w-6 h-6 text-red-400" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-slate-100">Cancelar Solicitação de Cautela</h3>
-                  <p className="text-xs text-slate-400">Ação imediata antes da análise do armeiro</p>
+                  <h3 className="text-base font-bold text-slate-100">Excluir Solicitação de Cautela</h3>
+                  <p className="text-xs text-slate-400">Permitido enquanto o armeiro da unidade não deferir ou indeferir</p>
                 </div>
               </div>
 
               <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-2.5">
                 <p>
-                  Você tem certeza que deseja cancelar e apagar a solicitação de cautela do armamento:
+                  Você tem certeza que deseja excluir esta solicitação de cautela do armamento:
                 </p>
                 <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-slate-200 space-y-1">
                   <div><strong>Modelo:</strong> {cancelPendingModal.weaponModel}</div>
@@ -4677,7 +5138,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <div><strong>Calibre:</strong> {cancelPendingModal.weaponCaliber}</div>
                 </div>
                 <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-[11px] leading-relaxed">
-                  ● Ao cancelar, esta solicitação será apagada e a arma voltará a ficar disponível no cofre (status "No Cofre") da sua unidade.
+                  ● Ao excluir, esta solicitação será apagada e a arma voltará a ficar disponível no cofre (status "No Cofre") da sua unidade.
                 </div>
               </div>
 
@@ -4694,10 +5155,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => handleCancelPendingCautela(cancelPendingModal)}
-                  className="flex items-center space-x-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 text-slate-950 font-bold rounded-xl text-xs transition shadow-lg shadow-red-950/40"
+                  className="flex items-center space-x-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-xs transition shadow-lg shadow-red-950/40"
                 >
                   <Trash2 className="w-4 h-4" />
-                  <span>{isSubmitting ? 'Cancelando...' : 'Sim, Cancelar e Apagar'}</span>
+                  <span>{isSubmitting ? 'Excluindo...' : 'Sim, Excluir Cautela'}</span>
                 </button>
               </div>
             </div>
