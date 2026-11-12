@@ -52,7 +52,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'DEFERIDAS' | 'INDEFERIDAS' | 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA'>('TODOS');
   const [historyWeaponFilter, setHistoryWeaponFilter] = useState<string>('TODAS');
   const [historyDateFilter, setHistoryDateFilter] = useState<string>('');
-  const [historyDecisionFilter, setHistoryDecisionFilter] = useState<'TODAS' | 'DEFERIDA' | 'INDEFERIDAS'>('TODAS');
+  const [historyDecisionFilter, setHistoryDecisionFilter] = useState<'TODAS' | 'ATIVAS' | 'DEFERIDA' | 'INDEFERIDAS'>('TODAS');
+
+  // Modal de Impressão do Histórico de Cautelas (Policial)
+  const [isPrintHistoryModalOpen, setIsPrintHistoryModalOpen] = useState(false);
+  const [printMode, setPrintMode] = useState<'COMPLETO' | 'FILTRADO'>('COMPLETO');
+  const [printStartDate, setPrintStartDate] = useState<string>('');
+  const [printEndDate, setPrintEndDate] = useState<string>('');
+  const [printWeaponFilter, setPrintWeaponFilter] = useState<string>('TODAS');
+  const [printStatusFilter, setPrintStatusFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS' | 'INDEFERIDAS' | 'DEFERIDAS'>('TODAS');
   
   // Modal de Devolução
   const [returningCautela, setReturningCautela] = useState<CautelaArma | null>(null);
@@ -691,7 +699,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         list = list.filter(c => c.status === 'RECUSADA');
       } else {
         // Aba "Meu Histórico" (Policial): histórico completo de armas em seu nome (inclusive indeferidas)
-        if (historyDecisionFilter === 'DEFERIDA') {
+        if (historyDecisionFilter === 'ATIVAS') {
+          list = list.filter(c => c.status === 'AUTORIZADA');
+        } else if (historyDecisionFilter === 'DEFERIDA') {
           list = list.filter(c =>
             c.status === 'AUTORIZADA' ||
             c.status === 'DEVOLUCAO_PENDENTE' ||
@@ -816,6 +826,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   const meuHistoricoTotalCount = useMemo(() => {
     return scopedCautelas.length;
+  }, [scopedCautelas]);
+
+  const meuHistoricoAtivasCount = useMemo(() => {
+    return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
+  }, [scopedCautelas]);
+
+  const meuHistoricoDevolvidasCount = useMemo(() => {
+    return scopedCautelas.filter(c =>
+      c.status === 'DEVOLVIDA' || c.status === 'DEVOLUCAO_PENDENTE'
+    ).length;
   }, [scopedCautelas]);
 
   const meuHistoricoDeferidasCount = useMemo(() => {
@@ -2131,6 +2151,577 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     printDocumentInPage(htmlContent);
   };
 
+  // Auxiliar para converter ISO em YYYY-MM-DD local
+  const toLocalDateYMD = useCallback((iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  // Lista calculada para o Relatório de Impressão do Histórico do Policial
+  const buildPolicialPrintList = useCallback((overrideComplete?: boolean) => {
+    const isComplete = overrideComplete === true || (overrideComplete !== false && printMode === 'COMPLETO');
+    let list = [...scopedCautelas];
+
+    if (!isComplete) {
+      if (printStatusFilter === 'ATIVAS') {
+        list = list.filter(c => c.status === 'AUTORIZADA');
+      } else if (printStatusFilter === 'DEVOLVIDAS') {
+        list = list.filter(c => c.status === 'DEVOLVIDA' || c.status === 'DEVOLUCAO_PENDENTE');
+      } else if (printStatusFilter === 'INDEFERIDAS') {
+        list = list.filter(c => c.status === 'RECUSADA');
+      } else if (printStatusFilter === 'DEFERIDAS') {
+        list = list.filter(c =>
+          c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA'
+        );
+      }
+
+      if (printWeaponFilter !== 'TODAS') {
+        list = list.filter(c => {
+          const key = c.weaponSerialNumber || c.weaponId || c.weaponModel || '';
+          return key === printWeaponFilter;
+        });
+      }
+
+      if (printStartDate || printEndDate) {
+        list = list.filter(c => {
+          const candidateDates = [
+            toLocalDateYMD(c.requestDate),
+            toLocalDateYMD(c.authorizedAt),
+            toLocalDateYMD(c.returnDate),
+            toLocalDateYMD(c.createdAt)
+          ].filter(Boolean);
+
+          if (candidateDates.length === 0) return false;
+
+          return candidateDates.some(ymd => {
+            const afterStart = !printStartDate || ymd >= printStartDate;
+            const beforeEnd = !printEndDate || ymd <= printEndDate;
+            return afterStart && beforeEnd;
+          });
+        });
+      }
+    }
+
+    // Ordena fixando cautelas ATIVAS no topo e depois por data decrescente
+    list.sort((a, b) => {
+      const aIsAtiva = a.status === 'AUTORIZADA' ? 1 : 0;
+      const bIsAtiva = b.status === 'AUTORIZADA' ? 1 : 0;
+      if (aIsAtiva !== bIsAtiva) return bIsAtiva - aIsAtiva;
+
+      const getTs = (item: CautelaArma) => {
+        const raw = item.returnDate || item.authorizedAt || item.requestDate || item.createdAt || '';
+        const t = raw ? new Date(raw).getTime() : 0;
+        return isNaN(t) ? 0 : t;
+      };
+      return getTs(b) - getTs(a);
+    });
+
+    return list;
+  }, [
+    scopedCautelas,
+    printMode,
+    printStatusFilter,
+    printWeaponFilter,
+    printStartDate,
+    printEndDate,
+    toLocalDateYMD
+  ]);
+
+  const printPreviewList = useMemo(() => buildPolicialPrintList(), [buildPolicialPrintList]);
+
+  const handleOpenPrintHistoryModal = () => {
+    setErrorMsg('');
+    const hasScreenFilters =
+      activeTab === 'INDEFERIDAS' &&
+      (historyWeaponFilter !== 'TODAS' || Boolean(historyDateFilter) || historyDecisionFilter !== 'TODAS');
+
+    if (hasScreenFilters) {
+      setPrintMode('FILTRADO');
+      setPrintWeaponFilter(historyWeaponFilter);
+      setPrintStartDate(historyDateFilter || '');
+      setPrintEndDate(historyDateFilter || '');
+      if (historyDecisionFilter === 'ATIVAS') {
+        setPrintStatusFilter('ATIVAS');
+      } else if (historyDecisionFilter === 'DEFERIDA') {
+        setPrintStatusFilter('DEFERIDAS');
+      } else if (historyDecisionFilter === 'INDEFERIDAS') {
+        setPrintStatusFilter('INDEFERIDAS');
+      } else {
+        setPrintStatusFilter('TODAS');
+      }
+    } else {
+      setPrintMode('COMPLETO');
+      setPrintWeaponFilter('TODAS');
+      setPrintStartDate('');
+      setPrintEndDate('');
+      setPrintStatusFilter('TODAS');
+    }
+    setIsPrintHistoryModalOpen(true);
+  };
+
+  // Impressão do Relatório de Histórico de Cautelas do Policial (Completo ou Filtrado, com Munições Vinculadas)
+  const handlePrintPolicialHistory = (forceComplete?: boolean) => {
+    const isComplete = forceComplete === true || (forceComplete !== false && printMode === 'COMPLETO');
+    const reportList = buildPolicialPrintList(isComplete);
+
+    const escapeHtml = (val?: string | number | null) =>
+      String(val ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+
+    const formatDateBr = (ymd: string) => {
+      if (!ymd) return '';
+      const [y, m, d] = ymd.split('-');
+      return y && m && d ? `${d}/${m}/${y}` : ymd;
+    };
+
+    const deptObj = userUnit ? departments.find(d => d.id === userUnit.departmentId) : undefined;
+
+    const totalCount = reportList.length;
+    const ativasCount = reportList.filter(c => c.status === 'AUTORIZADA').length;
+    const devolvidasCount = reportList.filter(c => c.status === 'DEVOLVIDA' || c.status === 'DEVOLUCAO_PENDENTE').length;
+    const indeferidasReportCount = reportList.filter(c => c.status === 'RECUSADA').length;
+    const emAnaliseCount = reportList.filter(c => isPendingStatus(c.status)).length;
+    const comMunicaoCount = reportList.filter(c => {
+      const ad = getRescuedAmmoDetails(c);
+      return ad.hasAmmo && ad.quantity > 0;
+    }).length;
+
+    const statusLabelMap: Record<typeof printStatusFilter, string> = {
+      TODAS: 'Todas (Ativas, Devolvidas e Indeferidas)',
+      ATIVAS: 'Somente Ativas (Em Posse)',
+      DEVOLVIDAS: 'Somente Devolvidas',
+      INDEFERIDAS: 'Somente Indeferidas',
+      DEFERIDAS: 'Deferidas (Ativas e Devolvidas)'
+    };
+
+    const selectedWeaponObj = userHistoryWeapons.find(w => w.key === printWeaponFilter);
+    const periodLabel = isComplete
+      ? 'Todo o Período (Histórico Completo: Ativas, Devolvidas e Indeferidas)'
+      : (printStartDate || printEndDate)
+        ? `${printStartDate ? `De ${formatDateBr(printStartDate)}` : 'Desde o início'}${printEndDate ? ` até ${formatDateBr(printEndDate)}` : ' até a presente data'}`
+        : 'Todo o Período';
+
+    const filterSummaryText = isComplete
+      ? 'Relatório Completo — Todo o Período (Inclui Cautelas Ativas, Devolvidas e Indeferidas)'
+      : `Situação: ${statusLabelMap[printStatusFilter]} • Armamento: ${selectedWeaponObj ? selectedWeaponObj.label : 'Todas as Armas'} • Período: ${periodLabel}`;
+
+    const rowsHtml = reportList.length === 0
+      ? `
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 18px; text-align: center; color: #475569; margin-top: 10px;">
+          Nenhum registro de cautela encontrado para os parâmetros selecionados.
+        </div>
+      `
+      : reportList.map((cautela, index) => {
+          const isAtiva = cautela.status === 'AUTORIZADA';
+          const isDevolvida = cautela.status === 'DEVOLVIDA';
+          const isDevPendente = cautela.status === 'DEVOLUCAO_PENDENTE';
+          const isRecusada = cautela.status === 'RECUSADA';
+          const isPend = isPendingStatus(cautela.status);
+
+          const statusText = isAtiva
+            ? 'ATIVA (EM POSSE)'
+            : isDevolvida
+              ? 'DEVOLVIDA'
+              : isDevPendente
+                ? 'DEVOLVIDA (AGUARDANDO RECIBO)'
+                : isRecusada
+                  ? 'INDEFERIDA'
+                  : isPend
+                    ? 'EM ANÁLISE'
+                    : cautela.status;
+
+          const statusStyle = isAtiva
+            ? 'background: #dcfce7; color: #14532d; border: 1px solid #16a34a;'
+            : isDevolvida
+              ? 'background: #f1f5f9; color: #0f172a; border: 1px solid #64748b;'
+              : isDevPendente
+                ? 'background: #fef3c7; color: #92400e; border: 1px solid #d97706;'
+                : isRecusada
+                  ? 'background: #fee2e2; color: #991b1b; border: 1px solid #dc2626;'
+                  : 'background: #fef9c3; color: #854d0e; border: 1px solid #ca8a04;';
+
+          const cardBorderStyle = isAtiva
+            ? 'border: 2px solid #16a34a; background: #f8fafc;'
+            : isRecusada
+              ? 'border: 1px solid #fca5a5; background: #ffffff;'
+              : 'border: 1px solid #94a3b8; background: #ffffff;';
+
+          const cautelaUnit = units.find(u => u.id === cautela.unitId) || userUnit;
+          const armorerInfo = getResolvedArmorer(cautela);
+          const ammoDetails = getRescuedAmmoDetails(cautela);
+          const hasLinkedAmmo = ammoDetails.hasAmmo && ammoDetails.quantity > 0;
+
+          const returnedAmmoVal =
+            cautela.returnedAmmoQuantity !== undefined && cautela.returnedAmmoQuantity !== null
+              ? Number(cautela.returnedAmmoQuantity)
+              : (ammoDetails.linkedAmmo as any)?.returnedQuantity !== undefined
+                ? Number((ammoDetails.linkedAmmo as any).returnedQuantity)
+                : null;
+
+          return `
+            <div class="cautela-card" style="${cardBorderStyle}">
+              <div class="cautela-card-header">
+                <div>
+                  <span style="font-weight: 800; font-size: 11px; color: #0f172a;">
+                    #${index + 1} — ${escapeHtml(cautela.weaponModel || 'Armamento')}
+                  </span>
+                  <span style="font-family: monospace; font-weight: 700; font-size: 11px; margin-left: 8px; color: #1e293b;">
+                    Nº Série: ${escapeHtml(cautela.weaponSerialNumber || 'N/I')}
+                  </span>
+                  ${cautela.weaponCaliber ? `<span style="margin-left: 8px; font-size: 10px; padding: 1px 6px; border: 1px solid #cbd5e1; border-radius: 3px; background: #f1f5f9;">Calibre: <strong>${escapeHtml(cautela.weaponCaliber)}</strong></span>` : ''}
+                </div>
+                <span style="padding: 2px 8px; border-radius: 4px; font-size: 9.5px; font-weight: 800; text-transform: uppercase; ${statusStyle}">
+                  ${escapeHtml(statusText)}
+                </span>
+              </div>
+
+              <table class="info-table" style="margin-bottom: ${hasLinkedAmmo ? '6px' : '0'};">
+                <tr>
+                  <td style="width: 34%;"><strong>Espécie / Tipo:</strong> ${escapeHtml(cautela.weaponType || 'Arma de Fogo')}</td>
+                  <td style="width: 33%;"><strong>Carregadores:</strong> ${escapeHtml(cautela.magazineQuantity ?? 0)} un.</td>
+                  <td style="width: 33%;"><strong>Unidade:</strong> ${escapeHtml(cautelaUnit?.name || 'Unidade Policial')}</td>
+                </tr>
+                <tr>
+                  <td><strong>Data da Solicitação:</strong> ${cautela.requestDate ? escapeHtml(new Date(cautela.requestDate).toLocaleString('pt-BR')) : 'N/I'}</td>
+                  <td><strong>Data da Autorização:</strong> ${cautela.authorizedAt ? escapeHtml(new Date(cautela.authorizedAt).toLocaleString('pt-BR')) : (isRecusada ? 'Indeferida' : 'Aguardando')}</td>
+                  <td><strong>Data da Devolução:</strong> ${cautela.returnDate ? escapeHtml(new Date(cautela.returnDate).toLocaleString('pt-BR')) : (isAtiva ? 'Em posse (Ativa)' : '—')}</td>
+                </tr>
+                <tr>
+                  <td><strong>Armeiro Responsável:</strong> ${isPend ? 'Aguardando análise' : `${escapeHtml(armorerInfo.name)}${armorerInfo.masp ? ` (MASP: ${escapeHtml(armorerInfo.masp)})` : ''}`}</td>
+                  <td colspan="2"><strong>Motivo / Finalidade:</strong> ${escapeHtml(cautela.reason || 'Serviço Policial')}</td>
+                </tr>
+                ${(isDevolvida || isDevPendente) ? `
+                  <tr>
+                    <td><strong>Disparos na Devolução:</strong> ${cautela.hadShots ? `Sim (${escapeHtml(cautela.shotsFired || 0)} disparos)` : 'Não houve disparos'}</td>
+                    <td><strong>Condição na Devolução:</strong> ${cautela.isWorking !== false ? 'Em perfeito funcionamento' : `Com defeito (${escapeHtml(cautela.defectDescription || 'Relatado')})`}</td>
+                    <td><strong>Recebedor Devolução:</strong> ${isDevPendente ? 'Aguardando recibo do Armeiro' : escapeHtml(cautela.returnArmorerName || armorerInfo.name)}</td>
+                  </tr>
+                ` : ''}
+                ${isRecusada && cautela.authorizationNotes ? `
+                  <tr>
+                    <td colspan="3" style="color: #991b1b; background: #fef2f2;">
+                      <strong>Justificativa do Indeferimento:</strong> ${escapeHtml(cautela.authorizationNotes)}
+                    </td>
+                  </tr>
+                ` : ''}
+                ${!isRecusada && cautela.authorizationNotes ? `
+                  <tr>
+                    <td colspan="3">
+                      <strong>Observações do Registro:</strong> ${escapeHtml(cautela.authorizationNotes)}
+                    </td>
+                  </tr>
+                ` : ''}
+              </table>
+
+              ${hasLinkedAmmo ? `
+                <div class="ammo-linked-box">
+                  <div class="ammo-linked-title">
+                    DADOS DAS MUNIÇÕES DA CAUTELA VINCULADA ${ammoDetails.linkedCautelaId ? `(PROTOCOLO: ${escapeHtml(ammoDetails.linkedCautelaId.toUpperCase())})` : ''}
+                  </div>
+                  <table class="data-table">
+                    <thead>
+                      <tr>
+                        <th>Calibre</th>
+                        <th>Qtd. Acautelada</th>
+                        <th>Fabricante</th>
+                        <th>Tipo</th>
+                        <th>Peso</th>
+                        <th>Lote</th>
+                        <th>Destinação</th>
+                        <th>Regime / Devolução</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td><strong>${escapeHtml(ammoDetails.caliberName)}</strong></td>
+                        <td><strong>${escapeHtml(ammoDetails.quantity)} un.</strong></td>
+                        <td>${escapeHtml(ammoDetails.fabricante)}</td>
+                        <td>${escapeHtml(ammoDetails.tipoMunicao)}</td>
+                        <td>${escapeHtml(ammoDetails.pesoMunicao)}</td>
+                        <td style="font-family: monospace;">${escapeHtml(ammoDetails.loteMunicao)}</td>
+                        <td>${escapeHtml(ammoDetails.destinacao)}</td>
+                        <td>
+                          ${ammoDetails.seraDevolvida
+                            ? `Passiva de Devolução${(isDevolvida || isDevPendente) && returnedAmmoVal !== null ? ` (Devolvidas: ${escapeHtml(returnedAmmoVal)} un.)` : ''}`
+                            : 'Retirada Permanente / Consumo'}
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }).join('');
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="utf-8" />
+        <title>Relatório de Histórico de Cautelas de Armas - ${escapeHtml(currentUser.masp)}</title>
+        <style>
+          @page {
+            size: A4 portrait;
+            margin: 11mm;
+          }
+          * {
+            box-sizing: border-box;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          body {
+            background-color: #ffffff !important;
+            color: #0f172a !important;
+            font-family: Arial, Helvetica, sans-serif !important;
+            margin: 0;
+            padding: 6px;
+            font-size: 10.5px;
+            line-height: 1.4;
+          }
+          .header-box {
+            text-align: center;
+            border-bottom: 2px solid #0f172a;
+            padding-bottom: 8px;
+            margin-bottom: 12px;
+          }
+          .header-title-org {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 800;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: #000000;
+          }
+          .header-subtitle-unit {
+            margin: 3px 0 0 0;
+            font-size: 11.5px;
+            font-weight: 700;
+            color: #1e293b;
+            text-transform: uppercase;
+          }
+          .header-doc-title {
+            margin: 6px 0 2px 0;
+            font-size: 13px;
+            font-weight: 800;
+            color: #000000;
+            text-decoration: underline;
+            text-transform: uppercase;
+          }
+          .filter-banner {
+            margin: 4px auto 0 auto;
+            font-size: 10px;
+            font-weight: 700;
+            color: #1e293b;
+            background: #f1f5f9;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 4px 8px;
+            display: inline-block;
+          }
+          .section-banner {
+            background-color: #e2e8f0 !important;
+            color: #0f172a !important;
+            padding: 4px 8px;
+            font-weight: 800;
+            font-size: 10.5px;
+            border: 1px solid #94a3b8;
+            border-bottom: none;
+            text-transform: uppercase;
+          }
+          .info-table, .data-table {
+            width: 100%;
+            border-collapse: collapse;
+          }
+          .info-table td {
+            padding: 4px 7px;
+            border: 1px solid #cbd5e1;
+            font-size: 10px;
+            color: #0f172a;
+            vertical-align: top;
+          }
+          .data-table th {
+            background-color: #f1f5f9 !important;
+            color: #0f172a !important;
+            border: 1px solid #94a3b8;
+            padding: 4px 5px;
+            text-align: left;
+            font-size: 9.5px;
+            font-weight: 700;
+            text-transform: uppercase;
+          }
+          .data-table td {
+            border: 1px solid #cbd5e1;
+            padding: 4px 5px;
+            font-size: 9.5px;
+            color: #0f172a;
+          }
+          .summary-grid {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
+            border-collapse: collapse;
+            margin-bottom: 12px;
+          }
+          .summary-cell {
+            display: table-cell;
+            border: 1px solid #94a3b8;
+            padding: 6px 8px;
+            text-align: center;
+            background: #f8fafc;
+          }
+          .summary-cell strong {
+            display: block;
+            font-size: 13px;
+            color: #0f172a;
+          }
+          .summary-cell span {
+            font-size: 9px;
+            text-transform: uppercase;
+            font-weight: 700;
+            color: #475569;
+          }
+          .cautela-card {
+            border-radius: 5px;
+            padding: 7px;
+            margin-bottom: 10px;
+            page-break-inside: avoid;
+          }
+          .cautela-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-bottom: 5px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #cbd5e1;
+          }
+          .ammo-linked-box {
+            background: #f8fafc;
+            border: 1px solid #94a3b8;
+            border-radius: 4px;
+            padding: 5px;
+            margin-top: 4px;
+          }
+          .ammo-linked-title {
+            font-size: 9.5px;
+            font-weight: 800;
+            color: #0f172a;
+            text-transform: uppercase;
+            margin-bottom: 4px;
+          }
+          .signature-section {
+            margin-top: 28px;
+            page-break-inside: avoid;
+            text-align: center;
+          }
+          .signature-line {
+            width: 60%;
+            margin: 0 auto;
+            border-top: 1px solid #000000;
+            padding-top: 6px;
+            font-size: 10.5px;
+          }
+          .footer-note {
+            margin-top: 14px;
+            border-top: 1px dashed #cbd5e1;
+            padding-top: 6px;
+            text-align: center;
+            font-size: 9px;
+            color: #475569;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header-box">
+          <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
+          <h3 class="header-subtitle-unit">
+            ${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA')} • ${escapeHtml(userUnit ? userUnit.name : 'UNIDADE POLICIAL')}
+          </h3>
+          <h1 class="header-doc-title">
+            RELATÓRIO DE HISTÓRICO INDIVIDUAL DE CAUTELAS DE ARMAS
+          </h1>
+          <div class="filter-banner">
+            ${escapeHtml(filterSummaryText)}
+          </div>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+          <div class="section-banner">1. IDENTIFICAÇÃO DO SERVIDOR POLICIAL</div>
+          <table class="info-table">
+            <tr>
+              <td style="width: 45%;"><strong>Servidor:</strong> ${escapeHtml(currentUser.name)}</td>
+              <td style="width: 25%;"><strong>MASP:</strong> ${escapeHtml(currentUser.masp)}</td>
+              <td style="width: 30%;"><strong>Cargo/Perfil:</strong> ${escapeHtml((currentUser as any).cargo || currentUser.role)}</td>
+            </tr>
+            <tr>
+              <td><strong>Unidade de Lotação:</strong> ${escapeHtml(userUnit ? userUnit.name : 'Unidade Vinculada')}</td>
+              <td colspan="2"><strong>Data/Hora da Emissão:</strong> ${escapeHtml(new Date().toLocaleString('pt-BR'))}</td>
+            </tr>
+          </table>
+        </div>
+
+        <div class="summary-grid">
+          <div class="summary-cell">
+            <strong>${totalCount}</strong>
+            <span>Total no Relatório</span>
+          </div>
+          <div class="summary-cell" style="background: #f0fdf4;">
+            <strong style="color: #15803d;">${ativasCount}</strong>
+            <span>Ativas (Em Posse)</span>
+          </div>
+          <div class="summary-cell">
+            <strong>${devolvidasCount}</strong>
+            <span>Devolvidas</span>
+          </div>
+          <div class="summary-cell" style="background: #fef2f2;">
+            <strong style="color: #b91c1c;">${indeferidasReportCount}</strong>
+            <span>Indeferidas</span>
+          </div>
+          ${emAnaliseCount > 0 ? `
+            <div class="summary-cell" style="background: #fffbeb;">
+              <strong style="color: #b45309;">${emAnaliseCount}</strong>
+              <span>Em Análise</span>
+            </div>
+          ` : ''}
+          <div class="summary-cell">
+            <strong>${comMunicaoCount}</strong>
+            <span>C/ Munição Vinculada</span>
+          </div>
+        </div>
+
+        <div>
+          <div class="section-banner" style="border-bottom: 1px solid #94a3b8; margin-bottom: 8px;">
+            2. REGISTROS DE CAUTELAS DE ARMAMENTO ${ativasCount > 0 ? '(CAUTELAS ATIVAS FIXADAS NO TOPO)' : ''}
+          </div>
+          ${rowsHtml}
+        </div>
+
+        <div class="signature-section">
+          <div class="signature-line">
+            <strong>${escapeHtml(currentUser.name)}</strong><br/>
+            MASP: ${escapeHtml(currentUser.masp)} — ${escapeHtml(userUnit ? userUnit.name : 'Polícia Civil de Minas Gerais')}
+          </div>
+        </div>
+
+        <div class="footer-note">
+          Relatório de Histórico de Cautelas de Armas emitido em ${escapeHtml(new Date().toLocaleString('pt-BR'))} • Sistema de Gestão de Armas e Munições - PCMG
+        </div>
+      </body>
+      </html>
+    `;
+
+    setIsPrintHistoryModalOpen(false);
+    printDocumentInPage(htmlContent);
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner Header */}
@@ -2160,7 +2751,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {!canAuthorize && (
+              <button
+                type="button"
+                onClick={handleOpenPrintHistoryModal}
+                className="flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-sm bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-700/60"
+                title="Imprimir histórico de cautelas filtrando por data, armas, ativas ou relatório completo"
+              >
+                <Printer className="w-4 h-4 text-sky-400" />
+                <span>Imprimir Histórico</span>
+              </button>
+            )}
             <button
               onClick={handleOpenNovaSolicitacao}
               className={`flex items-center space-x-2 px-4 py-2.5 rounded-xl text-xs font-bold transition shadow-sm ${
@@ -2861,13 +3463,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
                   {[
                     { id: 'TODAS', label: `Todas (${meuHistoricoTotalCount})`, activeClass: 'bg-sky-500 text-slate-950 font-black shadow-sm' },
-                    { id: 'DEFERIDA', label: `Deferida (${meuHistoricoDeferidasCount})`, activeClass: 'bg-emerald-500 text-slate-950 font-black shadow-sm' },
+                    { id: 'ATIVAS', label: `Ativas (${meuHistoricoAtivasCount})`, activeClass: 'bg-emerald-500 text-slate-950 font-black shadow-sm' },
+                    { id: 'DEFERIDA', label: `Deferida (${meuHistoricoDeferidasCount})`, activeClass: 'bg-teal-500 text-slate-950 font-black shadow-sm' },
                     { id: 'INDEFERIDAS', label: `Indeferidas (${indeferidasCount})`, activeClass: 'bg-red-500 text-white font-black shadow-sm' }
                   ].map(item => (
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setHistoryDecisionFilter(item.id as 'TODAS' | 'DEFERIDA' | 'INDEFERIDAS')}
+                      onClick={() => setHistoryDecisionFilter(item.id as 'TODAS' | 'ATIVAS' | 'DEFERIDA' | 'INDEFERIDAS')}
                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
                         historyDecisionFilter === item.id
                           ? item.activeClass
@@ -2881,10 +3484,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               )}
             </div>
 
-            {/* Filtros por Arma e por Data exclusivos da aba "Meu Histórico" (Policial) */}
+            {/* Filtros por Arma, por Data e Ações de Impressão exclusivos da aba "Meu Histórico" (Policial) */}
             {!canAuthorize && activeTab === 'INDEFERIDAS' && (
-              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
-                <div>
+              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
                   <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                     Filtrar por Arma:
                   </label>
@@ -2902,7 +3505,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   </select>
                 </div>
 
-                <div>
+                <div className="sm:col-span-3">
                   <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
                     Filtrar por Data:
                   </label>
@@ -2914,7 +3517,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   />
                 </div>
 
-                <div className="flex items-center justify-end">
+                <div className="sm:col-span-5 flex flex-wrap items-center justify-end gap-2">
                   {(historyWeaponFilter !== 'TODAS' || historyDateFilter || historyDecisionFilter !== 'TODAS' || searchTerm.trim()) && (
                     <button
                       type="button"
@@ -2924,12 +3527,32 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         setHistoryDecisionFilter('TODAS');
                         setSearchTerm('');
                       }}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 border border-slate-700"
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 border border-slate-700"
                     >
                       <X className="w-3.5 h-3.5 text-slate-400" />
-                      <span>Limpar Filtros</span>
+                      <span>Limpar</span>
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={handleOpenPrintHistoryModal}
+                    className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-slate-950 rounded-xl text-xs font-black transition flex items-center space-x-1.5 shadow-sm"
+                    title="Abrir opções para imprimir histórico filtrado por data, armas, ativas ou relatório completo"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Imprimir Histórico</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handlePrintPolicialHistory(true)}
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
+                    title="Imprimir relatório completo com ativas, devolvidas e indeferidas de todo o período"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Relatório Completo</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -5160,6 +5783,257 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <Trash2 className="w-4 h-4" />
                   <span>{isSubmitting ? 'Excluindo...' : 'Sim, Excluir Cautela'}</span>
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal de Impressão do Histórico de Cautelas (Policial) */}
+        {isPrintHistoryModalOpen && !canAuthorize && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+            <div className="bg-slate-900 border border-sky-800/70 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-8">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-4">
+                <div className="flex items-center space-x-3">
+                  <div className="p-3 bg-sky-500/15 rounded-xl border border-sky-500/30 text-sky-400">
+                    <Printer className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100">
+                      Imprimir Histórico de Cautelas de Armas
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Gere a impressão filtrando por data, armas ou ativas, ou imprima o relatório completo de todo o período (incluindo dados das munições vinculadas).
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsPrintHistoryModalOpen(false)}
+                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Seleção do Modo de Impressão */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setPrintMode('COMPLETO')}
+                  className={`text-left p-3.5 rounded-xl border transition space-y-1 ${
+                    printMode === 'COMPLETO'
+                      ? 'bg-sky-500/15 border-sky-500 text-slate-100 ring-1 ring-sky-500/40'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-sky-300">
+                      Relatório Completo (Todo o Período)
+                    </span>
+                    {printMode === 'COMPLETO' && <CheckCircle2 className="w-4 h-4 text-sky-400 shrink-0" />}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Inclui todas as cautelas <strong>ativas, devolvidas e indeferidas</strong> por todo o período, além das munições vinculadas.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPrintMode('FILTRADO')}
+                  className={`text-left p-3.5 rounded-xl border transition space-y-1 ${
+                    printMode === 'FILTRADO'
+                      ? 'bg-amber-500/15 border-amber-500 text-slate-100 ring-1 ring-amber-500/40'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-300">
+                      Filtrar Impressão
+                    </span>
+                    {printMode === 'FILTRADO' && <Filter className="w-4 h-4 text-amber-400 shrink-0" />}
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Permite filtrar especificamente por <strong>data/período, armas e situação</strong> (ativas, devolvidas ou indeferidas).
+                  </p>
+                </button>
+              </div>
+
+              {/* Opções de Filtro quando printMode === 'FILTRADO' */}
+              {printMode === 'FILTRADO' && (
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-2">
+                      Situação das Cautelas:
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {[
+                        { id: 'TODAS', label: `Todas (${meuHistoricoTotalCount})` },
+                        { id: 'ATIVAS', label: `Somente Ativas (${meuHistoricoAtivasCount})` },
+                        { id: 'DEVOLVIDAS', label: `Devolvidas (${meuHistoricoDevolvidasCount})` },
+                        { id: 'INDEFERIDAS', label: `Indeferidas (${indeferidasCount})` },
+                        { id: 'DEFERIDAS', label: `Deferidas (${meuHistoricoDeferidasCount})` }
+                      ].map(opt => (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => setPrintStatusFilter(opt.id as any)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition border ${
+                            printStatusFilter === opt.id
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 font-black'
+                              : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Filtrar por Arma:
+                      </label>
+                      <select
+                        value={printWeaponFilter}
+                        onChange={(e) => setPrintWeaponFilter(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-amber-500"
+                      >
+                        <option value="TODAS">Todas as Armas do Histórico ({userHistoryWeapons.length})</option>
+                        {userHistoryWeapons.map(w => (
+                          <option key={w.key} value={w.key}>
+                            {w.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Data Inicial:
+                      </label>
+                      <input
+                        type="date"
+                        value={printStartDate}
+                        onChange={(e) => setPrintStartDate(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                        Data Final:
+                      </label>
+                      <input
+                        type="date"
+                        value={printEndDate}
+                        onChange={(e) => setPrintEndDate(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-amber-500"
+                      />
+                    </div>
+                  </div>
+
+                  {(printStartDate || printEndDate || printWeaponFilter !== 'TODAS' || printStatusFilter !== 'TODAS') && (
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPrintStartDate('');
+                          setPrintEndDate('');
+                          setPrintWeaponFilter('TODAS');
+                          setPrintStatusFilter('TODAS');
+                        }}
+                        className="text-[11px] font-bold text-slate-400 hover:text-slate-200 flex items-center space-x-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Redefinir filtros de impressão</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Resumo prévio do que sairá na impressão */}
+              {(() => {
+                const prevAtivas = printPreviewList.filter(c => c.status === 'AUTORIZADA').length;
+                const prevDevolvidas = printPreviewList.filter(c => c.status === 'DEVOLVIDA' || c.status === 'DEVOLUCAO_PENDENTE').length;
+                const prevIndeferidas = printPreviewList.filter(c => c.status === 'RECUSADA').length;
+                const prevComMunicao = printPreviewList.filter(c => {
+                  const ad = getRescuedAmmoDetails(c);
+                  return ad.hasAmmo && ad.quantity > 0;
+                }).length;
+
+                return (
+                  <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-slate-300 uppercase tracking-wider text-[11px]">
+                        Prévia dos Registros no Relatório:
+                      </span>
+                      <span className="font-mono font-bold text-sky-300">
+                        {printPreviewList.length} cautela(s) selecionada(s)
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                      <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-2">
+                        <div className="text-sm font-black text-emerald-400 font-mono">{prevAtivas}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Ativas</div>
+                      </div>
+                      <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                        <div className="text-sm font-black text-slate-200 font-mono">{prevDevolvidas}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Devolvidas</div>
+                      </div>
+                      <div className="bg-slate-900 border border-red-900/40 rounded-lg p-2">
+                        <div className="text-sm font-black text-red-400 font-mono">{prevIndeferidas}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">Indeferidas</div>
+                      </div>
+                      <div className="bg-slate-900 border border-amber-800/40 rounded-lg p-2">
+                        <div className="text-sm font-black text-amber-400 font-mono">{prevComMunicao}</div>
+                        <div className="text-[10px] font-bold text-slate-400 uppercase">C/ Munição Vinculada</div>
+                      </div>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400">
+                      ● Cautelas com munição vinculada exibem automaticamente calibre, quantidade, fabricante, tipo, peso, lote, destinação e regime de devolução.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsPrintHistoryModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                >
+                  Cancelar
+                </button>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {printMode === 'FILTRADO' && (
+                    <button
+                      type="button"
+                      onClick={() => handlePrintPolicialHistory(true)}
+                      className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 border border-sky-700/60 rounded-xl text-xs font-bold transition"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Imprimir Completo (Todo o Período)</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => handlePrintPolicialHistory()}
+                    className="flex items-center space-x-2 px-5 py-2.5 bg-sky-500 hover:bg-sky-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>
+                      {printMode === 'COMPLETO'
+                        ? 'Imprimir Relatório Completo'
+                        : 'Imprimir Relatório Filtrado'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>
