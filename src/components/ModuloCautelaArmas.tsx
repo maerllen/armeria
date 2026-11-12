@@ -485,6 +485,158 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     };
   }, [currentUser, canAuthorize]);
 
+  // Extrai nome e MASP limpos a partir de observações de localização da arma
+  const parseWeaponLocationRequester = useCallback((rawText?: string | null) => {
+    if (!rawText) return { name: '', masp: '' };
+    const note = String(rawText).trim();
+    let masp = '';
+    if (note.includes('MASP:')) {
+      masp = note.split('MASP:')[1].split(')')[0].split('•')[0].trim();
+    }
+    const name = note
+      .split('•')[0]
+      .replace(/^Cautela Pendente\s*[—\-:]\s*Solicitante:\s*/i, '')
+      .replace(/^Devolu[cç][aã]o Pendente[^—\-:]*[—\-:]\s*Policial:\s*/i, '')
+      .replace(/^Acautelada com\s*/i, '')
+      .replace(/^Solicitante:\s*/i, '')
+      .replace(/^Policial:\s*/i, '')
+      .split('(MASP:')[0]
+      .trim();
+    return { name, masp };
+  }, []);
+
+  // Resolve com precisão o usuário solicitante da cautela (Nome seguido do MASP)
+  const getResolvedRequester = useCallback((cautela: CautelaArma | null | undefined) => {
+    if (!cautela) {
+      return { name: 'Usuário não identificado', masp: 'N/I', cargo: 'Policial' };
+    }
+
+    const isGenericName = (val?: string | null) => {
+      const s = normalizeStr(val || '');
+      return (
+        !s ||
+        s === 'policial solicitante' ||
+        s === 'policial' ||
+        s === 'policial da unidade' ||
+        s === 'policial responsavel' ||
+        s === 'solicitante' ||
+        s === 'usr-solicitante' ||
+        s === 'usr-policial' ||
+        s === 'usuario nao identificado' ||
+        s.startsWith('cautela pendente')
+      );
+    };
+
+    const isGenericMasp = (val?: string | null) => {
+      const s = normalizeStr(val || '');
+      return (
+        !s ||
+        s === 'pendente recibo' ||
+        s === 'pendente de recibo' ||
+        s === 'pendente' ||
+        s === 'n/a' ||
+        s === 'n/i' ||
+        s === '0000000' ||
+        s === 'masp da cautela' ||
+        s === '—' ||
+        s === '-'
+      );
+    };
+
+    const allUsers = storage.getUsers();
+    const parsedStored = parseWeaponLocationRequester(cautela.requesterName);
+
+    let resolvedName = !isGenericName(parsedStored.name) ? parsedStored.name : '';
+    let resolvedMasp = !isGenericMasp(cautela.requesterMasp)
+      ? String(cautela.requesterMasp).trim()
+      : (!isGenericMasp(parsedStored.masp) ? parsedStored.masp : '');
+    let resolvedCargo: string = cautela.requesterCargo || '';
+
+    // 1. Busca direta em usuários cadastrados (por ID, dígitos do MASP ou Nome)
+    if (!resolvedName || !resolvedMasp || !resolvedCargo) {
+      const reqDigits = cleanDigits(resolvedMasp || cautela.requesterMasp);
+      const reqNorm = normalizeStr(resolvedName);
+      const matchedUser =
+        (cautela.requesterId ? allUsers.find(u => u.id === cautela.requesterId) : undefined) ||
+        (reqDigits ? allUsers.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+        (reqNorm ? allUsers.find(u => normalizeStr(u.name) === reqNorm) : undefined);
+
+      if (matchedUser) {
+        if (!resolvedName) resolvedName = matchedUser.name;
+        if (!resolvedMasp) resolvedMasp = matchedUser.masp || '';
+        if (!resolvedCargo) resolvedCargo = matchedUser.cargo || '';
+      }
+    }
+
+    // 2. Busca nos dados da arma vinculada (locationNote ou destinatarioId)
+    if (!resolvedName || !resolvedMasp) {
+      const linkedWeapon = (weapons || []).find(
+        w => w.id === cautela.weaponId || (w.serialNumber && w.serialNumber === cautela.weaponSerialNumber)
+      );
+      if (linkedWeapon) {
+        const destId = (linkedWeapon as any).destinatarioId;
+        if (destId) {
+          const destUser = allUsers.find(u => u.id === destId);
+          if (destUser) {
+            if (!resolvedName) resolvedName = destUser.name;
+            if (!resolvedMasp) resolvedMasp = destUser.masp || '';
+            if (!resolvedCargo) resolvedCargo = destUser.cargo || '';
+          }
+        }
+        const parsedWeaponNote = parseWeaponLocationRequester((linkedWeapon as any).locationNote || (linkedWeapon as any).policialAcautelado || '');
+        if (!resolvedName && !isGenericName(parsedWeaponNote.name)) {
+          resolvedName = parsedWeaponNote.name;
+        }
+        if (!resolvedMasp && !isGenericMasp(parsedWeaponNote.masp)) {
+          resolvedMasp = parsedWeaponNote.masp;
+        }
+
+        // Caso tenha encontrado apenas nome ou apenas MASP na nota, cruza novamente com USUARIOS
+        if ((resolvedName && !resolvedMasp) || (!resolvedName && resolvedMasp)) {
+          const mDigits = cleanDigits(resolvedMasp);
+          const mNorm = normalizeStr(resolvedName);
+          const uMatch =
+            (mDigits ? allUsers.find(u => cleanDigits(u.masp) === mDigits) : undefined) ||
+            (mNorm ? allUsers.find(u => normalizeStr(u.name) === mNorm) : undefined);
+          if (uMatch) {
+            if (!resolvedName) resolvedName = uMatch.name;
+            if (!resolvedMasp) resolvedMasp = uMatch.masp || '';
+            if (!resolvedCargo) resolvedCargo = uMatch.cargo || '';
+          }
+        }
+      }
+    }
+
+    // 3. Caso a arma tenha vindo de transferência pendente de recibo, busca o usuário responsável/transportador da transferência
+    if (!resolvedName || !resolvedMasp) {
+      const transfers = storage.getWeaponTransfers(currentUser, 'ALL') || [];
+      const matchedTransfer = transfers.find(t =>
+        (t.weapons || []).some(
+          tw =>
+            (cautela.weaponId && tw.weaponId === cautela.weaponId) ||
+            (cautela.weaponSerialNumber && tw.serialNumber === cautela.weaponSerialNumber)
+        )
+      );
+      if (matchedTransfer) {
+        if (!resolvedName) {
+          resolvedName = matchedTransfer.receiverOrTransporterName || matchedTransfer.transferredByUserName || '';
+        }
+        if (!resolvedMasp) {
+          resolvedMasp = matchedTransfer.receiverOrTransporterMasp || matchedTransfer.transferredByUserMasp || '';
+        }
+        if (!resolvedCargo && matchedTransfer.receiverOrTransporterCargo) {
+          resolvedCargo = matchedTransfer.receiverOrTransporterCargo;
+        }
+      }
+    }
+
+    return {
+      name: resolvedName || (cautela.requesterName || '').trim() || 'Usuário não identificado',
+      masp: resolvedMasp || 'N/I',
+      cargo: resolvedCargo || 'Policial'
+    };
+  }, [weapons, currentUser, parseWeaponLocationRequester]);
+
   // Filtragem de cautelas de acordo com permissões
   const scopedCautelas = useMemo(() => {
     let list = [...allCautelas];
@@ -630,8 +782,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
         const locNote = (w as any).locationNote || '';
         const polAcautelado = (w as any).policialAcautelado || '';
-        const reqName = locNote ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : (polAcautelado || 'Policial');
-        const reqMasp = locNote && locNote.includes('MASP:') ? locNote.split('MASP:')[1].split(')')[0].trim() : 'N/A';
+        const parsedLoc = parseWeaponLocationRequester(locNote || polAcautelado);
+        const allUsersList = storage.getUsers();
+        const destUser = (w as any).destinatarioId
+          ? allUsersList.find(u => u.id === (w as any).destinatarioId)
+          : undefined;
+        const matchedByParsed =
+          (!destUser && parsedLoc.masp ? allUsersList.find(u => cleanDigits(u.masp) === cleanDigits(parsedLoc.masp)) : undefined) ||
+          (!destUser && parsedLoc.name ? allUsersList.find(u => normalizeStr(u.name) === normalizeStr(parsedLoc.name)) : undefined);
+        const resolvedSyncUser = destUser || matchedByParsed;
+
+        let reqName = resolvedSyncUser?.name || parsedLoc.name || '';
+        let reqMasp = resolvedSyncUser?.masp || parsedLoc.masp || '';
+        let reqCargo: string = resolvedSyncUser?.cargo || 'Policial';
+
+        if (!reqName || !reqMasp) {
+          const matchedTransfer = (storage.getWeaponTransfers(currentUser, 'ALL') || []).find(t =>
+            (t.weapons || []).some(tw => tw.weaponId === w.id || tw.serialNumber === w.serialNumber)
+          );
+          if (matchedTransfer) {
+            reqName = reqName || matchedTransfer.receiverOrTransporterName || matchedTransfer.transferredByUserName || '';
+            reqMasp = reqMasp || matchedTransfer.receiverOrTransporterMasp || matchedTransfer.transferredByUserMasp || '';
+            reqCargo = matchedTransfer.receiverOrTransporterCargo || reqCargo;
+          }
+        }
 
         if (isWeaponPending && !list.some(c => c.weaponId === w.id && isPendingStatus(c.status))) {
           list.unshift({
@@ -645,10 +819,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             vaultSpaceId: w.vaultSpaceId,
             departmentId: w.departmentId,
             unitId: w.unitId || targetUnitId,
-            requesterId: (w as any).destinatarioId || 'solicitante',
-            requesterName: reqName || 'Policial Solicitante',
-            requesterMasp: reqMasp || 'Pendente',
-            requesterCargo: 'Investigador',
+            requesterId: resolvedSyncUser?.id || (w as any).destinatarioId || 'solicitante',
+            requesterName: reqName || 'Usuário não identificado',
+            requesterMasp: reqMasp || 'N/I',
+            requesterCargo: reqCargo as any,
             reason: w.status === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo',
             requestDate: new Date().toISOString(),
             status: 'PENDENTE',
@@ -718,7 +892,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
 
     return list;
-  }, [allCautelas, currentUser, isPolicial, isGeral, weapons, vaultSpaces, isUserCautela, isUserWeapon]);
+  }, [allCautelas, currentUser, isPolicial, isGeral, weapons, vaultSpaces, isUserCautela, isUserWeapon, parseWeaponLocationRequester]);
 
   // Lista a exibir com base na aba ativa
   const displayedCautelas = useMemo(() => {
@@ -789,16 +963,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
-      list = list.filter(c =>
-        (c.weaponSerialNumber && c.weaponSerialNumber.toLowerCase().includes(term)) ||
-        (c.weaponModel && c.weaponModel.toLowerCase().includes(term)) ||
-        (c.weaponCaliber && c.weaponCaliber.toLowerCase().includes(term)) ||
-        (c.requesterName && c.requesterName.toLowerCase().includes(term)) ||
-        (c.requesterMasp && c.requesterMasp.toLowerCase().includes(term)) ||
-        (c.armorerName && c.armorerName.toLowerCase().includes(term)) ||
-        (c.reason && c.reason.toLowerCase().includes(term)) ||
-        (c.authorizationNotes && c.authorizationNotes.toLowerCase().includes(term))
-      );
+      list = list.filter(c => {
+        const reqResolved = getResolvedRequester(c);
+        return (
+          (c.weaponSerialNumber && c.weaponSerialNumber.toLowerCase().includes(term)) ||
+          (c.weaponModel && c.weaponModel.toLowerCase().includes(term)) ||
+          (c.weaponCaliber && c.weaponCaliber.toLowerCase().includes(term)) ||
+          (c.requesterName && c.requesterName.toLowerCase().includes(term)) ||
+          (c.requesterMasp && c.requesterMasp.toLowerCase().includes(term)) ||
+          (reqResolved.name && reqResolved.name.toLowerCase().includes(term)) ||
+          (reqResolved.masp && reqResolved.masp.toLowerCase().includes(term)) ||
+          (c.armorerName && c.armorerName.toLowerCase().includes(term)) ||
+          (c.reason && c.reason.toLowerCase().includes(term)) ||
+          (c.authorizationNotes && c.authorizationNotes.toLowerCase().includes(term))
+        );
+      });
     }
 
     // Na aba "Meu Histórico" do policial, a cautela ativa fica SEMPRE fixa como primeiro resultado
@@ -826,7 +1005,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     canAuthorize,
     historyDecisionFilter,
     historyWeaponFilter,
-    historyDateFilter
+    historyDateFilter,
+    getResolvedRequester
   ]);
 
   // Lista de armas distintas presentes no histórico do policial (para o filtro por arma em "Meu Histórico")
@@ -1352,6 +1532,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setErrorMsg('');
     try {
       const selectedStock = availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId);
+      const resolvedAuthReq = getResolvedRequester(authorizingCautela);
       const res = await storage.authorizeCautelaArma(authorizingCautela.id, {
         notes: authNotes,
         stockId: authWithAmmo ? (authStockId || undefined) : undefined,
@@ -1362,9 +1543,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         weaponId: authorizingCautela.weaponId,
         weaponSerialNumber: authorizingCautela.weaponSerialNumber,
         cautelaId: authorizingCautela.id,
-        requesterName: authorizingCautela.requesterName,
-        requesterMasp: authorizingCautela.requesterMasp,
-        requesterCargo: authorizingCautela.requesterCargo,
+        requesterName: resolvedAuthReq.name,
+        requesterMasp: resolvedAuthReq.masp,
+        requesterCargo: resolvedAuthReq.cargo || authorizingCautela.requesterCargo,
         armorerId: currentUser.id,
         armorerName: currentUser.name,
         armorerMasp: currentUser.masp
@@ -1372,7 +1553,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar acautelamento.');
       } else {
-        setSuccessMsg(`Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${authorizingCautela.requesterName} (MASP: ${authorizingCautela.requesterMasp})".${authWithAmmo ? ' Munições deduzidas e lançadas em Cautela de Munições.' : ''}`);
+        setSuccessMsg(`Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${authWithAmmo ? ' Munições deduzidas e lançadas em Cautela de Munições.' : ''}`);
         setAuthorizingCautela(null);
         setLocalSyncTick(t => t + 1);
         await onRefresh();
@@ -1391,14 +1572,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setErrorMsg('');
     try {
       const targetCautela = allCautelas.find(c => c.id === id || c.weaponId === id);
+      const resolvedTargetReq = getResolvedRequester(targetCautela);
       const res = await storage.authorizeCautelaArma(id, {
         notes,
         weaponId: targetCautela?.weaponId,
         weaponSerialNumber: targetCautela?.weaponSerialNumber,
         cautelaId: targetCautela?.id || id,
-        requesterName: targetCautela?.requesterName,
-        requesterMasp: targetCautela?.requesterMasp,
-        requesterCargo: targetCautela?.requesterCargo,
+        requesterName: targetCautela ? resolvedTargetReq.name : undefined,
+        requesterMasp: targetCautela ? resolvedTargetReq.masp : undefined,
+        requesterCargo: targetCautela ? (resolvedTargetReq.cargo || targetCautela.requesterCargo) : undefined,
         armorerId: currentUser.id,
         armorerName: currentUser.name,
         armorerMasp: currentUser.masp
@@ -1406,8 +1588,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar cautela.');
       } else {
-        const reqName = targetCautela ? targetCautela.requesterName : 'Policial';
-        const reqMasp = targetCautela?.requesterMasp ? ` (MASP: ${targetCautela.requesterMasp})` : '';
+        const reqName = targetCautela ? resolvedTargetReq.name : 'Policial';
+        const reqMasp = targetCautela ? ` (MASP: ${resolvedTargetReq.masp})` : '';
         setSuccessMsg(`Cautela autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${reqName}${reqMasp}", liberada para o policial e retirada do cofre.`);
         setNotesModal(null);
         setActionNotes('');
@@ -3098,7 +3280,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span>{canAuthorize ? 'Solicitações Pendentes (Unidade)' : 'Cautela de arma em análise'}</span>
+          <span>{canAuthorize ? 'Solicitações Pendentes (Armeiro)' : 'Cautela de arma em análise'}</span>
           {pendingCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
               {pendingCount} {canAuthorize ? (pendingCount === 1 ? 'pendente' : 'pendentes') : 'em análise'}
@@ -3836,6 +4018,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                               {devolucoesPendentes.map(cautela => {
                                 const ammoDetails = getRescuedAmmoDetails(cautela);
                                 const armorerInfo = getResolvedArmorer(cautela);
+                                const requesterInfo = getResolvedRequester(cautela);
                                 return (
                                   <div
                                     key={`ret-pend-${cautela.id}`}
@@ -3866,7 +4049,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <span>Aguardando comando do Armeiro para conferência e recibo da devolução ao cofre</span>
                                           </p>
                                           <p className="text-[11px] text-slate-400 mt-0.5">
-                                            Policial: <strong className="text-amber-300">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp}) • Autorizado originalmente por: <strong className="text-slate-300">{armorerInfo.name}</strong>
+                                            Solicitante: <strong className="text-amber-300 font-semibold">{requesterInfo.name}</strong> <span className="font-mono text-amber-400">(MASP: {requesterInfo.masp})</span> • Autorizado originalmente por: <strong className="text-slate-300">{armorerInfo.name}</strong>
                                           </p>
                                         </div>
                                       </div>
@@ -3997,6 +4180,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                                 const linkedAmmo = getLinkedAmmoForCautela(cautela);
                                 const hasAmmo = Boolean(cautela.ammoQuantity || cautela.linkedAmmoCautelaId || linkedAmmo);
+                                const requesterInfo = getResolvedRequester(cautela);
 
                                 return (
                                   <div
@@ -4029,7 +4213,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <span>Aguardando resposta do Armeiro para autorização e liberação do armamento</span>
                                           </p>
                                           <p className="text-[11px] text-slate-400 mt-0.5">
-                                            Solicitante: <strong className="text-amber-300 font-semibold">{cautela.requesterName}</strong> <span className="font-mono text-amber-400">(MASP: {cautela.requesterMasp})</span> • Solicitado em {new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                            Solicitante: <strong className="text-amber-300 font-semibold">{requesterInfo.name}</strong> <span className="font-mono text-amber-400">(MASP: {requesterInfo.masp})</span> • Solicitado em {new Date(cautela.requestDate).toLocaleString('pt-BR')}
                                           </p>
                                         </div>
                                       </div>
@@ -4100,9 +4284,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         <span className="text-slate-300">{new Date(cautela.requestDate).toLocaleString('pt-BR')}</span>
                                       </div>
                                       <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                        <span className="text-[10px] text-slate-500 uppercase block font-semibold">Policial Solicitante</span>
-                                        <span className="text-slate-200 font-semibold truncate block">
-                                          {cautela.requesterName} ({cautela.requesterMasp})
+                                        <span className="text-[10px] text-slate-500 uppercase block font-semibold">Solicitante</span>
+                                        <span className="text-slate-200 font-semibold truncate block" title={`${requesterInfo.name} — MASP: ${requesterInfo.masp}`}>
+                                          {requesterInfo.name} <span className="font-mono text-amber-400">• MASP: {requesterInfo.masp}</span>
                                         </span>
                                       </div>
                                     </div>
@@ -4217,6 +4401,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                               const ammoDetails = getRescuedAmmoDetails(cautela);
                               const armorerInfo = getResolvedArmorer(cautela);
+                              const requesterInfo = getResolvedRequester(cautela);
 
                               return (
                                 <div
@@ -4243,7 +4428,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             Nº {cautela.weaponSerialNumber}
                                           </span>
                                           {isDevPendente ? (
-                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse">
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse">
                                               Devolução Pendente de Recibo pelo Armeiro
                                             </span>
                                           ) : (
@@ -4253,7 +4438,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                           )}
                                         </div>
                                         <p className="text-xs text-slate-400 mt-0.5">
-                                          Policial: <strong className="text-slate-200">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp}) • {cautela.requesterCargo || 'Policial'}
+                                          Solicitante: <strong className="text-slate-200">{requesterInfo.name}</strong> <span className="font-mono text-slate-300">(MASP: {requesterInfo.masp})</span> • {requesterInfo.cargo}
                                         </p>
                                       </div>
                                     </div>
@@ -4446,6 +4631,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             <div className="grid grid-cols-1 gap-3">
                               {recusadas.map(cautela => {
                                 const vault = vaultSpaces.find(v => v.id === cautela.vaultSpaceId);
+                                const requesterInfo = getResolvedRequester(cautela);
 
                                 return (
                                   <div
@@ -4468,7 +4654,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             </span>
                                           </div>
                                           <p className="text-xs text-slate-400 mt-0.5">
-                                            Solicitante: <strong className="text-slate-200">{cautela.requesterName}</strong> ({cautela.requesterMasp}) • Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong>
+                                            Solicitante: <strong className="text-slate-200">{requesterInfo.name}</strong> (MASP: {requesterInfo.masp}) • Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong>
                                           </p>
                                         </div>
                                       </div>
@@ -5388,31 +5574,36 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
             <form onSubmit={handleConfirmAuthorizeWithAmmo} className="space-y-4">
               {/* Resumo do Pedido do Policial */}
-              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
-                <div className="flex items-center justify-between text-slate-300">
-                  <span>Policial Solicitante:</span>
-                  <strong className="text-slate-100">{authorizingCautela.requesterName} (MASP: {authorizingCautela.requesterMasp})</strong>
-                </div>
-                <div className="flex items-center justify-between text-slate-300">
-                  <span>Arma Solicitada:</span>
-                  <strong className="text-slate-100 font-mono">{authorizingCautela.weaponModel} - Série: {authorizingCautela.weaponSerialNumber} ({authorizingCautela.weaponCaliber})</strong>
-                </div>
-                {authorizingCautela.reason && (
-                  <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/80">
-                    <span>Motivo/Finalidade:</span>
-                    <span className="italic">{authorizingCautela.reason}</span>
-                  </div>
-                )}
-                {authorizingCautela.authorizationNotes && (
-                  <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-xs flex items-start space-x-2">
-                    <Disc className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <div>
-                      <strong className="block text-amber-200 uppercase text-[10px] tracking-wider">Munição Indicada pelo Policial:</strong>
-                      <span className="font-mono text-xs">{authorizingCautela.authorizationNotes}</span>
+              {(() => {
+                const authRequesterInfo = getResolvedRequester(authorizingCautela);
+                return (
+                  <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2 text-xs">
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span>Solicitante:</span>
+                      <strong className="text-slate-100">{authRequesterInfo.name} — MASP: {authRequesterInfo.masp}</strong>
                     </div>
+                    <div className="flex items-center justify-between text-slate-300">
+                      <span>Arma Solicitada:</span>
+                      <strong className="text-slate-100 font-mono">{authorizingCautela.weaponModel} - Série: {authorizingCautela.weaponSerialNumber} ({authorizingCautela.weaponCaliber})</strong>
+                    </div>
+                    {authorizingCautela.reason && (
+                      <div className="flex items-center justify-between text-slate-400 pt-1 border-t border-slate-800/80">
+                        <span>Motivo/Finalidade:</span>
+                        <span className="italic">{authorizingCautela.reason}</span>
+                      </div>
+                    )}
+                    {authorizingCautela.authorizationNotes && (
+                      <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-xs flex items-start space-x-2">
+                        <Disc className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                        <div>
+                          <strong className="block text-amber-200 uppercase text-[10px] tracking-wider">Munição Indicada pelo Policial:</strong>
+                          <span className="font-mono text-xs">{authorizingCautela.authorizationNotes}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
 
               {/* Opção para o armeiro acautelar munições junto com a arma */}
               <div className="bg-slate-950 p-3.5 rounded-xl border border-amber-600/50 space-y-2">

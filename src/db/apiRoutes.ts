@@ -8964,6 +8964,56 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
     const pool = getPool();
     await ensureCautelaReturnSchema(pool);
 
+    const parseUserFromWeaponNote = (rawNote?: string | null): { name: string; masp: string } => {
+      if (!rawNote) return { name: '', masp: '' };
+      const note = String(rawNote).trim();
+      let extractedMasp = '';
+      if (note.includes('MASP:')) {
+        extractedMasp = note.split('MASP:')[1].split(')')[0].split('•')[0].trim();
+      }
+      let extractedName = note
+        .split('•')[0]
+        .replace(/^Cautela Pendente\s*[—\-:]\s*Solicitante:\s*/i, '')
+        .replace(/^Devolu[cç][aã]o Pendente[^—\-:]*[—\-:]\s*Policial:\s*/i, '')
+        .replace(/^Acautelada com\s*/i, '')
+        .replace(/^Solicitante:\s*/i, '')
+        .replace(/^Policial:\s*/i, '')
+        .split('(MASP:')[0]
+        .trim();
+      return { name: extractedName, masp: extractedMasp };
+    };
+
+    const isPlaceholderRequesterName = (val?: string | null): boolean => {
+      const s = String(val || '').trim().toLowerCase();
+      return (
+        !s ||
+        s === 'policial solicitante' ||
+        s === 'policial' ||
+        s === 'policial da unidade' ||
+        s === 'policial responsável' ||
+        s === 'policial responsavel' ||
+        s === 'solicitante' ||
+        s === 'usr-solicitante' ||
+        s === 'usr-policial' ||
+        s.startsWith('cautela pendente')
+      );
+    };
+
+    const isPlaceholderRequesterMasp = (val?: string | null): boolean => {
+      const s = String(val || '').trim().toLowerCase();
+      return (
+        !s ||
+        s === 'pendente recibo' ||
+        s === 'pendente de recibo' ||
+        s === 'pendente' ||
+        s === 'n/a' ||
+        s === '0000000' ||
+        s === 'masp da cautela' ||
+        s === '—' ||
+        s === '-'
+      );
+    };
+
     // Auto-sincroniza armas com status 'Cautela Pendente', 'Pendente de Recibo' ou 'Pendente Recibo'
     // garantindo que apareçam imediatamente para o armeiro em Solicitações Pendentes
     try {
@@ -8980,6 +9030,60 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
 
       for (const pa of (pendArmas || [])) {
         const syncId = `caut-sync-${pa.ID_ARMAS}`;
+        const rawLocNote = pa.OBSERVACAO_LOCALIZACAO_ARMAS || pa.LOCALIZACAO_NOTA_ARMAS || pa.OBSERVACOES_ARMAS || '';
+        const parsedFromNote = parseUserFromWeaponNote(rawLocNote);
+
+        let resolvedId: string = pa.DESTINATARIO_ID_ARMAS || '';
+        let resolvedName: string = !isPlaceholderRequesterName(parsedFromNote.name) ? parsedFromNote.name : '';
+        let resolvedMasp: string = !isPlaceholderRequesterMasp(parsedFromNote.masp) ? parsedFromNote.masp : '';
+        let resolvedCargo: string = 'Policial';
+
+        // 1. Tenta resolver na tabela USUARIOS por ID, MASP ou Nome
+        try {
+          if (resolvedId || resolvedMasp || resolvedName) {
+            const [uRows]: any = await pool.query(
+              `SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS
+               FROM USUARIOS
+               WHERE (? <> '' AND ID_USUARIOS = ?)
+                  OR (? <> '' AND (MASP_USUARIOS = ? OR REPLACE(REPLACE(MASP_USUARIOS, '.', ''), '-', '') = REPLACE(REPLACE(?, '.', ''), '-', '')))
+                  OR (? <> '' AND LOWER(NOME_USUARIOS) = LOWER(?))
+               LIMIT 1`,
+              [resolvedId, resolvedId, resolvedMasp, resolvedMasp, resolvedMasp, resolvedName, resolvedName]
+            );
+            if (uRows && uRows.length > 0) {
+              resolvedId = uRows[0].ID_USUARIOS || resolvedId;
+              resolvedName = uRows[0].NOME_USUARIOS || resolvedName;
+              resolvedMasp = uRows[0].MASP_USUARIOS || resolvedMasp;
+              resolvedCargo = uRows[0].CARGO_USUARIOS || resolvedCargo;
+            }
+          }
+        } catch (_) {}
+
+        // 2. Se ainda não identificado (ex.: arma com status 'Pendente de Recibo' oriunda de transferência), busca em TRANSFERENCIAS_ARMAS
+        if (!resolvedName || !resolvedMasp) {
+          try {
+            const serialSearch = pa.NUMERO_SERIE_ARMAS ? `%${pa.NUMERO_SERIE_ARMAS}%` : '';
+            const idSearch = pa.ID_ARMAS ? `%${pa.ID_ARMAS}%` : '';
+            const [tRows]: any = await pool.query(
+              `SELECT RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS, RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS, RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
+                      TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS, TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS, TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS
+               FROM TRANSFERENCIAS_ARMAS
+               WHERE (? <> '' AND ARMAS_JSON_TRANSFERENCIAS_ARMAS LIKE ?)
+                  OR (? <> '' AND ARMAS_JSON_TRANSFERENCIAS_ARMAS LIKE ?)
+               ORDER BY DATA_CRIACAO_TRANSFERENCIAS_ARMAS DESC
+               LIMIT 1`,
+              [idSearch, idSearch, serialSearch, serialSearch]
+            );
+            if (tRows && tRows.length > 0) {
+              const tr = tRows[0];
+              resolvedId = resolvedId || tr.RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS || '';
+              resolvedName = resolvedName || tr.TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS || tr.RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS || '';
+              resolvedMasp = resolvedMasp || tr.TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS || tr.RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS || '';
+              resolvedCargo = tr.TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS || resolvedCargo;
+            }
+          } catch (_) {}
+        }
+
         await pool.query(`
           INSERT INTO ACAUTELAR_ARMAS (
             ID_ACAUTELAR_ARMAS, ARMA_ID_ACAUTELAR_ARMAS, NUMERO_SERIE_ACAUTELAR_ARMAS,
@@ -8991,7 +9095,11 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
             FINALIDADE_MOTIVO_ACAUTELAR_ARMAS, DATA_SOLICITACAO_ACAUTELAR_ARMAS,
             STATUS_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'PENDENTE', NOW())
-          ON DUPLICATE KEY UPDATE STATUS_ACAUTELAR_ARMAS = 'PENDENTE'
+          ON DUPLICATE KEY UPDATE
+            STATUS_ACAUTELAR_ARMAS = 'PENDENTE',
+            REQUERENTE_ID_ACAUTELAR_ARMAS = VALUES(REQUERENTE_ID_ACAUTELAR_ARMAS),
+            REQUERENTE_NOME_ACAUTELAR_ARMAS = VALUES(REQUERENTE_NOME_ACAUTELAR_ARMAS),
+            REQUERENTE_MASP_ACAUTELAR_ARMAS = VALUES(REQUERENTE_MASP_ACAUTELAR_ARMAS)
         `, [
           syncId,
           pa.ID_ARMAS,
@@ -9003,10 +9111,10 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
           pa.COFRE_ID_ARMAS || null,
           pa.DEPARTAMENTO_ID_ARMAS || null,
           pa.UNIDADE_ID_ARMAS || null,
-          pa.DESTINATARIO_ID_ARMAS || 'usr-solicitante',
-          'Policial Solicitante',
-          'Pendente Recibo',
-          'Policial',
+          resolvedId || 'usr-solicitante',
+          resolvedName || 'Policial Solicitante',
+          resolvedMasp || 'N/I',
+          resolvedCargo,
           pa.STATUS_ARMAS === 'Pendente de Recibo' ? 'Armamento pendente de recibo' : 'Solicitação de acautelamento pendente de recibo'
         ]);
       }
@@ -9025,13 +9133,10 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
 
       for (const aa of (acautArmas || [])) {
         const syncId = `caut-active-${aa.ID_ARMAS}`;
-        const locNote = aa.LOCALIZACAO_NOTA_ARMAS || aa.OBSERVACOES_ARMAS || '';
-        const reqName = locNote.includes('Acautelada com ')
-          ? locNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim()
-          : 'Policial';
-        const reqMasp = locNote.includes('MASP:')
-          ? locNote.split('MASP:')[1].split(')')[0].trim()
-          : 'N/A';
+        const locNote = aa.OBSERVACAO_LOCALIZACAO_ARMAS || aa.LOCALIZACAO_NOTA_ARMAS || aa.OBSERVACOES_ARMAS || '';
+        const parsedAcaut = parseUserFromWeaponNote(locNote);
+        const reqName = parsedAcaut.name || 'Policial';
+        const reqMasp = parsedAcaut.masp || 'N/A';
 
         let armId: string | null = null;
         let armName = 'Armeiro da Unidade';
@@ -9173,8 +9278,14 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         COALESCE(a.MUNICAO_DEVOLVIDA_ACAUTELAR_ARMAS, m.QUANTIDADE_DEVOLVIDA_ACAUTELAR_MUNICOES) as returnedAmmoQuantity,
         a.OBSERVACOES_DEVOLUCAO_ACAUTELAR_ARMAS as returnObservations,
         a.DATA_CRIACAO_ACAUTELAR_ARMAS as createdAt,
-        a.DATA_ATUALIZACAO_ACAUTELAR_ARMAS as updatedAt
+        a.DATA_ATUALIZACAO_ACAUTELAR_ARMAS as updatedAt,
+        u_req.NOME_USUARIOS as dbUserName,
+        u_req.MASP_USUARIOS as dbUserMasp,
+        u_req.CARGO_USUARIOS as dbUserCargo,
+        arm_ref.OBSERVACAO_LOCALIZACAO_ARMAS as weaponLocationNote
       FROM ACAUTELAR_ARMAS a
+      LEFT JOIN USUARIOS u_req ON u_req.ID_USUARIOS = a.REQUERENTE_ID_ACAUTELAR_ARMAS
+      LEFT JOIN ARMAS arm_ref ON arm_ref.ID_ARMAS = a.ARMA_ID_ACAUTELAR_ARMAS
       LEFT JOIN ACAUTELAR_MUNICOES m ON (
         (a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS IS NOT NULL AND m.ID_ACAUTELAR_MUNICOES = a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS)
         OR (a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS IS NULL AND m.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = a.ID_ACAUTELAR_ARMAS)
@@ -9238,7 +9349,11 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
       seenIds.add(r.id);
       return true;
     });
-    const mapped = dedupedRows.map((r: any) => {
+    let allUsersCache: any[] | null = null;
+    let allTransfersCache: any[] | null = null;
+
+    const mapped = [];
+    for (const r of dedupedRows) {
       const rawStatus = (r.status || '').trim().toUpperCase();
       const normalizedStatus = (rawStatus === 'PENDENTE DE RECIBO' || rawStatus === 'PENDENTE RECIBO' || rawStatus === 'CAUTELA PENDENTE')
         ? 'PENDENTE'
@@ -9246,8 +9361,104 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         ? 'DEVOLUCAO_PENDENTE'
         : r.status;
 
-      return {
-        ...r,
+      const cleanedFromStored = parseUserFromWeaponNote(r.requesterName);
+      let finalReqName = !isPlaceholderRequesterName(cleanedFromStored.name) ? cleanedFromStored.name : '';
+      let finalReqMasp = !isPlaceholderRequesterMasp(r.requesterMasp)
+        ? String(r.requesterMasp).trim()
+        : (!isPlaceholderRequesterMasp(cleanedFromStored.masp) ? cleanedFromStored.masp : '');
+      let finalReqCargo = r.requesterCargo || r.dbUserCargo || undefined;
+
+      if ((!finalReqName || !finalReqMasp) && (r.dbUserName || r.dbUserMasp)) {
+        if (!finalReqName && r.dbUserName) finalReqName = r.dbUserName;
+        if (!finalReqMasp && r.dbUserMasp) finalReqMasp = r.dbUserMasp;
+      }
+
+      if ((!finalReqName || !finalReqMasp) && r.weaponLocationNote) {
+        const parsedNote = parseUserFromWeaponNote(r.weaponLocationNote);
+        if (!finalReqName && !isPlaceholderRequesterName(parsedNote.name)) finalReqName = parsedNote.name;
+        if (!finalReqMasp && !isPlaceholderRequesterMasp(parsedNote.masp)) finalReqMasp = parsedNote.masp;
+      }
+
+      if (!finalReqName || !finalReqMasp) {
+        if (allUsersCache === null) {
+          try {
+            const [uList]: any = await pool.query('SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS FROM USUARIOS');
+            allUsersCache = uList || [];
+          } catch (_) {
+            allUsersCache = [];
+          }
+        }
+        const reqDigits = String(finalReqMasp || '').replace(/\D/g, '');
+        const matchedUser = (allUsersCache || []).find((u: any) => {
+          if (r.requesterId && u.ID_USUARIOS === r.requesterId) return true;
+          const uDigits = String(u.MASP_USUARIOS || '').replace(/\D/g, '');
+          if (reqDigits && uDigits && reqDigits === uDigits) return true;
+          if (finalReqName && u.NOME_USUARIOS && String(u.NOME_USUARIOS).trim().toLowerCase() === finalReqName.toLowerCase()) return true;
+          return false;
+        });
+        if (matchedUser) {
+          if (!finalReqName) finalReqName = matchedUser.NOME_USUARIOS || '';
+          if (!finalReqMasp) finalReqMasp = matchedUser.MASP_USUARIOS || '';
+          if (!finalReqCargo) finalReqCargo = matchedUser.CARGO_USUARIOS || undefined;
+        }
+      }
+
+      if (!finalReqName || !finalReqMasp) {
+        if (allTransfersCache === null) {
+          try {
+            const [tList]: any = await pool.query(
+              `SELECT RESPONSAVEL_ID_TRANSFERENCIAS_ARMAS, RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS, RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS,
+                      TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS, TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS, TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS,
+                      ARMAS_JSON_TRANSFERENCIAS_ARMAS
+               FROM TRANSFERENCIAS_ARMAS
+               ORDER BY DATA_CRIACAO_TRANSFERENCIAS_ARMAS DESC`
+            );
+            allTransfersCache = tList || [];
+          } catch (_) {
+            allTransfersCache = [];
+          }
+        }
+        const matchedTransfer = (allTransfersCache || []).find((tr: any) => {
+          const jsonStr = String(tr.ARMAS_JSON_TRANSFERENCIAS_ARMAS || '');
+          return (
+            (r.weaponId && jsonStr.includes(r.weaponId)) ||
+            (r.weaponSerialNumber && jsonStr.includes(r.weaponSerialNumber))
+          );
+        });
+        if (matchedTransfer) {
+          if (!finalReqName) {
+            finalReqName = matchedTransfer.TRANSPORTADOR_NOME_TRANSFERENCIAS_ARMAS || matchedTransfer.RESPONSAVEL_NOME_TRANSFERENCIAS_ARMAS || '';
+          }
+          if (!finalReqMasp) {
+            finalReqMasp = matchedTransfer.TRANSPORTADOR_MASP_TRANSFERENCIAS_ARMAS || matchedTransfer.RESPONSAVEL_MASP_TRANSFERENCIAS_ARMAS || '';
+          }
+          if (!finalReqCargo && matchedTransfer.TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS) {
+            finalReqCargo = matchedTransfer.TRANSPORTADOR_CARGO_TRANSFERENCIAS_ARMAS;
+          }
+        }
+      }
+
+      // Persiste a correção no banco caso o registro antigo estivesse com placeholder
+      if (
+        (finalReqName && isPlaceholderRequesterName(r.requesterName)) ||
+        (finalReqMasp && isPlaceholderRequesterMasp(r.requesterMasp))
+      ) {
+        pool.query(
+          `UPDATE ACAUTELAR_ARMAS
+           SET REQUERENTE_NOME_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), REQUERENTE_NOME_ACAUTELAR_ARMAS),
+               REQUERENTE_MASP_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), REQUERENTE_MASP_ACAUTELAR_ARMAS)
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [finalReqName, finalReqMasp, r.id]
+        ).catch(() => {});
+      }
+
+      const { dbUserName: _duN, dbUserMasp: _duM, dbUserCargo: _duC, weaponLocationNote: _wln, ...cleanRow } = r;
+
+      mapped.push({
+        ...cleanRow,
+        requesterName: finalReqName || r.requesterName || 'Usuário não identificado',
+        requesterMasp: finalReqMasp || r.requesterMasp || 'N/I',
+        requesterCargo: finalReqCargo,
         status: normalizedStatus,
         hadShots: Boolean(r.hadShots),
         isWorking: r.condicoesUso !== 'Apresenta Defeito',
@@ -9264,8 +9475,8 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         ammoDestinacao: r.ammoDestinacao || undefined,
         ammoCaliberName: r.ammoCaliberName || undefined,
         ammoSeraDevolvida: r.ammoSeraDevolvida !== null && r.ammoSeraDevolvida !== undefined ? Boolean(r.ammoSeraDevolvida) : undefined
-      };
-    });
+      });
+    }
 
     return res.json(mapped);
   } catch (err: any) {
@@ -9275,7 +9486,7 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
 
 apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
   try {
-    const {
+    let {
       weaponId,
       weaponSerialNumber,
       weaponModel,
@@ -9299,6 +9510,22 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
     }
 
     const pool = getPool();
+
+    if (!requesterName || !requesterMasp) {
+      try {
+        const [uRows]: any = await pool.query(
+          'SELECT NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS, TELEFONE_USUARIOS FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
+          [requesterId]
+        );
+        if (uRows && uRows.length > 0) {
+          requesterName = requesterName || uRows[0].NOME_USUARIOS;
+          requesterMasp = requesterMasp || uRows[0].MASP_USUARIOS;
+          requesterCargo = requesterCargo || uRows[0].CARGO_USUARIOS;
+          requesterPhone = requesterPhone || uRows[0].TELEFONE_USUARIOS;
+        }
+      } catch (_) {}
+    }
+
     const id = `caut-arma-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     let ammoCautelaId: string | null = null;
     const isDirect = Boolean(req.body.directAuthorized || req.body.status === 'AUTORIZADA');
