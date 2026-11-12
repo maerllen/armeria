@@ -3823,10 +3823,14 @@ class StorageService {
     const effectiveRole = this.state.currentUser?.activeRole || this.state.currentUser?.role;
     const isPendingReceipt = Boolean(returnData?.pendingReceipt || effectiveRole === 'Policial');
 
+    const nowIso = new Date().toISOString();
     if (target) {
       target.status = isPendingReceipt ? 'DEVOLUCAO_PENDENTE' : 'DEVOLVIDA';
       if (!isPendingReceipt) {
-        target.returnDate = new Date().toISOString();
+        target.returnDate = nowIso;
+        target.returnArmorerId = this.state.currentUser?.id;
+        target.returnArmorerName = this.state.currentUser?.name;
+        target.returnArmorerMasp = this.state.currentUser?.masp;
       }
       target.hadShots = Boolean(returnData.hadShots);
       target.shotsFired = Number(returnData.shotsFired || 0);
@@ -3851,6 +3855,64 @@ class StorageService {
       weap.status = !returnData.isWorking ? 'Manutenção' : 'No Cofre';
       if (returnData.shotsFired) {
         weap.shotCount = (weap.shotCount || 0) + Number(returnData.shotsFired);
+      }
+    }
+
+    // Sincroniza a cautela de munições vinculada e o estoque do cofre de destino
+    const linkedAmmoId = target?.linkedAmmoCautelaId || returnData?.linkedAmmoCautelaId;
+    const linkedMun = (this.state.cautelasMunicoes || []).find(m =>
+      (linkedAmmoId && (m.id === linkedAmmoId || m.id === `caut-mun-${String(linkedAmmoId).replace(/^caut-mun-/, '')}`)) ||
+      (target?.id && (m.linkedWeaponCautelaId === target.id || (m as any).cautelaArmaId === target.id))
+    );
+
+    if (linkedMun) {
+      if (isPendingReceipt) {
+        if (linkedMun.seraDevolvida && returnData.returnedAmmoQuantity !== undefined && returnData.returnedAmmoQuantity !== null) {
+          linkedMun.returnedQuantity = Math.max(0, Number(returnData.returnedAmmoQuantity));
+        }
+      } else {
+        const isPassiva = Boolean(linkedMun.seraDevolvida);
+        const retQty = isPassiva ? Math.max(0, Number(returnData.returnedAmmoQuantity ?? 0)) : 0;
+        linkedMun.status = isPassiva ? 'DEVOLVIDA' : 'CONSUMIDA';
+        linkedMun.returnedQuantity = retQty;
+        linkedMun.returnedAt = nowIso;
+        linkedMun.returnArmorerId = this.state.currentUser?.id;
+        linkedMun.returnArmorerName = this.state.currentUser?.name;
+
+        const ammoDestVault = returnData.ammoDestinationVaultSpaceId || linkedMun.vaultSpaceId;
+        if (isPassiva && ammoDestVault) {
+          linkedMun.vaultSpaceId = ammoDestVault;
+        }
+
+        if (isPassiva && retQty > 0 && ammoDestVault) {
+          const norm = (s?: string) => (s || '').trim().toLowerCase();
+          const matchingStock = (this.state.ammoStocks || []).find(s =>
+            s.vaultSpaceId === ammoDestVault &&
+            (s.caliberId === linkedMun.caliberId || norm((s as any).caliberName) === norm(linkedMun.caliberName)) &&
+            (!linkedMun.loteMunicao || norm(s.loteMunicao) === norm(linkedMun.loteMunicao))
+          );
+          if (matchingStock) {
+            matchingStock.quantity = Number(matchingStock.quantity || 0) + retQty;
+          } else {
+            const destVaultObj = (this.state.vaultSpaces || []).find(v => v.id === ammoDestVault);
+            if (!this.state.ammoStocks) this.state.ammoStocks = [];
+            this.state.ammoStocks.unshift({
+              id: `stock-mun-ret-${Date.now()}`,
+              caliberId: linkedMun.caliberId || linkedMun.caliberName || 'padrao',
+              quantity: retQty,
+              vaultSpaceId: ammoDestVault,
+              departmentId: destVaultObj?.departmentId || linkedMun.departmentId || target?.departmentId,
+              unitId: destVaultObj?.unitId || linkedMun.unitId || target?.unitId,
+              fabricante: linkedMun.fabricante || 'CBC',
+              tipoMunicao: linkedMun.tipoMunicao || 'Operacional',
+              pesoMunicao: linkedMun.pesoMunicao,
+              loteMunicao: linkedMun.loteMunicao || 'Devolução',
+              anoFabricacao: linkedMun.anoFabricacao,
+              destinacao: linkedMun.destinacao || 'Defesa',
+              updatedAt: nowIso
+            } as any);
+          }
+        }
       }
     }
 
@@ -3983,7 +4045,7 @@ class StorageService {
     const target = (this.state.cautelasMunicoes || []).find(c => c.id === id || c.id === cleanId || c.id === `caut-mun-${cleanId}`);
     if (target) {
       const returnedQty = Number(returnData.returnedQuantity || 0);
-      target.status = returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
+      target.status = target.seraDevolvida || returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
       target.returnedQuantity = returnedQty;
       target.returnedAt = new Date().toISOString();
       target.returnArmorerId = this.state.currentUser?.id;
