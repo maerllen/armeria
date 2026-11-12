@@ -247,7 +247,7 @@ export default function App() {
   const rawPendingAmmoCautelasCount = useMemo(() => {
     const list = storage.getCautelasMunicoes();
     if (isGeralUser) {
-      return list.filter(c => c.status === 'PENDENTE').length;
+      return list.filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE').length;
     }
     if (isArmeiroUser && effectiveUser) {
       const deptUnits = new Set(
@@ -256,7 +256,7 @@ export default function App() {
           .map(u => u.id)
       );
       return list.filter(c =>
-        c.status === 'PENDENTE' &&
+        (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
         (effectiveUser.managementScope === 'department'
           ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
           : c.unitId === effectiveUser.unitId)
@@ -517,6 +517,7 @@ export default function App() {
           {activeModule === 'cautela-municoes' && effectiveUser && (
             <ModuloCautelaMunicoes
               currentUser={effectiveUser}
+              weapons={weapons}
               ammoStocks={ammoStocks}
               calibers={calibers}
               vaultSpaces={vaultSpaces}

@@ -1145,7 +1145,7 @@ export interface MovimentacaoVeterinaria {
 }
 
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
-export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA';
+export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA';
 
 export interface CautelaArma {
   id: string;
@@ -1217,6 +1217,17 @@ export interface CautelaMunicao {
   linkedWeaponCautelaId?: string;
   linkedWeaponSerialNumber?: string;
   linkedWeaponModel?: string;
+  linkedWeaponType?: string;
+  linkedWeaponStatus?: CautelaArmaStatus;
+  linkedWeaponMagazineQty?: number;
+  linkedWeaponVaultSpaceId?: string;
+  linkedWeaponHadShots?: boolean;
+  linkedWeaponShotsFired?: number;
+  linkedWeaponConditions?: string;
+  linkedWeaponDefectDesc?: string;
+  linkedWeaponHadMalfunction?: boolean;
+  linkedWeaponMalfunctionDesc?: string;
+  linkedWeaponReturnedMags?: number;
   weaponId?: string;
   requesterId: string;
   requesterName: string;

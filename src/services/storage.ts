@@ -847,11 +847,22 @@ class StorageService {
     if (role === 'Geral') return this.state.ammoStocks;
     if (this.hasDepartmentScope(actor)) {
       const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      const deptVaultIds = new Set(
+        this.state.vaultSpaces
+          .filter(v => this.belongsToDepartment(v.unitId, v.departmentId, actor.departmentId, deptUnits))
+          .map(v => v.id)
+      );
       return this.state.ammoStocks.filter(s =>
-        this.belongsToDepartment(s.unitId, s.departmentId, actor.departmentId, deptUnits)
+        this.belongsToDepartment(s.unitId, s.departmentId, actor.departmentId, deptUnits) ||
+        (s.vaultSpaceId ? deptVaultIds.has(s.vaultSpaceId) : false)
       );
     }
-    return this.state.ammoStocks.filter(s => s.unitId === actor.unitId);
+    const unitVaultIds = new Set(
+      this.state.vaultSpaces.filter(v => v.unitId === actor.unitId).map(v => v.id)
+    );
+    return this.state.ammoStocks.filter(
+      s => s.unitId === actor.unitId || (s.vaultSpaceId ? unitVaultIds.has(s.vaultSpaceId) : false)
+    );
   }
 
   public getAmmoMovements(currentUser?: User | null): AmmunitionMovement[] {
@@ -4136,7 +4147,7 @@ class StorageService {
   // CAUTELA DE MUNIÇÕES
   // =========================================================
   public getCautelasMunicoes(): CautelaMunicao[] {
-    return this.state.cautelasMunicoes || [];
+    return (this.state.cautelasMunicoes || []).filter(c => Number(c.quantity || 0) > 0);
   }
 
   public async requestCautelaMunicao(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
@@ -4227,27 +4238,89 @@ class StorageService {
     }
   }
 
-  public async returnCautelaMunicao(id: string, returnData: any): Promise<{ success: boolean; error?: string }> {
+  public async returnCautelaMunicao(
+    id: string,
+    returnData: any
+  ): Promise<{ success: boolean; error?: string; pendingReceipt?: boolean; shotsAddedToWeapon?: number }> {
+    const actor = this.state.currentUser;
+    const actorRole = actor ? (actor.activeRole || actor.role) : '';
+    const isPendingReceipt = Boolean(returnData.pendingReceipt) || actorRole === 'Policial';
+
     const cleanId = id.replace(/^caut-mun-sync-/, '').replace(/^caut-mun-/, '').replace(/^caut-sync-/, '').replace(/^caut-/, '');
-    const target = (this.state.cautelasMunicoes || []).find(c => c.id === id || c.id === cleanId || c.id === `caut-mun-${cleanId}`);
+    const target = (this.state.cautelasMunicoes || []).find(
+      c => c.id === id || c.id === cleanId || c.id === `caut-mun-${cleanId}`
+    );
+
     if (target) {
-      const returnedQty = Number(returnData.returnedQuantity || 0);
-      target.status = target.seraDevolvida || returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
-      target.returnedQuantity = returnedQty;
-      target.returnedAt = new Date().toISOString();
-      target.returnArmorerId = this.state.currentUser?.id;
-      target.returnArmorerName = this.state.currentUser?.name;
-      if (returnData.destinationVaultSpaceId) {
-        target.vaultSpaceId = returnData.destinationVaultSpaceId;
-      }
-      if (returnedQty > 0) {
-        const destVault = returnData.destinationVaultSpaceId || target.vaultSpaceId;
-        const matchingStock = (this.state.ammoStocks || []).find(s => 
-          (s.caliberId === target.caliberId || (s as any).caliberName === target.caliberName) &&
-          (destVault ? s.vaultSpaceId === destVault : true)
-        );
-        if (matchingStock) {
-          matchingStock.quantity += returnedQty;
+      const returnedQty = Math.max(0, Number(returnData.returnedQuantity ?? target.returnedQuantity ?? 0));
+      if (isPendingReceipt) {
+        target.status = 'DEVOLUCAO_PENDENTE';
+        target.returnedQuantity = returnedQty;
+        const modeTag = target.linkedWeaponCautelaId
+          ? (returnData.returnWithWeapon ? '[MODALIDADE_DEVOLUCAO: CONJUNTA_ARMA]' : '[MODALIDADE_DEVOLUCAO: SOMENTE_MUNICAO]')
+          : '';
+        const cleanObs = String(returnData.observations || '').trim();
+        target.observations = [cleanObs, modeTag].filter(Boolean).join(' | ');
+
+        if (returnData.returnWithWeapon && target.linkedWeaponCautelaId) {
+          const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === target.linkedWeaponCautelaId);
+          if (linkedWeapon && linkedWeapon.status !== 'DEVOLVIDA') {
+            linkedWeapon.status = 'DEVOLUCAO_PENDENTE';
+            linkedWeapon.hadShots = Boolean(returnData.hadShots);
+            linkedWeapon.shotsFired = Number(returnData.shotsFired || 0);
+            linkedWeapon.returnedMagazinesCount = returnData.returnedMagazinesCount;
+            linkedWeapon.returnedAmmoQuantity = returnedQty;
+            target.linkedWeaponStatus = 'DEVOLUCAO_PENDENTE';
+            target.linkedWeaponHadShots = Boolean(returnData.hadShots);
+            target.linkedWeaponShotsFired = Number(returnData.shotsFired || 0);
+            target.linkedWeaponReturnedMags = returnData.returnedMagazinesCount;
+          }
+        }
+      } else {
+        target.status = target.seraDevolvida || returnedQty > 0 ? 'DEVOLVIDA' : 'CONSUMIDA';
+        target.returnedQuantity = returnedQty;
+        target.returnedAt = new Date().toISOString();
+        target.returnArmorerId = actor?.id;
+        target.returnArmorerName = actor?.name;
+        const destAmmoVault = returnData.ammoDestinationVaultSpaceId || returnData.destinationVaultSpaceId;
+        if (destAmmoVault) {
+          target.vaultSpaceId = destAmmoVault;
+        }
+        if (returnedQty > 0) {
+          const destVault = destAmmoVault || target.vaultSpaceId;
+          const matchingStock = (this.state.ammoStocks || []).find(
+            s =>
+              (s.caliberId === target.caliberId || (s as any).caliberName === target.caliberName) &&
+              (destVault ? s.vaultSpaceId === destVault : true)
+          );
+          if (matchingStock) {
+            matchingStock.quantity += returnedQty;
+          }
+        }
+        if (returnData.returnWithWeapon && target.linkedWeaponCautelaId) {
+          const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === target.linkedWeaponCautelaId);
+          const wasAlreadyDev = linkedWeapon?.status === 'DEVOLVIDA';
+          if (linkedWeapon) {
+            linkedWeapon.status = 'DEVOLVIDA';
+            linkedWeapon.returnDate = new Date().toISOString();
+            linkedWeapon.returnArmorerId = actor?.id;
+            linkedWeapon.returnArmorerName = actor?.name;
+            linkedWeapon.hadShots = Boolean(returnData.hadShots);
+            linkedWeapon.shotsFired = Number(returnData.shotsFired || 0);
+            target.linkedWeaponStatus = 'DEVOLVIDA';
+          }
+          const weap = (this.state.weapons || []).find(
+            w => w.id === target.weaponId || (target.linkedWeaponSerialNumber && w.serialNumber === target.linkedWeaponSerialNumber)
+          );
+          if (weap) {
+            weap.status = returnData.isWorking === false ? 'Manutenção' : 'No Cofre';
+            if (returnData.weaponDestinationVaultSpaceId) {
+              weap.vaultSpaceId = returnData.weaponDestinationVaultSpaceId;
+            }
+            if (!wasAlreadyDev && returnData.hadShots && Number(returnData.shotsFired || 0) > 0) {
+              weap.shotCount = Number(weap.shotCount || 0) + Number(returnData.shotsFired || 0);
+            }
+          }
         }
       }
     }
@@ -4258,19 +4331,24 @@ class StorageService {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...returnData,
+          pendingReceipt: isPendingReceipt,
           cautelaId: target?.id || id,
-          returnArmorerId: this.state.currentUser?.id,
-          returnArmorerName: this.state.currentUser?.name,
-          returnArmorerMasp: this.state.currentUser?.masp,
-          actor: this.state.currentUser
+          returnArmorerId: actor?.id,
+          returnArmorerName: actor?.name,
+          returnArmorerMasp: actor?.masp,
+          actor
         })
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
-      return { success: true };
+      return {
+        success: true,
+        pendingReceipt: Boolean(data.pendingReceipt ?? isPendingReceipt),
+        shotsAddedToWeapon: data.shotsAddedToWeapon
+      };
     } catch (err: any) {
-      return { success: true };
+      return { success: true, pendingReceipt: isPendingReceipt };
     }
   }
 }
