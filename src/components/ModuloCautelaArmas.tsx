@@ -100,8 +100,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [editWeaponId, setEditWeaponId] = useState('');
   const [editReason, setEditReason] = useState('');
   const [editWantsAmmo, setEditWantsAmmo] = useState(false);
-  const [editAmmoTipo, setEditAmmoTipo] = useState('Operacional');
-  const [editAmmoPeso, setEditAmmoPeso] = useState('124 gr');
+  const [editAmmoTipo, setEditAmmoTipo] = useState('');
+  const [editAmmoPeso, setEditAmmoPeso] = useState('');
   const [activeCautelaWarningModal, setActiveCautelaWarningModal] = useState<CautelaArma[] | null>(null);
   const [hasDismissedActiveWarning, setHasDismissedActiveWarning] = useState(false);
   const [authWithAmmo, setAuthWithAmmo] = useState(false);
@@ -111,10 +111,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
   const [authNotes, setAuthNotes] = useState('');
 
-  // Indicação Informativa de Munição pelo Policial (Opcional - meramente informativa)
+  // Indicação Informativa de Munição pelo Policial ("Desejo solicitar munições")
   const [policialWantsAmmo, setPolicialWantsAmmo] = useState(false);
-  const [policialAmmoTipo, setPolicialAmmoTipo] = useState('Operacional');
-  const [policialAmmoPeso, setPolicialAmmoPeso] = useState('124 gr');
+  const [policialAmmoTipo, setPolicialAmmoTipo] = useState('');
+  const [policialAmmoPeso, setPolicialAmmoPeso] = useState('');
 
   // Available officers in unit (strict unit restriction for direct checkout)
   const availableUnitOfficers = useMemo(() => {
@@ -143,61 +143,113 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
   }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
 
-  // Tipos e pesos de munição disponíveis para seleção informativa pelo policial
+  // Retorna especificações (tipo e peso) cadastradas no calibre da arma e disponíveis em estoque (> 0) na unidade
   // (Sem jamais expor local do cofre ou quantidade de munições em estoque)
+  const getAvailableUnitAmmoSpecsForWeapon = useCallback(
+    (weapon?: Weapon | null) => {
+      if (!weapon || !weapon.caliber) {
+        return [] as Array<{ tipo: string; peso: string }>;
+      }
+      const norm = (s?: string) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const targetCalName = norm(weapon.caliber);
+      const targetUnitId = weapon.unitId || currentUser.unitId;
+
+      const matchingCalibers = calibers.filter(c => norm(c.name) === targetCalName);
+      const matchingCaliberIds = new Set(matchingCalibers.map(c => c.id));
+
+      const specs: Array<{ tipo: string; peso: string }> = [];
+
+      ammoStocks.forEach(st => {
+        if (Number(st.quantity) <= 0) return;
+
+        const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+        const stUnitId = st.unitId || stVault?.unitId || '';
+        const matchUnit = targetUnitId ? stUnitId === targetUnitId : true;
+        if (!matchUnit) return;
+
+        const calObj = calibers.find(
+          c => c.id === st.caliberId || norm(c.name) === norm(st.caliberId)
+        );
+        const matchCaliber =
+          matchingCaliberIds.has(st.caliberId) ||
+          Boolean(calObj && norm(calObj.name) === targetCalName) ||
+          norm(st.caliberId) === targetCalName;
+        if (!matchCaliber) return;
+
+        const resolvedTipo = (st.tipoMunicao || calObj?.tipo || '').trim();
+        if (!resolvedTipo) return;
+
+        let resolvedPeso = (st.pesoMunicao || calObj?.peso || '').trim();
+        if (!resolvedPeso) {
+          const calWithSameTipo = matchingCalibers.find(
+            c => norm(c.tipo) === norm(resolvedTipo) && Boolean((c.peso || '').trim())
+          );
+          if (calWithSameTipo?.peso) {
+            resolvedPeso = calWithSameTipo.peso.trim();
+          }
+        }
+
+        specs.push({
+          tipo: resolvedTipo,
+          peso: resolvedPeso
+        });
+      });
+
+      return specs;
+    },
+    [ammoStocks, calibers, vaultSpaces, currentUser.unitId]
+  );
+
+  // Somente tipos cadastrados no calibre da arma e disponíveis na unidade
+  const availablePoliceSpecs = useMemo(() => {
+    return getAvailableUnitAmmoSpecsForWeapon(selectedWeapon);
+  }, [getAvailableUnitAmmoSpecsForWeapon, selectedWeapon]);
+
   const availablePoliceTipos = useMemo(() => {
-    const calName = (selectedWeapon?.caliber || '').trim().toLowerCase();
-    const set = new Set<string>();
-    calibers
-      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.tipo)
-      .forEach(c => set.add(c.tipo!.trim()));
-    availableAmmoForSelectedWeapon.forEach(st => {
-      if (st.tipoMunicao && st.tipoMunicao.trim()) {
-        set.add(st.tipoMunicao.trim());
+    const seen = new Set<string>();
+    const result: string[] = [];
+    availablePoliceSpecs.forEach(spec => {
+      const key = spec.tipo.trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        result.push(spec.tipo.trim());
       }
     });
-    ['Operacional', 'Treinamento', 'Expansiva', 'ETOG', 'Treino', 'Defesa'].forEach(t => set.add(t));
-    return Array.from(set);
-  }, [selectedWeapon, calibers, availableAmmoForSelectedWeapon]);
+    return result;
+  }, [availablePoliceSpecs]);
 
+  // Somente pesos cadastrados no tipo selecionado do calibre da arma e disponíveis na unidade
   const availablePolicePesos = useMemo(() => {
-    const calName = (selectedWeapon?.caliber || '').trim().toLowerCase();
-    const set = new Set<string>();
-    calibers
-      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.peso)
-      .forEach(c => set.add(c.peso!.trim()));
-    availableAmmoForSelectedWeapon.forEach(st => {
-      if (st.pesoMunicao && st.pesoMunicao.trim()) {
-        set.add(st.pesoMunicao.trim());
+    if (!policialAmmoTipo) return [];
+    const selectedTipoNorm = policialAmmoTipo.trim().toLowerCase().replace(/\s+/g, ' ');
+    const seen = new Set<string>();
+    const result: string[] = [];
+    availablePoliceSpecs.forEach(spec => {
+      const specTipoNorm = spec.tipo.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (specTipoNorm !== selectedTipoNorm) return;
+      const pesoClean = spec.peso.trim();
+      const pesoKey = pesoClean.toLowerCase();
+      if (pesoClean && !seen.has(pesoKey)) {
+        seen.add(pesoKey);
+        result.push(pesoClean);
       }
     });
-    if (calName.includes('9mm') || calName.includes('9x19')) {
-      ['124 gr', '115 gr', '147 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('40')) {
-      ['180 gr', '165 gr', '155 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('380')) {
-      ['95 gr', '90 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('5,56') || calName.includes('5.56') || calName.includes('223')) {
-      ['55 gr', '62 gr', '77 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('12')) {
-      ['Balote', 'SG 3T', 'SG 2T', 'Chumbo 3'].forEach(p => set.add(p));
-    } else if (calName.includes('38')) {
-      ['158 gr', '125 gr'].forEach(p => set.add(p));
-    } else {
-      ['124 gr', '180 gr', '55 gr', 'Padrão'].forEach(p => set.add(p));
-    }
-    return Array.from(set);
-  }, [selectedWeapon, calibers, availableAmmoForSelectedWeapon]);
+    return result;
+  }, [availablePoliceSpecs, policialAmmoTipo]);
 
-  // Sincroniza automaticamente o tipo e peso selecionados quando o armamento muda
+  // Sincroniza automaticamente o tipo e peso selecionados quando o armamento ou tipo mudam
   React.useEffect(() => {
-    if (availablePoliceTipos.length > 0 && !availablePoliceTipos.includes(policialAmmoTipo)) {
+    if (availablePoliceTipos.length === 0) {
+      if (policialAmmoTipo !== '') setPolicialAmmoTipo('');
+    } else if (!availablePoliceTipos.includes(policialAmmoTipo)) {
       setPolicialAmmoTipo(availablePoliceTipos[0]);
     }
   }, [availablePoliceTipos, policialAmmoTipo]);
 
   React.useEffect(() => {
-    if (availablePolicePesos.length > 0 && !availablePolicePesos.includes(policialAmmoPeso)) {
+    if (availablePolicePesos.length === 0) {
+      if (policialAmmoPeso !== '') setPolicialAmmoPeso('');
+    } else if (!availablePolicePesos.includes(policialAmmoPeso)) {
       setPolicialAmmoPeso(availablePolicePesos[0]);
     }
   }, [availablePolicePesos, policialAmmoPeso]);
@@ -931,71 +983,56 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return editableUnitWeapons.find(w => w.id === editWeaponId) || null;
   }, [editableUnitWeapons, editWeaponId]);
 
-  // Tipos e pesos disponíveis no modal de edição da cautela (sem expor cofre ou saldo de estoque)
+  // Tipos e pesos disponíveis no modal de edição da cautela (somente cadastrados no calibre/tipo da arma e disponíveis na unidade)
+  const availableEditPoliceSpecs = useMemo(() => {
+    return getAvailableUnitAmmoSpecsForWeapon(editSelectedWeapon);
+  }, [getAvailableUnitAmmoSpecsForWeapon, editSelectedWeapon]);
+
   const availableEditPoliceTipos = useMemo(() => {
-    const calName = (editSelectedWeapon?.caliber || '').trim().toLowerCase();
-    const set = new Set<string>();
-    calibers
-      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.tipo)
-      .forEach(c => set.add(c.tipo!.trim()));
-    ammoStocks
-      .filter(st => {
-        const matchUnit = isGeral ? true : st.unitId === (editSelectedWeapon?.unitId || currentUser.unitId);
-        const cal = calibers.find(c => c.id === st.caliberId);
-        const cName = (cal?.name || '').toLowerCase().trim();
-        const matchCal = !calName || (cal && (cName.includes(calName) || calName.includes(cName))) || st.caliberId === editSelectedWeapon?.caliber;
-        return matchUnit && matchCal && st.quantity > 0;
-      })
-      .forEach(st => {
-        if (st.tipoMunicao && st.tipoMunicao.trim()) set.add(st.tipoMunicao.trim());
-      });
-    ['Operacional', 'Treinamento', 'Expansiva', 'ETOG', 'Treino', 'Defesa'].forEach(t => set.add(t));
-    return Array.from(set);
-  }, [editSelectedWeapon, calibers, ammoStocks, isGeral, currentUser.unitId]);
+    const seen = new Set<string>();
+    const result: string[] = [];
+    availableEditPoliceSpecs.forEach(spec => {
+      const key = spec.tipo.trim().toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.add(key);
+        result.push(spec.tipo.trim());
+      }
+    });
+    return result;
+  }, [availableEditPoliceSpecs]);
 
   const availableEditPolicePesos = useMemo(() => {
-    const calName = (editSelectedWeapon?.caliber || '').trim().toLowerCase();
-    const set = new Set<string>();
-    calibers
-      .filter(c => (!calName || c.name.trim().toLowerCase() === calName) && c.peso)
-      .forEach(c => set.add(c.peso!.trim()));
-    ammoStocks
-      .filter(st => {
-        const matchUnit = isGeral ? true : st.unitId === (editSelectedWeapon?.unitId || currentUser.unitId);
-        const cal = calibers.find(c => c.id === st.caliberId);
-        const cName = (cal?.name || '').toLowerCase().trim();
-        const matchCal = !calName || (cal && (cName.includes(calName) || calName.includes(cName))) || st.caliberId === editSelectedWeapon?.caliber;
-        return matchUnit && matchCal && st.quantity > 0;
-      })
-      .forEach(st => {
-        if (st.pesoMunicao && st.pesoMunicao.trim()) set.add(st.pesoMunicao.trim());
-      });
-    if (calName.includes('9mm') || calName.includes('9x19')) {
-      ['124 gr', '115 gr', '147 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('40')) {
-      ['180 gr', '165 gr', '155 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('380')) {
-      ['95 gr', '90 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('5,56') || calName.includes('5.56') || calName.includes('223')) {
-      ['55 gr', '62 gr', '77 gr'].forEach(p => set.add(p));
-    } else if (calName.includes('12')) {
-      ['Balote', 'SG 3T', 'SG 2T', 'Chumbo 3'].forEach(p => set.add(p));
-    } else if (calName.includes('38')) {
-      ['158 gr', '125 gr'].forEach(p => set.add(p));
-    } else {
-      ['124 gr', '180 gr', '55 gr', 'Padrão'].forEach(p => set.add(p));
-    }
-    return Array.from(set);
-  }, [editSelectedWeapon, calibers, ammoStocks, isGeral, currentUser.unitId]);
+    if (!editAmmoTipo) return [];
+    const selectedTipoNorm = editAmmoTipo.trim().toLowerCase().replace(/\s+/g, ' ');
+    const seen = new Set<string>();
+    const result: string[] = [];
+    availableEditPoliceSpecs.forEach(spec => {
+      const specTipoNorm = spec.tipo.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (specTipoNorm !== selectedTipoNorm) return;
+      const pesoClean = spec.peso.trim();
+      const pesoKey = pesoClean.toLowerCase();
+      if (pesoClean && !seen.has(pesoKey)) {
+        seen.add(pesoKey);
+        result.push(pesoClean);
+      }
+    });
+    return result;
+  }, [availableEditPoliceSpecs, editAmmoTipo]);
 
   React.useEffect(() => {
-    if (editingCautela && availableEditPoliceTipos.length > 0 && !availableEditPoliceTipos.includes(editAmmoTipo)) {
+    if (!editingCautela) return;
+    if (availableEditPoliceTipos.length === 0) {
+      if (editAmmoTipo !== '') setEditAmmoTipo('');
+    } else if (!availableEditPoliceTipos.includes(editAmmoTipo)) {
       setEditAmmoTipo(availableEditPoliceTipos[0]);
     }
   }, [editingCautela, availableEditPoliceTipos, editAmmoTipo]);
 
   React.useEffect(() => {
-    if (editingCautela && availableEditPolicePesos.length > 0 && !availableEditPolicePesos.includes(editAmmoPeso)) {
+    if (!editingCautela) return;
+    if (availableEditPolicePesos.length === 0) {
+      if (editAmmoPeso !== '') setEditAmmoPeso('');
+    } else if (!availableEditPolicePesos.includes(editAmmoPeso)) {
       setEditAmmoPeso(availableEditPolicePesos[0]);
     }
   }, [editingCautela, availableEditPolicePesos, editAmmoPeso]);
@@ -1207,12 +1244,26 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         payload.ammoLote = resolvedLote;
       }
 
-      // Regra de Negócio: Se for policial e informou preferência de munição,
+      // Regra de Negócio: Se for policial e marcou "Desejo solicitar munições",
       // salva meramente informativa em OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS
       // sem gerar cautela de munições em conjunto e sem deduzir do cofre
       if (isPolicial && policialWantsAmmo) {
+        if (availablePoliceTipos.length === 0 || !policialAmmoTipo) {
+          setErrorMsg(
+            `Não há munições correspondentes ao calibre ${weapon.caliber} disponíveis na unidade no momento. Desmarque "Desejo solicitar munições" para solicitar apenas o armamento.`
+          );
+          setIsSubmitting(false);
+          return;
+        }
+        if (availablePolicePesos.length > 0 && !policialAmmoPeso) {
+          setErrorMsg('Selecione o peso do projétil disponível para o tipo de munição escolhido.');
+          setIsSubmitting(false);
+          return;
+        }
         const calStr = weapon.caliber || 'Padrão';
-        payload.authorizationNotes = `Solicito munição tipo: ${calStr}, ${policialAmmoTipo}, ${policialAmmoPeso}`;
+        payload.authorizationNotes = policialAmmoPeso
+          ? `Solicito munição tipo: ${calStr}, ${policialAmmoTipo}, ${policialAmmoPeso}`
+          : `Solicito munição tipo: ${calStr}, ${policialAmmoTipo}`;
       }
 
       const res = await storage.requestCautelaArma(payload);
@@ -1431,16 +1482,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         setEditAmmoTipo(parts[1]);
         setEditAmmoPeso(parts.slice(2).join(', '));
       } else if (parts.length === 2) {
-        setEditAmmoTipo(parts[0]);
-        setEditAmmoPeso(parts[1]);
+        setEditAmmoTipo(parts[1]);
+        setEditAmmoPeso('');
       } else {
-        setEditAmmoTipo('Operacional');
-        setEditAmmoPeso('124 gr');
+        setEditAmmoTipo('');
+        setEditAmmoPeso('');
       }
     } else {
       setEditWantsAmmo(false);
-      setEditAmmoTipo('Operacional');
-      setEditAmmoPeso('124 gr');
+      setEditAmmoTipo('');
+      setEditAmmoPeso('');
     }
   };
 
@@ -1466,12 +1517,27 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return;
     }
 
+    if (editWantsAmmo) {
+      if (availableEditPoliceTipos.length === 0 || !editAmmoTipo) {
+        setErrorMsg(
+          `Não há munições correspondentes ao calibre ${chosenWeapon.caliber} disponíveis na unidade no momento. Desmarque "Desejo solicitar munições" para manter apenas o armamento.`
+        );
+        return;
+      }
+      if (availableEditPolicePesos.length > 0 && !editAmmoPeso) {
+        setErrorMsg('Selecione o peso do projétil disponível para o tipo de munição escolhido.');
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setErrorMsg('');
     try {
       const calStr = chosenWeapon.caliber || 'Padrão';
       const updatedAuthNotes = editWantsAmmo
-        ? `Solicito munição tipo: ${calStr}, ${editAmmoTipo}, ${editAmmoPeso}`
+        ? editAmmoPeso
+          ? `Solicito munição tipo: ${calStr}, ${editAmmoTipo}, ${editAmmoPeso}`
+          : `Solicito munição tipo: ${calStr}, ${editAmmoTipo}`
         : null;
 
       const res = await storage.updatePendingCautelaArma(editingCautela.id, {
@@ -3301,7 +3367,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     </select>
                   </div>
 
-                  {/* Seção Informativa de Munição Desejada (Opcional para Policial) */}
+                  {/* Seção Informativa de Munição Desejada ("Desejo solicitar munições") */}
                   <div className="pt-2 border-t border-slate-800 space-y-3">
                     <div className="flex items-center space-x-2">
                       <input
@@ -3312,59 +3378,92 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700 cursor-pointer"
                       />
                       <label htmlFor="policialAmmoRequest" className="text-xs font-bold text-slate-200 cursor-pointer">
-                        Informar ao armeiro especificação da munição que deseja cautelar (Opcional)
+                        Desejo solicitar munições
                       </label>
                     </div>
 
                     {policialWantsAmmo && (
                       <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5 animate-in fade-in">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                          {/* Calibre (correspondente ao armamento escolhido) */}
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                              Calibre Correspondente
-                            </label>
-                            <input
-                              type="text"
-                              readOnly
-                              disabled
-                              value={selectedWeapon?.caliber || 'Calibre da Arma'}
-                              className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
-                            />
+                        {!selectedWeapon ? (
+                          <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
+                            <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                            <span>Selecione primeiramente uma arma acima para carregar o calibre, os tipos e os pesos de munição disponíveis na unidade.</span>
                           </div>
+                        ) : availablePoliceTipos.length === 0 ? (
+                          <div className="space-y-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Calibre Correspondente
+                              </label>
+                              <input
+                                type="text"
+                                readOnly
+                                disabled
+                                value={selectedWeapon.caliber}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                              />
+                            </div>
+                            <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
+                              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                              <span>
+                                Não há tipos de munição cadastrados para o calibre <strong>{selectedWeapon.caliber}</strong> disponíveis na sua unidade no momento.
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            {/* Calibre fixo correspondente ao armamento escolhido */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Calibre Correspondente
+                              </label>
+                              <input
+                                type="text"
+                                readOnly
+                                disabled
+                                value={selectedWeapon.caliber}
+                                className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                              />
+                            </div>
 
-                          {/* Tipo de Munição */}
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                              Tipo de Munição
-                            </label>
-                            <select
-                              value={policialAmmoTipo}
-                              onChange={(e) => setPolicialAmmoTipo(e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
-                            >
-                              {availablePoliceTipos.map(t => (
-                                <option key={t} value={t}>{t}</option>
-                              ))}
-                            </select>
-                          </div>
+                            {/* Tipo de Munição (somente cadastrados no calibre da arma e disponíveis na unidade) */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Tipo de Munição
+                              </label>
+                              <select
+                                value={policialAmmoTipo}
+                                onChange={(e) => setPolicialAmmoTipo(e.target.value)}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                              >
+                                {availablePoliceTipos.map(t => (
+                                  <option key={t} value={t}>{t}</option>
+                                ))}
+                              </select>
+                            </div>
 
-                          {/* Peso da Munição */}
-                          <div>
-                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                              Peso do Projétil
-                            </label>
-                            <select
-                              value={policialAmmoPeso}
-                              onChange={(e) => setPolicialAmmoPeso(e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
-                            >
-                              {availablePolicePesos.map(p => (
-                                <option key={p} value={p}>{p}</option>
-                              ))}
-                            </select>
+                            {/* Peso do Projétil (somente cadastrados no tipo do calibre da arma e disponíveis na unidade) */}
+                            <div>
+                              <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                                Peso do Projétil
+                              </label>
+                              <select
+                                value={policialAmmoPeso}
+                                onChange={(e) => setPolicialAmmoPeso(e.target.value)}
+                                disabled={availablePolicePesos.length === 0}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                              >
+                                {availablePolicePesos.length === 0 ? (
+                                  <option value="">Sem peso cadastrado neste tipo</option>
+                                ) : (
+                                  availablePolicePesos.map(p => (
+                                    <option key={p} value={p}>{p}</option>
+                                  ))
+                                )}
+                              </select>
+                            </div>
                           </div>
-                        </div>
+                        )}
 
                         <div className="p-2.5 bg-slate-900/70 border border-slate-800 rounded-lg text-[11px] text-slate-400 flex items-start space-x-2">
                           <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
@@ -5642,7 +5741,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </select>
               </div>
 
-              {/* 3. Indicação Informativa de Munição Desejada */}
+              {/* 3. Indicação Informativa de Munição Desejada ("Desejo solicitar munições") */}
               <div className="pt-2 border-t border-slate-800 space-y-3">
                 <div className="flex items-center space-x-2">
                   <input
@@ -5653,56 +5752,89 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     className="w-4 h-4 rounded text-amber-500 focus:ring-amber-500 bg-slate-950 border-slate-700 cursor-pointer"
                   />
                   <label htmlFor="editPolicialAmmoRequest" className="text-xs font-bold text-slate-200 cursor-pointer">
-                    Informar ao armeiro especificação da munição que deseja cautelar (Opcional)
+                    Desejo solicitar munições
                   </label>
                 </div>
 
                 {editWantsAmmo && (
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Calibre Correspondente
-                        </label>
-                        <input
-                          type="text"
-                          readOnly
-                          disabled
-                          value={editSelectedWeapon?.caliber || 'Calibre da Arma'}
-                          className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
-                        />
+                    {!editSelectedWeapon ? (
+                      <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
+                        <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                        <span>Selecione uma arma acima para carregar o calibre, os tipos e os pesos disponíveis na unidade.</span>
                       </div>
+                    ) : availableEditPoliceTipos.length === 0 ? (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            Calibre Correspondente
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            disabled
+                            value={editSelectedWeapon.caliber}
+                            className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                          />
+                        </div>
+                        <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
+                          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span>
+                            Não há tipos de munição cadastrados para o calibre <strong>{editSelectedWeapon.caliber}</strong> disponíveis na sua unidade no momento.
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            Calibre Correspondente
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            disabled
+                            value={editSelectedWeapon.caliber}
+                            className="w-full bg-slate-900/60 border border-slate-800 rounded-xl px-3 py-2 text-xs text-amber-400 font-mono font-bold cursor-not-allowed"
+                          />
+                        </div>
 
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Tipo de Munição
-                        </label>
-                        <select
-                          value={editAmmoTipo}
-                          onChange={(e) => setEditAmmoTipo(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
-                        >
-                          {availableEditPoliceTipos.map(t => (
-                            <option key={`edit-t-${t}`} value={t}>{t}</option>
-                          ))}
-                        </select>
-                      </div>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            Tipo de Munição
+                          </label>
+                          <select
+                            value={editAmmoTipo}
+                            onChange={(e) => setEditAmmoTipo(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
+                          >
+                            {availableEditPoliceTipos.map(t => (
+                              <option key={`edit-t-${t}`} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
 
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
-                          Peso do Projétil
-                        </label>
-                        <select
-                          value={editAmmoPeso}
-                          onChange={(e) => setEditAmmoPeso(e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer"
-                        >
-                          {availableEditPolicePesos.map(p => (
-                            <option key={`edit-p-${p}`} value={p}>{p}</option>
-                          ))}
-                        </select>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                            Peso do Projétil
+                          </label>
+                          <select
+                            value={editAmmoPeso}
+                            onChange={(e) => setEditAmmoPeso(e.target.value)}
+                            disabled={availableEditPolicePesos.length === 0}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-amber-500 cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
+                          >
+                            {availableEditPolicePesos.length === 0 ? (
+                              <option value="">Sem peso cadastrado neste tipo</option>
+                            ) : (
+                              availableEditPolicePesos.map(p => (
+                                <option key={`edit-p-${p}`} value={p}>{p}</option>
+                              ))
+                            )}
+                          </select>
+                        </div>
                       </div>
-                    </div>
+                    )}
 
                     <div className="p-2.5 bg-slate-900/70 border border-slate-800 rounded-lg text-[11px] text-slate-400 flex items-start space-x-2">
                       <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
