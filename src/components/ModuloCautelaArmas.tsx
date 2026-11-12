@@ -109,7 +109,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Emissão de Relatório de Cautelas da Unidade (Armeiro)
   const [isArmorerReportModalOpen, setIsArmorerReportModalOpen] = useState(false);
-  const [armorerReportScope, setArmorerReportScope] = useState<'ATIVAS' | 'ATIVAS_E_INATIVAS' | 'SOMENTE_INATIVAS'>('ATIVAS');
+  const [armorerReportScope, setArmorerReportScope] = useState<
+    'POR_ARMA' | 'POR_POLICIAL' | 'ATIVAS' | 'ATIVAS_E_INATIVAS' | 'SOMENTE_INATIVAS'
+  >('POR_ARMA');
+  const [armorerReportWeaponKey, setArmorerReportWeaponKey] = useState<string>('');
+  const [armorerReportWeaponSearch, setArmorerReportWeaponSearch] = useState<string>('');
+  const [armorerReportUserKey, setArmorerReportUserKey] = useState<string>('');
+  const [armorerReportUserSearch, setArmorerReportUserSearch] = useState<string>('');
+  const [armorerReportStatusSubFilter, setArmorerReportStatusSubFilter] = useState<
+    'TODAS' | 'ATIVAS' | 'INATIVAS'
+  >('TODAS');
 
   // Modal de Impressão do Histórico de Cautelas (Policial)
   const [isPrintHistoryModalOpen, setIsPrintHistoryModalOpen] = useState(false);
@@ -5084,10 +5093,47 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     printDocumentInPage(htmlContent);
   };
 
-  // Dados consolidados para prévia e emissão do Relatório de Cautelas pelo Armeiro
+  // Chave única de identificação de arma para o Relatório de Cautelas do Armeiro
+  const getCautelaWeaponReportKey = useCallback(
+    (c: CautelaArma): string => {
+      const wObj = weapons.find(
+        w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
+      );
+      const serial = (c.weaponSerialNumber || wObj?.serialNumber || '').trim();
+      if (serial) return `ser:${normalizeStr(serial)}`;
+      if (c.weaponId || wObj?.id) return `id:${c.weaponId || wObj?.id}`;
+      return `mod:${normalizeStr(c.weaponModel || wObj?.model || c.id)}`;
+    },
+    [weapons]
+  );
+
+  // Dados consolidados para prévia, seletores (Arma / Policial) e emissão do Relatório de Cautelas pelo Armeiro
   const armorerReportPreview = useMemo(() => {
     if (!canAuthorize) {
       return {
+        weaponOptions: [] as Array<{
+          key: string;
+          label: string;
+          weaponTitle: string;
+          serial: string;
+          caliber: string;
+          status: string;
+          totalCount: number;
+          activeCount: number;
+          inactiveCount: number;
+        }>,
+        userOptions: [] as Array<{
+          key: string;
+          label: string;
+          name: string;
+          masp: string;
+          cargo: string;
+          phone: string;
+          unitName: string;
+          totalCount: number;
+          activeCount: number;
+          inactiveCount: number;
+        }>,
         activeUsersGroups: [] as Array<{
           key: string;
           user: { name: string; masp: string; cargo: string; phone: string; unitName: string };
@@ -5106,6 +5152,183 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     );
     const inactiveCautelas = scopedCautelas.filter(c => c.status === 'DEVOLVIDA');
 
+    // 1. Opções de Armas da Unidade (todas as armas com cautelas + armas cadastradas na unidade)
+    const weaponMap = new Map<
+      string,
+      {
+        key: string;
+        weaponTitle: string;
+        serial: string;
+        caliber: string;
+        status: string;
+        totalCount: number;
+        activeCount: number;
+        inactiveCount: number;
+      }
+    >();
+
+    scopedCautelas.forEach(c => {
+      const key = getCautelaWeaponReportKey(c);
+      const wObj = weapons.find(
+        w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
+      );
+      const weaponTitle = [
+        c.weaponType || wObj?.type,
+        wObj?.manufacturer,
+        c.weaponModel || wObj?.model || 'Armamento'
+      ]
+        .filter(Boolean)
+        .join(' ');
+      const serial = (c.weaponSerialNumber || wObj?.serialNumber || 'S/N').trim();
+      const caliber = (c.weaponCaliber || wObj?.caliber || 'Padrão').trim();
+      const status = wObj?.status || (c.status === 'AUTORIZADA' ? 'Acautelada' : 'No Cofre');
+
+      if (!weaponMap.has(key)) {
+        weaponMap.set(key, {
+          key,
+          weaponTitle,
+          serial,
+          caliber,
+          status,
+          totalCount: 0,
+          activeCount: 0,
+          inactiveCount: 0
+        });
+      }
+      const entry = weaponMap.get(key)!;
+      entry.totalCount += 1;
+      if (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') {
+        entry.activeCount += 1;
+      } else if (c.status === 'DEVOLVIDA') {
+        entry.inactiveCount += 1;
+      }
+    });
+
+    // Inclui também armas da unidade ainda sem cautela registrada para permitir consulta completa
+    (weapons || []).forEach(w => {
+      const sameUnit =
+        isGeral ||
+        currentUser.managementScope === 'department' ||
+        !currentUser.unitId ||
+        w.unitId === currentUser.unitId;
+      if (!sameUnit) return;
+      const serial = (w.serialNumber || '').trim();
+      const key = serial ? `ser:${normalizeStr(serial)}` : `id:${w.id}`;
+      if (!weaponMap.has(key)) {
+        const weaponTitle = [w.type, w.manufacturer, w.model || 'Armamento']
+          .filter(Boolean)
+          .join(' ');
+        weaponMap.set(key, {
+          key,
+          weaponTitle,
+          serial: serial || 'S/N',
+          caliber: w.caliber || 'Padrão',
+          status: w.status || 'No Cofre',
+          totalCount: 0,
+          activeCount: 0,
+          inactiveCount: 0
+        });
+      }
+    });
+
+    const weaponOptions = Array.from(weaponMap.values())
+      .map(item => ({
+        ...item,
+        label: `${item.weaponTitle} — Nº ${item.serial} (${item.caliber}) • ${item.totalCount} cautela(s)`
+      }))
+      .sort((a, b) => {
+        if ((b.totalCount > 0 ? 1 : 0) !== (a.totalCount > 0 ? 1 : 0)) {
+          return (b.totalCount > 0 ? 1 : 0) - (a.totalCount > 0 ? 1 : 0);
+        }
+        return a.label.localeCompare(b.label, 'pt-BR');
+      });
+
+    // 2. Opções de Policiais / Usuários (todos os policiais com cautelas na unidade + policiais da unidade)
+    const userMap = new Map<
+      string,
+      {
+        key: string;
+        name: string;
+        masp: string;
+        cargo: string;
+        phone: string;
+        unitName: string;
+        totalCount: number;
+        activeCount: number;
+        inactiveCount: number;
+      }
+    >();
+
+    scopedCautelas.forEach(c => {
+      const key = getCautelaRequesterFilterKey(c);
+      if (!key || key === 'unknown') return;
+      const resolved = getResolvedRequester(c);
+      const reqDigits = cleanDigits(resolved.masp || c.requesterMasp);
+      const matchedUser =
+        (c.requesterId ? allUsersLookup.find(u => u.id === c.requesterId) : undefined) ||
+        (reqDigits ? allUsersLookup.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+        allUsersLookup.find(u => normalizeStr(u.name) === normalizeStr(resolved.name));
+      const wObj = weapons.find(
+        w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
+      );
+      const uObj = units.find(
+        u => u.id === (matchedUser?.unitId || c.unitId || wObj?.unitId || currentUser.unitId)
+      );
+
+      if (!userMap.has(key)) {
+        userMap.set(key, {
+          key,
+          name: resolved.name,
+          masp: resolved.masp || 'N/I',
+          cargo: resolved.cargo || matchedUser?.cargo || 'Policial Civil',
+          phone: matchedUser?.phone || c.requesterPhone || 'Não informado',
+          unitName: uObj?.name || unitSigla,
+          totalCount: 0,
+          activeCount: 0,
+          inactiveCount: 0
+        });
+      }
+      const entry = userMap.get(key)!;
+      entry.totalCount += 1;
+      if (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') {
+        entry.activeCount += 1;
+      } else if (c.status === 'DEVOLVIDA') {
+        entry.inactiveCount += 1;
+      }
+    });
+
+    availableUnitOfficers.forEach(u => {
+      const mDigits = cleanDigits(u.masp);
+      const key = mDigits && mDigits.length >= 4 ? `masp:${mDigits}` : `id:${u.id}`;
+      if (!userMap.has(key)) {
+        const uObj = units.find(x => x.id === (u.unitId || currentUser.unitId));
+        userMap.set(key, {
+          key,
+          name: u.name,
+          masp: u.masp || 'N/I',
+          cargo: u.cargo || 'Policial Civil',
+          phone: u.phone || 'Não informado',
+          unitName: uObj?.name || unitSigla,
+          totalCount: 0,
+          activeCount: 0,
+          inactiveCount: 0
+        });
+      }
+    });
+
+    const userOptions = Array.from(userMap.values())
+      .map(item => ({
+        ...item,
+        label: `${item.name}${item.masp && item.masp !== 'N/I' ? ` (MASP: ${item.masp})` : ''} — ${item.cargo} • ${item.totalCount} cautela(s)`
+      }))
+      .sort((a, b) => {
+        if ((b.totalCount > 0 ? 1 : 0) !== (a.totalCount > 0 ? 1 : 0)) {
+          return (b.totalCount > 0 ? 1 : 0) - (a.totalCount > 0 ? 1 : 0);
+        }
+        return a.name.localeCompare(b.name, 'pt-BR');
+      });
+
+    // 3. Agrupamento de Usuários com Cautelas Ativas
     const userGroupsMap = new Map<
       string,
       {
@@ -5161,6 +5384,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }).length;
 
     return {
+      weaponOptions,
+      userOptions,
       activeUsersGroups,
       activeCautelas,
       inactiveCautelas,
@@ -5172,18 +5397,151 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     scopedCautelas,
     weapons,
     units,
+    isGeral,
     currentUser.unitId,
+    currentUser.managementScope,
     unitSigla,
+    availableUnitOfficers,
+    getCautelaWeaponReportKey,
     getCautelaRequesterFilterKey,
     getResolvedRequester
   ]);
 
+  // Filtra opções de armas e policiais conforme busca digitada no modal
+  const filteredReportWeaponOptions = useMemo(() => {
+    if (!armorerReportWeaponSearch.trim()) return armorerReportPreview.weaponOptions;
+    const q = normalizeStr(armorerReportWeaponSearch);
+    const qDigits = cleanDigits(armorerReportWeaponSearch);
+    return armorerReportPreview.weaponOptions.filter(opt => {
+      if (normalizeStr(opt.label).includes(q)) return true;
+      if (qDigits.length >= 2 && cleanDigits(opt.serial).includes(qDigits)) return true;
+      return false;
+    });
+  }, [armorerReportPreview.weaponOptions, armorerReportWeaponSearch]);
+
+  const filteredReportUserOptions = useMemo(() => {
+    if (!armorerReportUserSearch.trim()) return armorerReportPreview.userOptions;
+    const q = normalizeStr(armorerReportUserSearch);
+    const qDigits = cleanDigits(armorerReportUserSearch);
+    return armorerReportPreview.userOptions.filter(opt => {
+      if (normalizeStr(opt.label).includes(q)) return true;
+      if (qDigits.length >= 2 && cleanDigits(opt.masp).includes(qDigits)) return true;
+      return false;
+    });
+  }, [armorerReportPreview.userOptions, armorerReportUserSearch]);
+
+  // Mantém seleção válida nos seletores de Arma e Policial
+  React.useEffect(() => {
+    if (filteredReportWeaponOptions.length > 0) {
+      if (!filteredReportWeaponOptions.some(w => w.key === armorerReportWeaponKey)) {
+        setArmorerReportWeaponKey(filteredReportWeaponOptions[0].key);
+      }
+    }
+  }, [filteredReportWeaponOptions, armorerReportWeaponKey]);
+
+  React.useEffect(() => {
+    if (filteredReportUserOptions.length > 0) {
+      if (!filteredReportUserOptions.some(u => u.key === armorerReportUserKey)) {
+        setArmorerReportUserKey(filteredReportUserOptions[0].key);
+      }
+    }
+  }, [filteredReportUserOptions, armorerReportUserKey]);
+
+  // Lista calculada em tempo real para os modos POR_ARMA e POR_POLICIAL
+  const selectedEntityHistoryCautelas = useMemo(() => {
+    if (!canAuthorize) return [] as CautelaArma[];
+    let list = [...scopedCautelas];
+
+    if (armorerReportScope === 'POR_ARMA') {
+      if (!armorerReportWeaponKey) return [];
+      list = list.filter(c => getCautelaWeaponReportKey(c) === armorerReportWeaponKey);
+    } else if (armorerReportScope === 'POR_POLICIAL') {
+      if (!armorerReportUserKey) return [];
+      list = list.filter(c => getCautelaRequesterFilterKey(c) === armorerReportUserKey);
+    } else if (armorerReportScope === 'ATIVAS') {
+      list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+    } else if (armorerReportScope === 'SOMENTE_INATIVAS') {
+      list = list.filter(c => c.status === 'DEVOLVIDA');
+    } else {
+      list = list.filter(
+        c =>
+          c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA'
+      );
+    }
+
+    if (armorerReportScope === 'POR_ARMA' || armorerReportScope === 'POR_POLICIAL') {
+      if (armorerReportStatusSubFilter === 'ATIVAS') {
+        list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+      } else if (armorerReportStatusSubFilter === 'INATIVAS') {
+        list = list.filter(c => c.status === 'DEVOLVIDA');
+      }
+    }
+
+    // Ordena mantendo cautelas ativas no topo e as demais da mais recente para a mais antiga
+    list.sort((a, b) => {
+      const aActive = a.status === 'AUTORIZADA' || a.status === 'DEVOLUCAO_PENDENTE' ? 1 : 0;
+      const bActive = b.status === 'AUTORIZADA' || b.status === 'DEVOLUCAO_PENDENTE' ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      const tsA =
+        new Date(a.returnDate || a.authorizedAt || a.requestDate || a.createdAt || '').getTime() || 0;
+      const tsB =
+        new Date(b.returnDate || b.authorizedAt || b.requestDate || b.createdAt || '').getTime() || 0;
+      return tsB - tsA;
+    });
+
+    return list;
+  }, [
+    canAuthorize,
+    scopedCautelas,
+    armorerReportScope,
+    armorerReportWeaponKey,
+    armorerReportUserKey,
+    armorerReportStatusSubFilter,
+    getCautelaWeaponReportKey,
+    getCautelaRequesterFilterKey
+  ]);
+
   const handleOpenArmorerReportModal = () => {
     setErrorMsg('');
+    setArmorerReportWeaponSearch('');
+    setArmorerReportUserSearch('');
+    setArmorerReportStatusSubFilter('TODAS');
+
+    // Pré-seleciona automaticamente caso o armeiro já esteja filtrando por usuário ou arma na tela
+    if (activeTab === 'HISTORICO_UNIDADE' && unitHistoryUserFilter !== 'TODOS') {
+      setArmorerReportScope('POR_POLICIAL');
+      setArmorerReportUserKey(unitHistoryUserFilter);
+    } else if (activeTab === 'DEFERIDAS' && deferidasUserFilter !== 'TODOS') {
+      setArmorerReportScope('POR_POLICIAL');
+      setArmorerReportUserKey(deferidasUserFilter);
+    } else if (activeTab === 'INDEFERIDAS' && indeferidasUserFilter !== 'TODOS') {
+      setArmorerReportScope('POR_POLICIAL');
+      setArmorerReportUserKey(indeferidasUserFilter);
+    } else if (activeTab === 'HISTORICO_UNIDADE' && unitHistoryWeaponFilter !== 'TODAS') {
+      const foundW = armorerReportPreview.weaponOptions.find(
+        w => w.serial === unitHistoryWeaponFilter || w.key.includes(normalizeStr(unitHistoryWeaponFilter))
+      );
+      if (foundW) {
+        setArmorerReportScope('POR_ARMA');
+        setArmorerReportWeaponKey(foundW.key);
+      }
+    } else {
+      if (!armorerReportWeaponKey && armorerReportPreview.weaponOptions.length > 0) {
+        setArmorerReportWeaponKey(armorerReportPreview.weaponOptions[0].key);
+      }
+      if (!armorerReportUserKey && armorerReportPreview.userOptions.length > 0) {
+        setArmorerReportUserKey(armorerReportPreview.userOptions[0].key);
+      }
+    }
+
     setIsArmorerReportModalOpen(true);
   };
 
-  // Emissão do Relatório de Cautelas da Unidade pelo Armeiro
+  // Emissão do Relatório de Cautelas pelo Armeiro
+  // Contém TODAS as informações completas (usuário, arma, solicitação/retirada, devolução/condição técnica e munições vinculadas)
+  // independentemente do tipo de filtro selecionado (por arma, por policial, ativas, inativas ou geral).
   const handlePrintArmorerCautelasReport = () => {
     const escapeHtml = (val?: string | number | null) =>
       String(val ?? '')
@@ -5199,393 +5557,475 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const issuerStored = allUsersLookup.find(u => u.id === currentUser.id);
     const issuerCareer = (currentUser.cargo || issuerStored?.cargo || 'Armeiro da Unidade').trim();
 
-    const includeActivesSection =
-      armorerReportScope === 'ATIVAS' || armorerReportScope === 'ATIVAS_E_INATIVAS';
-    const includeInactiveHistorySection =
-      armorerReportScope === 'ATIVAS_E_INATIVAS' || armorerReportScope === 'SOMENTE_INATIVAS';
+    const selectedWeaponOpt = armorerReportPreview.weaponOptions.find(
+      w => w.key === armorerReportWeaponKey
+    );
+    const selectedUserOpt = armorerReportPreview.userOptions.find(
+      u => u.key === armorerReportUserKey
+    );
+
+    const subFilterLabel =
+      armorerReportStatusSubFilter === 'ATIVAS'
+        ? 'Somente Cautelas Ativas'
+        : armorerReportStatusSubFilter === 'INATIVAS'
+          ? 'Somente Cautelas Inativas (Devolvidas)'
+          : 'Todo o Histórico de Cautelas';
 
     const reportDocTitle =
-      armorerReportScope === 'ATIVAS'
-        ? `RELATÓRIO DE CAUTELAS ATIVAS — ${unitSigla}`
-        : armorerReportScope === 'SOMENTE_INATIVAS'
-          ? `RELATÓRIO DE CAUTELAS INATIVAS (RECEBIDAS E DEVOLVIDAS) — ${unitSigla}`
-          : `RELATÓRIO GERAL DE CAUTELAS ATIVAS E INATIVAS — ${unitSigla}`;
+      armorerReportScope === 'POR_ARMA'
+        ? `HISTÓRICO COMPLETO DE CAUTELAS DO ARMAMENTO — ${unitSigla}`
+        : armorerReportScope === 'POR_POLICIAL'
+          ? `HISTÓRICO COMPLETO DE CAUTELAS DO POLICIAL — ${unitSigla}`
+          : armorerReportScope === 'ATIVAS'
+            ? `RELATÓRIO DE CAUTELAS ATIVAS — ${unitSigla}`
+            : armorerReportScope === 'SOMENTE_INATIVAS'
+              ? `RELATÓRIO DE CAUTELAS INATIVAS (RECEBIDAS E DEVOLVIDAS) — ${unitSigla}`
+              : `RELATÓRIO GERAL DE CAUTELAS ATIVAS E INATIVAS — ${unitSigla}`;
 
     const reportSubtitle =
-      armorerReportScope === 'ATIVAS'
-        ? 'Relação nominal de todos os usuários com cautela ativa, dados funcionais, armamentos e munições vinculadas'
-        : armorerReportScope === 'SOMENTE_INATIVAS'
-          ? 'Histórico de todas as cautelas inativas (recebidas e devolvidas) por armamento e detalhamento de munições vinculadas'
-          : 'Relação de usuários com cautelas ativas e histórico completo de cautelas recebidas e devolvidas do armamento';
+      armorerReportScope === 'POR_ARMA'
+        ? `Histórico detalhado de todas as cautelas da arma ${selectedWeaponOpt ? `${selectedWeaponOpt.weaponTitle} (Nº ${selectedWeaponOpt.serial})` : ''} — ${subFilterLabel}`
+        : armorerReportScope === 'POR_POLICIAL'
+          ? `Histórico detalhado de todas as cautelas do policial ${selectedUserOpt ? `${selectedUserOpt.name} (MASP: ${selectedUserOpt.masp})` : ''} — ${subFilterLabel}`
+          : armorerReportScope === 'ATIVAS'
+            ? 'Relação completa com todos os dados de usuários, armamentos, retiradas, devoluções e munições vinculadas'
+            : armorerReportScope === 'SOMENTE_INATIVAS'
+              ? 'Histórico completo de todas as cautelas inativas (recebidas e devolvidas) com todos os dados de usuários, armas e munições'
+              : 'Relatório completo de cautelas ativas e inativas contendo todos os dados de usuários, armamentos e munições vinculadas';
 
-    // Renderizador de bloco de munição vinculada (exibido SOMENTE quando a cautela da arma possui munição vinculada)
-    const renderLinkedAmmoHtml = (c: CautelaArma, isReturnedContext: boolean) => {
+    const modalidadeSummary =
+      armorerReportScope === 'POR_ARMA'
+        ? `Histórico por Arma (${subFilterLabel})`
+        : armorerReportScope === 'POR_POLICIAL'
+          ? `Histórico por Policial (${subFilterLabel})`
+          : armorerReportScope === 'ATIVAS'
+            ? 'Somente Cautelas Ativas (Unidade)'
+            : armorerReportScope === 'SOMENTE_INATIVAS'
+              ? 'Somente Cautelas Inativas / Devolvidas (Unidade)'
+              : 'Cautelas Ativas e Inativas (Histórico Completo da Unidade)';
+
+    // Renderizador padronizado contendo TODAS AS INFORMAÇÕES da cautela independentemente do tipo de filtro
+    const renderCompleteCautelaCardHtml = (c: CautelaArma, index: number, total: number) => {
+      const reqInfo = getResolvedRequester(c);
+      const reqDigits = cleanDigits(reqInfo.masp || c.requesterMasp);
+      const matchedUser =
+        (c.requesterId ? allUsersLookup.find(u => u.id === c.requesterId) : undefined) ||
+        (reqDigits ? allUsersLookup.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+        allUsersLookup.find(u => normalizeStr(u.name) === normalizeStr(reqInfo.name));
+
+      const wObj = weapons.find(
+        w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
+      );
+      const uObj = units.find(
+        u => u.id === (matchedUser?.unitId || c.unitId || wObj?.unitId || currentUser.unitId)
+      );
+      const vaultObj = vaultSpaces.find(
+        v => v.id === (c.vaultSpaceId || wObj?.vaultSpaceId || wObj?.previousVaultSpaceId)
+      );
+      const vaultLabel = vaultObj ? vaultObj.code : 'Cofre da Unidade';
+
+      const armorerOut = getResolvedArmorer(c);
+      const motivo = getResolvedMotivoFinalidade(c) || c.reason || 'Serviço Policial';
+
+      const isActive = c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE';
+      const isDevPend = c.status === 'DEVOLUCAO_PENDENTE';
+      const isReturned = c.status === 'DEVOLVIDA';
+      const isRefused = c.status === 'RECUSADA';
+
+      const statusBadgeClass = isActive
+        ? 'badge-active'
+        : isReturned
+          ? 'badge-inactive'
+          : isRefused
+            ? 'badge-refused'
+            : 'badge-pending';
+
+      const statusLabel = isDevPend
+        ? 'ATIVA — DEVOLUÇÃO PENDENTE DE CONFERÊNCIA'
+        : isActive
+          ? 'CAUTELA ATIVA EM POSSE'
+          : isReturned
+            ? 'CAUTELA INATIVA / DEVOLVIDA AO COFRE'
+            : isRefused
+              ? 'SOLICITAÇÃO INDEFERIDA / RECUSADA'
+              : 'SOLICITAÇÃO PENDENTE DE ANÁLISE';
+
+      const reqDateStr = c.requestDate
+        ? new Date(c.requestDate).toLocaleString('pt-BR')
+        : c.createdAt
+          ? new Date(c.createdAt).toLocaleString('pt-BR')
+          : 'N/I';
+      const authDateStr = c.authorizedAt
+        ? new Date(c.authorizedAt).toLocaleString('pt-BR')
+        : isRefused
+          ? 'Indeferida'
+          : isActive || isReturned
+            ? reqDateStr
+            : 'Aguardando autorização';
+      const returnDateStr = c.returnDate
+        ? new Date(c.returnDate).toLocaleString('pt-BR')
+        : isReturned
+          ? 'Baixada no Sistema'
+          : isDevPend
+            ? 'Devolução informada pelo policial (aguardando recibo)'
+            : isActive
+              ? 'Em posse atual (não devolvida)'
+              : 'Não aplicável';
+
+      const returnArmorerStr = isReturned
+        ? `${c.returnArmorerName || armorerOut.name}${
+            c.returnArmorerMasp ? ` (MASP: ${c.returnArmorerMasp})` : ''
+          }`
+        : isDevPend
+          ? 'Aguardando conferência do Armeiro'
+          : isActive
+            ? 'Aguardando encerramento da cautela'
+            : 'Não aplicável';
+
+      const shotsStr =
+        isReturned || isDevPend
+          ? c.hadShots
+            ? `SIM (${c.shotsFired || 0} disparo(s) efetuado(s))`
+            : 'NÃO (Zero disparos)'
+          : 'Sem registro de devolução';
+
+      const conditionStr =
+        isReturned || isDevPend
+          ? c.isWorking !== false
+            ? 'Em perfeitas condições de uso'
+            : `APRESENTA DEFEITO${c.defectDescription ? `: ${c.defectDescription}` : ''}`
+          : 'Em condições normais na saída';
+
+      const malfunctionStr =
+        isReturned || isDevPend
+          ? c.hadMalfunction
+            ? `SIM${c.malfunctionDescription ? ` (${c.malfunctionDescription})` : ''}`
+            : 'NÃO'
+          : 'Sem registro';
+
+      const returnedMagsStr =
+        isReturned || isDevPend
+          ? `${c.returnedMagazinesCount ?? c.magazineQuantity ?? 1} de ${c.magazineQuantity || 1} un.`
+          : `${c.magazineQuantity || 1} un. acautelado(s)`;
+
       const ammoDetails = getRescuedAmmoDetails(c);
-      if (!ammoDetails.hasAmmo || ammoDetails.quantity <= 0) {
-        return '';
+      let ammoSectionHtml = '';
+
+      if (ammoDetails.hasAmmo && ammoDetails.quantity > 0) {
+        const retVaultId =
+          (c as any).ammoReturnVaultSpaceId ||
+          (ammoDetails.linkedAmmo as any)?.returnVaultSpaceId ||
+          ammoDetails.vaultSpaceId;
+        const retVaultObj = retVaultId ? vaultSpaces.find(v => v.id === retVaultId) : undefined;
+        const retVaultCode = retVaultObj
+          ? retVaultObj.code
+          : ammoDetails.originVaultCode || 'Cofre da Unidade';
+
+        const returnedQty =
+          ammoDetails.returnedQuantity !== null && ammoDetails.returnedQuantity !== undefined
+            ? Number(ammoDetails.returnedQuantity)
+            : ammoDetails.seraDevolvida
+              ? Math.max(0, ammoDetails.quantity - (c.shotsFired || 0))
+              : 0;
+        const consumedQty = Math.max(0, ammoDetails.quantity - returnedQty);
+
+        const ammoReturnStatusStr = isReturned
+          ? ammoDetails.seraDevolvida
+            ? `Devolvidas: ${returnedQty} un.${
+                consumedQty > 0 ? ` • Deflagradas: ${consumedQty} un.` : ''
+              } (Cofre: ${retVaultCode})`
+            : `Baixa definitiva / Consumo${c.hadShots ? ` (${c.shotsFired || 0} tiro(s))` : ''}`
+          : isDevPend && ammoDetails.seraDevolvida
+            ? `Informadas p/ devolução: ${c.returnedAmmoQuantity ?? returnedQty} de ${ammoDetails.quantity} un.`
+            : ammoDetails.seraDevolvida
+              ? 'Em posse (passiva de devolução posterior)'
+              : 'Em posse (retirada permanente)';
+
+        ammoSectionHtml = `
+          <div class="ammo-linked-box">
+            <div class="ammo-linked-title">
+              ● Detalhamento das Munições Vinculadas (${escapeHtml(ammoDetails.quantity)} cartuchos)
+            </div>
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Calibre</th>
+                  <th>Qtd. Acautelada</th>
+                  <th>Fabricante</th>
+                  <th>Tipo / Peso</th>
+                  <th>Lote${ammoDetails.anoFabricacao ? ' / Ano' : ''}</th>
+                  <th>Destinação</th>
+                  <th>Regime</th>
+                  <th>Cofre Origem</th>
+                  <th>Situação / Devolução da Munição</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>${escapeHtml(ammoDetails.caliberName)}</strong></td>
+                  <td style="font-weight: 800;">${escapeHtml(ammoDetails.quantity)} un.</td>
+                  <td>${escapeHtml(ammoDetails.fabricante)}</td>
+                  <td>${escapeHtml(ammoDetails.tipoMunicao)} • ${escapeHtml(ammoDetails.pesoMunicao)}</td>
+                  <td style="font-family: monospace;">${escapeHtml(ammoDetails.loteMunicao)}${
+                    ammoDetails.anoFabricacao ? ` (${escapeHtml(ammoDetails.anoFabricacao)})` : ''
+                  }</td>
+                  <td><strong>${escapeHtml(ammoDetails.destinacao)}</strong></td>
+                  <td>${ammoDetails.seraDevolvida ? 'Passiva de Devolução' : 'Retirada Permanente'}</td>
+                  <td>${escapeHtml(ammoDetails.originVaultCode || 'Cofre da Unidade')}</td>
+                  <td>${escapeHtml(ammoReturnStatusStr)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        `;
+      } else {
+        ammoSectionHtml = `
+          <div class="no-ammo-line">
+            <strong>Munições Vinculadas:</strong> Nenhuma munição vinculada nesta cautela (somente armamento e ${escapeHtml(c.magazineQuantity || 1)} carregador(es)).
+          </div>
+        `;
       }
 
-      const retVaultId =
-        (c as any).ammoReturnVaultSpaceId ||
-        (ammoDetails.linkedAmmo as any)?.returnVaultSpaceId ||
-        ammoDetails.vaultSpaceId;
-      const retVaultObj = retVaultId ? vaultSpaces.find(v => v.id === retVaultId) : undefined;
-      const retVaultCode = retVaultObj ? retVaultObj.code : ammoDetails.originVaultCode || 'Cofre da Unidade';
-
-      const returnedQty =
-        ammoDetails.returnedQuantity !== null && ammoDetails.returnedQuantity !== undefined
-          ? Number(ammoDetails.returnedQuantity)
-          : ammoDetails.seraDevolvida
-            ? Math.max(0, ammoDetails.quantity - (c.shotsFired || 0))
-            : 0;
-      const consumedQty = Math.max(0, ammoDetails.quantity - returnedQty);
+      const weaponFullTitle = [
+        c.weaponType || wObj?.type || 'Arma de Fogo',
+        wObj?.manufacturer,
+        c.weaponModel || wObj?.model || 'Armamento'
+      ]
+        .filter(Boolean)
+        .join(' • ');
 
       return `
-        <div class="ammo-linked-box">
-          <div class="ammo-linked-title">
-            ● Munição Vinculada à Cautela da Arma (${escapeHtml(ammoDetails.quantity)} cartuchos)
+        <div class="full-record-card">
+          <div class="full-record-header">
+            <div>
+              <span class="record-order">REGISTRO #${index + 1} DE ${total}</span>
+              <span class="record-proto">Protocolo: ${escapeHtml(String(c.id || '').toUpperCase())}</span>
+            </div>
+            <span class="${statusBadgeClass}">${escapeHtml(statusLabel)}</span>
           </div>
-          <table class="data-table">
+
+          <!-- 1. Dados do Policial / Usuário -->
+          <div class="sub-banner">Dados do Policial / Usuário</div>
+          <table class="info-table" style="margin-bottom: 5px;">
+            <tr>
+              <td style="width: 42%;"><strong>Nome Completo:</strong> ${escapeHtml(reqInfo.name)}</td>
+              <td style="width: 22%;"><strong>MASP:</strong> <span style="font-family: monospace; font-weight: 700;">${escapeHtml(reqInfo.masp)}</span></td>
+              <td style="width: 36%;"><strong>Cargo / Carreira:</strong> ${escapeHtml(reqInfo.cargo)}</td>
+            </tr>
+            <tr>
+              <td><strong>Telefone:</strong> ${escapeHtml(matchedUser?.phone || c.requesterPhone || 'Não informado')}</td>
+              <td colspan="2"><strong>Unidade de Lotação:</strong> ${escapeHtml(uObj?.name || unitSigla)}</td>
+            </tr>
+          </table>
+
+          <!-- 2. Dados do Armamento -->
+          <div class="sub-banner">Dados do Armamento</div>
+          <table class="data-table" style="margin-bottom: 5px;">
             <thead>
               <tr>
+                <th>Espécie / Fabricante / Modelo</th>
+                <th>Número de Série</th>
                 <th>Calibre</th>
-                <th>Qtd. Acautelada</th>
-                <th>Fabricante</th>
-                <th>Tipo / Peso</th>
-                <th>Lote${ammoDetails.anoFabricacao ? ' / Ano' : ''}</th>
-                <th>Destinação</th>
-                <th>Regime</th>
-                ${isReturnedContext ? '<th>Baixa / Devolução da Munição</th>' : '<th>Cofre de Origem</th>'}
+                <th>Carregadores</th>
+                <th>Cofre de Origem / Retorno</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td><strong>${escapeHtml(ammoDetails.caliberName)}</strong></td>
-                <td style="font-weight: 800;">${escapeHtml(ammoDetails.quantity)} un.</td>
-                <td>${escapeHtml(ammoDetails.fabricante)}</td>
-                <td>${escapeHtml(ammoDetails.tipoMunicao)} • ${escapeHtml(ammoDetails.pesoMunicao)}</td>
-                <td style="font-family: monospace;">${escapeHtml(ammoDetails.loteMunicao)}${ammoDetails.anoFabricacao ? ` (${escapeHtml(ammoDetails.anoFabricacao)})` : ''}</td>
-                <td><strong>${escapeHtml(ammoDetails.destinacao)}</strong></td>
-                <td>${ammoDetails.seraDevolvida ? 'Passiva de Devolução' : 'Retirada Permanente'}</td>
-                ${
-                  isReturnedContext
-                    ? `<td>${
-                        ammoDetails.seraDevolvida
-                          ? `<strong>Devolvidas: ${escapeHtml(returnedQty)} un.</strong>${
-                              consumedQty > 0 ? ` • Deflagradas: ${escapeHtml(consumedQty)} un.` : ''
-                            } (${escapeHtml(retVaultCode)})`
-                          : `Baixa definitiva / Consumo${c.hadShots ? ` (${escapeHtml(c.shotsFired || 0)} tiro(s))` : ''}`
-                      }</td>`
-                    : `<td>${escapeHtml(ammoDetails.originVaultCode || 'Cofre da Unidade')}</td>`
-                }
+                <td><strong>${escapeHtml(weaponFullTitle)}</strong></td>
+                <td style="font-family: monospace; font-weight: 800;">${escapeHtml(c.weaponSerialNumber || wObj?.serialNumber || 'S/N')}</td>
+                <td>${escapeHtml(c.weaponCaliber || wObj?.caliber || 'Padrão')}</td>
+                <td style="text-align: center;">${escapeHtml(c.magazineQuantity || 1)} un.</td>
+                <td>${escapeHtml(vaultLabel)}</td>
               </tr>
             </tbody>
           </table>
+
+          <!-- 3. Dados da Solicitação, Autorização e Recebimento + Devolução ao Cofre -->
+          <div class="sub-banner">Movimentação da Cautela (Retirada / Recebimento e Devolução ao Cofre)</div>
+          <table class="info-table">
+            <tr>
+              <td style="width: 34%;"><strong>Data/Hora Solicitação:</strong> ${escapeHtml(reqDateStr)}</td>
+              <td style="width: 33%;"><strong>Data/Hora Autorização/Retirada:</strong> ${escapeHtml(authDateStr)}</td>
+              <td style="width: 33%;"><strong>Motivo / Finalidade:</strong> <strong>${escapeHtml(motivo)}</strong></td>
+            </tr>
+            <tr>
+              <td colspan="2"><strong>Armeiro Autorizador / Liberador:</strong> ${escapeHtml(armorerOut.label)}</td>
+              <td><strong>Data/Hora Devolução:</strong> ${escapeHtml(returnDateStr)}</td>
+            </tr>
+            <tr>
+              <td colspan="2"><strong>Armeiro Recebedor na Devolução:</strong> ${escapeHtml(returnArmorerStr)}</td>
+              <td><strong>Carregadores Devolvidos:</strong> ${escapeHtml(returnedMagsStr)}</td>
+            </tr>
+            <tr>
+              <td><strong>Disparos Efetuados:</strong> ${escapeHtml(shotsStr)}</td>
+              <td><strong>Condição Técnica:</strong> ${escapeHtml(conditionStr)}</td>
+              <td><strong>Registro de Pane:</strong> ${escapeHtml(malfunctionStr)}</td>
+            </tr>
+            ${
+              c.authorizationNotes
+                ? `<tr><td colspan="3"><strong>Observações / Despacho da Solicitação/Autorização:</strong> ${escapeHtml(c.authorizationNotes)}</td></tr>`
+                : ''
+            }
+            ${
+              c.returnObservations
+                ? `<tr><td colspan="3"><strong>Observações da Devolução:</strong> ${escapeHtml(c.returnObservations)}</td></tr>`
+                : ''
+            }
+          </table>
+
+          <!-- 4. Detalhamento das Munições Vinculadas -->
+          ${ammoSectionHtml}
         </div>
       `;
     };
 
-    // SEÇÃO 1: USUÁRIOS COM CAUTELAS ATIVAS
-    let activesHtml = '';
-    if (includeActivesSection) {
-      if (armorerReportPreview.activeUsersGroups.length === 0) {
-        activesHtml = `
-          <div class="section-block">
-            <div class="section-banner">
-              ${armorerReportScope === 'ATIVAS_E_INATIVAS' ? '1. ' : ''}RELAÇÃO DE USUÁRIOS COM CAUTELAS ATIVAS — ${escapeHtml(unitSigla)}
-            </div>
-            <div class="empty-box">
-              Nenhum usuário possui cautela de armamento ativa na unidade ${escapeHtml(unitSigla)} neste momento.
-            </div>
-          </div>
-        `;
-      } else {
-        const usersCardsHtml = armorerReportPreview.activeUsersGroups
-          .map((group, idx) => {
-            const weaponsHtml = group.cautelas
-              .map(c => {
-                const wObj = weapons.find(
-                  w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
-                );
-                const vaultObj = vaultSpaces.find(
-                  v => v.id === (c.vaultSpaceId || wObj?.vaultSpaceId || wObj?.previousVaultSpaceId)
-                );
-                const armorerInfo = getResolvedArmorer(c);
-                const motivo = getResolvedMotivoFinalidade(c) || c.reason || 'Serviço Policial';
-                const authDateStr = c.authorizedAt
-                  ? new Date(c.authorizedAt).toLocaleString('pt-BR')
-                  : new Date(c.requestDate).toLocaleString('pt-BR');
-                const isDevPend = c.status === 'DEVOLUCAO_PENDENTE';
+    // Cabeçalho focalizado quando filtrado por uma Arma específica ou por um Policial específico
+    let entityFocusBannerHtml = '';
+    if (armorerReportScope === 'POR_ARMA' && selectedWeaponOpt) {
+      const totalC = selectedEntityHistoryCautelas.length;
+      const actC = selectedEntityHistoryCautelas.filter(
+        c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'
+      ).length;
+      const inactC = selectedEntityHistoryCautelas.filter(c => c.status === 'DEVOLVIDA').length;
 
-                return `
-                  <div class="weapon-subcard">
-                    <table class="data-table">
-                      <thead>
-                        <tr>
-                          <th>Espécie / Marca / Modelo</th>
-                          <th>Nº de Série</th>
-                          <th>Calibre</th>
-                          <th>Carregadores</th>
-                          <th>Cofre Origem/Retorno</th>
-                          <th>Finalidade</th>
-                          <th>Data da Cautela / Armeiro</th>
-                          <th>Situação</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        <tr>
-                          <td><strong>${escapeHtml(
-                            [c.weaponType || wObj?.type, wObj?.manufacturer, c.weaponModel || wObj?.model]
-                              .filter(Boolean)
-                              .join(' ')
-                          )}</strong></td>
-                          <td style="font-family: monospace; font-weight: 800;">${escapeHtml(c.weaponSerialNumber || wObj?.serialNumber || 'S/N')}</td>
-                          <td>${escapeHtml(c.weaponCaliber || wObj?.caliber || 'Padrão')}</td>
-                          <td style="text-align: center;">${escapeHtml(c.magazineQuantity || 1)} un.</td>
-                          <td>${escapeHtml(vaultObj ? vaultObj.code : 'Cofre da Unidade')}</td>
-                          <td>${escapeHtml(motivo)}</td>
-                          <td>${escapeHtml(authDateStr)}<br/><span style="font-size: 9px; color: #334155;">Aut.: ${escapeHtml(armorerInfo.label)}</span></td>
-                          <td><span class="badge-active">${isDevPend ? 'Devolução Pendente' : 'ATIVA EM POSSE'}</span></td>
-                        </tr>
-                      </tbody>
-                    </table>
-                    ${renderLinkedAmmoHtml(c, false)}
-                  </div>
-                `;
-              })
-              .join('');
+      entityFocusBannerHtml = `
+        <div class="focus-entity-box">
+          <div class="focus-entity-title">FICHA HISTÓRICA DO ARMAMENTO SELECIONADO</div>
+          <table class="info-table">
+            <tr>
+              <td style="width: 45%;"><strong>Armamento:</strong> ${escapeHtml(selectedWeaponOpt.weaponTitle)}</td>
+              <td style="width: 28%;"><strong>Número de Série:</strong> <span style="font-family: monospace; font-weight: 800;">${escapeHtml(selectedWeaponOpt.serial)}</span></td>
+              <td style="width: 27%;"><strong>Calibre:</strong> ${escapeHtml(selectedWeaponOpt.caliber)}</td>
+            </tr>
+            <tr>
+              <td><strong>Status Atual na Unidade:</strong> ${escapeHtml(selectedWeaponOpt.status)}</td>
+              <td colspan="2">
+                <strong>Resumo no Relatório:</strong> ${totalC} registro(s) listado(s)
+                (${actC} ativa(s) • ${inactC} devolvida(s)/inativa(s))
+              </td>
+            </tr>
+          </table>
+        </div>
+      `;
+    } else if (armorerReportScope === 'POR_POLICIAL' && selectedUserOpt) {
+      const totalC = selectedEntityHistoryCautelas.length;
+      const actC = selectedEntityHistoryCautelas.filter(
+        c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'
+      ).length;
+      const inactC = selectedEntityHistoryCautelas.filter(c => c.status === 'DEVOLVIDA').length;
 
-            return `
-              <div class="user-card">
-                <div class="user-card-header">
-                  <div>
-                    <span class="user-index">${idx + 1}.</span>
-                    <strong class="user-name">${escapeHtml(group.user.name)}</strong>
-                    <span class="user-masp">MASP: ${escapeHtml(group.user.masp)}</span>
-                  </div>
-                  <span class="user-count-tag">${group.cautelas.length} cautela(s) ativa(s)</span>
-                </div>
-                <table class="info-table" style="margin-bottom: 6px;">
-                  <tr>
-                    <td style="width: 34%;"><strong>Cargo / Carreira:</strong> ${escapeHtml(group.user.cargo)}</td>
-                    <td style="width: 33%;"><strong>Telefone:</strong> ${escapeHtml(group.user.phone)}</td>
-                    <td style="width: 33%;"><strong>Unidade:</strong> ${escapeHtml(group.user.unitName)}</td>
-                  </tr>
-                </table>
-                ${weaponsHtml}
-              </div>
-            `;
-          })
-          .join('');
-
-        activesHtml = `
-          <div class="section-block">
-            <div class="section-banner">
-              ${armorerReportScope === 'ATIVAS_E_INATIVAS' ? '1. ' : ''}RELAÇÃO DE USUÁRIOS COM CAUTELAS ATIVAS — ${escapeHtml(unitSigla)} (${armorerReportPreview.activeUsersGroups.length} usuário(s) / ${armorerReportPreview.activeCautelas.length} cautela(s))
-            </div>
-            ${usersCardsHtml}
-          </div>
-        `;
-      }
+      entityFocusBannerHtml = `
+        <div class="focus-entity-box">
+          <div class="focus-entity-title">FICHA HISTÓRICA DO POLICIAL / USUÁRIO SELECIONADO</div>
+          <table class="info-table">
+            <tr>
+              <td style="width: 45%;"><strong>Nome Completo:</strong> ${escapeHtml(selectedUserOpt.name)}</td>
+              <td style="width: 25%;"><strong>MASP:</strong> <span style="font-family: monospace; font-weight: 800;">${escapeHtml(selectedUserOpt.masp)}</span></td>
+              <td style="width: 30%;"><strong>Cargo / Carreira:</strong> ${escapeHtml(selectedUserOpt.cargo)}</td>
+            </tr>
+            <tr>
+              <td><strong>Telefone:</strong> ${escapeHtml(selectedUserOpt.phone)}</td>
+              <td><strong>Unidade:</strong> ${escapeHtml(selectedUserOpt.unitName)}</td>
+              <td><strong>Registros no Relatório:</strong> ${totalC} (${actC} ativa(s) • ${inactC} devolvida(s))</td>
+            </tr>
+          </table>
+        </div>
+      `;
     }
 
-    // SEÇÃO 2: HISTÓRICO DE CAUTELAS RECEBIDAS E DEVOLVIDAS DO ARMAMENTO
-    let historyByWeaponHtml = '';
-    if (includeInactiveHistorySection) {
-      // Se SOMENTE_INATIVAS: exibe exclusivamente as cautelas inativas (DEVOLVIDA — recebidas e devolvidas).
-      // Se ATIVAS_E_INATIVAS: exibe todo o histórico de cautelas recebidas e devolvidas por armamento.
-      const sourceForHistory =
-        armorerReportScope === 'SOMENTE_INATIVAS'
-          ? armorerReportPreview.inactiveCautelas
-          : scopedCautelas.filter(
-              c =>
-                c.status === 'DEVOLVIDA' ||
-                c.status === 'AUTORIZADA' ||
-                c.status === 'DEVOLUCAO_PENDENTE'
-            );
+    // Construção do corpo principal mantendo 100% das informações em qualquer filtro
+    let reportBodyHtml = '';
 
-      const weaponGroupsMap = new Map<
-        string,
-        {
-          key: string;
-          weaponTitle: string;
-          serial: string;
-          caliber: string;
-          records: CautelaArma[];
-        }
-      >();
+    if (armorerReportScope === 'POR_ARMA' || armorerReportScope === 'POR_POLICIAL') {
+      const sectionHeading =
+        armorerReportScope === 'POR_ARMA'
+          ? `HISTÓRICO CRONOLÓGICO DE CAUTELAS DO ARMAMENTO (${selectedEntityHistoryCautelas.length} REGISTRO(S))`
+          : `HISTÓRICO CRONOLÓGICO DE CAUTELAS DO POLICIAL (${selectedEntityHistoryCautelas.length} REGISTRO(S))`;
 
-      sourceForHistory.forEach(c => {
-        const wObj = weapons.find(
-          w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
-        );
-        const serial = (c.weaponSerialNumber || wObj?.serialNumber || '').trim();
-        const key = serial || c.weaponId || c.weaponModel || c.id;
-        const weaponTitle = [
-          c.weaponType || wObj?.type,
-          wObj?.manufacturer,
-          c.weaponModel || wObj?.model || 'Armamento'
-        ]
-          .filter(Boolean)
-          .join(' ');
-        const caliber = c.weaponCaliber || wObj?.caliber || 'Padrão';
-
-        if (!weaponGroupsMap.has(key)) {
-          weaponGroupsMap.set(key, {
-            key,
-            weaponTitle,
-            serial: serial || 'S/N',
-            caliber,
-            records: []
-          });
-        }
-        weaponGroupsMap.get(key)!.records.push(c);
-      });
-
-      const sortedWeaponGroups = Array.from(weaponGroupsMap.values()).sort((a, b) =>
-        `${a.weaponTitle} ${a.serial}`.localeCompare(`${b.weaponTitle} ${b.serial}`, 'pt-BR')
-      );
-
-      // Ordena cronologicamente (mais recentes primeiro) os registros de cada arma
-      sortedWeaponGroups.forEach(wg => {
-        wg.records.sort((a, b) => {
-          const tsA = new Date(a.returnDate || a.authorizedAt || a.requestDate || a.createdAt || '').getTime() || 0;
-          const tsB = new Date(b.returnDate || b.authorizedAt || b.requestDate || b.createdAt || '').getTime() || 0;
-          return tsB - tsA;
-        });
-      });
-
-      const sectionPrefix = armorerReportScope === 'ATIVAS_E_INATIVAS' ? '2. ' : '';
-      const sectionTitle =
-        armorerReportScope === 'SOMENTE_INATIVAS'
-          ? `${sectionPrefix}HISTÓRICO DE CAUTELAS INATIVAS (RECEBIDAS E DEVOLVIDAS) POR ARMAMENTO — ${escapeHtml(unitSigla)}`
-          : `${sectionPrefix}HISTÓRICO DE TODAS AS CAUTELAS RECEBIDAS E DEVOLVIDAS DO ARMAMENTO — ${escapeHtml(unitSigla)}`;
-
-      if (sortedWeaponGroups.length === 0) {
-        historyByWeaponHtml = `
-          <div class="section-block" ${armorerReportScope === 'ATIVAS_E_INATIVAS' ? 'style="margin-top: 16px;"' : ''}>
-            <div class="section-banner">
-              ${sectionTitle}
-            </div>
+      if (selectedEntityHistoryCautelas.length === 0) {
+        reportBodyHtml = `
+          <div class="section-block">
+            <div class="section-banner">${escapeHtml(sectionHeading)}</div>
             <div class="empty-box">
-              Nenhum registro de cautela inativa / devolvida encontrado para o armamento da unidade ${escapeHtml(unitSigla)}.
+              Nenhuma cautela encontrada para o filtro selecionado na unidade ${escapeHtml(unitSigla)}.
             </div>
           </div>
         `;
       } else {
-        const weaponsBlocksHtml = sortedWeaponGroups
-          .map(wg => {
-            const rowsHtml = wg.records
-              .map(c => {
-                const reqInfo = getResolvedRequester(c);
-                const reqDigits = cleanDigits(reqInfo.masp || c.requesterMasp);
-                const matchedUser =
-                  (c.requesterId ? allUsersLookup.find(u => u.id === c.requesterId) : undefined) ||
-                  (reqDigits ? allUsersLookup.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
-                  allUsersLookup.find(u => normalizeStr(u.name) === normalizeStr(reqInfo.name));
-                const armorerOut = getResolvedArmorer(c);
-                const wObj = weapons.find(
-                  w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
-                );
-                const vaultObj = vaultSpaces.find(
-                  v => v.id === (c.vaultSpaceId || wObj?.vaultSpaceId || wObj?.previousVaultSpaceId)
-                );
-                const vaultLabel = vaultObj ? vaultObj.code : 'Cofre da Unidade';
-
-                const isReturned = c.status === 'DEVOLVIDA';
-                const receivedDateStr = c.authorizedAt
-                  ? new Date(c.authorizedAt).toLocaleString('pt-BR')
-                  : new Date(c.requestDate).toLocaleString('pt-BR');
-                const returnedDateStr = c.returnDate
-                  ? new Date(c.returnDate).toLocaleString('pt-BR')
-                  : isReturned
-                    ? 'Baixada no Sistema'
-                    : 'Em posse (ainda não devolvida)';
-                const motivo = getResolvedMotivoFinalidade(c) || c.reason || 'Serviço Policial';
-                const returnArmorerLabel = isReturned
-                  ? `${c.returnArmorerName || armorerOut.name}${
-                      c.returnArmorerMasp ? ` (MASP: ${c.returnArmorerMasp})` : ''
-                    }`
-                  : 'Aguardando devolução ao cofre';
-
-                const techReturnSummary = isReturned
-                  ? [
-                      c.hadShots ? `${c.shotsFired || 0} disparo(s)` : 'Zero disparos',
-                      c.isWorking !== false ? 'Em condições' : `Defeito: ${c.defectDescription || 'Sim'}`,
-                      c.hadMalfunction ? `Pane: ${c.malfunctionDescription || 'Sim'}` : null,
-                      `Carreg. devolvidos: ${c.returnedMagazinesCount ?? c.magazineQuantity ?? 1} un.`
-                    ]
-                      .filter(Boolean)
-                      .join(' • ')
-                  : `Carreg. entregues: ${c.magazineQuantity || 1} un.`;
-
-                return `
-                  <div class="history-cycle-card">
-                    <div class="history-cycle-top">
-                      <div>
-                        <strong>Policial / Usuário:</strong> ${escapeHtml(reqInfo.name)}
-                        <span style="font-family: monospace; font-weight: 700;">(MASP: ${escapeHtml(reqInfo.masp)})</span>
-                        • ${escapeHtml(reqInfo.cargo)}
-                        ${matchedUser?.phone || c.requesterPhone ? ` • Tel: ${escapeHtml(matchedUser?.phone || c.requesterPhone)}` : ''}
-                      </div>
-                      <span class="${isReturned ? 'badge-inactive' : 'badge-active'}">
-                        ${isReturned ? 'INATIVA / DEVOLVIDA AO COFRE' : 'ATIVA / RECEBIDA PELO USUÁRIO'}
-                      </span>
-                    </div>
-                    <table class="info-table">
-                      <tr>
-                        <td style="width: 50%;">
-                          <strong>Recebimento / Retirada da Arma:</strong> ${escapeHtml(receivedDateStr)}<br/>
-                          <span style="font-size: 9.5px; color: #334155;">
-                            Finalidade: <strong>${escapeHtml(motivo)}</strong> • Carregadores: <strong>${escapeHtml(c.magazineQuantity || 1)} un.</strong><br/>
-                            Armeiro Liberador: ${escapeHtml(armorerOut.label)}
-                          </span>
-                        </td>
-                        <td style="width: 50%;">
-                          <strong>Devolução ao Cofre:</strong> ${escapeHtml(returnedDateStr)}<br/>
-                          <span style="font-size: 9.5px; color: #334155;">
-                            Cofre: <strong>${escapeHtml(vaultLabel)}</strong> • Recebedor: ${escapeHtml(returnArmorerLabel)}<br/>
-                            ${escapeHtml(techReturnSummary)}
-                          </span>
-                        </td>
-                      </tr>
-                      ${
-                        isReturned && c.returnObservations
-                          ? `<tr><td colspan="2" style="font-size: 9.5px;"><strong>Observações na Devolução:</strong> ${escapeHtml(c.returnObservations)}</td></tr>`
-                          : ''
-                      }
-                    </table>
-                    ${renderLinkedAmmoHtml(c, isReturned)}
-                  </div>
-                `;
-              })
-              .join('');
-
-            return `
-              <div class="weapon-history-group">
-                <div class="weapon-history-header">
-                  <div>
-                    <strong>ARMAMENTO:</strong> ${escapeHtml(wg.weaponTitle)}
-                    • <strong>Nº DE SÉRIE:</strong> <span style="font-family: monospace;">${escapeHtml(wg.serial)}</span>
-                    • <strong>CALIBRE:</strong> ${escapeHtml(wg.caliber)}
-                  </div>
-                  <span class="weapon-history-count">${wg.records.length} registro(s)</span>
-                </div>
-                ${rowsHtml}
-              </div>
-            `;
-          })
-          .join('');
-
-        historyByWeaponHtml = `
-          <div class="section-block" ${armorerReportScope === 'ATIVAS_E_INATIVAS' ? 'style="margin-top: 18px;"' : ''}>
-            <div class="section-banner">
-              ${sectionTitle}
-            </div>
-            ${weaponsBlocksHtml}
+        reportBodyHtml = `
+          <div class="section-block">
+            <div class="section-banner">${escapeHtml(sectionHeading)}</div>
+            ${selectedEntityHistoryCautelas
+              .map((c, idx) =>
+                renderCompleteCautelaCardHtml(c, idx, selectedEntityHistoryCautelas.length)
+              )
+              .join('')}
           </div>
         `;
       }
+    } else if (armorerReportScope === 'ATIVAS') {
+      const list = selectedEntityHistoryCautelas;
+      reportBodyHtml = `
+        <div class="section-block">
+          <div class="section-banner">
+            RELAÇÃO COMPLETA DE CAUTELAS ATIVAS — ${escapeHtml(unitSigla)} (${armorerReportPreview.activeUsersGroups.length} USUÁRIO(S) / ${list.length} CAUTELA(S))
+          </div>
+          ${
+            list.length === 0
+              ? `<div class="empty-box">Nenhum usuário possui cautela de armamento ativa na unidade ${escapeHtml(unitSigla)} neste momento.</div>`
+              : list.map((c, idx) => renderCompleteCautelaCardHtml(c, idx, list.length)).join('')
+          }
+        </div>
+      `;
+    } else if (armorerReportScope === 'SOMENTE_INATIVAS') {
+      const list = selectedEntityHistoryCautelas;
+      reportBodyHtml = `
+        <div class="section-block">
+          <div class="section-banner">
+            HISTÓRICO COMPLETO DE CAUTELAS INATIVAS (RECEBIDAS E DEVOLVIDAS) — ${escapeHtml(unitSigla)} (${list.length} REGISTRO(S))
+          </div>
+          ${
+            list.length === 0
+              ? `<div class="empty-box">Nenhum registro de cautela inativa / devolvida encontrado na unidade ${escapeHtml(unitSigla)}.</div>`
+              : list.map((c, idx) => renderCompleteCautelaCardHtml(c, idx, list.length)).join('')
+          }
+        </div>
+      `;
+    } else {
+      // ATIVAS_E_INATIVAS
+      const actList = selectedEntityHistoryCautelas.filter(
+        c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'
+      );
+      const inactList = selectedEntityHistoryCautelas.filter(c => c.status === 'DEVOLVIDA');
+
+      reportBodyHtml = `
+        <div class="section-block">
+          <div class="section-banner">
+            1. CAUTELAS ATIVAS EM POSSE — ${escapeHtml(unitSigla)} (${armorerReportPreview.activeUsersGroups.length} USUÁRIO(S) / ${actList.length} CAUTELA(S))
+          </div>
+          ${
+            actList.length === 0
+              ? `<div class="empty-box">Nenhuma cautela ativa no momento na unidade ${escapeHtml(unitSigla)}.</div>`
+              : actList
+                  .map((c, idx) => renderCompleteCautelaCardHtml(c, idx, actList.length))
+                  .join('')
+          }
+        </div>
+
+        <div class="section-block" style="margin-top: 16px;">
+          <div class="section-banner">
+            2. HISTÓRICO DE CAUTELAS INATIVAS (RECEBIDAS E DEVOLVIDAS) — ${escapeHtml(unitSigla)} (${inactList.length} REGISTRO(S))
+          </div>
+          ${
+            inactList.length === 0
+              ? `<div class="empty-box">Nenhuma cautela inativa / devolvida registrada na unidade ${escapeHtml(unitSigla)}.</div>`
+              : inactList
+                  .map((c, idx) => renderCompleteCautelaCardHtml(c, idx, inactList.length))
+                  .join('')
+          }
+        </div>
+      `;
     }
 
     const htmlContent = `
@@ -5595,7 +6035,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         <meta charset="UTF-8" />
         <title>${escapeHtml(reportDocTitle)}</title>
         <style>
-          @page { size: A4 portrait; margin: 12mm 12mm 14mm 12mm; }
+          @page { size: A4 portrait; margin: 11mm 11mm 13mm 11mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
           body {
             font-family: 'Segoe UI', Arial, Helvetica, sans-serif;
@@ -5603,8 +6043,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             background: #ffffff;
             margin: 0;
             padding: 0;
-            font-size: 10.5px;
-            line-height: 1.38;
+            font-size: 10px;
+            line-height: 1.36;
           }
           .header-box {
             display: flex;
@@ -5613,12 +6053,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             border: 1.5px solid #0f172a;
             border-radius: 6px;
             padding: 10px 14px;
-            margin-bottom: 10px;
+            margin-bottom: 9px;
             background: #f8fafc;
           }
           .header-logo {
-            width: 58px;
-            height: 58px;
+            width: 56px;
+            height: 56px;
             object-fit: contain;
             flex-shrink: 0;
           }
@@ -5636,133 +6076,100 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }
           .header-unit {
             margin: 2px 0;
-            font-size: 10.5px;
+            font-size: 10px;
             font-weight: 700;
             color: #334155;
             text-transform: uppercase;
           }
           .header-doc-title {
-            margin: 4px 0 2px 0;
-            font-size: 13px;
+            margin: 3px 0 2px 0;
+            font-size: 12.5px;
             font-weight: 900;
             color: #000000;
             text-transform: uppercase;
           }
           .header-subtitle {
             margin: 0;
-            font-size: 9.5px;
+            font-size: 9.2px;
             color: #475569;
           }
           .summary-bar {
             display: flex;
             justify-content: space-between;
+            flex-wrap: wrap;
             gap: 8px;
             background: #f1f5f9;
             border: 1px solid #cbd5e1;
             border-radius: 5px;
-            padding: 6px 10px;
-            margin-bottom: 12px;
+            padding: 5px 10px;
+            margin-bottom: 10px;
             font-size: 9.5px;
+          }
+          .focus-entity-box {
+            border: 1.5px solid #0f172a;
+            border-radius: 6px;
+            padding: 7px 9px;
+            margin-bottom: 11px;
+            background: #f8fafc;
+            page-break-inside: avoid;
+          }
+          .focus-entity-title {
+            font-size: 9.5px;
+            font-weight: 900;
+            letter-spacing: 0.4px;
+            color: #0f172a;
+            text-transform: uppercase;
+            margin-bottom: 5px;
           }
           .section-banner {
             background: #0f172a !important;
             color: #ffffff !important;
             padding: 6px 10px;
-            font-size: 10.5px;
+            font-size: 10px;
             font-weight: 800;
             letter-spacing: 0.4px;
             border-radius: 4px;
             margin-bottom: 8px;
             text-transform: uppercase;
           }
-          .user-card {
-            border: 1.2px solid #94a3b8;
+          .full-record-card {
+            border: 1.3px solid #64748b;
             border-radius: 6px;
-            padding: 8px 10px;
+            padding: 8px 9px;
             margin-bottom: 10px;
             page-break-inside: avoid;
             background: #ffffff;
           }
-          .user-card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid #cbd5e1;
-            padding-bottom: 5px;
-            margin-bottom: 6px;
-          }
-          .user-index {
-            font-weight: 900;
-            margin-right: 4px;
-          }
-          .user-name {
-            font-size: 11.5px;
-            color: #000000;
-            margin-right: 8px;
-          }
-          .user-masp {
-            font-family: monospace;
-            font-size: 10.5px;
-            font-weight: 700;
-            background: #e2e8f0;
-            padding: 1px 6px;
-            border-radius: 4px;
-          }
-          .user-count-tag {
-            font-size: 9.5px;
-            font-weight: 800;
-            color: #065f46;
-            background: #d1fae5;
-            border: 1px solid #6ee7b7;
-            padding: 2px 7px;
-            border-radius: 4px;
-            text-transform: uppercase;
-          }
-          .weapon-subcard {
-            margin-top: 6px;
-            padding-top: 4px;
-          }
-          .weapon-history-group {
-            border: 1.4px solid #64748b;
-            border-radius: 6px;
-            padding: 8px 10px;
-            margin-bottom: 12px;
-          }
-          .weapon-history-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: #e2e8f0;
-            border: 1px solid #94a3b8;
-            padding: 5px 8px;
-            border-radius: 4px;
-            margin-bottom: 8px;
-            font-size: 10.5px;
-          }
-          .weapon-history-count {
-            font-family: monospace;
-            font-weight: 800;
-            font-size: 9.5px;
-            background: #ffffff;
-            border: 1px solid #94a3b8;
-            padding: 1px 6px;
-            border-radius: 4px;
-          }
-          .history-cycle-card {
-            border: 1px solid #cbd5e1;
-            border-radius: 5px;
-            padding: 7px 8px;
-            margin-bottom: 8px;
-            page-break-inside: avoid;
-            background: #ffffff;
-          }
-          .history-cycle-top {
+          .full-record-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             gap: 8px;
-            margin-bottom: 5px;
-            font-size: 10px;
+            border-bottom: 1px solid #cbd5e1;
+            padding-bottom: 4px;
+            margin-bottom: 6px;
+          }
+          .record-order {
+            font-size: 9.5px;
+            font-weight: 900;
+            color: #0f172a;
+            margin-right: 8px;
+          }
+          .record-proto {
+            font-family: monospace;
+            font-size: 9px;
+            color: #475569;
+          }
+          .sub-banner {
+            font-size: 8.8px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            color: #1e293b;
+            background: #e2e8f0 !important;
+            padding: 2.5px 6px;
+            border-radius: 3px;
+            margin-bottom: 3px;
           }
           .info-table, .data-table {
             width: 100%;
@@ -5770,39 +6177,48 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }
           .info-table td {
             border: 1px solid #cbd5e1;
-            padding: 4px 7px;
-            font-size: 10px;
+            padding: 3.5px 6px;
+            font-size: 9.5px;
             vertical-align: top;
           }
           .data-table th {
             background: #f1f5f9 !important;
             color: #0f172a !important;
             border: 1px solid #94a3b8;
-            padding: 4px 6px;
+            padding: 3.5px 5px;
             text-align: left;
-            font-size: 9px;
+            font-size: 8.5px;
             font-weight: 800;
             text-transform: uppercase;
           }
           .data-table td {
             border: 1px solid #cbd5e1;
-            padding: 4px 6px;
-            font-size: 9.5px;
+            padding: 3.5px 5px;
+            font-size: 9.2px;
             vertical-align: top;
           }
           .ammo-linked-box {
             margin-top: 5px;
-            padding: 6px;
+            padding: 5px 6px;
             background: #f8fafc;
             border: 1px solid #94a3b8;
             border-radius: 4px;
           }
           .ammo-linked-title {
-            font-size: 9.5px;
+            font-size: 9px;
             font-weight: 800;
             color: #0f172a;
             text-transform: uppercase;
-            margin-bottom: 4px;
+            margin-bottom: 3px;
+          }
+          .no-ammo-line {
+            margin-top: 5px;
+            padding: 4px 7px;
+            background: #f8fafc;
+            border: 1px dashed #cbd5e1;
+            border-radius: 4px;
+            font-size: 9px;
+            color: #475569;
           }
           .badge-active {
             display: inline-block;
@@ -5826,6 +6242,28 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             border: 1px solid #0f172a;
             text-transform: uppercase;
           }
+          .badge-refused {
+            display: inline-block;
+            padding: 1.5px 6px;
+            border-radius: 3px;
+            font-size: 8.5px;
+            font-weight: 800;
+            background: #fee2e2 !important;
+            color: #991b1b !important;
+            border: 1px solid #fca5a5;
+            text-transform: uppercase;
+          }
+          .badge-pending {
+            display: inline-block;
+            padding: 1.5px 6px;
+            border-radius: 3px;
+            font-size: 8.5px;
+            font-weight: 800;
+            background: #fef3c7 !important;
+            color: #92400e !important;
+            border: 1px solid #fcd34d;
+            text-transform: uppercase;
+          }
           .empty-box {
             padding: 12px;
             text-align: center;
@@ -5835,7 +6273,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             font-size: 10px;
           }
           .signature-section {
-            margin-top: 32px;
+            margin-top: 30px;
             page-break-inside: avoid;
             text-align: center;
           }
@@ -5845,11 +6283,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             border-top: 1px solid #000000;
           }
           .footer-note {
-            margin-top: 16px;
+            margin-top: 14px;
             border-top: 1px dashed #cbd5e1;
-            padding-top: 6px;
+            padding-top: 5px;
             text-align: center;
-            font-size: 9px;
+            font-size: 8.8px;
             color: #475569;
           }
         </style>
@@ -5869,18 +6307,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
         <div class="summary-bar">
           <span><strong>Unidade:</strong> ${escapeHtml(userUnit?.name || unitSigla)}</span>
-          <span><strong>Modalidade:</strong> ${
-            armorerReportScope === 'ATIVAS'
-              ? 'Somente Cautelas Ativas'
-              : armorerReportScope === 'SOMENTE_INATIVAS'
-                ? 'Somente Cautelas Inativas (Devolvidas)'
-                : 'Cautelas Ativas e Inativas (Histórico Completo)'
-          }</span>
+          <span><strong>Modalidade:</strong> ${escapeHtml(modalidadeSummary)}</span>
           <span><strong>Emissão:</strong> ${escapeHtml(new Date().toLocaleString('pt-BR'))}</span>
         </div>
 
-        ${activesHtml}
-        ${historyByWeaponHtml}
+        ${entityFocusBannerHtml}
+        ${reportBodyHtml}
 
         <div class="signature-section">
           <div class="signature-line"></div>
@@ -5890,7 +6322,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </div>
 
         <div class="footer-note">
-          Relatório oficial gerado pelo Módulo Cautela de Armas — Unidade ${escapeHtml(unitSigla)} em ${escapeHtml(new Date().toLocaleString('pt-BR'))}
+          Relatório oficial completo gerado pelo Módulo Cautela de Armas — Unidade ${escapeHtml(unitSigla)} em ${escapeHtml(new Date().toLocaleString('pt-BR'))}
         </div>
       </body>
       </html>
@@ -10203,177 +10635,400 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         )}
 
         {/* Modal de Emissão de Relatório de Cautelas da Unidade (Armeiro) */}
-        {isArmorerReportModalOpen && canAuthorize && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in">
-            <div className="bg-slate-900 border border-emerald-700/70 rounded-2xl max-w-2xl w-full p-6 space-y-5 shadow-2xl my-8 animate-in zoom-in-95">
-              <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="p-3 bg-emerald-500/15 rounded-xl border border-emerald-500/30 text-emerald-400">
-                    <Printer className="w-6 h-6" />
-                  </div>
-                  <div>
-                    <h3 className="text-base font-bold text-slate-100">
-                      Emitir Relatório de Cautelas — {unitSigla}
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Selecione se deseja imprimir apenas as cautelas ativas ou incluir também o histórico de cautelas inativas (recebidas e devolvidas).
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setIsArmorerReportModalOpen(false)}
-                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
+        {isArmorerReportModalOpen && canAuthorize && (() => {
+          const previewActivesCount = selectedEntityHistoryCautelas.filter(
+            c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'
+          ).length;
+          const previewInactivesCount = selectedEntityHistoryCautelas.filter(
+            c => c.status === 'DEVOLVIDA'
+          ).length;
+          const previewWithAmmoCount = selectedEntityHistoryCautelas.filter(c => {
+            const ad = getRescuedAmmoDetails(c);
+            return ad.hasAmmo && ad.quantity > 0;
+          }).length;
 
-              {/* Opções de Escopo do Relatório */}
-              <div className="space-y-2.5">
-                <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">
-                  Selecione o Tipo de Relatório para Impressão:
-                </label>
-
-                <button
-                  type="button"
-                  onClick={() => setArmorerReportScope('ATIVAS')}
-                  className={`w-full text-left p-4 rounded-xl border transition space-y-1.5 ${
-                    armorerReportScope === 'ATIVAS'
-                      ? 'bg-emerald-500/15 border-emerald-500 text-slate-100 ring-1 ring-emerald-500/40'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-emerald-300 flex items-center space-x-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shrink-0" />
-                      <span>Somente Cautelas Ativas</span>
-                    </span>
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60">
-                      {armorerReportPreview.activeUsersGroups.length} usuário(s) • {armorerReportPreview.activeCautelas.length} cautela(s)
-                    </span>
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 backdrop-blur-sm p-4 overflow-y-auto animate-in fade-in">
+              <div className="bg-slate-900 border border-emerald-700/70 rounded-2xl max-w-3xl w-full p-6 space-y-5 shadow-2xl my-8 animate-in zoom-in-95">
+                <div className="flex items-start justify-between gap-3 border-b border-slate-800 pb-4">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-3 bg-emerald-500/15 rounded-xl border border-emerald-500/30 text-emerald-400">
+                      <Printer className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-100">
+                        Emitir Relatório de Cautelas — {unitSigla}
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        Imprima todas as cautelas de uma arma específica, todas as cautelas de um policial em forma de histórico ou o relatório da unidade, contendo todas as informações completas independentemente do filtro.
+                      </p>
+                    </div>
                   </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Imprime a lista de <strong>todos os usuários que possuem cautela ativa</strong> com os dados completos do usuário, das armas acauteladas e das <strong>munições vinculadas</strong> (caso a cautela da arma tenha munição vinculada).
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setArmorerReportScope('ATIVAS_E_INATIVAS')}
-                  className={`w-full text-left p-4 rounded-xl border transition space-y-1.5 ${
-                    armorerReportScope === 'ATIVAS_E_INATIVAS'
-                      ? 'bg-amber-500/15 border-amber-500 text-slate-100 ring-1 ring-amber-500/40'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center space-x-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 shrink-0" />
-                      <span>Cautelas Ativas e Inativas (Histórico Completo)</span>
-                    </span>
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-700/60">
-                      {armorerReportPreview.activeCautelas.length + armorerReportPreview.inactiveCautelas.length} registro(s)
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Imprime a lista de usuários com cautelas ativas e também o <strong>histórico completo de todas as cautelas recebidas e devolvidas do armamento</strong>, com os detalhamentos das munições caso tenha munição vinculada.
-                  </p>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setArmorerReportScope('SOMENTE_INATIVAS')}
-                  className={`w-full text-left p-4 rounded-xl border transition space-y-1.5 ${
-                    armorerReportScope === 'SOMENTE_INATIVAS'
-                      ? 'bg-sky-500/15 border-sky-500 text-slate-100 ring-1 ring-sky-500/40'
-                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                  }`}
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-black uppercase tracking-wider text-sky-300 flex items-center space-x-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-black ring-2 ring-slate-300 shrink-0" />
-                      <span>Somente Cautelas Inativas (Devolvidas)</span>
-                    </span>
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-950 text-sky-300 border border-sky-700/60">
-                      {armorerReportPreview.inactiveCautelas.length} devolvida(s)
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    Imprime exclusivamente o <strong>histórico de todas as cautelas inativas (recebidas e devolvidas) do armamento</strong>, com os detalhamentos das munições caso tenha munição vinculada.
-                  </p>
-                </button>
-              </div>
-
-              {/* Resumo quantitativo do relatório selecionado */}
-              <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-300 uppercase tracking-wider text-[11px]">
-                    Resumo dos Dados que Sairão no Relatório:
-                  </span>
-                  <span className="font-mono font-bold text-emerald-300">
-                    Unidade {unitSigla}
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsArmorerReportModalOpen(false)}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
                 </div>
 
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
-                  <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-2">
-                    <div className="text-sm font-black text-emerald-400 font-mono">
-                      {armorerReportScope === 'SOMENTE_INATIVAS' ? 0 : armorerReportPreview.activeUsersGroups.length}
-                    </div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Usuários Ativos</div>
-                  </div>
-                  <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-2">
-                    <div className="text-sm font-black text-emerald-300 font-mono">
-                      {armorerReportScope === 'SOMENTE_INATIVAS' ? 0 : armorerReportPreview.activeCautelas.length}
-                    </div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Cautelas Ativas</div>
-                  </div>
-                  <div className="bg-slate-900 border border-slate-700 rounded-lg p-2">
-                    <div className="text-sm font-black text-slate-200 font-mono">
-                      {armorerReportScope === 'ATIVAS' ? 0 : armorerReportPreview.inactiveCautelas.length}
-                    </div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">Cautelas Inativas</div>
-                  </div>
-                  <div className="bg-slate-900 border border-amber-800/40 rounded-lg p-2">
-                    <div className="text-sm font-black text-amber-400 font-mono">
-                      {armorerReportScope === 'ATIVAS'
-                        ? armorerReportPreview.activeWithAmmoCount
-                        : armorerReportScope === 'SOMENTE_INATIVAS'
-                          ? armorerReportPreview.inactiveWithAmmoCount
-                          : armorerReportPreview.activeWithAmmoCount + armorerReportPreview.inactiveWithAmmoCount}
-                    </div>
-                    <div className="text-[10px] font-bold text-slate-400 uppercase">C/ Munição Vinculada</div>
+                {/* 1. Opções Principais: Histórico por Arma ou Histórico por Policial */}
+                <div className="space-y-2.5">
+                  <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider">
+                    Histórico Individual (Arma ou Policial):
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setArmorerReportScope('POR_ARMA')}
+                      className={`text-left p-4 rounded-xl border transition space-y-1.5 ${
+                        armorerReportScope === 'POR_ARMA'
+                          ? 'bg-emerald-500/15 border-emerald-500 text-slate-100 ring-1 ring-emerald-500/40'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-emerald-300 flex items-center space-x-2">
+                          <Crosshair className="w-4 h-4 text-emerald-400 shrink-0" />
+                          <span>Todas as Cautelas de uma Arma</span>
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-700/60">
+                          {armorerReportPreview.weaponOptions.length} arma(s)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Imprime em forma de histórico <strong>todas as cautelas de um armamento específico</strong> com todos os dados completos de policiais, retiradas, devoluções e munições.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setArmorerReportScope('POR_POLICIAL')}
+                      className={`text-left p-4 rounded-xl border transition space-y-1.5 ${
+                        armorerReportScope === 'POR_POLICIAL'
+                          ? 'bg-sky-500/15 border-sky-500 text-slate-100 ring-1 ring-sky-500/40'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-black uppercase tracking-wider text-sky-300 flex items-center space-x-2">
+                          <Shield className="w-4 h-4 text-sky-400 shrink-0" />
+                          <span>Todas as Cautelas de um Policial</span>
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-sky-950/80 text-sky-300 border border-sky-700/60">
+                          {armorerReportPreview.userOptions.length} policial(is)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-300 leading-relaxed">
+                        Imprime em forma de histórico <strong>todas as cautelas de um policial específico</strong> com todos os dados completos do servidor, armas, retiradas, devoluções e munições.
+                      </p>
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsArmorerReportModalOpen(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="button"
-                  onClick={handlePrintArmorerCautelasReport}
-                  className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>
-                    {armorerReportScope === 'ATIVAS'
-                      ? 'Imprimir Somente Cautelas Ativas'
-                      : armorerReportScope === 'SOMENTE_INATIVAS'
-                        ? 'Imprimir Somente Cautelas Inativas'
-                        : 'Imprimir Ativas e Inativas'}
-                  </span>
-                </button>
+                {/* Painel de Seleção de Arma quando POR_ARMA */}
+                {armorerReportScope === 'POR_ARMA' && (
+                  <div className="bg-slate-950 border border-emerald-700/50 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                      <div className="sm:col-span-5">
+                        <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                          Pesquisar Arma (Modelo / Série / Calibre):
+                        </label>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={armorerReportWeaponSearch}
+                            onChange={(e) => setArmorerReportWeaponSearch(e.target.value)}
+                            placeholder="Filtrar lista de armas..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-emerald-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-7">
+                        <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                          Selecione a Arma para o Histórico:
+                        </label>
+                        <select
+                          value={armorerReportWeaponKey}
+                          onChange={(e) => setArmorerReportWeaponKey(e.target.value)}
+                          className="w-full bg-slate-900 border border-emerald-600/60 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-emerald-400"
+                        >
+                          {filteredReportWeaponOptions.length === 0 ? (
+                            <option value="">Nenhuma arma encontrada para a pesquisa</option>
+                          ) : (
+                            filteredReportWeaponOptions.map(w => (
+                              <option key={w.key} value={w.key}>
+                                {w.label}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                      <span className="text-[11px] font-semibold text-slate-400">
+                        Recorte de situação no histórico da arma:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { id: 'TODAS', label: 'Todas as Cautelas (Histórico Completo)' },
+                          { id: 'ATIVAS', label: 'Somente Ativas' },
+                          { id: 'INATIVAS', label: 'Somente Inativas (Devolvidas)' }
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() =>
+                              setArmorerReportStatusSubFilter(
+                                item.id as 'TODAS' | 'ATIVAS' | 'INATIVAS'
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                              armorerReportStatusSubFilter === item.id
+                                ? 'bg-emerald-500 text-slate-950 border-emerald-400 font-black'
+                                : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Painel de Seleção de Policial quando POR_POLICIAL */}
+                {armorerReportScope === 'POR_POLICIAL' && (
+                  <div className="bg-slate-950 border border-sky-700/50 rounded-xl p-4 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+                      <div className="sm:col-span-5">
+                        <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                          Pesquisar Policial (Nome / MASP):
+                        </label>
+                        <div className="relative">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input
+                            type="text"
+                            value={armorerReportUserSearch}
+                            onChange={(e) => setArmorerReportUserSearch(e.target.value)}
+                            placeholder="Filtrar lista de policiais..."
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-sky-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="sm:col-span-7">
+                        <label className="block text-[11px] font-bold text-slate-300 uppercase tracking-wider mb-1">
+                          Selecione o Policial para o Histórico:
+                        </label>
+                        <select
+                          value={armorerReportUserKey}
+                          onChange={(e) => setArmorerReportUserKey(e.target.value)}
+                          className="w-full bg-slate-900 border border-sky-600/60 rounded-xl px-3 py-2 text-xs text-slate-100 font-medium focus:border-sky-400"
+                        >
+                          {filteredReportUserOptions.length === 0 ? (
+                            <option value="">Nenhum policial encontrado para a pesquisa</option>
+                          ) : (
+                            filteredReportUserOptions.map(u => (
+                              <option key={u.key} value={u.key}>
+                                {u.label}
+                              </option>
+                            ))
+                          )}
+                        </select>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                      <span className="text-[11px] font-semibold text-slate-400">
+                        Recorte de situação no histórico do policial:
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {[
+                          { id: 'TODAS', label: 'Todas as Cautelas (Histórico Completo)' },
+                          { id: 'ATIVAS', label: 'Somente Ativas' },
+                          { id: 'INATIVAS', label: 'Somente Inativas (Devolvidas)' }
+                        ].map(item => (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() =>
+                              setArmorerReportStatusSubFilter(
+                                item.id as 'TODAS' | 'ATIVAS' | 'INATIVAS'
+                              )
+                            }
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition border ${
+                              armorerReportStatusSubFilter === item.id
+                                ? 'bg-sky-500 text-slate-950 border-sky-400 font-black'
+                                : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
+                            }`}
+                          >
+                            {item.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* 2. Opções Gerais da Unidade (Ativas / Ativas e Inativas / Somente Inativas) */}
+                <div className="space-y-2">
+                  <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                    Ou Relatório Geral da Unidade ({unitSigla}):
+                  </label>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => setArmorerReportScope('ATIVAS')}
+                      className={`text-left p-3 rounded-xl border transition space-y-1 ${
+                        armorerReportScope === 'ATIVAS'
+                          ? 'bg-emerald-500/15 border-emerald-500 text-slate-100 ring-1 ring-emerald-500/40'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[11px] font-black uppercase text-emerald-300">
+                          Somente Ativas
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-emerald-400">
+                          {armorerReportPreview.activeCautelas.length}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-snug">
+                        Todos os usuários com cautelas ativas na unidade.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setArmorerReportScope('ATIVAS_E_INATIVAS')}
+                      className={`text-left p-3 rounded-xl border transition space-y-1 ${
+                        armorerReportScope === 'ATIVAS_E_INATIVAS'
+                          ? 'bg-amber-500/15 border-amber-500 text-slate-100 ring-1 ring-amber-500/40'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[11px] font-black uppercase text-amber-300">
+                          Ativas e Inativas
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-amber-400">
+                          {armorerReportPreview.activeCautelas.length + armorerReportPreview.inactiveCautelas.length}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-snug">
+                        Relatório geral ativo e histórico devolvido.
+                      </p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setArmorerReportScope('SOMENTE_INATIVAS')}
+                      className={`text-left p-3 rounded-xl border transition space-y-1 ${
+                        armorerReportScope === 'SOMENTE_INATIVAS'
+                          ? 'bg-slate-800 border-slate-400 text-slate-100 ring-1 ring-slate-400/40'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-[11px] font-black uppercase text-slate-200">
+                          Somente Inativas
+                        </span>
+                        <span className="text-[10px] font-mono font-bold text-slate-300">
+                          {armorerReportPreview.inactiveCautelas.length}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 leading-snug">
+                        Todas as cautelas recebidas e devolvidas.
+                      </p>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Resumo quantitativo do relatório selecionado */}
+                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-300 uppercase tracking-wider text-[11px]">
+                      Prévia dos Registros Selecionados no Relatório:
+                    </span>
+                    <span className="font-mono font-bold text-emerald-300">
+                      {selectedEntityHistoryCautelas.length} registro(s) completo(s)
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center">
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg p-2">
+                      <div className="text-sm font-black text-slate-100 font-mono">
+                        {selectedEntityHistoryCautelas.length}
+                      </div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">Total no Relatório</div>
+                    </div>
+                    <div className="bg-slate-900 border border-emerald-800/40 rounded-lg p-2">
+                      <div className="text-sm font-black text-emerald-400 font-mono">
+                        {previewActivesCount}
+                      </div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">Cautelas Ativas</div>
+                    </div>
+                    <div className="bg-slate-900 border border-slate-700 rounded-lg p-2">
+                      <div className="text-sm font-black text-slate-200 font-mono">
+                        {previewInactivesCount}
+                      </div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">Inativas / Devolvidas</div>
+                    </div>
+                    <div className="bg-slate-900 border border-amber-800/40 rounded-lg p-2">
+                      <div className="text-sm font-black text-amber-400 font-mono">
+                        {previewWithAmmoCount}
+                      </div>
+                      <div className="text-[10px] font-bold text-slate-400 uppercase">C/ Munição Vinculada</div>
+                    </div>
+                  </div>
+
+                  <p className="text-[11px] text-slate-400">
+                    ● Independentemente do tipo de filtro (por arma, por policial ou geral da unidade), cada registro impresso contém <strong>todas as informações completas</strong>: dados do policial, dados do armamento, solicitação/autorização/retirada, devolução/condição técnica e detalhamento das munições vinculadas.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsArmorerReportModalOpen(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={
+                      (armorerReportScope === 'POR_ARMA' && !armorerReportWeaponKey) ||
+                      (armorerReportScope === 'POR_POLICIAL' && !armorerReportUserKey)
+                    }
+                    onClick={handlePrintArmorerCautelasReport}
+                    className="flex items-center space-x-2 px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black rounded-xl text-xs transition shadow-lg"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>
+                      {armorerReportScope === 'POR_ARMA'
+                        ? 'Imprimir Histórico da Arma'
+                        : armorerReportScope === 'POR_POLICIAL'
+                          ? 'Imprimir Histórico do Policial'
+                          : armorerReportScope === 'ATIVAS'
+                            ? 'Imprimir Somente Cautelas Ativas'
+                            : armorerReportScope === 'SOMENTE_INATIVAS'
+                              ? 'Imprimir Somente Cautelas Inativas'
+                              : 'Imprimir Ativas e Inativas'}
+                    </span>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Modal de Impressão do Histórico de Cautelas (Policial) */}
         {isPrintHistoryModalOpen && !canAuthorize && (
