@@ -10228,58 +10228,62 @@ apiRouter.get('/cautelas-municoes', async (req: Request, res: Response) => {
 
     let query = `
       SELECT 
-        ID_ACAUTELAR_MUNICOES as id,
-        CALIBRE_ID_ACAUTELAR_MUNICOES as caliberId,
-        CALIBRE_NOME_ACAUTELAR_MUNICOES as caliberName,
-        QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES as quantity,
-        FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES as fabricante,
-        TIPO_MUNICAO_ACAUTELAR_MUNICOES as tipoMunicao,
-        PESO_MUNICAO_ACAUTELAR_MUNICOES as pesoMunicao,
-        LOTE_MUNICAO_ACAUTELAR_MUNICOES as loteMunicao,
-        ANO_FABRICACAO_ACAUTELAR_MUNICOES as anoFabricacao,
-        DESTINACAO_ACAUTELAR_MUNICOES as destinacao,
-        COFRE_ID_ACAUTELAR_MUNICOES as vaultSpaceId,
-        DEPARTAMENTO_ID_ACAUTELAR_MUNICOES as departmentId,
-        UNIDADE_ID_ACAUTELAR_MUNICOES as unitId,
-        CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES as linkedWeaponCautelaId,
-        REQUERENTE_ID_ACAUTELAR_MUNICOES as requesterId,
-        REQUERENTE_NOME_ACAUTELAR_MUNICOES as requesterName,
-        REQUERENTE_MASP_ACAUTELAR_MUNICOES as requesterMasp,
-        REQUERENTE_CARGO_ACAUTELAR_MUNICOES as requesterCargo,
-        MOTIVO_USO_ACAUTELAR_MUNICOES as reason,
-        DATA_SOLICITACAO_ACAUTELAR_MUNICOES as requestDate,
-        STATUS_ACAUTELAR_MUNICOES as status,
-        ARMEIRO_ID_ACAUTELAR_MUNICOES as armorerId,
-        ARMEIRO_NOME_ACAUTELAR_MUNICOES as armorerName,
-        ARMEIRO_MASP_ACAUTELAR_MUNICOES as armorerMasp,
-        DATA_AUTORIZACAO_ACAUTELAR_MUNICOES as authorizedAt,
-        SERA_DEVOLVIDA_ACAUTELAR_MUNICOES as seraDevolvida,
-        QUANTIDADE_DEVOLVIDA_ACAUTELAR_MUNICOES as returnedQuantity,
-        DATA_DEVOLUCAO_ACAUTELAR_MUNICOES as returnedAt,
-        ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_MUNICOES as returnArmorerId,
-        ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_MUNICOES as returnArmorerName,
-        OBSERVACOES_ACAUTELAR_MUNICOES as observations,
-        DATA_CRIACAO_ACAUTELAR_MUNICOES as createdAt,
-        DATA_ATUALIZACAO_ACAUTELAR_MUNICOES as updatedAt
-      FROM ACAUTELAR_MUNICOES
+        m.ID_ACAUTELAR_MUNICOES as id,
+        m.CALIBRE_ID_ACAUTELAR_MUNICOES as caliberId,
+        m.CALIBRE_NOME_ACAUTELAR_MUNICOES as caliberName,
+        m.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES as quantity,
+        m.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES as fabricante,
+        m.TIPO_MUNICAO_ACAUTELAR_MUNICOES as tipoMunicao,
+        m.PESO_MUNICAO_ACAUTELAR_MUNICOES as pesoMunicao,
+        m.LOTE_MUNICAO_ACAUTELAR_MUNICOES as loteMunicao,
+        m.ANO_FABRICACAO_ACAUTELAR_MUNICOES as anoFabricacao,
+        m.DESTINACAO_ACAUTELAR_MUNICOES as destinacao,
+        m.COFRE_ID_ACAUTELAR_MUNICOES as vaultSpaceId,
+        m.DEPARTAMENTO_ID_ACAUTELAR_MUNICOES as departmentId,
+        m.UNIDADE_ID_ACAUTELAR_MUNICOES as unitId,
+        COALESCE(m.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES, ca.ID_ACAUTELAR_ARMAS) as linkedWeaponCautelaId,
+        ca.NUMERO_SERIE_ACAUTELAR_ARMAS as linkedWeaponSerialNumber,
+        ca.ARMA_ID_ACAUTELAR_ARMAS as weaponId,
+        ca.MODELO_ACAUTELAR_ARMAS as linkedWeaponModel,
+        m.REQUERENTE_ID_ACAUTELAR_MUNICOES as requesterId,
+        m.REQUERENTE_NOME_ACAUTELAR_MUNICOES as requesterName,
+        m.REQUERENTE_MASP_ACAUTELAR_MUNICOES as requesterMasp,
+        m.REQUERENTE_CARGO_ACAUTELAR_MUNICOES as requesterCargo,
+        m.MOTIVO_USO_ACAUTELAR_MUNICOES as reason,
+        m.DATA_SOLICITACAO_ACAUTELAR_MUNICOES as requestDate,
+        m.STATUS_ACAUTELAR_MUNICOES as status,
+        m.ARMEIRO_ID_ACAUTELAR_MUNICOES as armorerId,
+        m.ARMEIRO_NOME_ACAUTELAR_MUNICOES as armorerName,
+        m.ARMEIRO_MASP_ACAUTELAR_MUNICOES as armorerMasp,
+        m.DATA_AUTORIZACAO_ACAUTELAR_MUNICOES as authorizedAt,
+        m.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES as seraDevolvida,
+        m.QUANTIDADE_DEVOLVIDA_ACAUTELAR_MUNICOES as returnedQuantity,
+        m.DATA_DEVOLUCAO_ACAUTELAR_MUNICOES as returnedAt,
+        m.ARMEIRO_RECEBIMENTO_ID_ACAUTELAR_MUNICOES as returnArmorerId,
+        m.ARMEIRO_RECEBIMENTO_NOME_ACAUTELAR_MUNICOES as returnArmorerName,
+        m.OBSERVACOES_ACAUTELAR_MUNICOES as observations,
+        m.DATA_CRIACAO_ACAUTELAR_MUNICOES as createdAt,
+        m.DATA_ATUALIZACAO_ACAUTELAR_MUNICOES as updatedAt
+      FROM ACAUTELAR_MUNICOES m
+      LEFT JOIN ACAUTELAR_ARMAS ca ON (m.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ca.ID_ACAUTELAR_ARMAS OR m.ID_ACAUTELAR_MUNICOES = ca.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS)
       WHERE 1=1
     `;
     const params: any[] = [];
 
     if (userId) {
-      query += ' AND REQUERENTE_ID_ACAUTELAR_MUNICOES = ?';
+      query += ' AND m.REQUERENTE_ID_ACAUTELAR_MUNICOES = ?';
       params.push(userId);
     }
     if (unitId) {
-      query += ' AND UNIDADE_ID_ACAUTELAR_MUNICOES = ?';
+      query += ' AND m.UNIDADE_ID_ACAUTELAR_MUNICOES = ?';
       params.push(unitId);
     }
     if (status) {
-      query += ' AND STATUS_ACAUTELAR_MUNICOES = ?';
+      query += ' AND m.STATUS_ACAUTELAR_MUNICOES = ?';
       params.push(status);
     }
 
-    query += ' ORDER BY DATA_CRIACAO_ACAUTELAR_MUNICOES DESC';
+    query += ' ORDER BY m.DATA_CRIACAO_ACAUTELAR_MUNICOES DESC';
 
     const [rows]: any = await pool.query(query, params);
     const mapped = (rows || []).map((r: any) => ({

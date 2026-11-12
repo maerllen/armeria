@@ -521,6 +521,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
       (c as any).ammoCautelaId === cautela.id
     );
 
+    if (!weaponCautela && cautela.linkedWeaponSerialNumber) {
+      weaponCautela = cautelasArmas.find(c => c.weaponSerialNumber === cautela.linkedWeaponSerialNumber);
+    }
+
     if (!weaponCautela && cautela.requesterId) {
       weaponCautela = cautelasArmas.find(c => 
         (c.requesterId === cautela.requesterId || c.requesterMasp === cautela.requesterMasp) &&
@@ -535,6 +539,19 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
       const serial = weaponCautela.weaponSerialNumber || weapon?.serialNumber || '';
       return {
         cautelaArma: weaponCautela,
+        weapon,
+        serialNumber: serial,
+        description: desc,
+        fullText: serial ? `${serial} - ${desc}` : desc
+      };
+    }
+
+    if (cautela.linkedWeaponSerialNumber) {
+      const weapon = weapons.find(w => w.serialNumber === cautela.linkedWeaponSerialNumber || (cautela.weaponId && w.id === cautela.weaponId));
+      const desc = weapon ? `${weapon.model} (${weapon.type || 'Arma'})` : ((cautela as any).linkedWeaponModel || 'Armamento');
+      const serial = cautela.linkedWeaponSerialNumber;
+      return {
+        cautelaArma: null,
         weapon,
         serialNumber: serial,
         description: desc,

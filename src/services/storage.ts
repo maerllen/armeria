@@ -3131,6 +3131,43 @@ class StorageService {
       createdAt: new Date().toISOString()
     };
 
+    if (payload.ammunition && Number(payload.ammunition.quantity) > 0) {
+      const tempMunId = `caut-mun-${Date.now()}`;
+      newCautela.linkedAmmoCautelaId = tempMunId;
+      const newMun: CautelaMunicao = {
+        id: tempMunId,
+        caliberId: payload.ammunition.caliberId,
+        caliberName: payload.ammunition.caliberName || payload.weaponCaliber || 'Padrão',
+        quantity: Number(payload.ammunition.quantity),
+        fabricante: payload.ammunition.fabricante || 'CBC',
+        tipoMunicao: payload.ammunition.tipoMunicao || 'Operacional',
+        pesoMunicao: payload.ammunition.pesoMunicao,
+        loteMunicao: payload.ammunition.loteMunicao,
+        destinacao: payload.ammunition.destinacao || 'Defesa',
+        vaultSpaceId: payload.ammunition.vaultSpaceId || payload.vaultSpaceId,
+        departmentId: payload.departmentId,
+        unitId: payload.unitId,
+        linkedWeaponCautelaId: tempId,
+        linkedWeaponSerialNumber: payload.weaponSerialNumber,
+        weaponId: payload.weaponId,
+        requesterId: payload.requesterId,
+        requesterName: payload.requesterName,
+        requesterMasp: payload.requesterMasp,
+        requesterCargo: payload.requesterCargo,
+        reason: payload.ammunition.reason || `Acautelamento em conjunto com ${payload.weaponModel} Nº ${payload.weaponSerialNumber}`,
+        requestDate: new Date().toISOString(),
+        status: payload.directAuthorized ? 'AUTORIZADA' : 'PENDENTE',
+        armorerId: payload.armorerId,
+        armorerName: payload.armorerName,
+        armorerMasp: payload.armorerMasp,
+        authorizedAt: payload.directAuthorized ? new Date().toISOString() : undefined,
+        seraDevolvida: payload.ammunition.seraDevolvida !== undefined ? payload.ammunition.seraDevolvida : (payload.ammunition.destinacao === 'Defesa'),
+        createdAt: new Date().toISOString()
+      };
+      if (!this.state.cautelasMunicoes) this.state.cautelasMunicoes = [];
+      this.state.cautelasMunicoes.unshift(newMun);
+    }
+
     if (!this.state.cautelasArmas) this.state.cautelasArmas = [];
     this.state.cautelasArmas.unshift(newCautela);
 
@@ -3154,6 +3191,14 @@ class StorageService {
       if (!res.ok) return { success: false, error: data.error };
       if (data.id) {
         newCautela.id = data.id;
+      }
+      if (data.linkedAmmoCautelaId) {
+        newCautela.linkedAmmoCautelaId = data.linkedAmmoCautelaId;
+        const linkedMun = (this.state.cautelasMunicoes || []).find(m => m.id === newCautela.linkedAmmoCautelaId || m.linkedWeaponCautelaId === tempId);
+        if (linkedMun) {
+          linkedMun.id = data.linkedAmmoCautelaId;
+          linkedMun.linkedWeaponCautelaId = data.id || tempId;
+        }
       }
       await this.refreshFromServer();
       return { success: true, id: data.id || tempId };
@@ -3209,19 +3254,79 @@ class StorageService {
         (weap as any).locationNote = `Acautelada com ${target.requesterName} (MASP: ${target.requesterMasp}) • Último cofre: ${vault?.code || 'N/A'}`;
       }
 
-      // Sincroniza cautela de munição vinculada imediatamente no estado local
-      const ammoList = this.state.cautelasMunicoes || [];
-      const linkedMun = ammoList.find(m => 
-        m.id === target.linkedAmmoCautelaId || 
-        (m as any).cautelaArmaId === target.id || 
-        m.linkedWeaponCautelaId === target.id
-      );
-      if (linkedMun) {
-        linkedMun.status = 'AUTORIZADA';
-        linkedMun.authorizedAt = new Date().toISOString();
-        linkedMun.armorerId = target.armorerId;
-        linkedMun.armorerName = target.armorerName;
-        linkedMun.armorerMasp = target.armorerMasp;
+      // Sincroniza ou cria cautela de munição vinculada imediatamente no estado local
+      if (opts.ammoQuantity && Number(opts.ammoQuantity) > 0) {
+        target.ammoQuantity = Number(opts.ammoQuantity);
+        target.ammoDestinacao = opts.destinacao || 'Defesa';
+        
+        let linkedMun = (this.state.cautelasMunicoes || []).find(m => 
+          m.id === target.linkedAmmoCautelaId || 
+          (m as any).cautelaArmaId === target.id || 
+          m.linkedWeaponCautelaId === target.id ||
+          (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === target.weaponSerialNumber)
+        );
+
+        if (linkedMun) {
+          linkedMun.status = 'AUTORIZADA';
+          linkedMun.authorizedAt = new Date().toISOString();
+          linkedMun.armorerId = target.armorerId;
+          linkedMun.armorerName = target.armorerName;
+          linkedMun.armorerMasp = target.armorerMasp;
+          linkedMun.quantity = Number(opts.ammoQuantity);
+          linkedMun.destinacao = opts.destinacao || linkedMun.destinacao;
+          linkedMun.seraDevolvida = opts.seraDevolvida !== undefined ? opts.seraDevolvida : linkedMun.seraDevolvida;
+          linkedMun.linkedWeaponCautelaId = target.id;
+          linkedMun.linkedWeaponSerialNumber = target.weaponSerialNumber;
+          linkedMun.weaponId = target.weaponId;
+        } else {
+          const newMunId = `caut-mun-${Date.now()}`;
+          target.linkedAmmoCautelaId = newMunId;
+          const newMun: CautelaMunicao = {
+            id: newMunId,
+            caliberName: target.weaponCaliber || 'Padrão',
+            quantity: Number(opts.ammoQuantity),
+            fabricante: target.ammoFabricante || 'CBC',
+            tipoMunicao: target.ammoTipo || 'Operacional',
+            pesoMunicao: target.ammoPeso || '124gr',
+            loteMunicao: target.ammoLote || 'Lote Padrão',
+            destinacao: opts.destinacao || 'Defesa',
+            vaultSpaceId: opts.vaultSpaceId || target.vaultSpaceId,
+            departmentId: target.departmentId,
+            unitId: target.unitId,
+            linkedWeaponCautelaId: target.id,
+            linkedWeaponSerialNumber: target.weaponSerialNumber,
+            weaponId: target.weaponId,
+            requesterId: target.requesterId,
+            requesterName: target.requesterName,
+            requesterMasp: target.requesterMasp,
+            requesterCargo: target.requesterCargo,
+            reason: `Cautela conjunta com arma ${target.weaponModel} Nº ${target.weaponSerialNumber}`,
+            requestDate: target.requestDate || new Date().toISOString(),
+            status: 'AUTORIZADA',
+            armorerId: target.armorerId,
+            armorerName: target.armorerName,
+            armorerMasp: target.armorerMasp,
+            authorizedAt: new Date().toISOString(),
+            seraDevolvida: opts.seraDevolvida !== undefined ? opts.seraDevolvida : (opts.destinacao === 'Defesa'),
+            createdAt: new Date().toISOString()
+          };
+          if (!this.state.cautelasMunicoes) this.state.cautelasMunicoes = [];
+          this.state.cautelasMunicoes.unshift(newMun);
+        }
+      } else {
+        const ammoList = this.state.cautelasMunicoes || [];
+        const linkedMun = ammoList.find(m => 
+          m.id === target.linkedAmmoCautelaId || 
+          (m as any).cautelaArmaId === target.id || 
+          m.linkedWeaponCautelaId === target.id
+        );
+        if (linkedMun) {
+          linkedMun.status = 'AUTORIZADA';
+          linkedMun.authorizedAt = new Date().toISOString();
+          linkedMun.armorerId = target.armorerId;
+          linkedMun.armorerName = target.armorerName;
+          linkedMun.armorerMasp = target.armorerMasp;
+        }
       }
     }
 
