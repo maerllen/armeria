@@ -67,7 +67,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Nova Solicitação de Cautela
   const [selectedWeaponId, setSelectedWeaponId] = useState('');
-  const [reason, setReason] = useState('Serviço Policial Operacional / Plantão');
+  const [reason, setReason] = useState('');
   const [magazineQuantity, setMagazineQuantity] = useState<number>(2);
   const [requestAmmoTogether, setRequestAmmoTogether] = useState(true);
   const [ammoQuantity, setAmmoQuantity] = useState<number>(30);
@@ -890,6 +890,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           setActiveTab('MINHAS');
         }
         setSelectedWeaponId('');
+        setReason('');
         onRefresh();
       }
     } catch (err: any) {
@@ -1968,16 +1969,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                        Motivo / Finalidade do Uso
+                        MOTIVO / FINALIDADE DO USO (OPCIONAL)
                       </label>
-                      <input
-                        type="text"
+                      <select
                         value={reason}
                         onChange={(e) => setReason(e.target.value)}
-                        placeholder="Ex: Plantão Operacional / Diligência"
-                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
-                        required
-                      />
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-amber-500 cursor-pointer"
+                      >
+                        <option value="">Selecione o motivo (opcional)</option>
+                        <option value="Operação">Operação</option>
+                        <option value="Plantão">Plantão</option>
+                        <option value="Serviço ordinário">Serviço ordinário</option>
+                        <option value="Treinamento">Treinamento</option>
+                      </select>
                     </div>
                   </div>
 
@@ -2091,15 +2095,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               ) : (
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                    Motivo / Finalidade do Uso (Opcional)
+                    MOTIVO / FINALIDADE DO USO (OPCIONAL)
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
-                    placeholder="Ex: Plantão Operacional / Diligência / Serviço Policial"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500"
-                  />
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-amber-500 transition cursor-pointer"
+                  >
+                    <option value="">Selecione o motivo (opcional)</option>
+                    <option value="Operação">Operação</option>
+                    <option value="Plantão">Plantão</option>
+                    <option value="Serviço ordinário">Serviço ordinário</option>
+                    <option value="Treinamento">Treinamento</option>
+                  </select>
                   <p className="text-[11px] text-slate-400 mt-1">
                     Ao confirmar, a solicitação ficará marcada como <strong>Cautela Pendente</strong> aguardando autorização do armeiro. O armeiro definirá a entrega de carregadores e terá a opção de acautelar munições junto com a arma.
                   </p>

@@ -226,6 +226,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const [movRespName, setMovRespName] = useState('');
   const [movRespMasp, setMovRespMasp] = useState('');
   const [movObs, setMovObs] = useState('');
+  const [movStockObs, setMovStockObs] = useState('');
 
   // Movement Receipt Modal State
   const [selectedMovForReceipt, setSelectedMovForReceipt] = useState<AmmunitionMovement | null>(null);
@@ -390,7 +391,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setStockLote(stock.loteMunicao || '');
     setStockAno(stock.anoFabricacao || new Date().getFullYear());
     setStockDestinacao(stock.destinacao || 'Treinamento');
-    setStockInfo(stock.additionalInfo || '');
+    setStockInfo(stock.observacaoEstoqueMunicao || stock.observacao || stock.additionalInfo || '');
     setTransferTargetVaultId('');
     setTransferStockQuantity(0);
     setTransferStockObservation('');
@@ -430,6 +431,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             anoFabricacao: stockAno,
             destinacao: stockDestinacao,
             additionalInfo: stockInfo,
+            observacao: stockInfo,
+            observacaoEstoqueMunicao: stockInfo,
             targetVaultSpaceId: transferTargetVaultId || undefined,
             transferQuantity: transferTargetVaultId && transferStockQuantity > 0 ? Number(transferStockQuantity) : undefined,
             transferObservation: transferStockObservation || undefined
@@ -455,7 +458,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           loteMunicao: stockLote,
           anoFabricacao: stockAno,
           destinacao: stockDestinacao,
-          observation: stockInfo || 'Cadastro no sistema'
+          observation: stockInfo || 'Cadastro no sistema',
+          observacaoEstoqueMunicao: stockInfo,
+          stockObservation: stockInfo
         });
         setSuccessMsg('Munição adicionada ao estoque com sucesso!');
       }
@@ -533,15 +538,16 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   const handleOpenMovementModal = (stock?: AmmunitionStock, preselectedType: 'Entrada' | 'Saída' = 'Saída') => {
     setErrorMsg('');
     setSuccessMsg('');
-    setMovType(preselectedType);
-    setMovStockId(stock?.id || stocks[0]?.id || '');
-    setMovQuantity(preselectedType === 'Saída' ? Math.min(50, stock?.quantity || 50) : 100);
+    const target = stock || stocks[0];
+    setMovStockId(target?.id || '');
+    setMovQuantity(preselectedType === 'Saída' ? Math.min(50, target?.quantity || 50) : 100);
     setMovReason(preselectedType === 'Saída' ? 'Treinamento Tático' : 'Reabastecimento de Cofre');
     setMovRespType('SISTEMA');
     setMovRespUserId(currentUser.id);
     setMovRespName(currentUser.name);
     setMovRespMasp(currentUser.masp);
     setMovObs('');
+    setMovStockObs(target?.observacaoEstoqueMunicao || target?.observacao || target?.additionalInfo || '');
     setShowMovementModal(true);
   };
 
@@ -590,8 +596,25 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         responsibleUserId: movRespType === 'SISTEMA' ? movRespUserId : undefined,
         responsibleName: finalRespName,
         responsibleMasp: finalRespMasp,
-        observation: movObs
+        observation: movObs,
+        observacaoEstoqueMunicao: movStockObs,
+        stockObservation: movStockObs
       });
+
+      // Atualiza a observação da munição no estoque caso tenha sido alterada na movimentação
+      const currentObs = targetStock.observacaoEstoqueMunicao || targetStock.additionalInfo || targetStock.observacao || '';
+      if (movStockObs !== currentObs) {
+        await storage.updateAmmoStock(
+          targetStock.id,
+          {
+            quantity: movType === 'Saída' ? Math.max(0, targetStock.quantity - Number(movQuantity)) : targetStock.quantity,
+            observacaoEstoqueMunicao: movStockObs,
+            additionalInfo: movStockObs,
+            observacao: movStockObs
+          },
+          currentUser
+        );
+      }
 
       setSuccessMsg(`Movimentação de ${movType} de ${movQuantity} munição(ões) registrada com sucesso!`);
       setShowMovementModal(false);
@@ -667,19 +690,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       const rowsHtml = vaultStocks.length > 0
         ? vaultStocks.map(stock => {
             const cal = calibers.find(c => c.id === stock.caliberId);
+            const obs = stock.observacaoEstoqueMunicao || stock.additionalInfo || stock.observacao || '-';
             return `
               <tr>
                 <td style="font-weight: bold;">${cal?.name || 'Munição'}</td>
                 <td>${stock.fabricante || '-'} / ${stock.loteMunicao || 'S/L'}</td>
                 <td>${stock.tipoMunicao || '-'} ${stock.pesoMunicao ? `(${stock.pesoMunicao})` : ''}</td>
                 <td>${stock.anoFabricacao || '-'} / ${stock.destinacao || 'Operacional'}</td>
+                <td style="font-size: 10px; color: #334155;">${obs}</td>
                 <td style="text-align: right; font-weight: bold; font-family: monospace;">${stock.quantity}</td>
               </tr>
             `;
           }).join('')
         : `
           <tr>
-            <td colspan="5" style="text-align: center; color: #64748b; padding: 16px; font-style: italic;">
+            <td colspan="6" style="text-align: center; color: #64748b; padding: 16px; font-style: italic;">
               Nenhuma munição armazenada neste cofre no momento (Cofre Vazio).
             </td>
           </tr>
@@ -729,6 +754,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Fabricante / Lote</th>
                 <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Tipo / Peso</th>
                 <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Ano / Destinação</th>
+                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Observações</th>
                 <th style="padding: 7px 10px; border: 1px solid #cbd5e1; text-align: right;">Qtd (un)</th>
               </tr>
             </thead>
@@ -737,7 +763,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             </tbody>
             <tfoot>
               <tr style="background: #f8fafc; font-weight: bold;">
-                <td colspan="4" style="padding: 8px 10px; text-align: right; text-transform: uppercase;">Total de Munições no Cofre:</td>
+                <td colspan="5" style="padding: 8px 10px; text-align: right; text-transform: uppercase;">Total de Munições no Cofre:</td>
                 <td style="padding: 8px 10px; text-align: right; font-family: monospace; font-size: 12px;">${totalQuantity} un</td>
               </tr>
             </tfoot>
@@ -1500,6 +1526,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                               <th className="py-3 px-4">Fabricante / Lote</th>
                               <th className="py-3 px-4">Tipo / Peso</th>
                               <th className="py-3 px-4">Ano / Destinação</th>
+                              <th className="py-3 px-4">Observações</th>
                               <th className="py-3 px-4 text-right">Qtd Disponível</th>
                               <th className="py-3 px-4 text-right">Ações</th>
                             </tr>
@@ -1532,6 +1559,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                                     <span className="text-slate-500 ml-1.5">
                                       • {item.destinacao || 'Operacional'}
                                     </span>
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-300 max-w-[200px]">
+                                    {item.observacaoEstoqueMunicao || item.additionalInfo || item.observacao ? (
+                                      <span 
+                                        className="text-slate-300 text-xs truncate block"
+                                        title={item.observacaoEstoqueMunicao || item.additionalInfo || item.observacao}
+                                      >
+                                        {item.observacaoEstoqueMunicao || item.additionalInfo || item.observacao}
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-500 text-xs italic">-</span>
+                                    )}
                                   </td>
                                   <td className="py-3 px-4 text-right font-mono font-bold text-amber-400 text-sm">
                                     {item.quantity.toLocaleString('pt-BR')} <span className="text-[10px] text-slate-500 font-normal">un</span>
@@ -1761,6 +1800,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                     <option value="Reserva">Reserva Estratégica</option>
                     <option value="Curso de Formação">Curso de Formação Acadepol</option>
                   </select>
+                </div>
+
+                {/* Observações da Munição */}
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                    <span>Observações da Munição</span>
+                    <span className="text-[10px] text-amber-400 font-normal">Salvo em OBSERVACAO_ESTOQUE_MUNICAO</span>
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={stockInfo}
+                    onChange={e => setStockInfo(e.target.value)}
+                    placeholder="Observações complementares sobre o lote/munição..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500 resize-none"
+                  />
                 </div>
 
               </div>
@@ -2113,7 +2167,12 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </label>
                 <select
                   value={movStockId}
-                  onChange={e => setMovStockId(e.target.value)}
+                  onChange={e => {
+                    const newId = e.target.value;
+                    setMovStockId(newId);
+                    const s = stocks.find(st => st.id === newId);
+                    setMovStockObs(s?.observacaoEstoqueMunicao || s?.observacao || s?.additionalInfo || '');
+                  }}
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                 >
                   {stocks.map(s => {
@@ -2126,6 +2185,21 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                     );
                   })}
                 </select>
+              </div>
+
+              {/* Observações da Munição no Estoque */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1 flex items-center justify-between">
+                  <span>Observações da Munição</span>
+                  <span className="text-[10px] text-amber-400 font-normal">Salvo em OBSERVACAO_ESTOQUE_MUNICAO</span>
+                </label>
+                <input
+                  type="text"
+                  value={movStockObs}
+                  onChange={e => setMovStockObs(e.target.value)}
+                  placeholder="Observações da munição no cofre..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
               </div>
 
               {/* Quantidade */}

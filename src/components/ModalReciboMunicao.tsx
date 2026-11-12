@@ -84,7 +84,7 @@ export const AmmunitionReceiptModal: React.FC<AmmunitionReceiptModalProps> = ({
         <div class="box" style="margin-bottom: 14px;">
           <div class="box-title">2. Destino e Responsável</div>
           <div class="field"><span class="label">Destinatário / Motivo:</span> <span class="val">${responsibleText}</span></div>
-          ${movement.notes ? `<div class="field" style="margin-top: 6px;"><span class="label">Observações:</span> <span class="val" style="font-weight: normal;">${movement.notes}</span></div>` : ''}
+          ${(movement.observation || (movement as any).notes || movement.observacao || movement.observacaoEstoqueMunicao || movement.stockObservation) ? `<div class="field" style="margin-top: 6px;"><span class="label">Observações:</span> <span class="val" style="font-weight: normal;">${movement.observation || (movement as any).notes || movement.observacao || movement.observacaoEstoqueMunicao || movement.stockObservation}</span></div>` : ''}
         </div>
 
         <div class="signatures">
@@ -250,11 +250,11 @@ export const AmmunitionReceiptModal: React.FC<AmmunitionReceiptModalProps> = ({
             </div>
 
             {/* Observação (até 500 caracteres) */}
-            {movement.observation && (
+            {(movement.observation || movement.observacaoEstoqueMunicao || movement.stockObservation || movement.observacao) && (
               <div className="mt-3 pt-3 border-t border-slate-800 print:border-gray-300 font-mono">
                 <span className="text-slate-400 print:text-gray-700 block text-[10px] font-bold uppercase">OBSERVAÇÕES DO REGISTRO:</span>
                 <p className="text-xs text-slate-200 print:text-black italic bg-slate-900 print:bg-gray-100 p-2 rounded-lg mt-1 border border-slate-800 print:border-gray-300">
-                  {movement.observation}
+                  {movement.observation || movement.observacaoEstoqueMunicao || movement.stockObservation || movement.observacao}
                 </p>
               </div>
             )}

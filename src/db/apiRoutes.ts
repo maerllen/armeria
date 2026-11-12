@@ -1267,6 +1267,9 @@ apiRouter.get('/ammo-stocks', async (req: Request, res: Response) => {
           LOTE_MUNICAO as loteMunicao,
           ANO_FABRICACAO_MUNICAO as anoFabricacao,
           DESTINACAO_MUNICAO as destinacao,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as additionalInfo,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as observacaoEstoqueMunicao,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as observacao,
           DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
         FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
       `);
@@ -1281,6 +1284,9 @@ apiRouter.get('/ammo-stocks', async (req: Request, res: Response) => {
           COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId,
           TIPO_MUNICAO as tipoMunicao,
           LOTE_MUNICAO as loteMunicao,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as additionalInfo,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as observacaoEstoqueMunicao,
+          COALESCE(OBSERVACAO_ESTOQUE_MUNICAO, '') as observacao,
           DATA_ATUALIZACAO_ESTOQUE_MUNICOES as updatedAt
         FROM ESTOQUE_MUNICOES ORDER BY DATA_ATUALIZACAO_ESTOQUE_MUNICOES DESC
       `);
@@ -1315,6 +1321,7 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const { 
       quantity, caliberId, fabricante, tipoMunicao, pesoMunicao, 
       loteMunicao, anoFabricacao, destinacao, additionalInfo,
+      observacao, observacaoEstoqueMunicao,
       targetVaultSpaceId, transferQuantity, transferObservation,
       actor 
     } = req.body;
@@ -1326,7 +1333,7 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
 
     const pool = getPool();
     const [stocks]: any = await pool.query(
-      'SELECT ID_ESTOQUE_MUNICOES as id, CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, QUANTIDADE_ESTOQUE_MUNICOES as quantity, COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId, DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, UNIDADE_ID_ESTOQUE_MUNICOES as unitId FROM ESTOQUE_MUNICOES WHERE ID_ESTOQUE_MUNICOES = ?',
+      'SELECT ID_ESTOQUE_MUNICOES as id, CALIBRE_ID_ESTOQUE_MUNICOES as caliberId, QUANTIDADE_ESTOQUE_MUNICOES as quantity, COFRE_ID_ESTOQUE_MUNICOES as vaultSpaceId, DEPARTAMENTO_ID_ESTOQUE_MUNICOES as departmentId, UNIDADE_ID_ESTOQUE_MUNICOES as unitId, OBSERVACAO_ESTOQUE_MUNICAO as observacao FROM ESTOQUE_MUNICOES WHERE ID_ESTOQUE_MUNICOES = ?',
       [id]
     );
 
@@ -1341,7 +1348,10 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     }
 
     const newCaliberId = caliberId || currentStock.caliberId;
-    const cleanInfo = typeof additionalInfo === 'string' ? additionalInfo.slice(0, 500) : '';
+    const rawObs = observacaoEstoqueMunicao !== undefined 
+      ? observacaoEstoqueMunicao 
+      : (observacao !== undefined ? observacao : (additionalInfo !== undefined ? additionalInfo : currentStock.observacao));
+    const cleanInfo = typeof rawObs === 'string' ? rawObs.trim() : (rawObs || '');
 
     const isTransfer = Boolean(targetVaultSpaceId && targetVaultSpaceId !== currentStock.vaultSpaceId);
 
@@ -1529,14 +1539,15 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
           LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), 
           ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
           DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+          OBSERVACAO_ESTOQUE_MUNICAO = ?,
           DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() 
         WHERE ID_ESTOQUE_MUNICOES = ?`,
-        [newQty, newCaliberId, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, id]
+        [newQty, newCaliberId, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, cleanInfo, id]
       );
     } catch {
       await pool.query(
-        'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
-        [newQty, newCaliberId, tipoMunicao || null, loteMunicao || null, id]
+        'UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, CALIBRE_ID_ESTOQUE_MUNICOES = ?, TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), OBSERVACAO_ESTOQUE_MUNICAO = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?',
+        [newQty, newCaliberId, tipoMunicao || null, loteMunicao || null, cleanInfo, id]
       );
     }
 
@@ -1649,12 +1660,21 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
     let stockId = stocks && stocks.length > 0 ? stocks[0].id : null;
     let currentQty = stocks && stocks.length > 0 ? stocks[0].quantity : 0;
 
+    const rawStockObs = req.body.observacaoEstoqueMunicao !== undefined 
+      ? req.body.observacaoEstoqueMunicao 
+      : (req.body.stockObservation !== undefined ? req.body.stockObservation : (req.body.additionalInfo || req.body.observation || ''));
+    const stockObs = typeof rawStockObs === 'string' ? rawStockObs.trim() : (rawStockObs || '');
+
     if (type === 'Saída') {
       if (currentQty < quantity) {
         return res.status(400).json({ error: `Estoque insuficiente no cofre (${currentQty} disponíveis).` });
       }
       currentQty -= quantity;
-      await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+      if (req.body.observacaoEstoqueMunicao !== undefined || req.body.stockObservation !== undefined) {
+        await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, OBSERVACAO_ESTOQUE_MUNICAO = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockObs, stockId]);
+      } else {
+        await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+      }
     } else {
       if (!stockId) {
         stockId = `stock-${Date.now()}`;
@@ -1665,38 +1685,41 @@ apiRouter.post('/ammo-movements', async (req: Request, res: Response) => {
               ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, 
               DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES,
               FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
+              OBSERVACAO_ESTOQUE_MUNICAO,
               DATA_ATUALIZACAO_ESTOQUE_MUNICOES
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
             [
               stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId,
               fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null,
-              anoFabricacao || null, destinacao || null
+              anoFabricacao || null, destinacao || null, stockObs || ''
             ]
           );
         } catch {
           await pool.query(
-            'INSERT INTO ESTOQUE_MUNICOES (ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES, TIPO_MUNICAO, LOTE_MUNICAO, DATA_ATUALIZACAO_ESTOQUE_MUNICOES) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())',
-            [stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId, tipoMunicao || null, loteMunicao || null]
+            'INSERT INTO ESTOQUE_MUNICOES (ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES, TIPO_MUNICAO, LOTE_MUNICAO, OBSERVACAO_ESTOQUE_MUNICAO, DATA_ATUALIZACAO_ESTOQUE_MUNICOES) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())',
+            [stockId, caliberId, currentQty, vault.department_id, vault.unit_id, vaultSpaceId, tipoMunicao || null, loteMunicao || null, stockObs || '']
           );
         }
       } else {
         currentQty += quantity;
+        const updateObs = (req.body.observacaoEstoqueMunicao !== undefined || req.body.stockObservation !== undefined);
         try {
           await pool.query(
             `UPDATE ESTOQUE_MUNICOES SET 
               QUANTIDADE_ESTOQUE_MUNICOES = ?, 
               FABRICANTE_MUNICAO = COALESCE(?, FABRICANTE_MUNICAO),
-              TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO),
+              TIPO_MUNICAO = COALESCE(?, TIPO_MUNICAO), 
               PESO_MUNICAO = COALESCE(?, PESO_MUNICAO),
-              LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO),
+              LOTE_MUNICAO = COALESCE(?, LOTE_MUNICAO), 
               ANO_FABRICACAO_MUNICAO = COALESCE(?, ANO_FABRICACAO_MUNICAO),
               DESTINACAO_MUNICAO = COALESCE(?, DESTINACAO_MUNICAO),
+              OBSERVACAO_ESTOQUE_MUNICAO = ${updateObs ? '?' : 'COALESCE(?, OBSERVACAO_ESTOQUE_MUNICAO)'},
               DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() 
              WHERE ID_ESTOQUE_MUNICOES = ?`,
-            [currentQty, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, stockId]
+            [currentQty, fabricante || null, tipoMunicao || null, pesoMunicao || null, loteMunicao || null, anoFabricacao || null, destinacao || null, stockObs || null, stockId]
           );
         } catch {
-          await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockId]);
+          await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ?, OBSERVACAO_ESTOQUE_MUNICAO = COALESCE(?, OBSERVACAO_ESTOQUE_MUNICAO), DATA_ATUALIZACAO_ESTOQUE_MUNICOES = NOW() WHERE ID_ESTOQUE_MUNICOES = ?', [currentQty, stockObs || null, stockId]);
         }
       }
     }

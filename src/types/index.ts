@@ -156,6 +156,8 @@ export interface AmmunitionStock {
   anoFabricacao?: number | string;
   destinacao?: string;
   additionalInfo?: string;
+  observacao?: string;
+  observacaoEstoqueMunicao?: string;
 }
 
 export type AmmoMovementType = 'Entrada' | 'Saída';
@@ -180,6 +182,9 @@ export interface AmmunitionMovement {
   responsibleName?: string;
   responsibleMasp?: string;
   observation?: string;
+  observacao?: string;
+  observacaoEstoqueMunicao?: string;
+  stockObservation?: string;
   returnedQuantity?: number;
   returnedAt?: string;
   returnedByUserName?: string;

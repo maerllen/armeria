@@ -805,6 +805,9 @@ class StorageService {
     responsibleName?: string;
     responsibleMasp?: string;
     observation?: string;
+    observacao?: string;
+    observacaoEstoqueMunicao?: string;
+    stockObservation?: string;
   }): Promise<AmmunitionMovement> {
     const res = await fetch('/api/ammo-movements', {
       method: 'POST',
@@ -834,6 +837,9 @@ class StorageService {
     responsibleName?: string;
     responsibleMasp?: string;
     observation?: string;
+    observacao?: string;
+    observacaoEstoqueMunicao?: string;
+    stockObservation?: string;
   }) {
     return this.addAmmoMovement(data);
   }
@@ -862,6 +868,8 @@ class StorageService {
       anoFabricacao?: number | string;
       destinacao?: string;
       additionalInfo?: string;
+      observacao?: string;
+      observacaoEstoqueMunicao?: string;
       targetVaultSpaceId?: string;
       transferQuantity?: number;
       transferObservation?: string;
