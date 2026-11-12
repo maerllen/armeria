@@ -93,9 +93,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
   users = [],
   onRefresh
 }) => {
-  const isGeral = currentUser.role === 'Geral';
-  const isArmeiro = currentUser.role === 'Armeiro';
-  const isAdmin = currentUser.role === 'Administrador';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
   const isExplosivista = isUserExplosivista(currentUser);
 
   // Full CRUD permissions for Geral, Armeiro, Admin, and Explosivista
@@ -117,7 +119,7 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     return units.filter(u => u.departmentId === selectedDeptId);
   }, [units, selectedDeptId, isGeral, currentUser.departmentId]);
 
-  const canSelectAllUnits = isGeral || isAdmin;
+  const canSelectAllUnits = isGeral || isAdmin || isDeptArmeiro;
   const [selectedUnitId, setSelectedUnitId] = useState<string>(() => {
     return canSelectAllUnits ? 'ALL' : (availableUnits[0]?.id || currentUser.unitId || '');
   });
@@ -238,25 +240,11 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     setFabricantesExplosivos(storage.getFabricantesExplosivos());
 
     try {
-      const [resExp, resMovs, resTipos, resSubtipos, resFabricantes] = await Promise.all([
-        fetch('/api/explosivos'),
-        fetch('/api/movimentacoes-explosivos'),
+      const [resTipos, resSubtipos, resFabricantes] = await Promise.all([
         fetch('/api/tipos-explosivos'),
         fetch('/api/subtipos-explosivos'),
         fetch('/api/fabricantes-explosivos')
       ]);
-      if (resExp.ok) {
-        const expData = await resExp.json();
-        if (Array.isArray(expData)) {
-          setExplosivos(expData);
-        }
-      }
-      if (resMovs.ok) {
-        const data = await resMovs.json();
-        if (Array.isArray(data)) {
-          setMovimentacoes(data);
-        }
-      }
       if (resTipos.ok) {
         const tiposData = await resTipos.json();
         if (Array.isArray(tiposData)) {
@@ -653,7 +641,12 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     const targetDept = selectedDeptId !== 'ALL' ? selectedDeptId : currentUser.departmentId;
-    const targetUnit = selectedUnitId !== 'ALL' ? selectedUnitId : currentUser.unitId;
+    const deptScopedUnits = units.filter(u => !targetDept || u.departmentId === targetDept);
+    const targetUnit = selectedUnitId !== 'ALL'
+      ? selectedUnitId
+      : (currentUser.unitId && deptScopedUnits.some(u => u.id === currentUser.unitId)
+        ? currentUser.unitId
+        : (deptScopedUnits[0]?.id || currentUser.unitId));
 
     if (item) {
       setEditingItem(item);
@@ -2119,6 +2112,62 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
                     ))}
                   </select>
                 </div>
+
+                {canSelectAllUnits && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Departamento *
+                      </label>
+                      <select
+                        value={formDeptId}
+                        disabled={!isGeral}
+                        onChange={(e) => {
+                          const nextDept = e.target.value;
+                          setFormDeptId(nextDept);
+                          const depUnits = units.filter(u => u.departmentId === nextDept);
+                          const nextUnit = depUnits[0]?.id || '';
+                          setFormUnitId(nextUnit);
+                          const expVaults = allVaults.filter(v => v.unitId === nextUnit && v.type === 'EXPLOSIVOS');
+                          setFormCofreId(expVaults[0]?.id || '');
+                          setFormLocalArmazenamento(expVaults[0]?.code || 'PAIOL-01');
+                        }}
+                        className={`w-full px-3 py-2 border rounded-xl text-xs outline-none ${
+                          !isGeral
+                            ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
+                            : 'bg-slate-950 border-slate-700 text-slate-100 focus:border-amber-400'
+                        }`}
+                      >
+                        {availableDepts.map(d => (
+                          <option key={d.id} value={d.id}>{d.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1">
+                        Unidade Policial *
+                      </label>
+                      <select
+                        value={formUnitId}
+                        onChange={(e) => {
+                          const nextUnit = e.target.value;
+                          setFormUnitId(nextUnit);
+                          const expVaults = allVaults.filter(v => v.unitId === nextUnit && v.type === 'EXPLOSIVOS');
+                          setFormCofreId(expVaults[0]?.id || '');
+                          setFormLocalArmazenamento(expVaults[0]?.code || 'PAIOL-01');
+                        }}
+                        className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs text-slate-100 focus:border-amber-400 outline-none"
+                      >
+                        {units
+                          .filter(u => !formDeptId || u.departmentId === formDeptId)
+                          .map(u => (
+                            <option key={u.id} value={u.id}>{u.name}</option>
+                          ))}
+                      </select>
+                    </div>
+                  </>
+                )}
 
                 {/* 5. Local do Cofre - SOMENTE LOCAIS PARA ARMAZENAMENTO DE EXPLOSIVOS */}
                 <div className="sm:col-span-2 p-3 bg-slate-950/70 border border-amber-500/20 rounded-xl space-y-2">

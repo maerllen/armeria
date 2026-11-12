@@ -41,9 +41,11 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
   initialDeptId,
   onClose
 }) => {
-  const isGeral = currentUser.role === 'Geral';
-  const isAdmin = currentUser.role === 'Administrador';
-  const isArmeiro = currentUser.role === 'Armeiro';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const hasDeptWideScope = isGeral || isAdmin || (isArmeiro && currentUser.managementScope === 'department');
 
   // Permission Scope: Limit selectable departments and units to what the user is authorized to see
   const accessibleDepts = useMemo(() => {
@@ -61,7 +63,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
   const accessibleUnits = useMemo(() => {
     let list = units;
     if (!isGeral) {
-      if (isAdmin || isArmeiro || currentUser.managementScope !== 'unit') {
+      if (hasDeptWideScope) {
         list = list.filter(u => u.departmentId === currentUser.departmentId);
       } else {
         // Restricted to unit
@@ -72,7 +74,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       list = list.filter(u => u.departmentId === selectedDeptId);
     }
     return list;
-  }, [units, isGeral, isAdmin, isArmeiro, currentUser, selectedDeptId]);
+  }, [units, isGeral, hasDeptWideScope, currentUser, selectedDeptId]);
 
   const [selectedUnitId, setSelectedUnitId] = useState<string>(() => {
     if (initialUnitId && accessibleUnits.some(u => u.id === initialUnitId)) {
@@ -722,14 +724,14 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
                 <select
                   value={selectedUnitId}
                   onChange={(e) => setSelectedUnitId(e.target.value)}
-                  disabled={!isGeral && !isAdmin && !isArmeiro && currentUser.managementScope === 'unit'}
+                  disabled={!hasDeptWideScope && accessibleUnits.length <= 1}
                   className={`w-full rounded-xl px-3 py-2 text-xs transition ${
                     selectedUnitId !== 'ALL'
                       ? 'bg-amber-500/10 border-amber-500/60 text-amber-300 font-bold'
                       : 'bg-slate-900 border-slate-700 text-slate-100'
-                  } border focus:outline-none focus:border-amber-500 ${(!isGeral && !isAdmin && !isArmeiro && currentUser.managementScope === 'unit') ? 'cursor-not-allowed opacity-80' : ''}`}
+                  } border focus:outline-none focus:border-amber-500 ${(!hasDeptWideScope && accessibleUnits.length <= 1) ? 'cursor-not-allowed opacity-80' : ''}`}
                 >
-                  {(isGeral || isAdmin || isArmeiro) && (
+                  {hasDeptWideScope && (
                     <option value="ALL">Todas as Unidades do Departamento ({scopedWeapons.length})</option>
                   )}
                   {accessibleUnits.map(u => {

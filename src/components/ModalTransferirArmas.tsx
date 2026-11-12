@@ -20,6 +20,7 @@ import {
 
 interface TransferWeaponModalProps {
   initialWeapon?: Weapon | null;
+  selectedUnitId?: string;
   weapons: Weapon[];
   departments: Department[];
   units: Unit[];
@@ -32,6 +33,7 @@ interface TransferWeaponModalProps {
 
 export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   initialWeapon,
+  selectedUnitId,
   weapons,
   departments,
   units,
@@ -57,11 +59,36 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     return fromStorage && fromStorage.length > 0 ? fromStorage : vaultSpaces;
   }, [vaultSpaces]);
 
-  // Determine origin unit - Armeiro and Administrador are locked to their own privileged unit
-  const isGeral = currentUser.role === 'Geral';
-  const defaultOriginUnitId = (!isGeral && currentUser.unitId)
-    ? currentUser.unitId
-    : (initialWeapon?.unitId || currentUser.unitId || (allUnits[0]?.id || ''));
+  // Determine origin unit - Armeiro with department scope and Administrador can select any unit of their department
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const hasDeptWideScope =
+    isGeral ||
+    effectiveRole === 'Administrador' ||
+    (effectiveRole === 'Armeiro' && currentUser.managementScope === 'department');
+
+  const allowedOriginUnits = useMemo(() => {
+    if (isGeral) return allUnits;
+    if (hasDeptWideScope) {
+      return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+    }
+    return allUnits.filter(u => u.id === currentUser.unitId);
+  }, [allUnits, isGeral, hasDeptWideScope, currentUser.departmentId, currentUser.unitId]);
+
+  const canSelectOriginUnit = isGeral || (hasDeptWideScope && allowedOriginUnits.length > 1);
+
+  const defaultOriginUnitId = (() => {
+    if (initialWeapon?.unitId && allowedOriginUnits.some(u => u.id === initialWeapon.unitId)) {
+      return initialWeapon.unitId;
+    }
+    if (selectedUnitId && allowedOriginUnits.some(u => u.id === selectedUnitId)) {
+      return selectedUnitId;
+    }
+    if (currentUser.unitId && allowedOriginUnits.some(u => u.id === currentUser.unitId)) {
+      return currentUser.unitId;
+    }
+    return allowedOriginUnits[0]?.id || currentUser.unitId || allUnits[0]?.id || '';
+  })();
 
   const [originUnitId, setOriginUnitId] = useState<string>(defaultOriginUnitId);
   const originUnit = allUnits.find(u => u.id === originUnitId);
@@ -185,8 +212,12 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     e.preventDefault();
     setError(null);
 
-    if (!isGeral && currentUser.unitId && originUnitId !== currentUser.unitId) {
-      setError('Você só possui permissão para transferir armas pertencentes à sua própria unidade.');
+    if (!isGeral && !allowedOriginUnits.some(u => u.id === originUnitId)) {
+      setError(
+        hasDeptWideScope
+          ? 'Você só possui permissão para transferir armas pertencentes às unidades do seu departamento.'
+          : 'Você só possui permissão para transferir armas pertencentes à sua própria unidade.'
+      );
       return;
     }
 
@@ -205,12 +236,12 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
       return;
     }
 
-    // Verify all selected weapons belong to originUnitId and actor's unit
+    // Verify all selected weapons belong to originUnitId and actor's authorized scope
     for (const wId of selectedWeaponIds) {
       const w = weapons.find(item => item.id === wId);
       if (!w) continue;
-      if (!isGeral && currentUser.unitId && w.unitId !== currentUser.unitId) {
-        setError(`A arma ${w.serialNumber} não pertence à sua unidade.`);
+      if (!isGeral && !allowedOriginUnits.some(u => u.id === w.unitId)) {
+        setError(`A arma ${w.serialNumber} não pertence a uma unidade sob sua gestão.`);
         return;
       }
     }
@@ -350,7 +381,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                 <Building2 className="w-4 h-4" /> 1. Unidade de Origem (Remetente)
               </div>
 
-              {!isGeral ? (
+              {!canSelectOriginUnit ? (
                 <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg space-y-1">
                   <div className="text-xs font-semibold text-white">
                     {originUnit?.name || 'Unidade não identificada'}
@@ -364,14 +395,16 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                 </div>
               ) : (
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Selecione a Unidade de Origem</label>
+                  <label className="block text-xs text-slate-400 mb-1">
+                    Selecione a Unidade de Origem {hasDeptWideScope && !isGeral ? `(${originDept?.code || originDept?.name || 'Seu Departamento'})` : ''}
+                  </label>
                   <select
                     id="transfer-origin-unit-select"
                     value={originUnitId}
                     onChange={e => handleOriginUnitChange(e.target.value)}
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none"
                   >
-                    {allUnits.map(u => (
+                    {allowedOriginUnits.map(u => (
                       <option key={u.id} value={u.id}>
                         {u.name}
                       </option>

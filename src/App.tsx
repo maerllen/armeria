@@ -227,8 +227,18 @@ export default function App() {
     if (isGeralUser) {
       return list.filter(c => c.status === 'PENDENTE').length;
     }
-    if (isArmeiroUser) {
-      return list.filter(c => c.status === 'PENDENTE' && (effectiveUser?.managementScope === 'department' ? c.departmentId === effectiveUser?.departmentId : c.unitId === effectiveUser?.unitId)).length;
+    if (isArmeiroUser && effectiveUser) {
+      const deptUnits = new Set(
+        storage.getAllUnits()
+          .filter(u => u.departmentId === effectiveUser.departmentId)
+          .map(u => u.id)
+      );
+      return list.filter(c =>
+        c.status === 'PENDENTE' &&
+        (effectiveUser.managementScope === 'department'
+          ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
+          : c.unitId === effectiveUser.unitId)
+      ).length;
     }
     return 0;
   }, [effectiveUser, isArmeiroUser, isGeralUser]);
@@ -239,8 +249,18 @@ export default function App() {
     if (isGeralUser) {
       return list.filter(c => c.status === 'PENDENTE').length;
     }
-    if (isArmeiroUser) {
-      return list.filter(c => c.status === 'PENDENTE' && (effectiveUser?.managementScope === 'department' ? c.departmentId === effectiveUser?.departmentId : c.unitId === effectiveUser?.unitId)).length;
+    if (isArmeiroUser && effectiveUser) {
+      const deptUnits = new Set(
+        storage.getAllUnits()
+          .filter(u => u.departmentId === effectiveUser.departmentId)
+          .map(u => u.id)
+      );
+      return list.filter(c =>
+        c.status === 'PENDENTE' &&
+        (effectiveUser.managementScope === 'department'
+          ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
+          : c.unitId === effectiveUser.unitId)
+      ).length;
     }
     return 0;
   }, [effectiveUser, isArmeiroUser, isGeralUser]);
@@ -506,18 +526,18 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'unidade' && (
+          {activeModule === 'unidade' && effectiveUser && (
             <UnitModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               departments={departments}
               units={units}
               onRefresh={refreshData}
             />
           )}
 
-          {activeModule === 'usuarios' && (
+          {activeModule === 'usuarios' && effectiveUser && (
             <UserModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               users={allUsers}
               departments={departments}
               units={units}
@@ -526,9 +546,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'cofre' && (
+          {activeModule === 'cofre' && effectiveUser && (
             <VaultModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               vaultSpaces={vaultSpaces}
               departments={departments}
               units={units}
@@ -536,9 +556,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'municoes' && (
+          {activeModule === 'municoes' && effectiveUser && (
             <AmmunitionModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               calibers={calibers}
               stocks={ammoStocks}
               movements={ammoMovements}
@@ -550,9 +570,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'armas' && (
+          {activeModule === 'armas' && effectiveUser && (
             <WeaponModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               weapons={weapons}
               calibers={calibers}
               vaultSpaces={vaultSpaces}
@@ -562,9 +582,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'explosivos' && (
+          {activeModule === 'explosivos' && effectiveUser && (
             <ModuloExplosivos
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               departments={departments}
               units={units}
               vaultSpaces={vaultSpaces}
@@ -573,9 +593,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'movimentacoes' && (
+          {activeModule === 'movimentacoes' && effectiveUser && (
             <MovementModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               movements={movements}
               weapons={weapons}
               vaultSpaces={vaultSpaces}
@@ -584,9 +604,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'materiais' && (
+          {activeModule === 'materiais' && effectiveUser && (
             <MaterialModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               departments={departments}
               units={units}
               allUsers={allUsers}
@@ -695,9 +715,9 @@ export default function App() {
       </div>
 
       {/* Mobile Bottom Navigation Bar */}
-      {deviceInfo.isMobile && (
+      {deviceInfo.isMobile && effectiveUser && (
         <MobileBottomNav
-          currentUser={currentUser}
+          currentUser={effectiveUser}
           activeModule={activeModule}
           onSelectModule={handleSelectModule}
           onOpenMobileMenu={() => setIsMobileMenuOpen(true)}

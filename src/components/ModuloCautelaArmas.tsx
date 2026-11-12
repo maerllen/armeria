@@ -35,9 +35,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const isPolicial = effectiveRole === 'Policial';
   const isGeral = effectiveRole === 'Geral';
   const isArmeiro = effectiveRole === 'Armeiro';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
   const isAdmin = effectiveRole === 'Administrador';
+  const hasDeptWideScope = isGeral || isAdmin || isDeptArmeiro;
   const isArmeiroOrAdmin = !isPolicial && (isGeral || isArmeiro || isAdmin);
   const canAuthorize = isArmeiroOrAdmin;
+
+  const departmentUnits = useMemo(() => {
+    const allUnits = storage.getAllUnits().length > 0 ? storage.getAllUnits() : units;
+    if (isGeral) return allUnits;
+    if (!currentUser.departmentId) return units;
+    return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+  }, [units, isGeral, currentUser.departmentId]);
+
+  const deptUnitIds = useMemo(() => {
+    return new Set(departmentUnits.map(u => u.id));
+  }, [departmentUnits]);
 
   const userUnit = useMemo(() => {
     const allUnits = storage.getAllUnits();
@@ -262,6 +275,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [isDirectCautela, setIsDirectCautela] = useState(false);
   const [targetOfficerId, setTargetOfficerId] = useState('');
   const [selectedAmmoStockId, setSelectedAmmoStockId] = useState('');
+  const [novaCautelaUnitFilter, setNovaCautelaUnitFilter] = useState<string>('TODAS');
 
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
@@ -300,11 +314,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [policialAmmoTipo, setPolicialAmmoTipo] = useState('');
   const [policialAmmoPeso, setPolicialAmmoPeso] = useState('');
 
-  // Available officers in unit (strict unit restriction for direct checkout)
+  // Available officers in unit or department (for department-scoped Armeiro / Admin / Geral)
   const availableUnitOfficers = useMemo(() => {
-    const allUsers = storage.getUsers();
-    return allUsers.filter(u => (isGeral ? true : u.unitId === currentUser.unitId) && u.hasSystemAccess !== false);
-  }, [currentUser, isGeral]);
+    const allUsers = storage.getUsers(currentUser);
+    return allUsers.filter(u => {
+      if (u.hasSystemAccess === false) return false;
+      if (hasDeptWideScope && novaCautelaUnitFilter !== 'TODAS') {
+        if (u.unitId !== novaCautelaUnitFilter) return false;
+      }
+      if (isGeral) return true;
+      if (hasDeptWideScope) {
+        return u.departmentId === currentUser.departmentId || (u.unitId ? deptUnitIds.has(u.unitId) : false);
+      }
+      return u.unitId === currentUser.unitId;
+    });
+  }, [currentUser, isGeral, hasDeptWideScope, deptUnitIds, novaCautelaUnitFilter]);
 
   // Selected weapon object
   const selectedWeapon = useMemo(() => {
@@ -317,7 +341,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const targetUnitId = selectedWeapon.unitId || currentUser.unitId;
     const selCal = (selectedWeapon.caliber || '').toLowerCase().trim();
     return ammoStocks.filter(st => {
-      const matchUnit = isGeral ? true : (st.unitId === targetUnitId);
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? st.unitId === targetUnitId || (hasDeptWideScope && !st.unitId && st.departmentId === currentUser.departmentId)
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (st.unitId ? deptUnitIds.has(st.unitId) : false))
+            : st.unitId === currentUser.unitId;
       const cal = calibers.find(c => c.id === st.caliberId);
       const calName = (cal?.name || '').toLowerCase().trim();
       const matchCaliber = !selCal ||
@@ -325,7 +355,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                            (st.caliberId === selectedWeapon.caliber);
       return matchUnit && matchCaliber && st.quantity > 0;
     });
-  }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
+  }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   // Retorna especificações (tipo e peso) cadastradas no calibre da arma e disponíveis em estoque (> 0) na unidade
   // (Sem jamais expor local do cofre ou quantidade de munições em estoque)
@@ -1007,43 +1037,67 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       });
     } else {
       // Armeiro / Admin / Geral:
-      // O usuário Armeiro poderá ver TODAS as cautelas deferidas, pendentes e indeferidas da unidade que faz parte
+      // Armeiro de unidade vê apenas sua unidade; Armeiro de departamento / Admin vê todas as unidades vinculadas ao seu departamento
       const targetUnitId = currentUser.unitId;
+      const targetDeptId = currentUser.departmentId;
 
-      if (!isGeral && currentUser.managementScope !== 'department' && targetUnitId) {
-        list = list.filter(c => {
-          // 1. Cautela possui a mesma unidade do armeiro
-          if (c.unitId && c.unitId === targetUnitId) return true;
+      if (!isGeral) {
+        if (hasDeptWideScope && targetDeptId) {
+          list = list.filter(c => {
+            if (c.departmentId && c.departmentId === targetDeptId) return true;
+            if (c.unitId && deptUnitIds.has(c.unitId)) return true;
 
-          // 2. Arma associada pertence à unidade do armeiro
-          const w = (weapons || []).find(x => x.id === c.weaponId || (x.serialNumber && x.serialNumber === c.weaponSerialNumber));
-          if (w && w.unitId === targetUnitId) return true;
+            const w = (weapons || []).find(x => x.id === c.weaponId || (x.serialNumber && x.serialNumber === c.weaponSerialNumber));
+            if (w && (w.departmentId === targetDeptId || (w.unitId && deptUnitIds.has(w.unitId)))) return true;
 
-          // 3. Cofre de origem ou retorno pertence à unidade do armeiro
-          const vId = c.vaultSpaceId || w?.vaultSpaceId || w?.previousVaultSpaceId;
-          if (vId) {
-            const v = (vaultSpaces || []).find(x => x.id === vId);
-            if (v && v.unitId === targetUnitId) return true;
-          }
+            const vId = c.vaultSpaceId || w?.vaultSpaceId || w?.previousVaultSpaceId;
+            if (vId) {
+              const v = (vaultSpaces || []).find(x => x.id === vId);
+              if (v && (v.departmentId === targetDeptId || (v.unitId && deptUnitIds.has(v.unitId)))) return true;
+            }
 
-          // 4. Se a cautela não tem unidade nem arma definida mas foi criada pelo armeiro atual
-          if (!c.unitId && !w?.unitId) {
-            if (c.armorerId === currentUser.id || c.requesterId === currentUser.id || isUserCautela(c)) return true;
-          }
+            if (!c.unitId && !c.departmentId && !w?.unitId) {
+              if (c.armorerId === currentUser.id || c.requesterId === currentUser.id || isUserCautela(c)) return true;
+            }
 
-          return false;
-        });
+            return false;
+          });
+        } else if (targetUnitId) {
+          list = list.filter(c => {
+            // 1. Cautela possui a mesma unidade do armeiro
+            if (c.unitId && c.unitId === targetUnitId) return true;
+
+            // 2. Arma associada pertence à unidade do armeiro
+            const w = (weapons || []).find(x => x.id === c.weaponId || (x.serialNumber && x.serialNumber === c.weaponSerialNumber));
+            if (w && w.unitId === targetUnitId) return true;
+
+            // 3. Cofre de origem ou retorno pertence à unidade do armeiro
+            const vId = c.vaultSpaceId || w?.vaultSpaceId || w?.previousVaultSpaceId;
+            if (vId) {
+              const v = (vaultSpaces || []).find(x => x.id === vId);
+              if (v && v.unitId === targetUnitId) return true;
+            }
+
+            // 4. Se a cautela não tem unidade nem arma definida mas foi criada pelo armeiro atual
+            if (!c.unitId && !w?.unitId) {
+              if (c.armorerId === currentUser.id || c.requesterId === currentUser.id || isUserCautela(c)) return true;
+            }
+
+            return false;
+          });
+        }
       }
 
-      // Sincroniza armas da unidade com status Cautela Pendente e Acautelada
+      // Sincroniza armas da unidade/departamento com status Cautela Pendente e Acautelada
       (weapons || []).forEach(w => {
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
         const isWeaponAcautelada = w.status === 'Acautelada';
 
-        const matchUnit = isGeral || 
-                          currentUser.managementScope === 'department' || 
-                          !targetUnitId || 
-                          w.unitId === targetUnitId;
+        const matchUnit = isGeral
+          ? true
+          : hasDeptWideScope
+            ? (!targetDeptId || w.departmentId === targetDeptId || (w.unitId ? deptUnitIds.has(w.unitId) : false))
+            : (!targetUnitId || w.unitId === targetUnitId);
 
         if (!matchUnit) return;
 
@@ -1797,21 +1851,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     } catch (e) {}
   };
 
-  // Armas disponíveis na unidade do usuário para solicitação de cautela: SOMENTE armas com status "No Cofre"
+  // Armas disponíveis na unidade (ou departamento para Armeiro com abrangência departamental) para solicitação de cautela: SOMENTE armas com status "No Cofre"
   const userUnitWeapons = useMemo(() => {
     const userUnitId = currentUser.unitId;
     const sourceWeapons = (weapons && weapons.length > 0) ? weapons : storage.getAllWeapons();
     return sourceWeapons.filter(w => {
-      const sameUnit = isGeral ? true : (
-        (userUnitId && w.unitId === userUnitId) ||
-        (!w.unitId && currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
-        (!userUnitId && currentUser.departmentId && w.departmentId === currentUser.departmentId)
-      );
+      if (hasDeptWideScope && novaCautelaUnitFilter !== 'TODAS') {
+        if (w.unitId !== novaCautelaUnitFilter) return false;
+      }
+      const sameUnit = isGeral
+        ? true
+        : hasDeptWideScope
+          ? (
+              (currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
+              (w.unitId ? deptUnitIds.has(w.unitId) : false)
+            )
+          : (
+              (userUnitId && w.unitId === userUnitId) ||
+              (!w.unitId && currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
+              (!userUnitId && currentUser.departmentId && w.departmentId === currentUser.departmentId)
+            );
       const st = (w.status || '').trim().toLowerCase();
       const isNoCofre = st === 'no cofre' || st === 'nocofre';
       return sameUnit && isNoCofre;
     });
-  }, [weapons, currentUser.unitId, currentUser.departmentId, isGeral]);
+  }, [weapons, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds, novaCautelaUnitFilter]);
 
   // Armas selecionáveis durante a edição de uma cautela pendente (inclui a arma atual da cautela + armas "No Cofre" da unidade)
   const editableUnitWeapons = useMemo(() => {
@@ -1903,13 +1967,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   const availableAmmoInUnit = useMemo(() => {
     if (!selectedWeapon) return [];
+    const targetUnitId = selectedWeapon.unitId || currentUser.unitId;
     return ammoStocks.filter(st => {
-      const matchUnit = isGeral ? true : (st.unitId === currentUser.unitId);
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? st.unitId === targetUnitId
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (st.unitId ? deptUnitIds.has(st.unitId) : false))
+            : st.unitId === currentUser.unitId;
       const cal = calibers.find(c => c.id === st.caliberId);
       const matchCaliber = cal && selectedWeapon.caliber && cal.name.toLowerCase().includes(selectedWeapon.caliber.toLowerCase());
       return matchUnit && (matchCaliber || st.quantity > 0);
     });
-  }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
+  }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   // Munições disponíveis na unidade correspondentes ao calibre do armamento e à Destinação selecionada (Defesa, Treinamento ou Ensaio)
   const availableAmmoForAuthorizingWeapon = useMemo(() => {
@@ -1922,7 +1993,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         .replace(/\s+/g, ' ')
         .trim();
 
-    const targetUnitId = authorizingCautela.unitId || currentUser.unitId;
+    const authWeaponObj = weapons.find(w => w.id === authorizingCautela.weaponId || (w.serialNumber && w.serialNumber === authorizingCautela.weaponSerialNumber));
+    const targetUnitId = authorizingCautela.unitId || authWeaponObj?.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     const selCal = normPlain(authorizingCautela.weaponCaliber);
 
     return ammoStocks.filter(st => {
@@ -1930,7 +2002,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
       const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
       const stUnitId = st.unitId || stVault?.unitId || '';
-      const matchUnit = isGeral ? true : (!targetUnitId || stUnitId === targetUnitId);
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? stUnitId === targetUnitId
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (stUnitId ? deptUnitIds.has(stUnitId) : false))
+            : stUnitId === currentUser.unitId;
       if (!matchUnit) return false;
 
       const cal = calibers.find(
@@ -2783,16 +2861,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     [nowTickMs, ACTIVE_CAUTELA_EDIT_LIMIT_MS]
   );
 
-  // Armas disponíveis para troca pelo Armeiro na edição da cautela ativa (arma atual + armas "No Cofre" da unidade)
+  // Armas disponíveis para troca pelo Armeiro na edição da cautela ativa (arma atual + armas "No Cofre" da unidade ou departamento)
   const editableActiveWeapons = useMemo(() => {
     if (!editingActiveCautela) return [];
-    const targetUnitId = editingActiveCautela.unitId || currentUser.unitId;
+    const targetUnitId = editingActiveCautela.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     return weapons.filter(w => {
-      const matchUnit = isGeral ? true : (!targetUnitId || w.unitId === targetUnitId);
+      const matchUnit = isGeral
+        ? true
+        : hasDeptWideScope
+          ? (!targetUnitId
+              ? (w.departmentId === currentUser.departmentId || (w.unitId ? deptUnitIds.has(w.unitId) : false))
+              : w.unitId === targetUnitId || deptUnitIds.has(w.unitId))
+          : (!targetUnitId || w.unitId === targetUnitId);
       if (!matchUnit) return false;
       return w.id === editingActiveCautela.weaponId || w.status === 'No Cofre';
     });
-  }, [editingActiveCautela, weapons, currentUser.unitId, isGeral]);
+  }, [editingActiveCautela, weapons, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   const activeEditSelectedWeapon = useMemo(() => {
     if (!activeEditWeaponId) return null;
@@ -2819,7 +2903,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         .replace(/\s+/g, ' ')
         .trim();
 
-    const targetUnitId = editingActiveCautela.unitId || currentUser.unitId;
+    const targetUnitId = activeEditSelectedWeapon?.unitId || editingActiveCautela.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     const weaponCaliber =
       activeEditSelectedWeapon?.caliber || editingActiveCautela.weaponCaliber || '';
     const selCal = normPlain(weaponCaliber);
@@ -2834,7 +2918,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     ammoStocks.forEach(st => {
       const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
       const stUnitId = st.unitId || stVault?.unitId || '';
-      const matchUnit = isGeral ? true : (!targetUnitId || stUnitId === targetUnitId);
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? stUnitId === targetUnitId
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (stUnitId ? deptUnitIds.has(stUnitId) : false))
+            : stUnitId === currentUser.unitId;
       if (!matchUnit) return;
 
       const cal = calibers.find(
@@ -3242,14 +3332,26 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   };
 
-  // Armas Vault Spaces na unidade da arma devolvida
+  // Armas Vault Spaces na unidade da arma devolvida (ou departamento caso aplicável)
   const availableArmasVaults = useMemo(() => {
     if (!returningCautela) return [];
-    const targetUnit = returningCautela.unitId || currentUser.unitId;
+    const retWeaponObj = weapons.find(w => w.id === returningCautela.weaponId || (w.serialNumber && w.serialNumber === returningCautela.weaponSerialNumber));
+    const targetUnit = returningCautela.unitId || retWeaponObj?.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     const originWeaponVaultId = returningCautela.vaultSpaceId || '';
-    const unitVaults = vaultSpaces.filter(v =>
-      isGeral ? (!targetUnit || !v.unitId || v.unitId === targetUnit) : (!v.unitId || v.unitId === targetUnit)
+    let unitVaults = vaultSpaces.filter(v =>
+      targetUnit
+        ? (!v.unitId || v.unitId === targetUnit)
+        : isGeral
+          ? true
+          : hasDeptWideScope
+            ? (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+            : (!v.unitId || v.unitId === currentUser.unitId)
     );
+    if (unitVaults.length === 0 && hasDeptWideScope) {
+      unitVaults = vaultSpaces.filter(v =>
+        isGeral ? true : (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+      );
+    }
     const weaponTyped = unitVaults.filter(v => {
       const t = String(v.type || '').toUpperCase();
       return !t || t.includes('ARMA') || v.id === originWeaponVaultId;
@@ -3260,18 +3362,30 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (originObj) return [originObj, ...baseList];
     }
     return baseList;
-  }, [returningCautela, vaultSpaces, currentUser.unitId, isGeral]);
+  }, [returningCautela, weapons, vaultSpaces, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   // Cofres disponíveis para receber as munições devolvidas na unidade
   const availableAmmoVaults = useMemo(() => {
     if (!returningCautela) return [];
-    const targetUnit = returningCautela.unitId || currentUser.unitId;
+    const retWeaponObj = weapons.find(w => w.id === returningCautela.weaponId || (w.serialNumber && w.serialNumber === returningCautela.weaponSerialNumber));
+    const targetUnit = returningCautela.unitId || retWeaponObj?.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     const linkedAmmo = getLinkedAmmoForCautela(returningCautela);
     const originAmmoVaultId = linkedAmmo?.vaultSpaceId || '';
 
-    const unitVaults = vaultSpaces.filter(v =>
-      isGeral ? (!targetUnit || !v.unitId || v.unitId === targetUnit) : (!v.unitId || v.unitId === targetUnit)
+    let unitVaults = vaultSpaces.filter(v =>
+      targetUnit
+        ? (!v.unitId || v.unitId === targetUnit)
+        : isGeral
+          ? true
+          : hasDeptWideScope
+            ? (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+            : (!v.unitId || v.unitId === currentUser.unitId)
     );
+    if (unitVaults.length === 0 && hasDeptWideScope) {
+      unitVaults = vaultSpaces.filter(v =>
+        isGeral ? true : (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+      );
+    }
     const ammoTyped = unitVaults.filter(v => {
       const t = String(v.type || '').toUpperCase();
       return !t || t.includes('MUNI') || v.id === originAmmoVaultId;
@@ -3283,7 +3397,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (originVaultObj) return [originVaultObj, ...baseList];
     }
     return baseList;
-  }, [returningCautela, vaultSpaces, currentUser.unitId, isGeral, localSyncTick]);
+  }, [returningCautela, weapons, vaultSpaces, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds, localSyncTick]);
 
   // Impressão do Recibo Oficial de Devolução de Armamento e Munições ao Cofre
   const handlePrintReciboDevolucao = (
@@ -3888,13 +4002,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     if (cautela.status === 'DEVOLUCAO_PENDENTE') {
       // Pré-carrega os dados já informados pelo policial para conferência e recibo do armeiro
       const reportedShots = Number(cautela.shotsFired || 0);
+      const hasReportedShots = Boolean(cautela.hadShots) || reportedShots > 0;
       const defaultRetAmmo =
         cautela.returnedAmmoQuantity !== undefined && cautela.returnedAmmoQuantity !== null
           ? Number(cautela.returnedAmmoQuantity)
           : Math.max(0, ammoDetails.quantity - reportedShots);
 
-      setHadShots(Boolean(cautela.hadShots));
-      setShotsFired(reportedShots);
+      setHadShots(hasReportedShots);
+      setShotsFired(hasReportedShots ? Math.max(1, reportedShots) : 0);
       setReturnedAmmoQuantity(ammoDetails.hasAmmo && ammoDetails.seraDevolvida ? defaultRetAmmo : 0);
       setReturnAmmoUsedCount(
         ammoDetails.hasAmmo && ammoDetails.seraDevolvida
@@ -3943,6 +4058,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     e.preventDefault();
     if (!returningCautela) return;
 
+    if (hadShots && (!shotsFired || Number(shotsFired) <= 0)) {
+      setErrorMsg('Informe uma quantidade válida de tiros efetuados (maior que zero).');
+      return;
+    }
     if (!isWorking && !defectDescription.trim()) {
       setErrorMsg('Informe a descrição do defeito apresentado pela arma.');
       return;
@@ -4060,8 +4179,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             overrides: receiptOverrides
           });
 
+          const effectiveConfirmedShots = hadShots ? Math.max(0, Number(shotsFired) || 0) : 0;
+          const shotsAddedCount = res.shotsAdded !== undefined ? res.shotsAdded : effectiveConfirmedShots;
+          const shotsMsgPart =
+            shotsAddedCount > 0
+              ? ` +${shotsAddedCount} tiro(s) somado(s) ao total de disparos do armamento${
+                  res.newWeaponTotalShots !== undefined ? ` (total atual: ${res.newWeaponTotalShots})` : ''
+                }.`
+              : '';
+
           setSuccessMsg(
-            `Cautela recebida com sucesso! Arma ${returningCautela.weaponModel} (Série: ${returningCautela.weaponSerialNumber}) guardada ${destText}.${
+            `Cautela recebida com sucesso! Arma ${returningCautela.weaponModel} (Série: ${returningCautela.weaponSerialNumber}) guardada ${destText}.${shotsMsgPart}${
               ammoDetails.hasAmmo
                 ? shouldReturnAmmoToVault
                   ? ` Munições (${sanitizedReturnedAmmo} un.) colocadas ${ammoDestText} e cautela de munições baixada como Devolvida. Recibo da arma e da munição gerado!`
@@ -5372,13 +5500,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     });
 
-    // Inclui também armas da unidade ainda sem cautela registrada para permitir consulta completa
+    // Inclui também armas da unidade/departamento ainda sem cautela registrada para permitir consulta completa
     (weapons || []).forEach(w => {
       const sameUnit =
         isGeral ||
-        currentUser.managementScope === 'department' ||
-        !currentUser.unitId ||
-        w.unitId === currentUser.unitId;
+        (hasDeptWideScope
+          ? (!currentUser.departmentId || w.departmentId === currentUser.departmentId || (w.unitId ? deptUnitIds.has(w.unitId) : false))
+          : (!currentUser.unitId || w.unitId === currentUser.unitId));
       if (!sameUnit) return;
       const serial = (w.serialNumber || '').trim();
       const key = serial ? `ser:${normalizeStr(serial)}` : `id:${w.id}`;
@@ -5723,8 +5851,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
     const defaultBranding = resolveCautelaPrintBranding(null);
     const allUsersLookup = storage.getAllUsersForLookup();
-    const issuerStored = allUsersLookup.find(u => u.id === currentUser.id);
-    const issuerCareer = (currentUser.cargo || issuerStored?.cargo || 'Armeiro').trim();
+    const currentMaspDigits = String(currentUser.masp || '').replace(/\D/g, '');
+    const issuerStored =
+      allUsersLookup.find(u => u.id === currentUser.id) ||
+      (currentMaspDigits
+        ? allUsersLookup.find(u => String(u.masp || '').replace(/\D/g, '') === currentMaspDigits)
+        : undefined);
+    const issuerName = (currentUser.name || issuerStored?.name || 'Usuário').trim();
+    const issuerCareer = (currentUser.cargo || issuerStored?.cargo || 'Policial Civil').trim();
+    const issuerMasp = (currentUser.masp || issuerStored?.masp || '—').trim();
     const emittedAtStr = new Date().toLocaleString('pt-BR');
 
     const selectedWeaponOpt = armorerReportPreview.weaponOptions.find(
@@ -5834,13 +5969,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       `;
     };
 
-    // Assinatura do Armeiro e rodapé em cada página impressa
+    // Assinatura do usuário (Nome, Carreira e MASP:) e rodapé em cada página impressa
     const renderArmorerSignatureAndFooter = (pageNum: number, totalPages: number) => `
       <div class="signature-section">
         <div class="signature-line"></div>
-        <div class="signature-name">${escapeHtml(currentUser.name)}</div>
-        <div class="signature-role">${escapeHtml(issuerCareer)} • Armeiro Responsável (${escapeHtml(unitSigla)})</div>
-        <div class="signature-masp">MASP: ${escapeHtml(currentUser.masp || 'N/I')}</div>
+        <div class="signature-name">${escapeHtml(issuerName)}</div>
+        <div class="signature-role">${escapeHtml(issuerCareer)}</div>
+        <div class="signature-masp">MASP: ${escapeHtml(issuerMasp)}</div>
       </div>
 
       <div class="footer-note">
@@ -6958,10 +7093,33 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     <span className="text-[10px] text-slate-400 font-mono">Deduz do cofre e gera recibo imediato</span>
                   </div>
 
+                  {hasDeptWideScope && departmentUnits.length > 1 && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Filtrar por Unidade do Departamento
+                      </label>
+                      <select
+                        value={novaCautelaUnitFilter}
+                        onChange={(e) => {
+                          setNovaCautelaUnitFilter(e.target.value);
+                          setSelectedWeaponId('');
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2 text-xs text-slate-200 font-semibold"
+                      >
+                        <option value="TODAS">Todas as Unidades do Departamento ({departmentUnits.length})</option>
+                        {departmentUnits.map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   {isDirectCautela && (
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                        Selecione o Policial Beneficiário (Mesma Unidade) <span className="text-amber-400">*</span>
+                        Selecione o Policial Beneficiário ({hasDeptWideScope ? 'Unidades do Departamento' : 'Mesma Unidade'}) <span className="text-amber-400">*</span>
                       </label>
                       <select
                         value={targetOfficerId}
@@ -6969,11 +7127,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         className="w-full bg-slate-900 border border-amber-600/70 focus:border-amber-400 rounded-xl px-3 py-2 text-xs text-amber-200 font-semibold"
                         required
                       >
-                        {availableUnitOfficers.map(o => (
-                          <option key={o.id} value={o.id}>
-                            {o.name} (MASP: {o.masp}) - {o.cargo || o.role}
-                          </option>
-                        ))}
+                        {availableUnitOfficers.map(o => {
+                          const oUnit = departmentUnits.find(u => u.id === o.unitId) || units.find(u => u.id === o.unitId);
+                          return (
+                            <option key={o.id} value={o.id}>
+                              {o.name} (MASP: {o.masp}) - {o.cargo || o.role}{hasDeptWideScope && oUnit ? ` [${oUnit.name}]` : ''}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   )}
@@ -6982,18 +7143,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                  1. Selecione a Arma Disponível na Unidade ({userUnitWeapons.length} disponível{userUnitWeapons.length === 1 ? '' : 'is'})
+                  1. Selecione a Arma Disponível {hasDeptWideScope ? 'no Departamento / Unidade' : 'na Unidade'} ({userUnitWeapons.length} disponível{userUnitWeapons.length === 1 ? '' : 'is'})
                 </label>
                 {userUnitWeapons.length === 0 ? (
                   <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
                     <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-                    Não há armas com status "No Cofre" disponíveis na sua unidade no momento.
+                    Não há armas com status "No Cofre" disponíveis {hasDeptWideScope ? 'nas unidades selecionadas' : 'na sua unidade'} no momento.
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">
                     {userUnitWeapons.map(w => {
                       const isSelected = selectedWeaponId === w.id;
                       const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+                      const weapUnit = departmentUnits.find(u => u.id === w.unitId) || units.find(u => u.id === w.unitId);
                       return (
                         <div
                           key={w.id}
@@ -7018,9 +7180,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                               Série: {w.serialNumber}
                             </div>
                           </div>
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60">
-                            <span>{isPolicial ? 'Disponível na Unidade' : `Local: ${vault ? vault.code : 'Cofre'}`}</span>
-                            <span>{w.magazineQuantity || 1} carregadores</span>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60 gap-2">
+                            <span className="truncate">
+                              {isPolicial
+                                ? 'Disponível na Unidade'
+                                : `${hasDeptWideScope && weapUnit ? `${weapUnit.name} • ` : ''}Local: ${vault ? vault.code : 'Cofre'}`}
+                            </span>
+                            <span className="shrink-0">{w.magazineQuantity || 1} carregadores</span>
                           </div>
                         </div>
                       );
@@ -9231,6 +9397,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         const ammoDetails = getRescuedAmmoDetails(returningCautela);
         const isArmorerConfirmingPending = canAuthorize && returningCautela.status === 'DEVOLUCAO_PENDENTE';
         const requesterInfo = getResolvedRequester(returningCautela);
+        const returningWeaponObj = weapons.find(
+          w =>
+            w.id === returningCautela.weaponId ||
+            (w.serialNumber &&
+              returningCautela.weaponSerialNumber &&
+              w.serialNumber.trim().toUpperCase() === returningCautela.weaponSerialNumber.trim().toUpperCase())
+        );
+        const currentWeaponShots = Number(returningWeaponObj?.shotCount || 0);
 
         return (
           <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
@@ -9290,7 +9464,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-emerald-800/50 text-[11px]">
                     <div className="bg-slate-950/70 p-2 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase">Disparos Relatados</span>
-                      <strong className="text-slate-100">{returningCautela.hadShots ? `${returningCautela.shotsFired || 0} tiro(s)` : 'Zero disparos'}</strong>
+                      <strong className="text-slate-100">
+                        {returningCautela.hadShots || Number(returningCautela.shotsFired || 0) > 0
+                          ? `${returningCautela.shotsFired || 0} tiro(s)`
+                          : 'Zero disparos'}
+                      </strong>
                     </div>
                     <div className="bg-slate-950/70 p-2 rounded-lg border border-slate-800">
                       <span className="text-slate-400 block text-[10px] uppercase">Condição Relatada</span>
@@ -9384,6 +9562,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono"
                         required={hadShots}
                       />
+                      {canAuthorize && Number(shotsFired) > 0 && (
+                        <p className="text-[11px] text-amber-200/95 mt-1.5 bg-amber-950/30 border border-amber-700/40 rounded-lg px-2.5 py-1.5">
+                          Ao receber a arma, <strong className="font-mono text-amber-300">+{Number(shotsFired)}</strong> tiro(s) serão somados ao cadastro do armamento (Atual:{' '}
+                          <strong className="font-mono">{currentWeaponShots}</strong> → Novo total:{' '}
+                          <strong className="font-mono text-emerald-300">{currentWeaponShots + Number(shotsFired)}</strong>).
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -11223,7 +11408,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   </div>
 
                   <p className="text-[11px] text-slate-400">
-                    ● Padrão de impressão da unidade: <strong>1 registro de cautela por página</strong>, com o <strong>logo da unidade no cabeçalho à esquerda do papel</strong>, todas as informações completas da cautela e a <strong>assinatura do armeiro</strong> em cada página.
+                    ● Padrão de impressão da unidade: <strong>1 registro de cautela por página</strong>, com o <strong>logo da unidade no cabeçalho à esquerda do papel</strong> e assinatura em 3 linhas (<strong>nome do usuário</strong>, <strong>carreira</strong> e <strong>MASP:</strong>) em cada página.
                   </p>
                 </div>
 

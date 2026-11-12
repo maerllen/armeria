@@ -277,12 +277,24 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Recebido' | 'Cancelado'>('all');
   
-  const allUnits = useMemo(() => storage.getAllUnits(), []);
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
+  const hasDeptWideScope = isGeral || isAdmin || isDeptArmeiro;
 
-  // For users with unitId, strictly bound to their unit.
-  // For Geral users with no unitId, can pick a specific unit or ALL.
+  const allUnits = useMemo(() => storage.getAllUnits(), []);
+  const filterableUnits = useMemo(() => {
+    if (isGeral) return allUnits;
+    return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+  }, [allUnits, isGeral, currentUser.departmentId]);
+  const deptUnitIds = useMemo(() => new Set(filterableUnits.map(u => u.id)), [filterableUnits]);
+
+  const isLockedToSingleUnit = !hasDeptWideScope && Boolean(currentUser.unitId);
+
   const [activeUnitFilter, setActiveUnitFilter] = useState<string>(() => {
-    if (currentUser.unitId) return currentUser.unitId;
+    if (isLockedToSingleUnit) return currentUser.unitId;
     if (selectedUnitId && selectedUnitId !== 'ALL') return selectedUnitId;
     return 'ALL';
   });
@@ -296,21 +308,30 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
   const [undoError, setUndoError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
-  // Strict Rule:
-  // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
   const unitScopedTransfers = useMemo(() => {
     let result = transfers;
-    if (currentUser.unitId) {
+    if (isLockedToSingleUnit) {
       result = result.filter(
         t => t.originUnitId === currentUser.unitId || t.destinationUnitId === currentUser.unitId
       );
-    } else if (activeUnitFilter && activeUnitFilter !== 'ALL') {
-      result = result.filter(
-        t => t.originUnitId === activeUnitFilter || t.destinationUnitId === activeUnitFilter
-      );
+    } else {
+      if (!isGeral && currentUser.departmentId) {
+        result = result.filter(
+          t =>
+            t.originDepartmentId === currentUser.departmentId ||
+            t.destinationDepartmentId === currentUser.departmentId ||
+            (t.originUnitId ? deptUnitIds.has(t.originUnitId) : false) ||
+            (t.destinationUnitId ? deptUnitIds.has(t.destinationUnitId) : false)
+        );
+      }
+      if (activeUnitFilter && activeUnitFilter !== 'ALL') {
+        result = result.filter(
+          t => t.originUnitId === activeUnitFilter || t.destinationUnitId === activeUnitFilter
+        );
+      }
     }
     return result;
-  }, [transfers, currentUser.unitId, activeUnitFilter]);
+  }, [transfers, isLockedToSingleUnit, isGeral, currentUser.unitId, currentUser.departmentId, deptUnitIds, activeUnitFilter]);
 
   const filteredTransfers = useMemo(() => {
     let result = unitScopedTransfers;
@@ -341,9 +362,15 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
 
   const canUndoTransfer = (trf: AmmoTransfer) => {
     if (trf.status !== 'Pendente') return false;
-    if (currentUser.role === 'Geral') return true;
+    if (isGeral) return true;
     if (trf.transferredByUserId === currentUser.id) return true;
-    if (currentUser.role === 'Armeiro' || currentUser.role === 'Administrador') {
+    if (isAdmin) {
+      return !currentUser.departmentId || trf.originDepartmentId === currentUser.departmentId || (trf.originUnitId ? deptUnitIds.has(trf.originUnitId) : false);
+    }
+    if (isArmeiro) {
+      if (isDeptArmeiro) {
+        return trf.originDepartmentId === currentUser.departmentId || (trf.originUnitId ? deptUnitIds.has(trf.originUnitId) : false);
+      }
       return currentUser.unitId === trf.originUnitId;
     }
     return false;
@@ -426,7 +453,7 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
           )}
 
           {/* Unit Isolation Info Banner or Selector */}
-          {currentUser.unitId ? (
+          {isLockedToSingleUnit ? (
             <div className="p-3 bg-sky-500/10 border border-sky-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-sky-400 shrink-0" />
@@ -450,8 +477,10 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
                   onChange={e => setActiveUnitFilter(e.target.value)}
                   className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-sky-500"
                 >
-                  <option value="ALL">Todas as Unidades (Visão Geral)</option>
-                  {allUnits.map(u => (
+                  <option value="ALL">
+                    {isGeral ? 'Todas as Unidades (Visão Geral)' : 'Todas as Unidades do Departamento'}
+                  </option>
+                  {filterableUnits.map(u => (
                     <option key={u.id} value={u.id}>
                       {u.name}
                     </option>

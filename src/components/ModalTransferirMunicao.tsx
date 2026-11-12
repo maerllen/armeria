@@ -20,6 +20,7 @@ import {
 
 interface TransferAmmoModalProps {
   initialStock?: AmmunitionStock | null;
+  selectedUnitId?: string;
   stocks: AmmunitionStock[];
   calibers: Caliber[];
   departments: Department[];
@@ -37,6 +38,7 @@ interface TransferItemDraft {
 
 export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
   initialStock,
+  selectedUnitId,
   stocks,
   calibers,
   departments,
@@ -56,10 +58,35 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
     return fromStorage && fromStorage.length > 0 ? fromStorage : units;
   }, [units]);
 
-  const isGeral = currentUser.role === 'Geral';
-  const defaultOriginUnitId = (!isGeral && currentUser.unitId)
-    ? currentUser.unitId
-    : (initialStock?.unitId || currentUser.unitId || (allUnits[0]?.id || ''));
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const hasDeptWideScope =
+    isGeral ||
+    effectiveRole === 'Administrador' ||
+    (effectiveRole === 'Armeiro' && currentUser.managementScope === 'department');
+
+  const allowedOriginUnits = useMemo(() => {
+    if (isGeral) return allUnits;
+    if (hasDeptWideScope) {
+      return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+    }
+    return allUnits.filter(u => u.id === currentUser.unitId);
+  }, [allUnits, isGeral, hasDeptWideScope, currentUser.departmentId, currentUser.unitId]);
+
+  const canSelectOriginUnit = isGeral || (hasDeptWideScope && allowedOriginUnits.length > 1);
+
+  const defaultOriginUnitId = (() => {
+    if (initialStock?.unitId && allowedOriginUnits.some(u => u.id === initialStock.unitId)) {
+      return initialStock.unitId;
+    }
+    if (selectedUnitId && allowedOriginUnits.some(u => u.id === selectedUnitId)) {
+      return selectedUnitId;
+    }
+    if (currentUser.unitId && allowedOriginUnits.some(u => u.id === currentUser.unitId)) {
+      return currentUser.unitId;
+    }
+    return allowedOriginUnits[0]?.id || currentUser.unitId || allUnits[0]?.id || '';
+  })();
 
   const [originUnitId, setOriginUnitId] = useState<string>(defaultOriginUnitId);
   const originUnit = allUnits.find(u => u.id === originUnitId);
@@ -265,8 +292,12 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
     e.preventDefault();
     setError(null);
 
-    if (!isGeral && currentUser.unitId && originUnitId !== currentUser.unitId) {
-      setError('Você só possui permissão para transferir munições pertencentes à sua própria unidade.');
+    if (!isGeral && !allowedOriginUnits.some(u => u.id === originUnitId)) {
+      setError(
+        hasDeptWideScope
+          ? 'Você só possui permissão para transferir munições pertencentes às unidades do seu departamento.'
+          : 'Você só possui permissão para transferir munições pertencentes à sua própria unidade.'
+      );
       return;
     }
 
@@ -412,20 +443,25 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
                 <span>1. Unidade de Origem (Remetente)</span>
               </div>
 
-              {isGeral ? (
+              {canSelectOriginUnit ? (
                 <div>
                   <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                    Selecionar Unidade de Origem
+                    Selecionar Unidade de Origem {hasDeptWideScope && !isGeral ? `(${originDept?.code || originDept?.name || 'Seu Departamento'})` : ''}
                   </label>
                   <select
                     value={originUnitId}
                     onChange={(e) => {
-                      setOriginUnitId(e.target.value);
+                      const nextOrigin = e.target.value;
+                      setOriginUnitId(nextOrigin);
                       setDraftItems([]);
+                      if (destUnitId === nextOrigin) {
+                        const altDest = allUnits.find(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== nextOrigin);
+                        if (altDest) setDestUnitId(altDest.id);
+                      }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
                   >
-                    {allUnits.map(u => (
+                    {allowedOriginUnits.map(u => (
                       <option key={u.id} value={u.id}>{u.name}</option>
                     ))}
                   </select>

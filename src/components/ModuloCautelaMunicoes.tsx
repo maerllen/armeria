@@ -33,9 +33,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   const isPolicial = effectiveRole === 'Policial';
   const isGeral = effectiveRole === 'Geral';
   const isArmeiro = effectiveRole === 'Armeiro';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
   const isAdmin = effectiveRole === 'Administrador';
+  const hasDeptWideScope = isGeral || isAdmin || isDeptArmeiro;
   const isArmeiroOrAdmin = !isPolicial && (isGeral || isArmeiro || isAdmin);
   const canAuthorize = isArmeiroOrAdmin;
+
+  const departmentUnits = useMemo(() => {
+    const allUnits = storage.getAllUnits().length > 0 ? storage.getAllUnits() : units;
+    if (isGeral) return allUnits;
+    if (!currentUser.departmentId) return units;
+    return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+  }, [units, isGeral, currentUser.departmentId]);
+
+  const deptUnitIds = useMemo(() => new Set(departmentUnits.map(u => u.id)), [departmentUnits]);
 
   // Tabs
   const [activeTab, setActiveTab] = useState<'MINHAS' | 'PENDENTES' | 'TODAS' | 'NOVA'>(
@@ -66,6 +77,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   // Armorer Direct Cautela State
   const [isDirectCautela, setIsDirectCautela] = useState(false);
   const [targetOfficerId, setTargetOfficerId] = useState('');
+  const [selectedDirectUnitFilter, setSelectedDirectUnitFilter] = useState<string>('TODAS');
 
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautelaMun, setAuthorizingCautelaMun] = useState<CautelaMunicao | null>(null);
@@ -80,11 +92,21 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
   }, [calibers, selectedCaliberId]);
 
-  // Available officers in unit
+  // Available officers in unit or department (for department-scoped Armeiro / Admin / Geral)
   const availableUnitOfficers = useMemo(() => {
-    const allUsers = storage.getUsers();
-    return allUsers.filter(u => (isGeral ? true : u.unitId === currentUser.unitId) && u.hasSystemAccess !== false);
-  }, [currentUser, isGeral]);
+    const allUsers = storage.getUsers(currentUser);
+    return allUsers.filter(u => {
+      if (u.hasSystemAccess === false) return false;
+      if (hasDeptWideScope && selectedDirectUnitFilter !== 'TODAS') {
+        if (u.unitId !== selectedDirectUnitFilter) return false;
+      }
+      if (isGeral) return true;
+      if (hasDeptWideScope) {
+        return u.departmentId === currentUser.departmentId || (u.unitId ? deptUnitIds.has(u.unitId) : false);
+      }
+      return u.unitId === currentUser.unitId;
+    });
+  }, [currentUser, isGeral, hasDeptWideScope, deptUnitIds, selectedDirectUnitFilter]);
 
   // Modal de Devolução
   const [returningCautela, setReturningCautela] = useState<CautelaMunicao | null>(null);
@@ -107,8 +129,14 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     let list = allCautelas;
     if (isPolicial) {
       list = list.filter(c => c.requesterId === currentUser.id || c.requesterMasp === currentUser.masp);
-    } else if (isArmeiro) {
-      if (currentUser.managementScope !== 'department') {
+    } else if (!isGeral) {
+      if (hasDeptWideScope) {
+        list = list.filter(c =>
+          c.departmentId === currentUser.departmentId ||
+          (c.unitId ? deptUnitIds.has(c.unitId) : false) ||
+          c.requesterId === currentUser.id
+        );
+      } else {
         list = list.filter(c => c.unitId === currentUser.unitId || c.requesterId === currentUser.id);
       }
     }
@@ -129,7 +157,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
 
     return list;
-  }, [allCautelas, currentUser, isArmeiro, isPolicial, statusFilter, searchTerm]);
+  }, [allCautelas, currentUser, isGeral, hasDeptWideScope, deptUnitIds, isPolicial, statusFilter, searchTerm]);
 
   // Lista a exibir com base na aba selecionada (PENDENTES mostra estritamente pendentes)
   const displayedCautelas = useMemo(() => {
@@ -141,14 +169,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
 
   // Contadores
   const pendingCount = useMemo(() => {
-    if (currentUser.role === 'Policial') {
+    if (isPolicial) {
       return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'PENDENTE').length;
     }
-    if (isArmeiro && currentUser.managementScope !== 'department') {
+    if (!isGeral) {
+      if (hasDeptWideScope) {
+        return allCautelas.filter(c =>
+          c.status === 'PENDENTE' &&
+          (c.departmentId === currentUser.departmentId || (c.unitId ? deptUnitIds.has(c.unitId) : false))
+        ).length;
+      }
       return allCautelas.filter(c => c.unitId === currentUser.unitId && c.status === 'PENDENTE').length;
     }
     return allCautelas.filter(c => c.status === 'PENDENTE').length;
-  }, [allCautelas, currentUser, isArmeiro]);
+  }, [allCautelas, currentUser, isPolicial, isGeral, hasDeptWideScope, deptUnitIds]);
 
   const myActiveCount = useMemo(() => {
     return allCautelas.filter(c => c.requesterId === currentUser.id && c.status === 'AUTORIZADA').length;
@@ -157,34 +191,51 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   // Cofre selecionado e estoques filtrados
   const [selectedVaultId, setSelectedVaultId] = useState('');
 
-  // Munições disponíveis na unidade do usuário
+  // Munições disponíveis na unidade (ou departamento para Armeiro departamental)
   const availableUnitStocks = useMemo(() => {
     const userUnitId = currentUser.unitId;
     return ammoStocks
       .filter(st => {
-        const matchUnit = isGeral ? true : (st.unitId === userUnitId);
-        return matchUnit && st.quantity > 0;
+        if (st.quantity <= 0) return false;
+        if (hasDeptWideScope && selectedDirectUnitFilter !== 'TODAS') {
+          if (st.unitId !== selectedDirectUnitFilter) return false;
+        }
+        const matchUnit = isGeral
+          ? true
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (st.unitId ? deptUnitIds.has(st.unitId) : false))
+            : st.unitId === userUnitId;
+        return matchUnit;
       })
       .map(st => {
         const cal = calibers.find(c => c.id === st.caliberId);
         const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+        const unitObj = departmentUnits.find(u => u.id === (st.unitId || vault?.unitId)) || units.find(u => u.id === (st.unitId || vault?.unitId));
         return {
           ...st,
           caliberName: cal ? cal.name : 'Calibre Padrão',
-          vaultCode: vault ? vault.code : 'Cofre'
+          vaultCode: vault ? vault.code : 'Cofre',
+          unitName: unitObj ? unitObj.name : ''
         };
       });
-  }, [ammoStocks, calibers, vaultSpaces, currentUser.unitId, isGeral]);
+  }, [ammoStocks, calibers, vaultSpaces, departmentUnits, units, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds, selectedDirectUnitFilter]);
 
-  // Cofres da unidade que possuem munições em estoque
+  // Cofres da unidade/departamento que possuem munições em estoque
   const availableUnitVaultsWithAmmo = useMemo(() => {
     const vaultIds = new Set(availableUnitStocks.map(s => s.vaultSpaceId).filter(Boolean));
     const targetUnitId = currentUser.unitId;
-    return vaultSpaces.filter(v => 
-      (isGeral ? true : v.unitId === targetUnitId) &&
-      (vaultIds.has(v.id) || v.type === 'MUNIÇÕES')
-    );
-  }, [availableUnitStocks, vaultSpaces, currentUser.unitId, isGeral]);
+    return vaultSpaces.filter(v => {
+      if (hasDeptWideScope && selectedDirectUnitFilter !== 'TODAS') {
+        if (v.unitId !== selectedDirectUnitFilter) return false;
+      }
+      const matchUnit = isGeral
+        ? true
+        : hasDeptWideScope
+          ? (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+          : v.unitId === targetUnitId;
+      return matchUnit && (vaultIds.has(v.id) || v.type === 'MUNIÇÕES');
+    });
+  }, [availableUnitStocks, vaultSpaces, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds, selectedDirectUnitFilter]);
 
   // Sincroniza cofre padrão
   React.useEffect(() => {
@@ -221,20 +272,41 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     return availableUnitStocks.find(s => s.id === selectedStockId);
   }, [availableUnitStocks, selectedStockId]);
 
-  // Estoques disponíveis na unidade para o armeiro autorizar a cautela pendente
+  // Estoques disponíveis na unidade (ou departamento) para o armeiro autorizar a cautela pendente
   const availableStocksForAuthorizing = useMemo(() => {
     if (!authorizingCautelaMun) return [];
-    const targetUnitId = authorizingCautelaMun.unitId || currentUser.unitId;
+    const targetUnitId = authorizingCautelaMun.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
     const calId = authorizingCautelaMun.caliberId;
     const calName = (authorizingCautelaMun.caliberName || '').toLowerCase().trim();
-    return availableUnitStocks.filter(st => {
-      const matchUnit = isGeral ? true : (st.unitId === targetUnitId);
+    const allDeptStocks = ammoStocks
+      .filter(st => {
+        if (st.quantity <= 0) return false;
+        if (isGeral) return true;
+        if (targetUnitId) return st.unitId === targetUnitId;
+        if (hasDeptWideScope) {
+          return st.departmentId === currentUser.departmentId || (st.unitId ? deptUnitIds.has(st.unitId) : false);
+        }
+        return st.unitId === currentUser.unitId;
+      })
+      .map(st => {
+        const cal = calibers.find(c => c.id === st.caliberId);
+        const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+        const unitObj = departmentUnits.find(u => u.id === (st.unitId || vault?.unitId)) || units.find(u => u.id === (st.unitId || vault?.unitId));
+        return {
+          ...st,
+          caliberName: cal ? cal.name : 'Calibre Padrão',
+          vaultCode: vault ? vault.code : 'Cofre',
+          unitName: unitObj ? unitObj.name : ''
+        };
+      });
+
+    return allDeptStocks.filter(st => {
       const c = calibers.find(x => x.id === st.caliberId);
       const cName = (c?.name || '').toLowerCase().trim();
       const matchCaliber = (calId && st.caliberId === calId) || (cName && (cName.includes(calName) || calName.includes(cName)));
-      return matchUnit && matchCaliber && st.quantity > 0;
+      return matchCaliber && st.quantity > 0;
     });
-  }, [authorizingCautelaMun, availableUnitStocks, calibers, currentUser.unitId, isGeral]);
+  }, [authorizingCautelaMun, ammoStocks, calibers, vaultSpaces, departmentUnits, units, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   React.useEffect(() => {
     if (authorizingCautelaMun && availableStocksForAuthorizing.length > 0) {
@@ -453,20 +525,34 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     }
   };
 
-  // Cofres disponíveis para retorno de munição na unidade
+  // Cofres disponíveis para retorno de munição na unidade (ou departamento caso aplicável)
   const availableReturnVaults = useMemo(() => {
     if (!returningCautela) return [];
-    const targetUnit = returningCautela.unitId || currentUser.unitId;
-    return vaultSpaces.filter(v => (!v.unitId || v.unitId === targetUnit));
-  }, [returningCautela, vaultSpaces, currentUser.unitId]);
+    const targetUnit = returningCautela.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
+    const list = vaultSpaces.filter(v =>
+      targetUnit
+        ? (!v.unitId || v.unitId === targetUnit)
+        : isGeral
+          ? true
+          : hasDeptWideScope
+            ? (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+            : (!v.unitId || v.unitId === currentUser.unitId)
+    );
+    if (list.length === 0 && hasDeptWideScope) {
+      return vaultSpaces.filter(v =>
+        isGeral ? true : (v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+      );
+    }
+    return list;
+  }, [returningCautela, vaultSpaces, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
   // Abrir Modal de Devolução
   const handleOpenReturnModal = (cautela: CautelaMunicao) => {
     setReturningCautela(cautela);
     setReturnedQty(cautela.quantity);
     setReturnObs('');
-    const targetUnit = cautela.unitId || currentUser.unitId;
-    const defaultVault = cautela.vaultSpaceId || vaultSpaces.find(v => (!v.unitId || v.unitId === targetUnit) && (v.type === 'MUNIÇÃO' || v.type === 'MUNIÇÕES' || v.type === 'MUNICAO'))?.id || vaultSpaces[0]?.id || '';
+    const targetUnit = cautela.unitId || (hasDeptWideScope ? '' : currentUser.unitId);
+    const defaultVault = cautela.vaultSpaceId || vaultSpaces.find(v => (!targetUnit || !v.unitId || v.unitId === targetUnit) && (v.type === 'MUNIÇÃO' || v.type === 'MUNIÇÕES' || v.type === 'MUNICAO'))?.id || vaultSpaces[0]?.id || '';
     setReturnVaultSpaceId(defaultVault);
   };
 
@@ -1121,6 +1207,30 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                     <span className="text-[10px] text-slate-400 font-mono">Deduz do cofre e gera recibo imediato</span>
                   </div>
 
+                  {hasDeptWideScope && departmentUnits.length > 1 && (
+                    <div>
+                      <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                        Filtrar por Unidade do Departamento
+                      </label>
+                      <select
+                        value={selectedDirectUnitFilter}
+                        onChange={(e) => {
+                          setSelectedDirectUnitFilter(e.target.value);
+                          setSelectedVaultId('');
+                          setSelectedStockId('');
+                        }}
+                        className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-200 font-semibold"
+                      >
+                        <option value="TODAS">Todas as Unidades do Departamento ({departmentUnits.length})</option>
+                        {departmentUnits.map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   {isDirectCautela && (
                     <div>
                       <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
@@ -1132,11 +1242,14 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                         className="w-full bg-slate-900 border border-cyan-600/70 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-cyan-200 font-semibold"
                         required
                       >
-                        {availableUnitOfficers.map(o => (
-                          <option key={o.id} value={o.id}>
-                            {o.name} (MASP: {o.masp}) - {o.cargo || o.role}
-                          </option>
-                        ))}
+                        {availableUnitOfficers.map(o => {
+                          const oUnit = departmentUnits.find(u => u.id === o.unitId) || units.find(u => u.id === o.unitId);
+                          return (
+                            <option key={o.id} value={o.id}>
+                              {o.name} (MASP: {o.masp}) - {o.cargo || o.role}{hasDeptWideScope && oUnit ? ` [${oUnit.name}]` : ''}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   )}
@@ -1240,9 +1353,9 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                     {availableUnitVaultsWithAmmo.length > 0 && (
                       <div>
                         <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
-                          <span>1. Local do Cofre da Unidade</span>
+                          <span>1. Local do Cofre {hasDeptWideScope ? 'do Departamento / Unidade' : 'da Unidade'}</span>
                           <span className="text-[10px] text-cyan-400 font-mono font-normal">
-                            {availableUnitVaultsWithAmmo.length} cofre(s) na unidade
+                            {availableUnitVaultsWithAmmo.length} cofre(s) disponível(is)
                           </span>
                         </label>
                         <select
@@ -1250,12 +1363,15 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                           onChange={(e) => setSelectedVaultId(e.target.value)}
                           className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-slate-100 font-bold focus:border-cyan-500 font-mono"
                         >
-                          <option value="">Todos os Cofres da Unidade ({availableUnitStocks.length} lote(s) disponíveis)</option>
-                          {availableUnitVaultsWithAmmo.map(v => (
-                            <option key={v.id} value={v.id}>
-                              Cofre: {v.code}
-                            </option>
-                          ))}
+                          <option value="">Todos os Cofres Disponíveis ({availableUnitStocks.length} lote(s) disponíveis)</option>
+                          {availableUnitVaultsWithAmmo.map(v => {
+                            const vUnit = departmentUnits.find(u => u.id === v.unitId) || units.find(u => u.id === v.unitId);
+                            return (
+                              <option key={v.id} value={v.id}>
+                                {hasDeptWideScope && vUnit ? `[${vUnit.name}] ` : ''}Cofre: {v.code}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
                     )}
@@ -1287,10 +1403,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                             const peso = stock.pesoMunicao || cal?.peso || 'N/I';
                             const lote = stock.loteMunicao || 'S/L';
                             const ano = stock.anoFabricacao || 'N/A';
-                            const cofre = stock.vaultCode ? `[${stock.vaultCode}] ` : '';
+                            const unitPrefix = hasDeptWideScope && (stock as any).unitName ? `[${(stock as any).unitName} - ${stock.vaultCode}] ` : (stock.vaultCode ? `[${stock.vaultCode}] ` : '');
                             return (
                               <option key={stock.id} value={stock.id}>
-                                {cofre}{stock.caliberName} • {tipo} - {peso} - Lote: {lote} - Ano: {ano} (Disponível: {stock.quantity} un.)
+                                {unitPrefix}{stock.caliberName} • {tipo} - {peso} - Lote: {lote} - Ano: {ano} (Disponível: {stock.quantity} un.)
                               </option>
                             );
                           })}

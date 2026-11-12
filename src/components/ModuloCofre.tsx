@@ -46,6 +46,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
   const isArmeiro = effectiveRole === 'Armeiro' || (currentUser.roles?.includes('Armeiro') && effectiveRole === 'Armeiro');
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
   const isExplosivista = effectiveRole === 'Explosivista';
   const isAdmin = effectiveRole === 'Administrador';
   const isAdminOrArmeiro = isAdmin || isArmeiro;
@@ -54,6 +55,18 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
   const userUnit = units.find(u => u.id === currentUser.unitId);
   const effectiveDeptId = currentUser.departmentId || userUnit?.departmentId || '';
+
+  const deptUnitIds = useMemo(() => {
+    if (!effectiveDeptId) return new Set<string>();
+    return new Set(units.filter(u => u.departmentId === effectiveDeptId).map(u => u.id));
+  }, [units, effectiveDeptId]);
+
+  const isVaultInArmeiroScope = (v: VaultSpace) => {
+    if (isDeptArmeiro) {
+      return v.departmentId === effectiveDeptId || (v.unitId ? deptUnitIds.has(v.unitId) : false);
+    }
+    return v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId);
+  };
 
   // Visible departments based on user scope
   const visibleDepts = useMemo(() => {
@@ -72,17 +85,19 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     if (isArmeiro) {
       return vaultSpaces.filter(v => 
         (v.type === 'ARMAS' || v.type === 'MUNIÇÕES') &&
-        (v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId))
+        (isDeptArmeiro
+          ? (v.departmentId === effectiveDeptId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
+          : (v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId)))
       );
     }
     if (isExplosivista) {
       return vaultSpaces.filter(v => v.unitId === currentUser.unitId && v.type === 'EXPLOSIVOS');
     }
     if (isAdmin) {
-      return vaultSpaces.filter(v => v.departmentId === currentUser.departmentId);
+      return vaultSpaces.filter(v => v.departmentId === currentUser.departmentId || (v.unitId ? deptUnitIds.has(v.unitId) : false));
     }
     return vaultSpaces.filter(v => v.unitId === currentUser.unitId);
-  }, [vaultSpaces, isGeral, isArmeiro, isExplosivista, isAdmin, currentUser, effectiveDeptId]);
+  }, [vaultSpaces, isGeral, isArmeiro, isDeptArmeiro, isExplosivista, isAdmin, currentUser, effectiveDeptId, deptUnitIds]);
 
   // Global counts for filter badges
   const totalArmas = useMemo(() => userScopedVaults.filter(v => v.type === 'ARMAS').length, [userScopedVaults]);
@@ -94,18 +109,18 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId || d.id === effectiveDeptId);
   const availableUnitsForModal = isGeral 
     ? units.filter(u => u.departmentId === (deptId || effectiveDeptId))
-    : (isArmeiro || isExplosivista)
+    : ((isArmeiro && !isDeptArmeiro) || isExplosivista)
     ? (userUnit ? [userUnit] : units.filter(u => u.id === currentUser.unitId))
     : units.filter(u => u.departmentId === (deptId || effectiveDeptId));
 
   // Available units for quick filter dropdown
   const filterUnits = useMemo(() => {
     if (isGeral) return units;
-    if (isArmeiro || isExplosivista) {
+    if ((isArmeiro && !isDeptArmeiro) || isExplosivista) {
       return userUnit ? [userUnit] : units.filter(u => u.id === currentUser.unitId);
     }
     return units.filter(u => u.departmentId === (currentUser.departmentId || effectiveDeptId));
-  }, [isGeral, isArmeiro, isExplosivista, units, currentUser, userUnit, effectiveDeptId]);
+  }, [isGeral, isArmeiro, isDeptArmeiro, isExplosivista, units, currentUser, userUnit, effectiveDeptId]);
 
   const toggleDeptExpand = (id: string) => {
     setExpandedDeptIds(prev =>
@@ -140,8 +155,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const initialDept = isGeral ? (departments[0]?.id || '') : (currentUser.departmentId || effectiveDeptId);
     setDeptId(initialDept);
     const initialUnits = units.filter(u => u.departmentId === initialDept);
-    // Armeiro e Explosivista vinculam à sua unidade por padrão
-    const targetUnit = (!isGeral && currentUser.unitId) ? currentUser.unitId : (userUnit?.id || initialUnits[0]?.id || '');
+    const targetUnit =
+      (isDeptArmeiro || isAdmin || isGeral) && selectedUnitFilter !== 'ALL' && initialUnits.some(u => u.id === selectedUnitFilter)
+        ? selectedUnitFilter
+        : (!isGeral && currentUser.unitId && (!isDeptArmeiro || initialUnits.some(u => u.id === currentUser.unitId)))
+          ? currentUser.unitId
+          : (userUnit?.id || initialUnits[0]?.id || '');
     setUnitId(targetUnit);
     setShowModal(true);
   };
@@ -149,12 +168,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const handleOpenEditModal = (vault: VaultSpace) => {
     if (isArmeiro) {
       if (vault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem editar locais de armas e munições da sua própria unidade.');
+        setErrorMsg('Usuários armeiros só podem editar locais de armas e munições.');
         return;
       }
-      const isMyUnitVault = vault.unitId === currentUser.unitId || (!vault.unitId && vault.departmentId === effectiveDeptId);
-      if (!isMyUnitVault && !isAdmin && !isGeral) {
-        setErrorMsg('Usuários armeiros só podem editar locais da sua própria unidade.');
+      if (!isVaultInArmeiroScope(vault) && !isAdmin && !isGeral) {
+        setErrorMsg(
+          isDeptArmeiro
+            ? 'Usuários armeiros com abrangência departamental só podem editar locais de unidades do seu departamento.'
+            : 'Usuários armeiros só podem editar locais da sua própria unidade.'
+        );
         return;
       }
     }
@@ -176,10 +198,11 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
 
-    const finalUnitId = isArmeiro
+    const finalUnitId = (isArmeiro && !isDeptArmeiro)
       ? (currentUser.unitId || unitId || userUnit?.id || '')
       : (unitId || currentUser.unitId || '');
-    const finalDeptId = deptId || userUnit?.departmentId || currentUser.departmentId || effectiveDeptId;
+    const selectedUnitObj = units.find(u => u.id === finalUnitId);
+    const finalDeptId = deptId || selectedUnitObj?.departmentId || userUnit?.departmentId || currentUser.departmentId || effectiveDeptId;
 
     if (!code.trim()) {
       setErrorMsg('Informe a identificação/código do local do cofre.');
@@ -195,8 +218,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         setErrorMsg('Usuários armeiros só podem cadastrar ou alterar locais vinculados a armas e munições.');
         return;
       }
-      if (currentUser.unitId && finalUnitId !== currentUser.unitId) {
+      if (!isDeptArmeiro && currentUser.unitId && finalUnitId !== currentUser.unitId) {
         setErrorMsg('Usuários armeiros só podem criar locais do cofre na sua própria unidade.');
+        return;
+      }
+      if (isDeptArmeiro && deptUnitIds.size > 0 && !deptUnitIds.has(finalUnitId)) {
+        setErrorMsg('Selecione uma unidade pertencente ao seu departamento.');
         return;
       }
     }
@@ -235,12 +262,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const handleDelete = (vault: VaultSpace) => {
     if (isArmeiro) {
       if (vault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições da sua própria unidade.');
+        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições.');
         return;
       }
-      const isMyUnitVault = vault.unitId === currentUser.unitId || (!vault.unitId && vault.departmentId === effectiveDeptId);
-      if (!isMyUnitVault && !isAdmin && !isGeral) {
-        setErrorMsg('Usuários armeiros só podem excluir locais da sua própria unidade.');
+      if (!isVaultInArmeiroScope(vault) && !isAdmin && !isGeral) {
+        setErrorMsg(
+          isDeptArmeiro
+            ? 'Usuários armeiros com abrangência departamental só podem excluir locais de unidades do seu departamento.'
+            : 'Usuários armeiros só podem excluir locais da sua própria unidade.'
+        );
         return;
       }
     }
@@ -255,13 +285,16 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     if (!deleteTargetVault) return;
     if (isArmeiro) {
       if (deleteTargetVault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições da sua própria unidade.');
+        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições.');
         setDeleteTargetVault(null);
         return;
       }
-      const isMyUnitVault = deleteTargetVault.unitId === currentUser.unitId || (!deleteTargetVault.unitId && deleteTargetVault.departmentId === effectiveDeptId);
-      if (!isMyUnitVault && !isAdmin && !isGeral) {
-        setErrorMsg('Usuários armeiros só podem excluir locais da sua própria unidade.');
+      if (!isVaultInArmeiroScope(deleteTargetVault) && !isAdmin && !isGeral) {
+        setErrorMsg(
+          isDeptArmeiro
+            ? 'Usuários armeiros com abrangência departamental só podem excluir locais de unidades do seu departamento.'
+            : 'Usuários armeiros só podem excluir locais da sua própria unidade.'
+        );
         setDeleteTargetVault(null);
         return;
       }
@@ -807,12 +840,13 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const isArmas = v.type === 'ARMAS';
     const isMunicoes = v.type === 'MUNIÇÕES';
     const isMyUnitVault = v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId);
+    const isScopedArmeiroVault = isVaultInArmeiroScope(v);
     const canEditThisVault = isGeral || 
-      (isArmeiro && isMyUnitVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
       (isExplosivista && isMyUnitVault && v.type === 'EXPLOSIVOS') ||
       isAdmin;
     const canDeleteThisVault = isGeral || 
-      (isArmeiro && isMyUnitVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
       (isExplosivista && isMyUnitVault && v.type === 'EXPLOSIVOS') ||
       isAdmin;
 
@@ -1119,7 +1153,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
           </div>
 
           {/* Quick Unit Filter (Optional dropdown) */}
-          {!isArmeiro && !isExplosivista && (
+          {((!isArmeiro && !isExplosivista) || isDeptArmeiro) && (
             <div className="flex items-center space-x-2">
               <span className="text-[11px] text-slate-400 hidden md:inline">Filtrar por Unidade:</span>
               <select
@@ -1162,7 +1196,11 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         {visibleDepts.map((dept) => {
           // Filter vaults for this department matching active filters and search term
           const deptVaults = userScopedVaults.filter(v => {
-            if (v.departmentId !== dept.id) return false;
+            if (v.departmentId && v.departmentId !== dept.id) return false;
+            if (!v.departmentId && v.unitId) {
+              const uObj = units.find(u => u.id === v.unitId);
+              if (uObj && uObj.departmentId !== dept.id) return false;
+            }
 
             // Type filter
             if (typeFilter !== 'ALL' && v.type !== typeFilter) return false;
@@ -2302,7 +2340,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
                   Unidade
                 </label>
-                {isArmeiro || isExplosivista ? (
+                {(isArmeiro && !isDeptArmeiro) || isExplosivista ? (
                   <div className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-sm flex items-center justify-between">
                     <div>
                       <span className="text-slate-100 font-semibold">
@@ -2322,9 +2360,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   <select
                     value={unitId}
                     onChange={(e) => setUnitId(e.target.value)}
-                    disabled={!isGeral && Boolean(currentUser.unitId)}
+                    disabled={!isGeral && !isDeptArmeiro && !isAdmin && Boolean(currentUser.unitId)}
                     className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
-                      !isGeral && Boolean(currentUser.unitId)
+                      !isGeral && !isDeptArmeiro && !isAdmin && Boolean(currentUser.unitId)
                         ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
                         : 'bg-slate-950 border-slate-700 text-slate-100 focus:border-amber-500'
                     }`}

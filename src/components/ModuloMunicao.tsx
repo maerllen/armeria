@@ -2568,6 +2568,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {showTransferModal && (
         <ModalTransferirMunicao
           initialStock={stockToTransferInitially}
+          selectedUnitId={selectedUnitId}
           stocks={stocks}
           calibers={calibers}
           departments={departments}

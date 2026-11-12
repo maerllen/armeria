@@ -88,10 +88,11 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
   const [deleteTargetMov, setDeleteTargetMov] = useState<Movement | null>(null);
   const [receiptTargetMov, setReceiptTargetMov] = useState<Movement | null>(null);
 
-  const isGeral = currentUser.role === 'Geral';
-  const isArmeiro = currentUser.role === 'Armeiro';
-  const isAdmin = currentUser.role === 'Administrador';
-  const isPolicial = currentUser.role === 'Policial';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isPolicial = effectiveRole === 'Policial';
 
   // Pending transfers across the 4 categories
   const pendingWeaponTransfers = storage.getPendingIncomingTransfers(currentUser);

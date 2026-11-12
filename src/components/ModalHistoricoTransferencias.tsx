@@ -48,13 +48,25 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'Pendente' | 'Recebido' | 'Cancelado'>('all');
   
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
+  const hasDeptWideScope = isGeral || isAdmin || isDeptArmeiro;
+
   // Available units for filtering
   const allUnits = useMemo(() => storage.getAllUnits(), []);
+  const filterableUnits = useMemo(() => {
+    if (isGeral) return allUnits;
+    return allUnits.filter(u => u.departmentId === currentUser.departmentId);
+  }, [allUnits, isGeral, currentUser.departmentId]);
+  const deptUnitIds = useMemo(() => new Set(filterableUnits.map(u => u.id)), [filterableUnits]);
 
-  // For users with unitId, they are strictly bound to their unit.
-  // For Geral users with no unitId, they can pick a specific unit or ALL.
+  const isLockedToSingleUnit = !hasDeptWideScope && Boolean(currentUser.unitId);
+
   const [activeUnitFilter, setActiveUnitFilter] = useState<string>(() => {
-    if (currentUser.unitId) return currentUser.unitId;
+    if (isLockedToSingleUnit) return currentUser.unitId;
     if (selectedUnitId && selectedUnitId !== 'ALL') return selectedUnitId;
     return 'ALL';
   });
@@ -68,17 +80,28 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
 
   const unitScopedTransfers = useMemo(() => {
     let result = transfers;
-    if (currentUser.unitId) {
+    if (isLockedToSingleUnit) {
       result = result.filter(
         t => t.originUnitId === currentUser.unitId || t.destinationUnitId === currentUser.unitId
       );
-    } else if (activeUnitFilter && activeUnitFilter !== 'ALL') {
-      result = result.filter(
-        t => t.originUnitId === activeUnitFilter || t.destinationUnitId === activeUnitFilter
-      );
+    } else {
+      if (!isGeral && currentUser.departmentId) {
+        result = result.filter(
+          t =>
+            t.originDepartmentId === currentUser.departmentId ||
+            t.destinationDepartmentId === currentUser.departmentId ||
+            (t.originUnitId ? deptUnitIds.has(t.originUnitId) : false) ||
+            (t.destinationUnitId ? deptUnitIds.has(t.destinationUnitId) : false)
+        );
+      }
+      if (activeUnitFilter && activeUnitFilter !== 'ALL') {
+        result = result.filter(
+          t => t.originUnitId === activeUnitFilter || t.destinationUnitId === activeUnitFilter
+        );
+      }
     }
     return result;
-  }, [transfers, currentUser.unitId, activeUnitFilter]);
+  }, [transfers, isLockedToSingleUnit, isGeral, currentUser.unitId, currentUser.departmentId, deptUnitIds, activeUnitFilter]);
 
   const filteredTransfers = useMemo(() => {
     let result = unitScopedTransfers;
@@ -108,13 +131,13 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
 
   const canReceiveTransfer = (trf: WeaponTransfer) => {
     if (trf.status === 'Recebido' || trf.status === 'Cancelado') return false;
-    if (currentUser.role === 'Geral') return true;
-    if (currentUser.role === 'Administrador') {
-      return trf.destinationDepartmentId === currentUser.departmentId || !currentUser.departmentId;
+    if (isGeral) return true;
+    if (isAdmin) {
+      return !currentUser.departmentId || trf.destinationDepartmentId === currentUser.departmentId || (trf.destinationUnitId ? deptUnitIds.has(trf.destinationUnitId) : false);
     }
-    if (currentUser.role === 'Armeiro') {
-      if (currentUser.managementScope !== 'unit') {
-        return trf.destinationDepartmentId === currentUser.departmentId;
+    if (isArmeiro) {
+      if (isDeptArmeiro) {
+        return trf.destinationDepartmentId === currentUser.departmentId || (trf.destinationUnitId ? deptUnitIds.has(trf.destinationUnitId) : false);
       }
       return trf.destinationUnitId === currentUser.unitId;
     }
@@ -123,12 +146,15 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
 
   const canUndoTransfer = (trf: WeaponTransfer) => {
     if (trf.status !== 'Pendente') return false;
-    if (currentUser.role === 'Geral') return true;
+    if (isGeral) return true;
     if (trf.transferredByUserId === currentUser.id) return true;
-    if (currentUser.role === 'Administrador') {
-      return !currentUser.departmentId || trf.originDepartmentId === currentUser.departmentId || trf.destinationDepartmentId === currentUser.departmentId;
+    if (isAdmin) {
+      return !currentUser.departmentId || trf.originDepartmentId === currentUser.departmentId || trf.destinationDepartmentId === currentUser.departmentId || (trf.originUnitId ? deptUnitIds.has(trf.originUnitId) : false) || (trf.destinationUnitId ? deptUnitIds.has(trf.destinationUnitId) : false);
     }
-    if (currentUser.role === 'Armeiro') {
+    if (isArmeiro) {
+      if (isDeptArmeiro) {
+        return trf.originDepartmentId === currentUser.departmentId || trf.destinationDepartmentId === currentUser.departmentId || (trf.originUnitId ? deptUnitIds.has(trf.originUnitId) : false) || (trf.destinationUnitId ? deptUnitIds.has(trf.destinationUnitId) : false);
+      }
       return currentUser.unitId === trf.originUnitId || currentUser.unitId === trf.destinationUnitId;
     }
     return false;
@@ -213,7 +239,7 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
           )}
 
           {/* Unit Isolation Info Banner or Selector */}
-          {currentUser.unitId ? (
+          {isLockedToSingleUnit ? (
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
               <div className="flex items-center gap-2">
                 <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
@@ -237,8 +263,10 @@ export const TransferHistoryModal: React.FC<TransferHistoryModalProps> = ({
                   onChange={e => setActiveUnitFilter(e.target.value)}
                   className="bg-slate-900 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold focus:outline-none focus:border-amber-500"
                 >
-                  <option value="ALL">Todas as Unidades (Visão Geral)</option>
-                  {allUnits.map(u => (
+                  <option value="ALL">
+                    {isGeral ? 'Todas as Unidades (Visão Geral)' : 'Todas as Unidades do Departamento'}
+                  </option>
+                  {filterableUnits.map(u => (
                     <option key={u.id} value={u.id}>
                       {u.name}
                     </option>

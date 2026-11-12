@@ -34,10 +34,13 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   units,
   onRefresh
 }) => {
-  const isGeral = currentUser.role === 'Geral';
-  const isArmeiro = currentUser.role === 'Armeiro';
-  const isAdmin = currentUser.role === 'Administrador';
-  const isPolicial = currentUser.role === 'Policial';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isPolicial = effectiveRole === 'Policial';
+  const isDeptArmeiro = isArmeiro && currentUser.managementScope === 'department';
+  const hasDeptWideScope = isGeral || isAdmin || isDeptArmeiro;
 
   // Navigation state: Department -> Unit -> Weapons
   const availableDepts = isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId);
@@ -50,8 +53,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     return units.filter(u => u.departmentId === selectedDeptId);
   }, [units, selectedDeptId, isGeral, currentUser.departmentId]);
 
-  // Permission to select all units: Geral, Admin, or Armeiro (and any user with multi-unit management scope)
-  const canSelectAllUnits = isGeral || isAdmin || isArmeiro || currentUser.managementScope !== 'unit' || availableUnits.length > 1;
+  // Permission to select all units: Geral, Admin, or Armeiro with department-wide scope
+  const canSelectAllUnits = hasDeptWideScope || availableUnits.length > 1;
 
   // Selected Unit ID: 'ALL' represents "Todas as Unidades", otherwise a specific unit ID
   const [selectedUnitId, setSelectedUnitId] = useState<string>(() => {
@@ -244,7 +247,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   // Vault spaces for weapons: MUST BE TYPE ARMAS
   const weaponVaultSpaces = vaultSpaces.filter(v => v.type === 'ARMAS' && v.unitId === (unitId || currentUser.unitId));
-  const availableUnitsForForm = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
+  const availableUnitsForForm = hasDeptWideScope
+    ? units.filter(u => u.departmentId === (deptId || currentUser.departmentId))
+    : units.filter(u => u.id === currentUser.unitId);
 
   const handleOpenWeaponModal = (weap?: Weapon) => {
     setErrorMsg('');
@@ -270,10 +275,18 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       setModel('T4');
       setCaliber(calibers[0]?.name || '5,56x45mm');
       setMagazineQuantity(4);
-      const initialDept = selectedDeptId || (isGeral ? (departments[0]?.id || '') : currentUser.departmentId);
+      const initialDept = (selectedDeptId && selectedDeptId !== 'ALL')
+        ? selectedDeptId
+        : (isGeral ? (departments[0]?.id || '') : currentUser.departmentId);
       setDeptId(initialDept);
-      const initialUnits = units.filter(u => u.departmentId === initialDept);
-      const initialUnitId = selectedUnitId || initialUnits[0]?.id || currentUser.unitId;
+      const initialUnits = hasDeptWideScope
+        ? units.filter(u => u.departmentId === initialDept)
+        : units.filter(u => u.id === currentUser.unitId);
+      const initialUnitId = (selectedUnitId && selectedUnitId !== 'ALL' && initialUnits.some(u => u.id === selectedUnitId))
+        ? selectedUnitId
+        : (currentUser.unitId && initialUnits.some(u => u.id === currentUser.unitId)
+          ? currentUser.unitId
+          : (initialUnits[0]?.id || ''));
       setUnitId(initialUnitId);
       const initialVaults = vaultSpaces.filter(v => v.type === 'ARMAS' && v.unitId === initialUnitId);
       setVaultSpaceId(initialVaults[0]?.id || '');
@@ -1476,7 +1489,14 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
                 {/* Transfer Weapon Button (Geral, Admin, Armeiro) */}
                 {canTransferWeapons && (() => {
-                  const isWeaponFromMyUnit = isGeral || !currentUser.unitId || selectedWeaponDetail.unitId === currentUser.unitId;
+                  const isWeaponFromMyUnit =
+                    isGeral ||
+                    !currentUser.unitId ||
+                    selectedWeaponDetail.unitId === currentUser.unitId ||
+                    (hasDeptWideScope && (
+                      selectedWeaponDetail.departmentId === currentUser.departmentId ||
+                      availableUnits.some(u => u.id === selectedWeaponDetail.unitId)
+                    ));
                   const isTransferDisabled = !isWeaponFromMyUnit || selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo' || selectedWeaponDetail.status === 'Manutenção';
                   
                   return (
@@ -1490,7 +1510,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       }}
                       title={
                         !isWeaponFromMyUnit
-                          ? 'Você só pode transferir armas pertencentes à sua própria unidade.'
+                          ? (hasDeptWideScope ? 'Você só pode transferir armas pertencentes às unidades do seu departamento.' : 'Você só pode transferir armas pertencentes à sua própria unidade.')
                           : selectedWeaponDetail.status === 'Em Trânsito' || selectedWeaponDetail.status === 'Em Aula' || selectedWeaponDetail.status === 'Pendente de Recibo' || selectedWeaponDetail.status === 'Manutenção'
                           ? `Arma com status "${selectedWeaponDetail.status}". Não é possível transferir no momento.`
                           : 'Transferir esta arma para outra unidade'
@@ -1766,12 +1786,17 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   </label>
                   <select
                     value={unitId}
+                    disabled={!hasDeptWideScope && Boolean(currentUser.unitId)}
                     onChange={(e) => {
                       setUnitId(e.target.value);
                       const newVaults = vaultSpaces.filter(v => v.type === 'ARMAS' && v.unitId === e.target.value);
                       setVaultSpaceId(newVaults[0]?.id || '');
                     }}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
+                    className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
+                      !hasDeptWideScope && Boolean(currentUser.unitId)
+                        ? 'bg-slate-950/60 border-slate-800 text-slate-400 cursor-not-allowed'
+                        : 'bg-slate-950 border-slate-700 text-slate-100'
+                    }`}
                   >
                     {availableUnitsForForm.map((u) => (
                       <option key={u.id} value={u.id}>
@@ -2194,6 +2219,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           units={units}
           vaultSpaces={vaultSpaces}
           initialWeapon={transferInitialWeapon}
+          selectedUnitId={selectedUnitId !== 'ALL' ? selectedUnitId : undefined}
           onClose={() => {
             setShowTransferModal(false);
             setTransferInitialWeapon(null);

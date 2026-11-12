@@ -1303,7 +1303,8 @@ apiRouter.delete('/ammo-stocks/:id', async (req: Request, res: Response) => {
     const actor = req.body?.actor;
     const pool = getPool();
 
-    if (actor && actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role)) {
+    const actorRole = actor?.activeRole || actor?.role || '';
+    if (actor && actorRole && !['Geral', 'Armeiro', 'Administrador'].includes(actorRole)) {
       return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e administradores podem excluir registros de estoque de munição.' });
     }
 
@@ -1327,7 +1328,8 @@ apiRouter.put('/ammo-stocks/:id', async (req: Request, res: Response) => {
     } = req.body;
     if (!actor) return res.status(401).json({ error: 'Sessão expirada' });
 
-    if (actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !(actor.role === 'Policial' && actor.canMoveAmmunition)) {
+    const actorRole = actor.activeRole || actor.role || '';
+    if (actorRole && !['Geral', 'Armeiro', 'Administrador'].includes(actorRole) && !(actorRole === 'Policial' && actor.canMoveAmmunition)) {
       return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e administradores podem alterar dados de estoque de munição.' });
     }
 
@@ -1859,7 +1861,8 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
     const pool = getPool();
 
     // Verify permissions: Geral, Armeiro or Administrador can delete
-    if (actor && actor.role && !['Geral', 'Armeiro', 'Administrador'].includes(actor.role) && !actor.canMoveAmmunition) {
+    const actorRole = actor?.activeRole || actor?.role || '';
+    if (actor && actorRole && !['Geral', 'Armeiro', 'Administrador'].includes(actorRole) && !actor.canMoveAmmunition) {
       return res.status(403).json({ error: 'Permissão negada. Apenas Armeiros e usuários Gerais podem excluir lançamentos de munições.' });
     }
 
@@ -1920,28 +1923,53 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
 apiRouter.get('/weapons', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        ID_ARMAS as id, 
-        TIPO_ARMAS as type, 
-        NUMERO_SERIE_ARMAS as serialNumber, 
-        FABRICANTE_ARMAS as manufacturer, 
-        MODELO_ARMAS as model, 
-        CALIBRE_ARMAS as caliber, 
-        QUANTIDADE_CARREGADORES_ARMAS as magazineQuantity, 
-        STATUS_ARMAS as status, 
-        DEPARTAMENTO_ID_ARMAS as departmentId, 
-        UNIDADE_ID_ARMAS as unitId, 
-        COFRE_ID_ARMAS as vaultSpaceId, 
-        OBSERVACAO_LOCALIZACAO_ARMAS as locationNote,
-        DATA_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceDate, 
-        RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceResponsible, 
-        TIROS_DISPARADOS_ARMAS as shotCount,
-        LOCAL_ANTERIOR_COFRE_ID_ARMAS as previousVaultSpaceId,
-        DATA_CRIACAO_ARMAS as createdAt
-      FROM ARMAS 
-      ORDER BY DATA_CRIACAO_ARMAS ASC
-    `);
+    let rows: any = [];
+    try {
+      [rows] = await pool.query(`
+        SELECT 
+          ID_ARMAS as id, 
+          TIPO_ARMAS as type, 
+          NUMERO_SERIE_ARMAS as serialNumber, 
+          FABRICANTE_ARMAS as manufacturer, 
+          MODELO_ARMAS as model, 
+          CALIBRE_ARMAS as caliber, 
+          QUANTIDADE_CARREGADORES_ARMAS as magazineQuantity, 
+          STATUS_ARMAS as status, 
+          DEPARTAMENTO_ID_ARMAS as departmentId, 
+          UNIDADE_ID_ARMAS as unitId, 
+          COFRE_ID_ARMAS as vaultSpaceId, 
+          OBSERVACAO_LOCALIZACAO_ARMAS as locationNote,
+          DATA_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceDate, 
+          RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceResponsible, 
+          COALESCE(TIROS_DISPARADOS_ARMAS, 0) as shotCount,
+          LOCAL_ANTERIOR_COFRE_ID_ARMAS as previousVaultSpaceId,
+          DATA_CRIACAO_ARMAS as createdAt
+        FROM ARMAS 
+        ORDER BY DATA_CRIACAO_ARMAS ASC
+      `);
+    } catch (_colErr) {
+      await ensureCautelaReturnSchema(pool);
+      [rows] = await pool.query(`
+        SELECT 
+          ID_ARMAS as id, 
+          TIPO_ARMAS as type, 
+          NUMERO_SERIE_ARMAS as serialNumber, 
+          FABRICANTE_ARMAS as manufacturer, 
+          MODELO_ARMAS as model, 
+          CALIBRE_ARMAS as caliber, 
+          QUANTIDADE_CARREGADORES_ARMAS as magazineQuantity, 
+          STATUS_ARMAS as status, 
+          DEPARTAMENTO_ID_ARMAS as departmentId, 
+          UNIDADE_ID_ARMAS as unitId, 
+          COFRE_ID_ARMAS as vaultSpaceId, 
+          DATA_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceDate, 
+          RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS as lastMaintenanceResponsible, 
+          COALESCE(TIROS_DISPARADOS_ARMAS, 0) as shotCount,
+          DATA_CRIACAO_ARMAS as createdAt
+        FROM ARMAS 
+        ORDER BY DATA_CRIACAO_ARMAS ASC
+      `);
+    }
 
     const mapped = (rows || []).map((w: any) => ({
       ...w,
@@ -5647,17 +5675,35 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
     }
 
+    const actorRole = actor.activeRole || actor.role || '';
     const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
-    if (!allowedRoles.includes(actor.role)) {
+    if (!allowedRoles.includes(actorRole)) {
       return res.status(403).json({ error: 'Apenas Armeiro, Administrador e perfil Geral têm permissão para transferir armas entre unidades.' });
     }
 
-    // Restrição de Segurança: Somente será possível transferir uma arma da unidade que pertencer o armeiro ou administrador
-    if (actor.role !== 'Geral') {
-      if (actor.unitId && originUnitId && originUnitId !== actor.unitId) {
+    const hasDeptScope =
+      actorRole === 'Geral' ||
+      actorRole === 'Administrador' ||
+      (actorRole === 'Armeiro' && actor.managementScope === 'department');
+
+    // Restrição de Segurança: Armeiro de unidade só transfere da própria unidade; Armeiro/Admin de departamento transfere de qualquer unidade do seu departamento
+    if (actorRole !== 'Geral') {
+      if (!hasDeptScope && actor.unitId && originUnitId && originUnitId !== actor.unitId) {
         return res.status(403).json({
           error: 'Você só possui permissão para transferir armas pertencentes à sua própria unidade.'
         });
+      }
+      if (hasDeptScope && actor.departmentId && originUnitId) {
+        const poolCheck = getPool();
+        const [origUnitRows]: any = await poolCheck.query(
+          'SELECT DEPARTAMENTO_ID_UNIDADES as deptId FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [originUnitId]
+        );
+        if (origUnitRows && origUnitRows.length > 0 && origUnitRows[0].deptId && origUnitRows[0].deptId !== actor.departmentId) {
+          return res.status(403).json({
+            error: 'Você só possui permissão para transferir armas de unidades vinculadas ao seu departamento.'
+          });
+        }
       }
     }
 
@@ -5705,16 +5751,23 @@ apiRouter.post('/weapon-transfers', async (req: Request, res: Response) => {
     // Verify all weapons belong to origin unit and are not 'Em Trânsito' or 'Em Aula'
     if (weaponIdsToUpdate.length > 0) {
       const [dbWeaps]: any = await pool.query(
-        `SELECT ID_ARMAS as id, NUMERO_SERIE_ARMAS as numero_serie, STATUS_ARMAS as status, UNIDADE_ID_ARMAS as unidade_id FROM ARMAS WHERE ID_ARMAS IN (${weaponIdsToUpdate.map(() => '?').join(',')})`,
+        `SELECT ID_ARMAS as id, NUMERO_SERIE_ARMAS as numero_serie, STATUS_ARMAS as status, UNIDADE_ID_ARMAS as unidade_id, DEPARTAMENTO_ID_ARMAS as departamento_id FROM ARMAS WHERE ID_ARMAS IN (${weaponIdsToUpdate.map(() => '?').join(',')})`,
         weaponIdsToUpdate
       );
 
       for (const dw of (dbWeaps || [])) {
-        // Validação da unidade da arma para Armeiro e Administrador
-        if (actor.role !== 'Geral' && actor.unitId && dw.unidade_id !== actor.unitId) {
-          return res.status(403).json({
-            error: `A arma de série ${dw.numero_serie} não pertence à sua unidade e não pode ser transferida por você.`
-          });
+        // Validação da unidade/departamento da arma para Armeiro e Administrador
+        if (actorRole !== 'Geral') {
+          if (!hasDeptScope && actor.unitId && dw.unidade_id !== actor.unitId) {
+            return res.status(403).json({
+              error: `A arma de série ${dw.numero_serie} não pertence à sua unidade e não pode ser transferida por você.`
+            });
+          }
+          if (hasDeptScope && actor.departmentId && dw.departamento_id && dw.departamento_id !== actor.departmentId) {
+            return res.status(403).json({
+              error: `A arma de série ${dw.numero_serie} não pertence ao seu departamento e não pode ser transferida por você.`
+            });
+          }
         }
 
         if (originUnitId && dw.unidade_id !== originUnitId) {
@@ -6055,9 +6108,13 @@ apiRouter.post('/weapon-transfers/:id/receive', async (req: Request, res: Respon
     }
 
     // Permission check: Geral, or Armeiro / Administrador of the destination unit/dept
-    const isGeral = actor.role === 'Geral';
-    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
-    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+    const actorRole = actor.activeRole || actor.role || '';
+    const isGeral = actorRole === 'Geral';
+    const isDestAdmin = actorRole === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actorRole === 'Armeiro' && (
+      actor.unitId === transfer.destino_unidade_id ||
+      (actor.managementScope === 'department' && actor.departmentId === transfer.destino_departamento_id)
+    );
 
     if (!isGeral && !isDestAdmin && !isDestArmeiro) {
       return res.status(403).json({
@@ -6280,12 +6337,19 @@ apiRouter.post('/weapon-transfers/:id/undo', async (req: Request, res: Response)
     }
 
     // Permission check: Geral, criador da transferência, Armeiro ou Administrador da unidade/departamento de origem ou destino
-    const isGeral = actor.role === 'Geral';
+    const actorRole = actor.activeRole || actor.role || '';
+    const isGeral = actorRole === 'Geral';
     const isCreator = actor.id === transfer.responsavel_id;
-    const isOriginAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.origem_departamento_id || !actor.departmentId);
-    const isOriginArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.origem_unidade_id || actor.departmentId === transfer.origem_departamento_id);
-    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
-    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+    const isOriginAdmin = actorRole === 'Administrador' && (actor.departmentId === transfer.origem_departamento_id || !actor.departmentId);
+    const isOriginArmeiro = actorRole === 'Armeiro' && (
+      actor.unitId === transfer.origem_unidade_id ||
+      (actor.managementScope === 'department' && actor.departmentId === transfer.origem_departamento_id)
+    );
+    const isDestAdmin = actorRole === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actorRole === 'Armeiro' && (
+      actor.unitId === transfer.destino_unidade_id ||
+      (actor.managementScope === 'department' && actor.departmentId === transfer.destino_departamento_id)
+    );
 
     if (!isGeral && !isCreator && !isOriginAdmin && !isOriginArmeiro && !isDestAdmin && !isDestArmeiro) {
       return res.status(403).json({
@@ -6488,15 +6552,35 @@ apiRouter.post('/ammo-transfers', async (req: Request, res: Response) => {
       return res.status(401).json({ error: 'Sessão não autorizada ou expirada.' });
     }
 
+    const actorRole = actor.activeRole || actor.role || '';
     const allowedRoles = ['Geral', 'Administrador', 'Armeiro'];
-    if (!allowedRoles.includes(actor.role)) {
+    if (!allowedRoles.includes(actorRole)) {
       return res.status(403).json({ error: 'Apenas Armeiro, Administrador e perfil Geral têm permissão para transferir munições entre unidades.' });
     }
 
-    if (actor.role !== 'Geral' && actor.unitId && originUnitId && originUnitId !== actor.unitId) {
-      return res.status(403).json({
-        error: 'Você só possui permissão para transferir munições pertencentes à sua própria unidade.'
-      });
+    const hasDeptScope =
+      actorRole === 'Geral' ||
+      actorRole === 'Administrador' ||
+      (actorRole === 'Armeiro' && actor.managementScope === 'department');
+
+    if (actorRole !== 'Geral') {
+      if (!hasDeptScope && actor.unitId && originUnitId && originUnitId !== actor.unitId) {
+        return res.status(403).json({
+          error: 'Você só possui permissão para transferir munições pertencentes à sua própria unidade.'
+        });
+      }
+      if (hasDeptScope && actor.departmentId && originUnitId) {
+        const poolCheck = getPool();
+        const [origUnitRows]: any = await poolCheck.query(
+          'SELECT DEPARTAMENTO_ID_UNIDADES as deptId FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [originUnitId]
+        );
+        if (origUnitRows && origUnitRows.length > 0 && origUnitRows[0].deptId && origUnitRows[0].deptId !== actor.departmentId) {
+          return res.status(403).json({
+            error: 'Você só possui permissão para transferir munições de unidades vinculadas ao seu departamento.'
+          });
+        }
+      }
     }
 
     if (!destinationUnitId) {
@@ -6716,9 +6800,13 @@ apiRouter.post('/ammo-transfers/:id/receive', async (req: Request, res: Response
       return res.status(400).json({ error: 'Esta transferência de munições já foi recebida e confirmada.' });
     }
 
-    const isGeral = actor.role === 'Geral';
-    const isDestAdmin = actor.role === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
-    const isDestArmeiro = actor.role === 'Armeiro' && (actor.unitId === transfer.destino_unidade_id || actor.departmentId === transfer.destino_departamento_id);
+    const actorRole = actor.activeRole || actor.role || '';
+    const isGeral = actorRole === 'Geral';
+    const isDestAdmin = actorRole === 'Administrador' && (actor.departmentId === transfer.destino_departamento_id || !actor.departmentId);
+    const isDestArmeiro = actorRole === 'Armeiro' && (
+      actor.unitId === transfer.destino_unidade_id ||
+      (actor.managementScope === 'department' && actor.departmentId === transfer.destino_departamento_id)
+    );
 
     if (!isGeral && !isDestAdmin && !isDestArmeiro) {
       return res.status(403).json({
@@ -8953,6 +9041,15 @@ async function ensureCautelaReturnSchema(pool: any) {
     `);
     if (cols?.[0]?.cnt === 0) {
       await pool.query('ALTER TABLE `ACAUTELAR_ARMAS` ADD COLUMN `MUNICAO_DEVOLVIDA_ACAUTELAR_ARMAS` INT DEFAULT NULL AFTER `CARREGADORES_DEVOLVIDOS_ACAUTELAR_ARMAS`');
+    }
+  } catch (_) {}
+  try {
+    const [armaShotCols]: any = await pool.query(`
+      SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ARMAS' AND COLUMN_NAME = 'TIROS_DISPARADOS_ARMAS'
+    `);
+    if (armaShotCols?.[0]?.cnt === 0) {
+      await pool.query('ALTER TABLE `ARMAS` ADD COLUMN `TIROS_DISPARADOS_ARMAS` INT NOT NULL DEFAULT 0');
     }
   } catch (_) {}
   cautelaReturnSchemaEnsured = true;
@@ -11243,10 +11340,20 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
 
     const actorRole = actor?.activeRole || actor?.role || req.body.actorRole || '';
     const isPendingReceipt = Boolean(pendingReceipt || actorRole === 'Policial');
+    const wasAlreadyReturned = String(cautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase() === 'DEVOLVIDA';
 
     const armorer = actor || { id: returnArmorerId, name: returnArmorerName, masp: returnArmorerMasp };
     const condicoes = isWorking ? 'Condições de Uso' : 'Apresenta Defeito';
-    const shots = parseInt(String(shotsFired || 0), 10);
+    const dbStoredShots = Math.max(0, parseInt(String(cautela.QUANTIDADE_TIROS_ACAUTELAR_ARMAS || 0), 10) || 0);
+    const hasExplicitShotsBody = shotsFired !== undefined && shotsFired !== null && shotsFired !== '';
+    const parsedBodyShots = hasExplicitShotsBody ? Math.max(0, parseInt(String(shotsFired), 10) || 0) : undefined;
+    const effectiveHadShots =
+      hadShots !== undefined
+        ? Boolean(hadShots) || (parsedBodyShots !== undefined && parsedBodyShots > 0)
+        : Boolean(cautela.HOUVE_TIROS_ACAUTELAR_ARMAS) || dbStoredShots > 0;
+    const shots = effectiveHadShots
+      ? (parsedBodyShots !== undefined ? parsedBodyShots : dbStoredShots)
+      : 0;
     const mags = parseInt(String(returnedMagazinesCount ?? 1), 10);
 
     // Localiza cautela de munições vinculada (caso tenha)
@@ -11303,7 +11410,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       } else if (cautela.MUNICAO_DEVOLVIDA_ACAUTELAR_ARMAS !== undefined && cautela.MUNICAO_DEVOLVIDA_ACAUTELAR_ARMAS !== null) {
         resolvedReturnedAmmo = Math.min(totalLinkedAmmo, Math.max(0, Number(cautela.MUNICAO_DEVOLVIDA_ACAUTELAR_ARMAS)));
       } else {
-        const ammoUsedFallback = Math.min(totalLinkedAmmo, Number(req.body.ammoUsedCount ?? (hadShots ? shots : 0)));
+        const ammoUsedFallback = Math.min(totalLinkedAmmo, Number(req.body.ammoUsedCount ?? (effectiveHadShots ? shots : 0)));
         resolvedReturnedAmmo = Math.max(0, totalLinkedAmmo - ammoUsedFallback);
       }
     }
@@ -11330,7 +11437,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
             DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
           WHERE ID_ACAUTELAR_ARMAS = ?
         `, [
-          hadShots ? 1 : 0,
+          effectiveHadShots ? 1 : 0,
           shots,
           condicoes,
           defectDescription || null,
@@ -11356,7 +11463,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
             DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
           WHERE ID_ACAUTELAR_ARMAS = ?
         `, [
-          hadShots ? 1 : 0,
+          effectiveHadShots ? 1 : 0,
           shots,
           condicoes,
           defectDescription || null,
@@ -11456,7 +11563,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
         armorer.id,
         armorer.name,
         armorer.masp,
-        hadShots ? 1 : 0,
+        effectiveHadShots ? 1 : 0,
         shots,
         condicoes,
         defectDescription || null,
@@ -11491,7 +11598,7 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
         armorer.id,
         armorer.name,
         armorer.masp,
-        hadShots ? 1 : 0,
+        effectiveHadShots ? 1 : 0,
         shots,
         condicoes,
         defectDescription || null,
@@ -11503,27 +11610,139 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       ]);
     }
 
-    // 2. Atualiza status da arma: se defeito, 'Manutenção'; se ok, 'No Cofre', armazenando no cofre selecionado
+    // 2. Localiza a arma correspondente na tabela ARMAS (por ID ou número de série)
+    const rawWeaponId = String(cautela.ARMA_ID_ACAUTELAR_ARMAS || req.body.weaponId || '').trim();
+    const cleanWeaponId = rawWeaponId
+      .replace(/^caut-active-/, '')
+      .replace(/^caut-weapon-sync-/, '')
+      .replace(/^caut-sync-/, '')
+      .replace(/^caut-arma-/, '')
+      .replace(/^caut-/, '');
+    const rawWeaponSerial = String(cautela.NUMERO_SERIE_ACAUTELAR_ARMAS || req.body.weaponSerialNumber || '').trim();
+
+    let matchedWeaponRow: any = null;
+    try {
+      const [wLookup]: any = await pool.query(
+        `SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, COALESCE(TIROS_DISPARADOS_ARMAS, 0) AS currentShots
+         FROM ARMAS
+         WHERE (? <> '' AND ID_ARMAS = ?)
+            OR (? <> '' AND ID_ARMAS = ?)
+            OR (? <> '' AND UPPER(TRIM(NUMERO_SERIE_ARMAS)) = UPPER(TRIM(?)))
+         LIMIT 1`,
+        [
+          rawWeaponId, rawWeaponId,
+          cleanWeaponId, cleanWeaponId,
+          rawWeaponSerial, rawWeaponSerial
+        ]
+      );
+      if (wLookup && wLookup.length > 0) {
+        matchedWeaponRow = wLookup[0];
+      }
+    } catch (_) {}
+
+    const resolvedWeaponId = matchedWeaponRow?.ID_ARMAS || rawWeaponId || cleanWeaponId;
+    const resolvedWeaponSerial = matchedWeaponRow?.NUMERO_SERIE_ARMAS || rawWeaponSerial;
+
+    // 2a. Atualiza status e cofre da arma na tabela ARMAS
     const newStatus = !isWorking ? 'Manutenção' : 'No Cofre';
     try {
-      await pool.query(`
-        UPDATE ARMAS SET 
-          STATUS_ARMAS = ?,
-          COFRE_ID_ARMAS = ?,
-          OBSERVACAO_LOCALIZACAO_ARMAS = NULL,
-          POLICIAL_ACAUTELADO_ARMAS = NULL,
-          LOCAL_ANTERIOR_COFRE_ID_ARMAS = ?,
-          TIROS_DISPARADOS_ARMAS = TIROS_DISPARADOS_ARMAS + ?
-        WHERE ID_ARMAS = ?
-      `, [newStatus, targetVaultId, targetVaultId, shots, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
-    } catch (e) {
-      await pool.query(`
-        UPDATE ARMAS SET 
-          STATUS_ARMAS = ?,
-          COFRE_ID_ARMAS = ?,
-          OBSERVACAO_LOCALIZACAO_ARMAS = NULL
-        WHERE ID_ARMAS = ?
-      `, [newStatus, targetVaultId, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+      await pool.query(
+        `UPDATE ARMAS SET 
+           STATUS_ARMAS = ?,
+           COFRE_ID_ARMAS = ?,
+           OBSERVACAO_LOCALIZACAO_ARMAS = NULL,
+           POLICIAL_ACAUTELADO_ARMAS = NULL,
+           LOCAL_ANTERIOR_COFRE_ID_ARMAS = ?
+         WHERE ID_ARMAS = ?`,
+        [newStatus, targetVaultId, targetVaultId, resolvedWeaponId]
+      );
+    } catch (_optColErr1) {
+      try {
+        await pool.query(
+          `UPDATE ARMAS SET 
+             STATUS_ARMAS = ?,
+             COFRE_ID_ARMAS = ?,
+             OBSERVACAO_LOCALIZACAO_ARMAS = NULL
+           WHERE ID_ARMAS = ?`,
+          [newStatus, targetVaultId, resolvedWeaponId]
+        );
+      } catch (_optColErr2) {
+        await pool.query(
+          `UPDATE ARMAS SET 
+             STATUS_ARMAS = ?,
+             COFRE_ID_ARMAS = ?
+           WHERE ID_ARMAS = ?`,
+          [newStatus, targetVaultId, resolvedWeaponId]
+        );
+      }
+    }
+
+    // 2b. Sempre que o armeiro receber uma arma que conste que teve tiros, soma em ARMAS.TIROS_DISPARADOS_ARMAS (de forma isolada e garantida)
+    let shotsAddedToWeapon = 0;
+    let newWeaponTotalShots: number | undefined = matchedWeaponRow
+      ? Number(matchedWeaponRow.currentShots || 0)
+      : undefined;
+
+    if (!wasAlreadyReturned && effectiveHadShots && shots > 0) {
+      let affectedShotsRows = 0;
+      if (resolvedWeaponId) {
+        const [updById]: any = await pool.query(
+          `UPDATE ARMAS
+           SET TIROS_DISPARADOS_ARMAS = COALESCE(TIROS_DISPARADOS_ARMAS, 0) + ?
+           WHERE ID_ARMAS = ?`,
+          [shots, resolvedWeaponId]
+        );
+        affectedShotsRows = Number(updById?.affectedRows || 0);
+      }
+      if (affectedShotsRows === 0 && resolvedWeaponSerial) {
+        const [updBySerial]: any = await pool.query(
+          `UPDATE ARMAS
+           SET TIROS_DISPARADOS_ARMAS = COALESCE(TIROS_DISPARADOS_ARMAS, 0) + ?
+           WHERE UPPER(TRIM(NUMERO_SERIE_ARMAS)) = UPPER(TRIM(?))`,
+          [shots, resolvedWeaponSerial]
+        );
+        affectedShotsRows = Number(updBySerial?.affectedRows || 0);
+      }
+
+      if (affectedShotsRows > 0) {
+        shotsAddedToWeapon = shots;
+      }
+
+      try {
+        const [afterRows]: any = await pool.query(
+          `SELECT COALESCE(TIROS_DISPARADOS_ARMAS, 0) AS totalShots
+           FROM ARMAS
+           WHERE (? <> '' AND ID_ARMAS = ?)
+              OR (? <> '' AND UPPER(TRIM(NUMERO_SERIE_ARMAS)) = UPPER(TRIM(?)))
+           LIMIT 1`,
+          [resolvedWeaponId, resolvedWeaponId, resolvedWeaponSerial, resolvedWeaponSerial]
+        );
+        if (afterRows && afterRows.length > 0) {
+          newWeaponTotalShots = Number(afterRows[0].totalShots || 0);
+        } else if (newWeaponTotalShots !== undefined) {
+          newWeaponTotalShots += shotsAddedToWeapon;
+        }
+      } catch (_) {}
+
+      // Registra também no histórico de disparos da arma (REGISTROS_TIROS_ARMAS), caso a tabela exista
+      try {
+        const shotRegId = `shot-caut-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+        await pool.query(
+          `INSERT INTO REGISTROS_TIROS_ARMAS (
+             ID_REGISTROS_TIROS, ARMA_ID, NUMERO_SERIE, QUANTIDADE_TIROS, MOTIVO, POLICIAL_NOME, POLICIAL_MASP, TOTAL_TIROS_APOS, DATA_REGISTRO
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            shotRegId,
+            resolvedWeaponId || cautela.ARMA_ID_ACAUTELAR_ARMAS,
+            resolvedWeaponSerial || cautela.NUMERO_SERIE_ACAUTELAR_ARMAS,
+            shots,
+            `Recebimento de Cautela #${String(actualCautelaId).slice(-8)} (Armeiro: ${armorer.name || 'Armaria'})`,
+            cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS || 'Policial',
+            cautela.REQUERENTE_MASP_ACAUTELAR_ARMAS || '',
+            newWeaponTotalShots ?? shots
+          ]
+        );
+      } catch (_) {}
     }
 
     // 3. Processamento de Devolução das Munições Vinculadas
@@ -11744,10 +11963,14 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       }
     }
 
+    const shotsLogPart = shotsAddedToWeapon > 0
+      ? ` Tiros somados em ARMAS (TIROS_DISPARADOS_ARMAS): +${shotsAddedToWeapon}${newWeaponTotalShots !== undefined ? ` (Total acumulado: ${newWeaponTotalShots})` : ''}.`
+      : ` Tiros: ${shots}.`;
+
     await insertAuditLog(
       'Armas',
       'Confirmar Recibo',
-      `Recibo de devolução da arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} confirmado pelo armeiro ${armorer.name} (${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}). Guardada no cofre: ${targetVaultCode || 'Padrão'}. Tiros: ${shots}. Condição: ${condicoes}. Panes: ${hadMalfunction ? 'Sim' : 'Não'}.${ammoReturnedText}`,
+      `Recibo de devolução da arma Nº ${cautela.NUMERO_SERIE_ACAUTELAR_ARMAS} confirmado pelo armeiro ${armorer.name} (${cautela.REQUERENTE_NOME_ACAUTELAR_ARMAS}). Guardada no cofre: ${targetVaultCode || 'Padrão'}.${shotsLogPart} Condição: ${condicoes}. Panes: ${hadMalfunction ? 'Sim' : 'Não'}.${ammoReturnedText}`,
       armorer,
       req.ip
     );
@@ -11756,6 +11979,8 @@ apiRouter.put('/cautelas-armas/:id/devolver', async (req: Request, res: Response
       success: true, 
       pendingReceipt: false,
       status: 'DEVOLVIDA',
+      shotsAdded: shotsAddedToWeapon,
+      newWeaponTotalShots,
       message: `Recibo de devolução confirmado com sucesso! Armamento guardado no cofre ${targetVaultCode || 'padrão'}.${ammoReturnedText}` 
     });
   } catch (err: any) {

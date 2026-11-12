@@ -499,6 +499,38 @@ class StorageService {
     return true;
   }
 
+  // --- SCOPE HELPERS ---
+  private getEffectiveRole(actor?: User | null): string {
+    return actor?.activeRole || actor?.role || '';
+  }
+
+  private hasDepartmentScope(actor?: User | null): boolean {
+    if (!actor) return false;
+    const role = this.getEffectiveRole(actor);
+    return role === 'Administrador' || (role === 'Armeiro' && actor.managementScope === 'department');
+  }
+
+  private getDepartmentUnitIds(departmentId?: string): Set<string> {
+    if (!departmentId) return new Set<string>();
+    return new Set(
+      (this.state.units || [])
+        .filter(u => u.departmentId === departmentId)
+        .map(u => u.id)
+    );
+  }
+
+  private belongsToDepartment(
+    unitId?: string,
+    departmentId?: string,
+    targetDeptId?: string,
+    deptUnitIds?: Set<string>
+  ): boolean {
+    if (!targetDeptId) return false;
+    if (departmentId && departmentId === targetDeptId) return true;
+    if (unitId && deptUnitIds && deptUnitIds.has(unitId)) return true;
+    return false;
+  }
+
   // --- UNITS ---
   public getAllUnits(): Unit[] {
     return this.state.units || [];
@@ -507,8 +539,9 @@ class StorageService {
   public getUnits(currentUser?: User | null): Unit[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.units;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.units;
+    if (this.hasDepartmentScope(actor)) {
       return this.state.units.filter(u => u.departmentId === actor.departmentId);
     }
     return this.state.units.filter(u => u.id === actor.unitId);
@@ -558,18 +591,22 @@ class StorageService {
   public getUsers(currentUser?: User | null): User[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    
+    const role = this.getEffectiveRole(actor);
+
     let list: User[] = [];
-    if (actor.role === 'Geral') {
+    if (role === 'Geral') {
       list = this.state.users;
-    } else if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      list = this.state.users.filter(u => u.departmentId === actor.departmentId);
+    } else if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      list = this.state.users.filter(u =>
+        this.belongsToDepartment(u.unitId, u.departmentId, actor.departmentId, deptUnits)
+      );
     } else {
       list = this.state.users.filter(u => u.unitId === actor.unitId);
     }
 
     // Apenas usuários com perfil Geral podem ver usuários com perfil Geral
-    if (actor.role !== 'Geral') {
+    if (role !== 'Geral') {
       list = list.filter(u => u.role !== 'Geral');
     }
 
@@ -686,9 +723,13 @@ class StorageService {
   public getVaultSpaces(currentUser?: User | null): VaultSpace[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.vaultSpaces;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.vaultSpaces.filter(v => v.departmentId === actor.departmentId);
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.vaultSpaces;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.vaultSpaces.filter(v =>
+        this.belongsToDepartment(v.unitId, v.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return this.state.vaultSpaces.filter(v => v.unitId === actor.unitId);
   }
@@ -776,9 +817,13 @@ class StorageService {
   public getAmmoStocks(currentUser?: User | null): AmmunitionStock[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.ammoStocks;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.ammoStocks.filter(s => s.departmentId === actor.departmentId);
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.ammoStocks;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.ammoStocks.filter(s =>
+        this.belongsToDepartment(s.unitId, s.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return this.state.ammoStocks.filter(s => s.unitId === actor.unitId);
   }
@@ -786,9 +831,13 @@ class StorageService {
   public getAmmoMovements(currentUser?: User | null): AmmunitionMovement[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.ammoMovements;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.ammoMovements.filter(m => m.departmentId === actor.departmentId);
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.ammoMovements;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.ammoMovements.filter(m =>
+        this.belongsToDepartment(m.unitId, m.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return this.state.ammoMovements.filter(m => m.unitId === actor.unitId || (!m.unitId && m.departmentId === actor.departmentId));
   }
@@ -925,18 +974,22 @@ class StorageService {
   public getWeapons(currentUser?: User | null): Weapon[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = this.getEffectiveRole(actor);
 
-    let result: Weapon[] = [];
-    if (actor.role === 'Geral') {
-      result = this.state.weapons;
-    } else if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      result = this.state.weapons.filter(w => !w.departmentId || w.departmentId === actor.departmentId);
-    } else {
-      // Policial or Armeiro scoped to unit: vê todas as armas da sua unidade
-      result = this.state.weapons.filter(w => !w.unitId || w.unitId === actor.unitId || (actor.departmentId && w.departmentId === actor.departmentId));
+    if (role === 'Geral') {
+      return this.state.weapons;
     }
-
-    return result;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.weapons.filter(w =>
+        (!w.departmentId && !w.unitId) ||
+        this.belongsToDepartment(w.unitId, w.departmentId, actor.departmentId, deptUnits)
+      );
+    }
+    // Policial or Armeiro scoped to unit: vê todas as armas da sua unidade
+    return this.state.weapons.filter(w =>
+      !w.unitId ? (!actor.departmentId || w.departmentId === actor.departmentId) : w.unitId === actor.unitId
+    );
   }
 
   public getAllWeapons(): Weapon[] {
@@ -946,9 +999,13 @@ class StorageService {
   public getAllWeaponsForAdmin(currentUser?: User | null): Weapon[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.weapons;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.weapons.filter(w => w.departmentId === actor.departmentId);
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.weapons;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.weapons.filter(w =>
+        this.belongsToDepartment(w.unitId, w.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return this.state.weapons.filter(w => w.unitId === actor.unitId);
   }
@@ -1114,48 +1171,60 @@ class StorageService {
   public getWeaponTransfers(currentUser?: User | null, unitIdFilter?: string): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
-    // Strict Role Check: ONLY Armeiro, Administrador, Geral, and Policial
+    const role = this.getEffectiveRole(actor);
     const allowedRoles = ['Geral', 'Administrador', 'Armeiro', 'Policial'];
     if (!allowedRoles.includes(role)) return [];
 
     const allTransfers = this.state.weaponTransfers || [];
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
 
-    // If an explicit unit filter is passed (and not 'ALL'), only return transfers where that unit is origin or destination
+    let scoped = allTransfers;
+    if (role !== 'Geral') {
+      if (isDeptScoped && actor.departmentId) {
+        scoped = allTransfers.filter(t =>
+          this.belongsToDepartment(t.originUnitId, t.originDepartmentId, actor.departmentId, deptUnits) ||
+          this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits) ||
+          t.destinationArmorerId === actor.id ||
+          t.transferredByUserId === actor.id
+        );
+      } else if (actor.unitId) {
+        scoped = allTransfers.filter(
+          t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+        );
+      } else {
+        scoped = allTransfers.filter(
+          t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
+        );
+      }
+    }
+
     if (unitIdFilter && unitIdFilter !== 'ALL') {
-      return allTransfers.filter(
+      return scoped.filter(
         t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
 
-    // Strict Rule:
-    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
-    if (actor.unitId) {
-      return allTransfers.filter(
-        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
-      );
-    }
-
-    // Super-user Geral with no unit restriction sees all transfers
-    if (role === 'Geral') return allTransfers;
-
-    return allTransfers.filter(
-      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
-    );
+    return scoped;
   }
 
   public getPendingIncomingTransfers(currentUser?: User | null): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
     const transfers = this.getWeaponTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (role === 'Geral') return true;
+      if (isDeptScoped && actor.departmentId) {
+        return this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits);
+      }
       if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      if (role === 'Geral' && !actor.unitId) return true;
       return false;
     });
   }
@@ -1242,19 +1311,16 @@ class StorageService {
   public getPendingOutgoingTransfers(currentUser?: User | null): WeaponTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
+    const role = this.getEffectiveRole(actor);
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
     const transfers = this.getWeaponTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
-      if (actor.role === 'Geral') return true;
+      if (role === 'Geral') return true;
       if (t.transferredByUserId === actor.id) return true;
-      if (actor.role === 'Administrador') {
-        return t.originDepartmentId === actor.departmentId || !actor.departmentId;
-      }
-      if (actor.role === 'Armeiro') {
-        if (actor.managementScope !== 'unit') {
-          return t.originDepartmentId === actor.departmentId;
-        }
-        return t.originUnitId === actor.unitId;
+      if (isDeptScoped && actor.departmentId) {
+        return this.belongsToDepartment(t.originUnitId, t.originDepartmentId, actor.departmentId, deptUnits);
       }
       return t.originUnitId === actor.unitId;
     });
@@ -1264,45 +1330,60 @@ class StorageService {
   public getAmmoTransfers(currentUser?: User | null, unitIdFilter?: string): AmmoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
     const allowedRoles = ['Geral', 'Administrador', 'Armeiro', 'Policial'];
     if (!allowedRoles.includes(role)) return [];
 
     const allTransfers = this.state.ammoTransfers || [];
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
+
+    let scoped = allTransfers;
+    if (role !== 'Geral') {
+      if (isDeptScoped && actor.departmentId) {
+        scoped = allTransfers.filter(t =>
+          this.belongsToDepartment(t.originUnitId, t.originDepartmentId, actor.departmentId, deptUnits) ||
+          this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits) ||
+          t.destinationArmorerId === actor.id ||
+          t.transferredByUserId === actor.id
+        );
+      } else if (actor.unitId) {
+        scoped = allTransfers.filter(
+          t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+        );
+      } else {
+        scoped = allTransfers.filter(
+          t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
+        );
+      }
+    }
 
     if (unitIdFilter && unitIdFilter !== 'ALL') {
-      return allTransfers.filter(
+      return scoped.filter(
         t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
 
-    // Strict Rule:
-    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
-    if (actor.unitId) {
-      return allTransfers.filter(
-        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
-      );
-    }
-
-    if (role === 'Geral') return allTransfers;
-
-    return allTransfers.filter(
-      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
-    );
+    return scoped;
   }
 
   public getPendingIncomingAmmoTransfers(currentUser?: User | null): AmmoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
     const transfers = this.getAmmoTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (role === 'Geral') return true;
+      if (isDeptScoped && actor.departmentId) {
+        return this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits);
+      }
       if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      if (role === 'Geral' && !actor.unitId) return true;
       return false;
     });
   }
@@ -1385,42 +1466,57 @@ class StorageService {
   public getExplosivoTransfers(currentUser?: User | null, unitIdFilter?: string): ExplosivoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
     const list = this.state.explosivoTransfers || [];
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
+
+    let scoped = list;
+    if (role !== 'Geral') {
+      if (isDeptScoped && actor.departmentId) {
+        scoped = list.filter(t =>
+          this.belongsToDepartment(t.originUnitId, t.originDepartmentId, actor.departmentId, deptUnits) ||
+          this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits) ||
+          t.destinationArmorerId === actor.id ||
+          t.transferredByUserId === actor.id
+        );
+      } else if (actor.unitId) {
+        scoped = list.filter(
+          t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+        );
+      } else {
+        scoped = list.filter(
+          t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
+        );
+      }
+    }
 
     if (unitIdFilter && unitIdFilter !== 'ALL') {
-      return list.filter(
+      return scoped.filter(
         t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
 
-    // Strict Rule:
-    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
-    if (actor.unitId) {
-      return list.filter(
-        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
-      );
-    }
-
-    if (role === 'Geral') return list;
-
-    return list.filter(
-      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
-    );
+    return scoped;
   }
 
   public getPendingIncomingExplosivoTransfers(currentUser?: User | null): ExplosivoTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
     const transfers = this.getExplosivoTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (role === 'Geral') return true;
+      if (isDeptScoped && actor.departmentId) {
+        return this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits);
+      }
       if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      if (role === 'Geral' && !actor.unitId) return true;
       return false;
     });
   }
@@ -1593,42 +1689,57 @@ class StorageService {
   public getMaterialTransfers(currentUser?: User | null, unitIdFilter?: string): MaterialTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
     const list = this.state.materialTransfers || [];
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
+
+    let scoped = list;
+    if (role !== 'Geral') {
+      if (isDeptScoped && actor.departmentId) {
+        scoped = list.filter(t =>
+          this.belongsToDepartment(t.originUnitId, t.originDepartmentId, actor.departmentId, deptUnits) ||
+          this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits) ||
+          t.destinationArmorerId === actor.id ||
+          t.transferredByUserId === actor.id
+        );
+      } else if (actor.unitId) {
+        scoped = list.filter(
+          t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
+        );
+      } else {
+        scoped = list.filter(
+          t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
+        );
+      }
+    }
 
     if (unitIdFilter && unitIdFilter !== 'ALL') {
-      return list.filter(
+      return scoped.filter(
         t => t.originUnitId === unitIdFilter || t.destinationUnitId === unitIdFilter
       );
     }
 
-    // Strict Rule:
-    // "o histórico de transferência entre unidades deve aparecer para as unidades envolvidas na movimentação, as demais unidades não devem enxergar o histórico se não estiver em origem ou destino da transferência"
-    if (actor.unitId) {
-      return list.filter(
-        t => t.originUnitId === actor.unitId || t.destinationUnitId === actor.unitId
-      );
-    }
-
-    if (role === 'Geral') return list;
-
-    return list.filter(
-      t => t.destinationArmorerId === actor.id || t.transferredByUserId === actor.id
-    );
+    return scoped;
   }
 
   public getPendingIncomingMaterialTransfers(currentUser?: User | null): MaterialTransfer[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    const role = actor.activeRole || actor.role;
+    const role = this.getEffectiveRole(actor);
+    const isDeptScoped = this.hasDepartmentScope(actor);
+    const deptUnits = isDeptScoped ? this.getDepartmentUnitIds(actor.departmentId) : new Set<string>();
     const transfers = this.getMaterialTransfers(actor);
     return transfers.filter(t => {
       if (t.status !== 'Pendente') return false;
       if (t.destinationArmorerId && t.destinationArmorerId === actor.id) return true;
+      if (role === 'Geral') return true;
+      if (isDeptScoped && actor.departmentId) {
+        return this.belongsToDepartment(t.destinationUnitId, t.destinationDepartmentId, actor.departmentId, deptUnits);
+      }
       if (actor.unitId) {
         return t.destinationUnitId === actor.unitId;
       }
-      if (role === 'Geral' && !actor.unitId) return true;
       return false;
     });
   }
@@ -1781,9 +1892,13 @@ class StorageService {
   public getMovements(currentUser?: User | null): Movement[] {
     const actor = currentUser || this.state.currentUser;
     if (!actor) return [];
-    if (actor.role === 'Geral') return this.state.movements;
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return this.state.movements.filter(m => m.departmentId === actor.departmentId);
+    const role = this.getEffectiveRole(actor);
+    if (role === 'Geral') return this.state.movements;
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return this.state.movements.filter(m =>
+        this.belongsToDepartment(m.unitId, m.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return this.state.movements.filter(m => m.unitId === actor.unitId);
   }
@@ -2515,18 +2630,16 @@ class StorageService {
   public getMateriais(user?: User | null): Material[] {
     const list = this.state.materiais || [];
     const currentUser = user || this.state.currentUser;
-    if (!currentUser || currentUser.role === 'Geral') {
+    const role = this.getEffectiveRole(currentUser);
+    if (!currentUser || role === 'Geral') {
       return list;
     }
 
-    if (currentUser.managementScope === 'unit' && currentUser.unitId) {
-      return list.filter(m => m.unidadeId === currentUser.unitId);
-    }
-
-    if (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') {
-      if (currentUser.departmentId) {
-        return list.filter(m => m.departamentoId === currentUser.departmentId);
-      }
+    if (this.hasDepartmentScope(currentUser) && currentUser.departmentId) {
+      const deptUnits = this.getDepartmentUnitIds(currentUser.departmentId);
+      return list.filter(m =>
+        this.belongsToDepartment(m.unidadeId, m.departamentoId, currentUser.departmentId, deptUnits)
+      );
     }
 
     if (currentUser.unitId) {
@@ -2589,22 +2702,24 @@ class StorageService {
   public getCautelasMateriais(user?: User | null): CautelaMaterial[] {
     const list = this.state.cautelasMateriais || [];
     const currentUser = user || this.state.currentUser;
-    if (!currentUser || currentUser.role === 'Geral') {
+    const role = this.getEffectiveRole(currentUser);
+    if (!currentUser || role === 'Geral') {
       return list;
     }
 
-    if (currentUser.managementScope === 'unit' && currentUser.unitId) {
-      return list.filter(c => c.unidadeId === currentUser.unitId);
+    if (this.hasDepartmentScope(currentUser) && currentUser.departmentId) {
+      const deptUnits = this.getDepartmentUnitIds(currentUser.departmentId);
+      return list.filter(c =>
+        this.belongsToDepartment(c.unidadeId, c.departamentoId, currentUser.departmentId, deptUnits)
+      );
     }
 
-    if (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') {
-      if (currentUser.departmentId) {
-        return list.filter(c => c.departamentoId === currentUser.departmentId);
-      }
-    }
-
-    if (currentUser.role === 'Policial') {
+    if (role === 'Policial') {
       return list.filter(c => c.usuarioInternoId === currentUser.id || c.unidadeId === currentUser.unitId);
+    }
+
+    if (currentUser.unitId) {
+      return list.filter(c => c.unidadeId === currentUser.unitId);
     }
 
     return list;
@@ -2694,11 +2809,16 @@ class StorageService {
   public getExplosivos(user?: User | null): Explosivo[] {
     const actor = user || this.state.currentUser;
     const list = this.state.explosivos || [];
-    if (!actor || actor.role === 'Geral') {
+    const role = this.getEffectiveRole(actor);
+    if (!actor || role === 'Geral') {
       return list;
     }
-    if (actor.role === 'Administrador' || (actor.role === 'Armeiro' && actor.managementScope !== 'unit')) {
-      return list.filter(e => !e.departmentId || e.departmentId === actor.departmentId);
+    if (this.hasDepartmentScope(actor)) {
+      const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+      return list.filter(e =>
+        (!e.departmentId && !e.unitId) ||
+        this.belongsToDepartment(e.unitId, e.departmentId, actor.departmentId, deptUnits)
+      );
     }
     return list.filter(e => !e.unitId || e.unitId === actor.unitId);
   }
@@ -2752,8 +2872,15 @@ class StorageService {
       filtered = filtered.filter(m => m.explosivoId === targetExplosivoId);
     }
 
-    if (actor && actor.role !== 'Geral' && actor.role !== 'Administrador') {
-      if (actor.unitId) {
+    const role = this.getEffectiveRole(actor);
+    if (actor && role !== 'Geral') {
+      if (this.hasDepartmentScope(actor) && actor.departmentId) {
+        const deptUnits = this.getDepartmentUnitIds(actor.departmentId);
+        filtered = filtered.filter(m =>
+          (!m.departmentId && !m.unitId) ||
+          this.belongsToDepartment(m.unitId, m.departmentId, actor.departmentId, deptUnits)
+        );
+      } else if (actor.unitId) {
         filtered = filtered.filter(m => !m.unitId || m.unitId === actor.unitId);
       } else if (actor.departmentId) {
         filtered = filtered.filter(m => !m.departmentId || m.departmentId === actor.departmentId);
@@ -3804,24 +3931,44 @@ class StorageService {
     }
   }
 
-  public async returnCautelaArma(id: string, returnData: any): Promise<{ success: boolean; pendingReceipt?: boolean; error?: string }> {
+  public async returnCautelaArma(
+    id: string,
+    returnData: any
+  ): Promise<{ success: boolean; pendingReceipt?: boolean; shotsAdded?: number; newWeaponTotalShots?: number; error?: string }> {
     const cleanId = id.replace(/^caut-active-/, '').replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '').replace(/^caut-arma-/, '').replace(/^caut-/, '');
-    const target = (this.state.cautelasArmas || []).find(c => 
-      c.id === id || 
-      c.id === cleanId || 
-      c.weaponId === id || 
-      c.weaponId === cleanId ||
-      (returnData?.weaponId && c.weaponId === returnData.weaponId) ||
-      (returnData?.weaponSerialNumber && c.weaponSerialNumber === returnData.weaponSerialNumber)
-    );
+    const cautelasList = this.state.cautelasArmas || [];
+    const target =
+      cautelasList.find(
+        c =>
+          c.id === id ||
+          c.id === cleanId ||
+          (returnData?.cautelaId && c.id === returnData.cautelaId)
+      ) ||
+      cautelasList.find(
+        c =>
+          (c.status === 'DEVOLUCAO_PENDENTE' || c.status === 'AUTORIZADA') &&
+          (c.weaponId === id ||
+            c.weaponId === cleanId ||
+            (returnData?.weaponId && c.weaponId === returnData.weaponId) ||
+            (returnData?.weaponSerialNumber && c.weaponSerialNumber === returnData.weaponSerialNumber))
+      );
     const weap = (this.state.weapons || []).find(w => 
       w.id === (target?.weaponId || returnData?.weaponId || cleanId) ||
-      (target?.weaponSerialNumber && w.serialNumber === target.weaponSerialNumber) ||
-      (returnData?.weaponSerialNumber && w.serialNumber === returnData.weaponSerialNumber)
+      (target?.weaponSerialNumber && w.serialNumber?.trim().toUpperCase() === target.weaponSerialNumber.trim().toUpperCase()) ||
+      (returnData?.weaponSerialNumber && w.serialNumber?.trim().toUpperCase() === String(returnData.weaponSerialNumber).trim().toUpperCase())
     );
 
     const effectiveRole = this.state.currentUser?.activeRole || this.state.currentUser?.role;
     const isPendingReceipt = Boolean(returnData?.pendingReceipt || effectiveRole === 'Policial');
+    const wasAlreadyDevolvida = target?.status === 'DEVOLVIDA';
+
+    const effectiveHadShots =
+      returnData?.hadShots !== undefined
+        ? Boolean(returnData.hadShots) || Number(returnData.shotsFired || 0) > 0
+        : Boolean(target?.hadShots) || Number(target?.shotsFired || 0) > 0;
+    const effectiveShotsFired = effectiveHadShots
+      ? Math.max(0, Number(returnData?.shotsFired ?? target?.shotsFired ?? 0))
+      : 0;
 
     const nowIso = new Date().toISOString();
     if (target) {
@@ -3836,8 +3983,8 @@ class StorageService {
           target.vaultSpaceId = chosenWeaponVault;
         }
       }
-      target.hadShots = Boolean(returnData.hadShots);
-      target.shotsFired = Number(returnData.shotsFired || 0);
+      target.hadShots = effectiveHadShots;
+      target.shotsFired = effectiveShotsFired;
       target.isWorking = Boolean(returnData.isWorking);
       target.defectDescription = returnData.defectDescription || undefined;
       target.hadMalfunction = Boolean(returnData.hadMalfunction);
@@ -3857,8 +4004,8 @@ class StorageService {
       weap.previousVaultSpaceId = destVault;
       delete (weap as any).locationNote;
       weap.status = !returnData.isWorking ? 'Manutenção' : 'No Cofre';
-      if (returnData.shotsFired) {
-        weap.shotCount = (weap.shotCount || 0) + Number(returnData.shotsFired);
+      if (!wasAlreadyDevolvida && effectiveHadShots && effectiveShotsFired > 0) {
+        weap.shotCount = Number(weap.shotCount || 0) + effectiveShotsFired;
       }
     }
 
@@ -3943,9 +4090,19 @@ class StorageService {
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
-      return { success: true, pendingReceipt: Boolean(data.pendingReceipt ?? isPendingReceipt) };
+      return {
+        success: true,
+        pendingReceipt: Boolean(data.pendingReceipt ?? isPendingReceipt),
+        shotsAdded: typeof data.shotsAdded === 'number' ? data.shotsAdded : (!isPendingReceipt ? effectiveShotsFired : 0),
+        newWeaponTotalShots: typeof data.newWeaponTotalShots === 'number' ? data.newWeaponTotalShots : weap?.shotCount
+      };
     } catch (err: any) {
-      return { success: true, pendingReceipt: isPendingReceipt };
+      return {
+        success: true,
+        pendingReceipt: isPendingReceipt,
+        shotsAdded: !isPendingReceipt ? effectiveShotsFired : 0,
+        newWeaponTotalShots: weap?.shotCount
+      };
     }
   }
 

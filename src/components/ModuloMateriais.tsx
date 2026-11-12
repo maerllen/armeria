@@ -132,23 +132,22 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const [transferObs, setTransferObs] = useState('');
 
   // Permission logic
-  const isGeral = currentUser?.role === 'Geral';
-  const isAdmin = currentUser?.role === 'Administrador';
-  const isArmeiro = currentUser?.role === 'Armeiro';
+  const effectiveRole = currentUser?.activeRole || currentUser?.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isDeptArmeiro = isArmeiro && currentUser?.managementScope === 'department';
 
   // "novos materiais so podem ser inseridos por usuarios administradores, armeiros e geral"
   const canInsertMaterial = isGeral || isAdmin || isArmeiro;
 
   // Department and Unit lock rules:
-  // "onde, o geral pode escolher para qual departamento e unidade está criando o material"
-  // "já armeiros e administradores, a opção departamento do material já será automaticamente selecionada como o departamento que ele faz parte, podendo escolher apenas a unidade"
-  // "caso o usuario só tenha acesso a sua unidade, tanto departamento quanto unidade ficará selecionado automaticamente"
+  // Geral chooses any department and unit.
+  // Admin and Armeiro with department scope have their department fixed and can choose any unit of that department.
+  // Unit-scoped users have both department and unit fixed.
   const userDeptId = currentUser?.departmentId || '';
   const userUnitId = currentUser?.unitId || '';
-  const isOnlyUnitAccess = !isGeral && (
-    currentUser?.managementScope === 'unit' ||
-    (userUnitId && !isGeral && !isAdmin)
-  );
+  const isOnlyUnitAccess = !isGeral && !isAdmin && !isDeptArmeiro;
 
   // Available data from storage with active state synchronization
   const [tiposMateriais, setTiposMateriais] = useState<TipoMaterial[]>(() => storage.getTiposMateriais());
@@ -346,7 +345,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       onRefresh();
       reloadMateriais();
     } else {
-      alert(res.error || 'Não foi possível excluir o material.');
+      setErrorMessage(res.error || 'Não foi possível excluir o material.');
     }
   };
 
@@ -387,7 +386,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     if (res.success) {
       onRefresh();
     } else {
-      alert(res.error || 'Erro ao excluir tipo.');
+      setErrorMessage(res.error || 'Erro ao excluir tipo.');
     }
   };
 
