@@ -3224,6 +3224,7 @@ class StorageService {
   public async authorizeCautelaArma(
     id: string, 
     options?: string | { 
+      withAmmo?: boolean;
       notes?: string; 
       vaultSpaceId?: string; 
       stockId?: string; 
@@ -3242,6 +3243,10 @@ class StorageService {
     }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { notes: options } : (options || {});
+    const shouldIncludeAmmo =
+      opts.withAmmo !== undefined
+        ? Boolean(opts.withAmmo && opts.ammoQuantity && Number(opts.ammoQuantity) > 0)
+        : Boolean(opts.ammoQuantity && Number(opts.ammoQuantity) > 0);
     
     // Atualização otimista imediata no estado local
     const cleanId = id.replace(/^caut-weapon-sync-/, '').replace(/^caut-sync-/, '');
@@ -3255,6 +3260,7 @@ class StorageService {
     );
 
     if (target) {
+      const prevLinkedAmmoId = target.linkedAmmoCautelaId;
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
       target.armorerId = (opts as any).armorerId || this.state.currentUser?.id;
@@ -3271,16 +3277,14 @@ class StorageService {
         (weap as any).locationNote = `Acautelada com ${target.requesterName} (MASP: ${target.requesterMasp}) • Último cofre: ${vault?.code || 'N/A'}`;
       }
 
-      // Sincroniza ou cria cautela de munição vinculada imediatamente no estado local
-      if (opts.ammoQuantity && Number(opts.ammoQuantity) > 0) {
+      if (shouldIncludeAmmo) {
         target.ammoQuantity = Number(opts.ammoQuantity);
         target.ammoDestinacao = opts.destinacao || 'Defesa';
         
-        let linkedMun = (this.state.cautelasMunicoes || []).find(m => 
-          m.id === target.linkedAmmoCautelaId || 
+        const linkedMun = (this.state.cautelasMunicoes || []).find(m => 
+          (prevLinkedAmmoId && m.id === prevLinkedAmmoId) || 
           (m as any).cautelaArmaId === target.id || 
-          m.linkedWeaponCautelaId === target.id ||
-          (m.linkedWeaponSerialNumber && m.linkedWeaponSerialNumber === target.weaponSerialNumber)
+          m.linkedWeaponCautelaId === target.id
         );
 
         if (linkedMun) {
@@ -3331,18 +3335,24 @@ class StorageService {
           this.state.cautelasMunicoes.unshift(newMun);
         }
       } else {
-        const ammoList = this.state.cautelasMunicoes || [];
-        const linkedMun = ammoList.find(m => 
-          m.id === target.linkedAmmoCautelaId || 
-          (m as any).cautelaArmaId === target.id || 
-          m.linkedWeaponCautelaId === target.id
-        );
-        if (linkedMun) {
-          linkedMun.status = 'AUTORIZADA';
-          linkedMun.authorizedAt = new Date().toISOString();
-          linkedMun.armorerId = target.armorerId;
-          linkedMun.armorerName = target.armorerName;
-          linkedMun.armorerMasp = target.armorerMasp;
+        // Armeiro não marcou "Acautelar munições junto com a arma?":
+        // limpa vínculos de munição e descarta qualquer pré-solicitação pendente vinculada
+        target.linkedAmmoCautelaId = undefined;
+        target.ammoQuantity = 0;
+        target.ammoFabricante = undefined;
+        target.ammoTipo = undefined;
+        target.ammoPeso = undefined;
+        target.ammoLote = undefined;
+        target.ammoDestinacao = undefined;
+
+        if (this.state.cautelasMunicoes) {
+          this.state.cautelasMunicoes = this.state.cautelasMunicoes.filter(m => {
+            const isLinkedToThis =
+              (prevLinkedAmmoId && m.id === prevLinkedAmmoId) ||
+              (m as any).cautelaArmaId === target.id ||
+              m.linkedWeaponCautelaId === target.id;
+            return !(isLinkedToThis && m.status === 'PENDENTE');
+          });
         }
       }
     }
@@ -3353,12 +3363,13 @@ class StorageService {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          withAmmo: shouldIncludeAmmo,
           notes: opts.notes,
           vaultSpaceId: opts.vaultSpaceId,
-          stockId: opts.stockId,
-          seraDevolvida: opts.seraDevolvida,
-          ammoQuantity: opts.ammoQuantity,
-          destinacao: opts.destinacao,
+          stockId: shouldIncludeAmmo ? opts.stockId : undefined,
+          seraDevolvida: shouldIncludeAmmo ? opts.seraDevolvida : undefined,
+          ammoQuantity: shouldIncludeAmmo ? opts.ammoQuantity : 0,
+          destinacao: shouldIncludeAmmo ? opts.destinacao : undefined,
           weaponId: (opts as any).weaponId || target?.weaponId,
           weaponSerialNumber: (opts as any).weaponSerialNumber || target?.weaponSerialNumber,
           cautelaId: target?.id || id,

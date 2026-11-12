@@ -9962,15 +9962,58 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
       `, [locationNote, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
     }
 
-    // 3. Se houver cautela de munição vinculada, autoriza e deduz o estoque do cofre
-    const ammoCautelaId = cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS;
-    const [ammoRows]: any = ammoCautelaId 
-      ? await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [ammoCautelaId])
-      : await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ? LIMIT 1', [id]);
+    // 3. Somente se o Armeiro marcou explicitamente "Acautelar munições junto com a arma?" (wantsWithAmmo),
+    // autoriza ou gera a cautela de munições vinculada e deduz do estoque do cofre.
+    // Caso contrário, a cautela será exclusivamente do armamento, sem gerar cautela de munições vinculada.
+    const wantsWithAmmo =
+      req.body.withAmmo !== undefined
+        ? Boolean(req.body.withAmmo && Number(req.body.ammoQuantity) > 0)
+        : Boolean(Number(req.body.ammoQuantity) > 0);
 
-    if (ammoRows && ammoRows.length > 0) {
+    const ammoCautelaId = cautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS;
+    const [ammoRows]: any = wantsWithAmmo
+      ? (ammoCautelaId
+          ? await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE ID_ACAUTELAR_MUNICOES = ?', [ammoCautelaId])
+          : await pool.query('SELECT * FROM ACAUTELAR_MUNICOES WHERE CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ? LIMIT 1', [actualCautelaId]))
+      : [[]];
+
+    if (!wantsWithAmmo) {
+      // Remove qualquer pré-solicitação pendente de munição porventura pré-vinculada e zera campos de munição na cautela de arma
+      try {
+        await pool.query(
+          `DELETE FROM ACAUTELAR_MUNICOES
+           WHERE STATUS_ACAUTELAR_MUNICOES = 'PENDENTE'
+             AND (
+               (? IS NOT NULL AND ID_ACAUTELAR_MUNICOES = ?)
+               OR CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ?
+               OR CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ?
+             )`,
+          [ammoCautelaId || null, ammoCautelaId || null, actualCautelaId, id]
+        );
+      } catch (_) {}
+
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS SET
+             CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_TIPO_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_PESO_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_LOTE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = NULL
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [actualCautelaId]
+        );
+      } catch (_) {
+        await pool.query(
+          'UPDATE ACAUTELAR_ARMAS SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = NULL WHERE ID_ACAUTELAR_ARMAS = ?',
+          [actualCautelaId]
+        ).catch(() => {});
+      }
+    } else if (ammoRows && ammoRows.length > 0) {
       const ammoCautela = ammoRows[0];
-      const qty = Number(ammoCautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
+      const qty = Number(req.body.ammoQuantity || ammoCautela.QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES || 0);
       const seraDev = seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : (ammoCautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES !== undefined ? ammoCautela.SERA_DEVOLVIDA_ACAUTELAR_MUNICOES : 1);
 
       let effectiveVault = vaultSpaceId || ammoCautela.COFRE_ID_ACAUTELAR_MUNICOES;
@@ -10065,7 +10108,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
           armorer.name
         ]
       );
-    } else if (Number(req.body.ammoQuantity) > 0) {
+    } else if (wantsWithAmmo && Number(req.body.ammoQuantity) > 0) {
       // O armeiro optou por acautelar munições em conjunto com o armamento
       const ammoQty = Number(req.body.ammoQuantity);
       let stockDetails: any = null;

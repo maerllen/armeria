@@ -1311,8 +1311,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     );
     if (exact) return exact;
 
-    // 2. Fallback para cautelas sincronizadas: somente se houver cautela de munição ativa vinculada à mesma arma e mesmo policial
-    if (!cautela.linkedAmmoCautelaId && (cautela.status === 'AUTORIZADA' || cautela.status === 'DEVOLUCAO_PENDENTE')) {
+    // 2. Fallback exclusivo para registros sintéticos sincronizados de arma ('caut-active-'):
+    // nunca vincula munições avulsas a registros reais de cautela de arma autorizados sem munição
+    if (
+      String(cautela.id || '').startsWith('caut-active-') &&
+      !cautela.linkedAmmoCautelaId &&
+      (cautela.status === 'AUTORIZADA' || cautela.status === 'DEVOLUCAO_PENDENTE')
+    ) {
       const cDigits = cleanDigits(cautela.requesterMasp);
       return list.find(m => {
         const isActiveMun = m.status === 'AUTORIZADA' || (m.status as string) === 'DEVOLUCAO_PENDENTE';
@@ -1568,12 +1573,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Abertura do fluxo de autorização pelo armeiro
   const handleOpenAuthorize = (cautela: CautelaArma) => {
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
-    const hasAmmo = Boolean(cautela.linkedAmmoCautelaId || (cautela.ammoQuantity && cautela.ammoQuantity > 0) || linkedAmmo);
-    const hasAmmoSuggestion = Boolean((cautela.authorizationNotes || '').trim());
     const resolvedMotivo = getResolvedMotivoFinalidade(cautela);
     setAuthStockId('');
     setAuthorizingCautela(cautela);
-    setAuthWithAmmo(hasAmmo || hasAmmoSuggestion);
+    // Inicia desmarcado: somente acautela munições caso o usuário Armeiro marque explicitamente a opção
+    setAuthWithAmmo(false);
     setAuthAmmoQty(cautela.ammoQuantity || linkedAmmo?.quantity || 30);
     const isTreinamento = (
       resolvedMotivo === 'Treinamento' ||
@@ -1592,15 +1596,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setIsSubmitting(true);
     setErrorMsg('');
     try {
-      const selectedStock = availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId);
+      const selectedStock = authWithAmmo
+        ? availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId)
+        : undefined;
       const resolvedAuthReq = getResolvedRequester(authorizingCautela);
       const res = await storage.authorizeCautelaArma(authorizingCautela.id, {
+        withAmmo: authWithAmmo,
         notes: authNotes,
         stockId: authWithAmmo ? (authStockId || undefined) : undefined,
-        vaultSpaceId: selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId,
-        seraDevolvida: authSeraDevolvida,
-        ammoQuantity: authWithAmmo ? Number(authAmmoQty) : undefined,
-        destinacao: authAmmoDestinacao,
+        vaultSpaceId: authWithAmmo
+          ? (selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId)
+          : authorizingCautela.vaultSpaceId,
+        seraDevolvida: authWithAmmo ? authSeraDevolvida : undefined,
+        ammoQuantity: authWithAmmo ? Number(authAmmoQty) : 0,
+        destinacao: authWithAmmo ? authAmmoDestinacao : undefined,
         weaponId: authorizingCautela.weaponId,
         weaponSerialNumber: authorizingCautela.weaponSerialNumber,
         cautelaId: authorizingCautela.id,
@@ -1614,7 +1623,13 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (!res.success) {
         setErrorMsg(res.error || 'Erro ao autorizar acautelamento.');
       } else {
-        setSuccessMsg(`Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${authWithAmmo ? ' Munições deduzidas e lançadas em Cautela de Munições.' : ''}`);
+        setSuccessMsg(
+          `Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${
+            authWithAmmo
+              ? ' Munições deduzidas e lançadas em Cautela de Munições.'
+              : ' Cautela exclusiva do armamento (sem geração de cautela de munições).'
+          }`
+        );
         setAuthorizingCautela(null);
         setLocalSyncTick(t => t + 1);
         await onRefresh();
@@ -1635,6 +1650,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       const targetCautela = allCautelas.find(c => c.id === id || c.weaponId === id);
       const resolvedTargetReq = getResolvedRequester(targetCautela);
       const res = await storage.authorizeCautelaArma(id, {
+        withAmmo: false,
+        ammoQuantity: 0,
         notes,
         weaponId: targetCautela?.weaponId,
         weaponSerialNumber: targetCautela?.weaponSerialNumber,
@@ -5756,12 +5773,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       Acautelar munições junto com a arma?
                     </span>
                   </label>
-                  <span className="text-[10px] text-amber-400 font-semibold">
-                    {authWithAmmo ? 'Munições vinculadas ativas' : 'Apenas a arma'}
+                  <span className={`text-[10px] font-semibold ${authWithAmmo ? 'text-amber-400' : 'text-slate-400'}`}>
+                    {authWithAmmo ? 'Munições vinculadas ativas' : 'Somente armamento (sem munição)'}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Caso habilitado, o registro de cautela de munição será lançado igualmente no módulo Cautela de Munições e deduzido do estoque do cofre selecionado.
+                  {authWithAmmo
+                    ? 'O registro de cautela de munição será lançado em Cautela de Munições e deduzido do estoque do cofre selecionado.'
+                    : 'Caso não marque esta opção, a cautela será exclusivamente do armamento, sem munição e sem gerar nenhuma cautela de munições vinculada.'}
                 </p>
               </div>
 
