@@ -94,8 +94,18 @@ export function printDocumentInPage(htmlContent: string) {
   const frameDoc = iframe.contentWindow?.document || iframe.contentDocument;
   if (!frameDoc) return;
 
+  let processedHtml = keepArmorerSignatureOnly(htmlContent);
+  if (typeof window !== 'undefined' && window.location?.origin && !/<base\s/i.test(processedHtml)) {
+    const baseTag = `<base href="${window.location.origin}/" />`;
+    if (/<head[^>]*>/i.test(processedHtml)) {
+      processedHtml = processedHtml.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+    } else {
+      processedHtml = `${baseTag}${processedHtml}`;
+    }
+  }
+
   frameDoc.open();
-  frameDoc.write(keepArmorerSignatureOnly(htmlContent));
+  frameDoc.write(processedHtml);
   frameDoc.close();
 
   let hasPrinted = false;
@@ -116,23 +126,36 @@ export function printDocumentInPage(htmlContent: string) {
   };
 
   const images = Array.from(frameDoc.images || []);
-  const pendingImages = images.filter(img => !img.complete);
-
-  if (pendingImages.length === 0) {
-    setTimeout(triggerPrint, 250);
-  } else {
-    let remaining = pendingImages.length;
-    const onImgSettled = () => {
-      remaining -= 1;
-      if (remaining <= 0) {
-        setTimeout(triggerPrint, 120);
-      }
-    };
-    pendingImages.forEach(img => {
-      img.addEventListener('load', onImgSettled, { once: true });
-      img.addEventListener('error', onImgSettled, { once: true });
-    });
-    // Fallback caso alguma imagem demore mais que o esperado
-    setTimeout(triggerPrint, 1200);
+  if (images.length === 0) {
+    setTimeout(triggerPrint, 200);
+    return;
   }
+
+  const waitForImg = (img: HTMLImageElement) =>
+    new Promise<void>(resolve => {
+      const finish = () => {
+        if (typeof img.decode === 'function') {
+          img
+            .decode()
+            .catch(() => {})
+            .finally(() => resolve());
+        } else {
+          resolve();
+        }
+      };
+
+      if (img.complete) {
+        finish();
+      } else {
+        img.addEventListener('load', finish, { once: true });
+        img.addEventListener('error', () => resolve(), { once: true });
+      }
+    });
+
+  Promise.all(images.map(waitForImg)).then(() => {
+    setTimeout(triggerPrint, 120);
+  });
+
+  // Fallback caso alguma imagem externa demore mais que o esperado
+  setTimeout(triggerPrint, 2500);
 }

@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { 
-  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo 
+  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo, DEFAULT_SYSTEM_LOGO 
 } from '../types';
 import { storage } from '../services/storage';
 import { 
@@ -40,8 +40,111 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const canAuthorize = isArmeiroOrAdmin;
 
   const userUnit = useMemo(() => {
-    return units.find(u => u.id === currentUser.unitId);
+    const allUnits = storage.getAllUnits();
+    return (
+      units.find(u => u.id === currentUser.unitId) ||
+      allUnits.find(u => u.id === currentUser.unitId)
+    );
   }, [units, currentUser.unitId]);
+
+  const toPrintableLogoSrc = useCallback((rawLogo?: string | null): string => {
+    const trimmed = (rawLogo || '').trim() || DEFAULT_SYSTEM_LOGO;
+    if (
+      trimmed.startsWith('data:') ||
+      trimmed.startsWith('blob:') ||
+      /^https?:\/\//i.test(trimmed)
+    ) {
+      return trimmed;
+    }
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      try {
+        return new URL(trimmed.startsWith('/') ? trimmed : `/${trimmed}`, window.location.origin).href;
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }, []);
+
+  // Resolve de forma padronizada a Unidade, o Departamento e o Logo da Unidade para qualquer recibo/termo impresso
+  const resolveCautelaPrintBranding = useCallback(
+    (cautela?: CautelaArma | null) => {
+      const allUnits = storage.getAllUnits().length > 0 ? storage.getAllUnits() : units;
+      const allDepts =
+        storage.getAllDepartments().length > 0 ? storage.getAllDepartments() : departments;
+      const allUsers = storage.getAllUsersForLookup();
+
+      const weaponObj = cautela
+        ? weapons.find(
+            w =>
+              w.id === cautela.weaponId ||
+              (w.serialNumber && w.serialNumber === cautela.weaponSerialNumber)
+          )
+        : undefined;
+      const vaultCandidateId =
+        cautela?.vaultSpaceId || weaponObj?.vaultSpaceId || weaponObj?.previousVaultSpaceId;
+      const vaultObj = vaultCandidateId
+        ? vaultSpaces.find(v => v.id === vaultCandidateId)
+        : undefined;
+      const reqUser = cautela?.requesterId
+        ? allUsers.find(u => u.id === cautela.requesterId)
+        : undefined;
+
+      const candidateUnitIds = [
+        cautela?.unitId,
+        weaponObj?.unitId,
+        vaultObj?.unitId,
+        currentUser.unitId,
+        reqUser?.unitId
+      ].filter(Boolean) as string[];
+
+      let resolvedUnit: Unit | undefined = undefined;
+      for (const uid of candidateUnitIds) {
+        const found = allUnits.find(u => u.id === uid) || units.find(u => u.id === uid);
+        if (found) {
+          resolvedUnit = found;
+          break;
+        }
+      }
+      if (!resolvedUnit) {
+        resolvedUnit = userUnit || (allUnits.length === 1 ? allUnits[0] : undefined);
+      }
+
+      const candidateDeptIds = [
+        resolvedUnit?.departmentId,
+        cautela?.departmentId,
+        currentUser.departmentId,
+        reqUser?.departmentId
+      ].filter(Boolean) as string[];
+
+      let resolvedDept: Department | undefined = undefined;
+      for (const did of candidateDeptIds) {
+        const found = allDepts.find(d => d.id === did) || departments.find(d => d.id === did);
+        if (found) {
+          resolvedDept = found;
+          break;
+        }
+      }
+
+      const rawUnitLogo = getSystemLogo(resolvedUnit, resolvedDept);
+      return {
+        unitObj: resolvedUnit,
+        deptObj: resolvedDept,
+        logoSrc: toPrintableLogoSrc(rawUnitLogo),
+        fallbackLogoSrc: toPrintableLogoSrc(DEFAULT_SYSTEM_LOGO)
+      };
+    },
+    [
+      units,
+      departments,
+      weapons,
+      vaultSpaces,
+      currentUser.unitId,
+      currentUser.departmentId,
+      userUnit,
+      toPrintableLogoSrc
+    ]
+  );
 
   const unitSigla = useMemo(() => {
     if (!userUnit) return 'COE';
@@ -3204,9 +3307,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       forceReturnAmmo?: boolean;
     }
   ) => {
-    const unitObj = units.find(u => u.id === cautela.unitId) || userUnit;
-    const deptObj = departments.find(d => d.id === (cautela.departmentId || unitObj?.departmentId));
-    const termoLogo = getSystemLogo(unitObj, deptObj);
+    const {
+      unitObj,
+      deptObj,
+      logoSrc: termoLogo,
+      fallbackLogoSrc
+    } = resolveCautelaPrintBranding(cautela);
     const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
 
     const chosenWeaponVaultId =
@@ -3295,12 +3401,20 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
     const headerHtml = (protocolText: string) => `
       <div class="header-box">
-        ${termoLogo ? `<img src="${termoLogo}" alt="Brasão" class="header-logo" />` : ''}
+        <div class="header-logo-left">
+          <img
+            src="${termoLogo}"
+            onerror="this.onerror=null;this.src='${fallbackLogoSrc}';"
+            alt="Logo da Unidade"
+            class="header-logo"
+          />
+        </div>
         <div class="header-center">
-          <p class="header-title-org">${deptObj ? deptObj.name : 'POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS'}</p>
-          <p class="header-subtitle-unit">${unitObj ? unitObj.name : 'UNIDADE POLICIAL'} — SETOR DE ARMARIA E CONTROLE BÉLICO</p>
+          <p class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</p>
+          <p class="header-subtitle-unit">${deptObj ? `${deptObj.name} • ` : ''}${unitObj ? unitObj.name : 'UNIDADE POLICIAL'} — SETOR DE ARMARIA E CONTROLE BÉLICO</p>
           <p class="header-protocol">${protocolText}</p>
         </div>
+        <div class="header-spacer" aria-hidden="true"></div>
       </div>
     `;
 
@@ -3349,16 +3463,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           .header-box {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 14px;
             border-bottom: 2px solid #0f172a;
             padding-bottom: 10px;
             margin-bottom: 14px;
           }
+          .header-logo-left {
+            width: 68px;
+            height: 68px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            flex-shrink: 0;
+          }
           .header-logo {
-            height: 58px;
-            width: auto;
-            max-width: 72px;
+            width: 64px;
+            height: 64px;
+            max-width: 64px;
+            max-height: 64px;
             object-fit: contain;
+            display: block;
+            flex-shrink: 0;
+          }
+          .header-spacer {
+            width: 68px;
             flex-shrink: 0;
           }
           .header-center {
@@ -3959,9 +4088,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Impressão do Termo Formal de Cautela de Armamento
   // Impressão do Termo Formal de Cautela de Armamento e Munições
   const handlePrintTermo = (cautela: CautelaArma) => {
-    const unitObj = units.find(u => u.id === cautela.unitId) || userUnit;
-    const deptObj = departments.find(d => d.id === (cautela.departmentId || unitObj?.departmentId));
-    const termoLogo = getSystemLogo(unitObj, deptObj);
+    const {
+      unitObj,
+      deptObj,
+      logoSrc: termoLogo,
+      fallbackLogoSrc
+    } = resolveCautelaPrintBranding(cautela);
     const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
     const returnVaultId = cautela.vaultSpaceId || weapon?.previousVaultSpaceId || weapon?.vaultSpaceId;
     const returnVault = vaultSpaces.find(v => v.id === returnVaultId);
@@ -4033,16 +4165,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           .header-box {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 14px;
             border-bottom: 2px solid #0f172a;
             padding-bottom: 10px;
             margin-bottom: 14px;
           }
+          .header-logo-left {
+            width: 68px;
+            height: 68px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            flex-shrink: 0;
+          }
           .header-logo {
-            height: 58px;
-            width: auto;
-            max-width: 72px;
+            width: 64px;
+            height: 64px;
+            max-width: 64px;
+            max-height: 64px;
             object-fit: contain;
+            display: block;
+            flex-shrink: 0;
+          }
+          .header-spacer {
+            width: 68px;
             flex-shrink: 0;
           }
           .header-center {
@@ -4157,7 +4304,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       <body>
         <!-- PÁGINA 1: TERMO DE CAUTELA DO ARMAMENTO E MUNIÇÕES -->
         <div class="header-box">
-          <img src="${termoLogo}" alt="Logo da Unidade" class="header-logo" />
+          <div class="header-logo-left">
+            <img
+              src="${termoLogo}"
+              onerror="this.onerror=null;this.src='${fallbackLogoSrc}';"
+              alt="Logo da Unidade"
+              class="header-logo"
+            />
+          </div>
           <div class="header-center">
             <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
             <h3 class="header-subtitle-unit">
@@ -4168,6 +4322,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </h1>
             <p class="protocol-tag">PROTOCOLO: ${cautela.id.toUpperCase()}</p>
           </div>
+          <div class="header-spacer" aria-hidden="true"></div>
         </div>
 
         <div>
@@ -4327,7 +4482,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           <!-- PÁGINA 2: RECIBO DE FORNECIMENTO DE MUNIÇÕES VINCULADAS -->
           <div class="page-break">
             <div class="header-box">
-              <img src="${termoLogo}" alt="Logo da Unidade" class="header-logo" />
+              <div class="header-logo-left">
+                <img
+                  src="${termoLogo}"
+                  onerror="this.onerror=null;this.src='${fallbackLogoSrc}';"
+                  alt="Logo da Unidade"
+                  class="header-logo"
+                />
+              </div>
               <div class="header-center">
                 <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
                 <h3 class="header-subtitle-unit">
@@ -4338,6 +4500,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </h1>
                 <p class="protocol-tag">VINCULADO AO ARMAMENTO Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel}) • PROTOCOLO: ${(linkedAmmo?.id || cautela.id).toUpperCase()}</p>
               </div>
+              <div class="header-spacer" aria-hidden="true"></div>
             </div>
 
             <div>
@@ -4567,8 +4730,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       return y && m && d ? `${d}/${m}/${y}` : ymd;
     };
 
-    const deptObj = userUnit ? departments.find(d => d.id === userUnit.departmentId) : undefined;
-    const defaultUnitLogo = getSystemLogo(userUnit, deptObj);
+    const defaultBranding = resolveCautelaPrintBranding(null);
+    const deptObj = defaultBranding.deptObj;
+    const defaultUnitLogo = defaultBranding.logoSrc;
+    const defaultFallbackLogo = defaultBranding.fallbackLogoSrc;
     const storedCurrentUser = storage.getUsers().find(u => u.id === currentUser.id);
     const userCareer = (currentUser.cargo || storedCurrentUser?.cargo || 'Policial Civil').trim();
     const emittedAtStr = new Date().toLocaleString('pt-BR');
@@ -4615,11 +4780,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         <div class="cautela-report-page">
           <div class="page-header">
             <div class="header-left">
-              <img src="${escapeHtml(defaultUnitLogo)}" alt="Logo da Unidade" class="unit-logo" />
+              <img src="${escapeHtml(defaultUnitLogo)}" onerror="this.onerror=null;this.src='${escapeHtml(defaultFallbackLogo)}';" alt="Logo da Unidade" class="unit-logo" />
               <div class="header-titles">
                 <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
                 <h3 class="header-subtitle-dept">${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')}</h3>
-                <div class="header-subtitle-unit">${escapeHtml(userUnit ? userUnit.name : 'UNIDADE POLICIAL')}</div>
+                <div class="header-subtitle-unit">${escapeHtml(defaultBranding.unitObj ? defaultBranding.unitObj.name : 'UNIDADE POLICIAL')}</div>
               </div>
             </div>
             <div class="header-badge">
@@ -4690,9 +4855,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               ? 'border: 1px solid #fca5a5; background: #ffffff;'
               : 'border: 1px solid #94a3b8; background: #ffffff;';
 
-          const cautelaUnit = units.find(u => u.id === cautela.unitId) || userUnit;
-          const cautelaDept = departments.find(d => d.id === (cautelaUnit?.departmentId || cautela.departmentId)) || deptObj;
-          const pageUnitLogo = getSystemLogo(cautelaUnit, cautelaDept);
+          const pageBranding = resolveCautelaPrintBranding(cautela);
+          const cautelaUnit = pageBranding.unitObj;
+          const cautelaDept = pageBranding.deptObj;
+          const pageUnitLogo = pageBranding.logoSrc;
 
           const armorerInfo = getResolvedArmorer(cautela);
           const ammoDetails = getRescuedAmmoDetails(cautela);
@@ -4711,7 +4877,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <div class="cautela-report-page ${!isLastPage ? 'page-break' : ''}">
               <div class="page-header">
                 <div class="header-left">
-                  <img src="${escapeHtml(pageUnitLogo)}" alt="Logo da Unidade" class="unit-logo" />
+                  <img src="${escapeHtml(pageUnitLogo)}" onerror="this.onerror=null;this.src='${escapeHtml(pageBranding.fallbackLogoSrc)}';" alt="Logo da Unidade" class="unit-logo" />
                   <div class="header-titles">
                     <h2 class="header-title-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
                     <h3 class="header-subtitle-dept">${escapeHtml(cautelaDept ? cautelaDept.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')}</h3>
@@ -4909,10 +5075,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             gap: 14px;
           }
           .unit-logo {
-            height: 58px;
-            width: auto;
-            max-width: 75px;
+            width: 62px;
+            height: 62px;
+            max-width: 62px;
+            max-height: 62px;
             object-fit: contain;
+            display: block;
             flex-shrink: 0;
           }
           .header-titles {
@@ -5551,8 +5719,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
 
-    const deptObj = userUnit ? departments.find(d => d.id === userUnit.departmentId) : undefined;
-    const reportLogo = getSystemLogo(userUnit, deptObj);
+    const reportBranding = resolveCautelaPrintBranding(selectedEntityHistoryCautelas[0] || null);
+    const deptObj = reportBranding.deptObj;
+    const reportLogo = reportBranding.logoSrc;
+    const reportFallbackLogo = reportBranding.fallbackLogoSrc;
     const allUsersLookup = storage.getAllUsersForLookup();
     const issuerStored = allUsersLookup.find(u => u.id === currentUser.id);
     const issuerCareer = (currentUser.cargo || issuerStored?.cargo || 'Armeiro da Unidade').trim();
@@ -6049,6 +6219,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           .header-box {
             display: flex;
             align-items: center;
+            justify-content: space-between;
             gap: 14px;
             border: 1.5px solid #0f172a;
             border-radius: 6px;
@@ -6056,10 +6227,25 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             margin-bottom: 9px;
             background: #f8fafc;
           }
+          .header-logo-left {
+            width: 64px;
+            height: 64px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            flex-shrink: 0;
+          }
           .header-logo {
-            width: 56px;
-            height: 56px;
+            width: 60px;
+            height: 60px;
+            max-width: 60px;
+            max-height: 60px;
             object-fit: contain;
+            display: block;
+            flex-shrink: 0;
+          }
+          .header-spacer {
+            width: 64px;
             flex-shrink: 0;
           }
           .header-center {
@@ -6294,15 +6480,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       </head>
       <body>
         <div class="header-box">
-          <img src="${reportLogo}" alt="Brasão / Logo" class="header-logo" />
+          <div class="header-logo-left">
+            <img
+              src="${escapeHtml(reportLogo)}"
+              onerror="this.onerror=null;this.src='${escapeHtml(reportFallbackLogo)}';"
+              alt="Logo da Unidade"
+              class="header-logo"
+            />
+          </div>
           <div class="header-center">
             <h2 class="header-org">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</h2>
             <h3 class="header-unit">
-              ${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')} • UNIDADE: ${escapeHtml(userUnit?.name || unitSigla)}
+              ${escapeHtml(deptObj ? deptObj.name : 'DEPARTAMENTO DE POLÍCIA CIVIL')} • UNIDADE: ${escapeHtml(reportBranding.unitObj?.name || userUnit?.name || unitSigla)}
             </h3>
             <h1 class="header-doc-title">${escapeHtml(reportDocTitle)}</h1>
             <p class="header-subtitle">${escapeHtml(reportSubtitle)}</p>
           </div>
+          <div class="header-spacer" aria-hidden="true"></div>
         </div>
 
         <div class="summary-bar">
@@ -8555,6 +8749,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <span>Excluir Cautela</span>
                                           </button>
                                         </>
+                                      )}
+
+                                      {isDevolvida && (
+                                        <button
+                                          onClick={() => handlePrintReciboDevolucao(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-900/50 hover:bg-emerald-800/60 border border-emerald-700/60 text-emerald-200 rounded-xl text-xs font-semibold transition"
+                                          title="Imprimir Recibo de Devolução da Arma e da Munição"
+                                        >
+                                          <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                                          <span>Recibo de Devolução</span>
+                                        </button>
                                       )}
 
                                       {isDeferida && (
