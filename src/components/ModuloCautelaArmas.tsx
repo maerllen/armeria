@@ -218,10 +218,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return [...storage.getCautelasArmas()];
   }, [weapons, ammoStocks, localSyncTick]);
 
-  // Função auxiliar para verificar status pendente de recibo / autorização
+  // Função auxiliar para verificar status pendente de autorização inicial
   const isPendingStatus = (st: string) => {
     const s = (st || '').trim().toUpperCase();
     return s === 'PENDENTE' || s === 'PENDENTE DE RECIBO' || s === 'PENDENTE RECIBO' || s === 'CAUTELA PENDENTE';
+  };
+
+  // Verifica se a cautela está aguardando algum comando do armeiro (autorização/análise inicial ou recibo de devolução)
+  const isAwaitingArmorerCommand = (st: string) => {
+    const s = (st || '').trim().toUpperCase();
+    return isPendingStatus(s) || s === 'DEVOLUCAO_PENDENTE' || s === 'DEVOLUÇÃO PENDENTE';
   };
 
   // Normalizador de texto para busca insensível a caixa, acentos e espaços extras
@@ -650,14 +656,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     let list = [...scopedCautelas];
 
     if (activeTab === 'MINHAS') {
-      // Aba "Minhas Cautelas": para Policial lista estritamente solicitações aguardando análise (PENDENTE);
-      // para Armeiro também inclui devoluções pendentes de recibo
-      list = list.filter(c => isPendingStatus(c.status) || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
+      // Aba "Cautela de arma em análise" (Policial) / "Solicitações Pendentes" (Armeiro):
+      // exibe todas as cautelas de armas aguardando algum comando do armeiro (autorização inicial ou recibo de devolução)
+      list = list.filter(c => isAwaitingArmorerCommand(c.status));
     } else if (activeTab === 'DEFERIDAS') {
-      // Aba "Deferidas (Autorizadas/Devolvidas)": cautelas deferidas (ativas / devolução pendente de recibo) e histórico das devolvidas
-      list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE' || c.status === 'DEVOLVIDA');
+      // Aba "Deferidas (Autorizadas/Devolvidas)": para Policial exibe AUTORIZADA e DEVOLVIDA (pois DEVOLUCAO_PENDENTE fica em análise);
+      // para Armeiro mantém visão de AUTORIZADA, DEVOLUCAO_PENDENTE e DEVOLVIDA
+      list = list.filter(c =>
+        c.status === 'AUTORIZADA' ||
+        (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE') ||
+        c.status === 'DEVOLVIDA'
+      );
       if (deferidasSubFilter === 'ATIVAS') {
-        list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
+        list = list.filter(c => c.status === 'AUTORIZADA' || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
       } else if (deferidasSubFilter === 'DEVOLVIDAS') {
         list = list.filter(c => c.status === 'DEVOLVIDA');
       }
@@ -684,16 +695,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Contadores para badges das abas
   const pendingCount = useMemo(() => {
-    return scopedCautelas.filter(c => isPendingStatus(c.status) || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE')).length;
-  }, [scopedCautelas, canAuthorize]);
+    return scopedCautelas.filter(c => isAwaitingArmorerCommand(c.status)).length;
+  }, [scopedCautelas]);
 
   const deferidasCount = useMemo(() => {
-    return scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE' || c.status === 'DEVOLVIDA').length;
-  }, [scopedCautelas]);
+    return scopedCautelas.filter(c =>
+      c.status === 'AUTORIZADA' ||
+      (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE') ||
+      c.status === 'DEVOLVIDA'
+    ).length;
+  }, [scopedCautelas, canAuthorize]);
 
   const activeCautelasCount = useMemo(() => {
-    return scopedCautelas.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE').length;
-  }, [scopedCautelas]);
+    return scopedCautelas.filter(c =>
+      c.status === 'AUTORIZADA' ||
+      (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE')
+    ).length;
+  }, [scopedCautelas, canAuthorize]);
 
   const returnedCautelasCount = useMemo(() => {
     return scopedCautelas.filter(c => c.status === 'DEVOLVIDA').length;
@@ -862,9 +880,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   };
 
   const handleGoToActiveCautela = () => {
+    const hasAuthorized = scopedCautelas.some(c => c.status === 'AUTORIZADA');
     setActiveCautelaWarningModal(null);
-    setActiveTab('DEFERIDAS');
-    setDeferidasSubFilter('ATIVAS');
+    if (hasAuthorized) {
+      setActiveTab('DEFERIDAS');
+      setDeferidasSubFilter('ATIVAS');
+    } else {
+      setActiveTab('MINHAS');
+    }
   };
 
   const handleProceedWithNewSolicitation = () => {
@@ -1013,7 +1036,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }, 150);
           setActiveTab('DEFERIDAS');
         } else {
-          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Minhas Cautelas" aguardando autorização do armeiro.`);
+          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Cautela de arma em análise" aguardando comando do armeiro.`);
           setActiveTab('MINHAS');
         }
         setSelectedWeaponId('');
@@ -1322,8 +1345,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       } else {
         if (isPolicial || res.pendingReceipt) {
           setSuccessMsg(
-            `Devolução da arma ${returningCautela.weaponModel} (Série: ${returningCautela.weaponSerialNumber}) registrada e encaminhada! A devolução encontra-se Pendente de Recibo pelo Armeiro.`
+            `Devolução da arma ${returningCautela.weaponModel} (Série: ${returningCautela.weaponSerialNumber}) registrada e encaminhada! O registro encontra-se na aba "Cautela de arma em análise" aguardando recibo pelo armeiro.`
           );
+          setActiveTab('MINHAS');
         } else {
           const destText = selectedVault ? `no cofre ${selectedVault.code}` : 'ao cofre da unidade';
           setSuccessMsg(
@@ -1970,10 +1994,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <Clock className="w-3.5 h-3.5 text-amber-400" />
-          <span>{canAuthorize ? 'Solicitações Pendentes (Unidade)' : 'Minhas Cautelas'}</span>
+          <span>{canAuthorize ? 'Solicitações Pendentes (Unidade)' : 'Cautela de arma em análise'}</span>
           {pendingCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-500 text-slate-950 font-black animate-pulse">
-              {pendingCount} {canAuthorize ? (pendingCount === 1 ? 'pendente' : 'pendentes') : (pendingCount === 1 ? 'aguardando' : 'aguardando')}
+              {pendingCount} {canAuthorize ? (pendingCount === 1 ? 'pendente' : 'pendentes') : 'em análise'}
             </span>
           )}
         </button>
@@ -2501,48 +2525,54 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             <div className="space-y-6">
                   {/* Conteúdo das Abas */}
 
-                  {/* Seção: Solicitações Pendentes (Aba MINHAS CAUTELAS) */}
+                  {/* Seção: Cautela de arma em análise (Policial) / Solicitações Pendentes (Armeiro) */}
                   {activeTab === 'MINHAS' && (() => {
                     const pendentes = displayedCautelas.filter(c => isPendingStatus(c.status));
-                    const devolucoesPendentesArmeiro = canAuthorize
-                      ? displayedCautelas.filter(c => c.status === 'DEVOLUCAO_PENDENTE')
-                      : [];
+                    const devolucoesPendentes = displayedCautelas.filter(c =>
+                      (c.status || '').trim().toUpperCase() === 'DEVOLUCAO_PENDENTE' ||
+                      (c.status || '').trim().toUpperCase() === 'DEVOLUÇÃO PENDENTE'
+                    );
 
-                    if (pendentes.length === 0 && devolucoesPendentesArmeiro.length === 0) {
+                    if (pendentes.length === 0 && devolucoesPendentes.length === 0) {
                       return (
                         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center text-slate-400">
                           <Clock className="w-8 h-8 text-amber-500/50 mx-auto mb-2" />
                           <p className="text-sm font-semibold">
-                            {canAuthorize ? 'Nenhuma solicitação ou devolução de armamento pendente na unidade.' : 'Nenhuma cautela aguardando ação do armeiro no momento.'}
+                            {canAuthorize
+                              ? 'Nenhuma solicitação ou devolução de armamento pendente na unidade.'
+                              : 'Nenhuma cautela de arma em análise no momento.'}
                           </p>
                           <p className="text-xs text-slate-500 mt-1">
                             {isPolicial 
-                              ? 'Você não possui solicitações de armamento pendentes de autorização.' 
-                              : `Não há solicitações nem devoluções aguardando recibo para a unidade ${userUnit?.name || 'vinculada'}.`}
+                              ? 'Não há cautelas de armas aguardando comando do armeiro (autorização ou recibo de devolução).' 
+                              : `Não há solicitações nem devoluções aguardando comando para a unidade ${userUnit?.name || 'vinculada'}.`}
                           </p>
                         </div>
                       );
                     }
                     return (
                       <div className="space-y-6">
-                        {/* Devoluções Pendentes de Recibo pelo Armeiro */}
-                        {canAuthorize && devolucoesPendentesArmeiro.length > 0 && (
+                        {/* Devoluções Aguardando Recibo pelo Armeiro (Visível para Policial e Armeiro) */}
+                        {devolucoesPendentes.length > 0 && (
                           <div className="space-y-3">
                             <div className="flex items-center justify-between pb-1 border-b border-slate-800">
                               <div className="flex items-center space-x-2">
                                 <RotateCcw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
                                 <h4 className="text-xs font-bold text-amber-300 uppercase tracking-wider">
-                                  Devoluções de Armamento Pendentes de Recibo pelo Armeiro — {userUnit?.name || 'Unidade'}
+                                  {canAuthorize
+                                    ? `Devoluções de Armamento Pendentes de Recibo pelo Armeiro — ${userUnit?.name || 'Unidade'}`
+                                    : 'Cautelas em Análise de Devolução (Aguardando Recibo do Armeiro)'}
                                 </h4>
                               </div>
                               <span className="text-xs font-mono font-bold text-amber-300 bg-amber-950/70 px-2.5 py-0.5 rounded-md border border-amber-700/70">
-                                {devolucoesPendentesArmeiro.length} aguardando recibo
+                                {devolucoesPendentes.length} aguardando recibo
                               </span>
                             </div>
 
                             <div className="grid grid-cols-1 gap-3">
-                              {devolucoesPendentesArmeiro.map(cautela => {
+                              {devolucoesPendentes.map(cautela => {
                                 const ammoDetails = getRescuedAmmoDetails(cautela);
+                                const armorerInfo = getResolvedArmorer(cautela);
                                 return (
                                   <div
                                     key={`ret-pend-${cautela.id}`}
@@ -2559,23 +2589,50 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <span className="font-mono text-xs text-amber-400 font-bold">
                                               Nº {cautela.weaponSerialNumber}
                                             </span>
+                                            {cautela.weaponCaliber && (
+                                              <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                                {cautela.weaponCaliber}
+                                              </span>
+                                            )}
                                             <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse">
                                               Devolução Pendente de Recibo
                                             </span>
                                           </div>
-                                          <p className="text-xs text-slate-300 mt-0.5">
-                                            Devolvida pelo Policial: <strong className="text-amber-300">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp})
+                                          <p className="text-xs text-amber-300/90 mt-1 flex items-center space-x-1.5 font-medium">
+                                            <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0 animate-pulse" />
+                                            <span>Aguardando comando do Armeiro para conferência e recibo da devolução ao cofre</span>
+                                          </p>
+                                          <p className="text-[11px] text-slate-400 mt-0.5">
+                                            Policial: <strong className="text-amber-300">{cautela.requesterName}</strong> (MASP: {cautela.requesterMasp}) • Autorizado originalmente por: <strong className="text-slate-300">{armorerInfo.name}</strong>
                                           </p>
                                         </div>
                                       </div>
 
-                                      <button
-                                        onClick={() => handleOpenReturnModal(cautela)}
-                                        className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-xl text-xs font-black transition shadow-md self-end sm:self-center"
-                                      >
-                                        <CheckCircle2 className="w-4 h-4" />
-                                        <span>Confirmar Recibo de Devolução</span>
-                                      </button>
+                                      <div className="flex items-center space-x-2 self-end sm:self-center">
+                                        <button
+                                          onClick={() => handlePrintTermo(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
+                                          title="Imprimir Termo de Cautela"
+                                        >
+                                          <Printer className="w-3.5 h-3.5 text-amber-400" />
+                                          <span>Imprimir Termo</span>
+                                        </button>
+
+                                        {canAuthorize ? (
+                                          <button
+                                            onClick={() => handleOpenReturnModal(cautela)}
+                                            className="flex items-center space-x-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-slate-950 rounded-xl text-xs font-black transition shadow-md"
+                                          >
+                                            <CheckCircle2 className="w-4 h-4" />
+                                            <span>Confirmar Recibo de Devolução</span>
+                                          </button>
+                                        ) : (
+                                          <span className="px-3 py-1.5 bg-amber-950/70 border border-amber-800 text-amber-300 text-xs font-bold rounded-xl flex items-center space-x-1.5">
+                                            <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                                            <span>Aguardando Recibo do Armeiro</span>
+                                          </span>
+                                        )}
+                                      </div>
                                     </div>
 
                                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
@@ -2606,6 +2663,42 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         </span>
                                       </div>
                                     </div>
+
+                                    {ammoDetails.hasAmmo && ammoDetails.quantity > 0 && (
+                                      <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1.5 text-xs">
+                                        <div className="flex items-center justify-between border-b border-slate-800/60 pb-1.5 flex-wrap gap-2">
+                                          <span className="font-bold text-amber-300 flex items-center space-x-1.5">
+                                            <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                            <span>Dados da Munição / Cautela Vinculada</span>
+                                          </span>
+                                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                            ammoDetails.seraDevolvida
+                                              ? 'bg-amber-950/60 text-amber-300 border-amber-700/60'
+                                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                                          }`}>
+                                            {ammoDetails.seraDevolvida ? 'Passiva de Devolução' : 'Retirada Permanente'}
+                                          </span>
+                                        </div>
+                                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
+                                          <div>
+                                            <span className="text-slate-500 block">Calibre / Fabricante:</span>
+                                            <strong className="text-slate-200">{ammoDetails.caliberName} • {ammoDetails.fabricante}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Tipo / Peso:</span>
+                                            <strong className="text-slate-200">{ammoDetails.tipoMunicao} • {ammoDetails.pesoMunicao}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Lote:</span>
+                                            <strong className="text-slate-200 font-mono">{ammoDetails.loteMunicao}</strong>
+                                          </div>
+                                          <div>
+                                            <span className="text-slate-500 block">Destinação:</span>
+                                            <strong className="text-slate-200">{ammoDetails.destinacao}</strong>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )}
                                   </div>
                                 );
                               })}
@@ -2621,11 +2714,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                 <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">
                                   {canAuthorize 
                                     ? `Solicitações Pendentes de Armamento — ${userUnit?.name || 'Unidade'} (Aguardando Ação do Armeiro)` 
-                                    : 'Minhas Solicitações Pendentes (Aguardando Ação do Armeiro)'}
+                                    : 'Cautelas de Arma em Análise (Aguardando Autorização do Armeiro)'}
                                 </h4>
                               </div>
                               <span className="text-xs font-mono font-bold text-amber-400 bg-amber-950/60 px-2.5 py-0.5 rounded-md border border-amber-800/60">
-                                {pendentes.length} aguardando ação
+                                {pendentes.length} aguardando comando
                               </span>
                             </div>
 
