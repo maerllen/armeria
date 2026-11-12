@@ -97,6 +97,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [deferidasWeaponFilter, setDeferidasWeaponFilter] = useState<string>('TODAS');
   const [deferidasSerialFilter, setDeferidasSerialFilter] = useState<string>('');
 
+  // Filtros exclusivos da aba "Indeferidas <Sigla>" (Armeiro)
+  const [indeferidasUserFilter, setIndeferidasUserFilter] = useState<string>('TODOS');
+  const [indeferidasWeaponFilter, setIndeferidasWeaponFilter] = useState<string>('TODAS');
+  const [indeferidasSerialFilter, setIndeferidasSerialFilter] = useState<string>('');
+
   // Filtros exclusivos da aba "Histórico de cautelas <Unidade>" (Armeiro)
   const [unitHistoryUserFilter, setUnitHistoryUserFilter] = useState<string>('TODOS');
   const [unitHistoryWeaponFilter, setUnitHistoryWeaponFilter] = useState<string>('TODAS');
@@ -1130,6 +1135,68 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return Array.from(map.values()).sort((a, b) => a.serial.localeCompare(b.serial, 'pt-BR'));
   }, [deferidasBaseCautelas, weapons, deferidasWeaponFilter, getResolvedRequester]);
 
+  // Lista base de cautelas recusadas da aba "Indeferidas <Sigla>" (Armeiro)
+  const indeferidasBaseCautelas = useMemo(() => {
+    if (!canAuthorize) return [] as CautelaArma[];
+    return scopedCautelas.filter(c => c.status === 'RECUSADA');
+  }, [scopedCautelas, canAuthorize]);
+
+  // Usuários distintos com cautelas recusadas na aba "Indeferidas <Sigla>"
+  const indeferidasUsers = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    indeferidasBaseCautelas.forEach(c => {
+      const key = getCautelaRequesterFilterKey(c);
+      if (!key || key === 'unknown' || map.has(key)) return;
+      const resolved = getResolvedRequester(c);
+      const maspPart =
+        resolved.masp && resolved.masp !== 'N/I' ? ` (MASP: ${resolved.masp})` : '';
+      map.set(key, {
+        key,
+        label: `${resolved.name}${maspPart}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [indeferidasBaseCautelas, getCautelaRequesterFilterKey, getResolvedRequester]);
+
+  // Armas distintas (modelo/fabricante/calibre) com cautelas recusadas na aba "Indeferidas <Sigla>"
+  const indeferidasWeapons = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    indeferidasBaseCautelas.forEach(c => {
+      const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+      const rawModel = (c.weaponModel || wObj?.model || '').trim();
+      const key = normalizeStr(rawModel) || c.weaponId || '';
+      if (!key || map.has(key)) return;
+      const typePart = c.weaponType || wObj?.type ? `${c.weaponType || wObj?.type} ` : '';
+      const brandPart = wObj?.manufacturer ? `${wObj.manufacturer} ` : '';
+      const calPart = c.weaponCaliber || wObj?.caliber ? ` (${c.weaponCaliber || wObj?.caliber})` : '';
+      map.set(key, {
+        key,
+        label: `${typePart}${brandPart}${rawModel || 'Armamento'}${calPart}`.trim()
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [indeferidasBaseCautelas, weapons]);
+
+  // Números de série distintos em cautelas recusadas na aba "Indeferidas <Sigla>"
+  const indeferidasSerialNumbers = useMemo(() => {
+    const map = new Map<string, { serial: string; label: string }>();
+    indeferidasBaseCautelas.forEach(c => {
+      const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+      if (indeferidasWeaponFilter !== 'TODAS') {
+        const modelKey = normalizeStr(c.weaponModel || wObj?.model || '') || c.weaponId || '';
+        if (modelKey !== indeferidasWeaponFilter) return;
+      }
+      const serial = (c.weaponSerialNumber || wObj?.serialNumber || '').trim();
+      if (!serial || map.has(serial)) return;
+      const req = getResolvedRequester(c);
+      map.set(serial, {
+        serial,
+        label: `${c.weaponModel || wObj?.model || 'Arma'} — ${req.name}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.serial.localeCompare(b.serial, 'pt-BR'));
+  }, [indeferidasBaseCautelas, weapons, indeferidasWeaponFilter, getResolvedRequester]);
+
   // Lista base de cautelas do Histórico da Unidade (todas as cautelas ativas e devolvidas da unidade)
   const unitHistoryBaseCautelas = useMemo(() => {
     if (!canAuthorize) return [] as CautelaArma[];
@@ -1274,8 +1341,32 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     } else if (activeTab === 'INDEFERIDAS') {
       if (canAuthorize) {
-        // Aba "Indeferidas (Unidade)" (Armeiro): cautelas recusadas da unidade
+        // Aba "Indeferidas <Sigla>" (Armeiro): cautelas recusadas da unidade
         list = list.filter(c => c.status === 'RECUSADA');
+
+        if (indeferidasUserFilter !== 'TODOS') {
+          list = list.filter(c => getCautelaRequesterFilterKey(c) === indeferidasUserFilter);
+        }
+
+        if (indeferidasWeaponFilter !== 'TODAS') {
+          list = list.filter(c => {
+            const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+            const modelKey = normalizeStr(c.weaponModel || wObj?.model || '') || c.weaponId || '';
+            return modelKey === indeferidasWeaponFilter;
+          });
+        }
+
+        if (indeferidasSerialFilter.trim()) {
+          const normSerialQuery = normalizeStr(indeferidasSerialFilter);
+          const serialQueryDigits = cleanDigits(indeferidasSerialFilter);
+          list = list.filter(c => {
+            const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+            const rawSerial = c.weaponSerialNumber || wObj?.serialNumber || '';
+            if (normalizeStr(rawSerial).includes(normSerialQuery)) return true;
+            if (serialQueryDigits.length >= 2 && cleanDigits(rawSerial).includes(serialQueryDigits)) return true;
+            return false;
+          });
+        }
       } else {
         // Aba "Meu Histórico" (Policial): histórico completo de armas em seu nome (inclusive indeferidas)
         if (historyDecisionFilter === 'ATIVAS') {
@@ -1438,6 +1529,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     deferidasUserFilter,
     deferidasWeaponFilter,
     deferidasSerialFilter,
+    indeferidasUserFilter,
+    indeferidasWeaponFilter,
+    indeferidasSerialFilter,
     unitHistoryUserFilter,
     unitHistoryWeaponFilter,
     unitHistoryDateFilter,
@@ -5279,7 +5373,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           ) : (
             <FileText className="w-3.5 h-3.5 text-sky-400" />
           )}
-          <span>{canAuthorize ? 'Indeferidas (Unidade)' : 'Meu Histórico'}</span>
+          <span>{canAuthorize ? `Indeferidas ${unitSigla}` : 'Meu Histórico'}</span>
           {canAuthorize ? (
             indeferidasCount > 0 && (
               <span className="px-2 py-0.5 rounded-full text-[10px] bg-red-500/20 text-red-300 border border-red-500/40 font-mono">
@@ -5776,7 +5870,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           {/* Barra de Filtro e Busca */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className={`relative w-full ${canAuthorize && (activeTab === 'HISTORICO_UNIDADE' || activeTab === 'DEFERIDAS') ? 'sm:flex-1' : 'sm:w-80'}`}>
+              <div className={`relative w-full ${canAuthorize && (activeTab === 'HISTORICO_UNIDADE' || activeTab === 'DEFERIDAS' || activeTab === 'INDEFERIDAS') ? 'sm:flex-1' : 'sm:w-80'}`}>
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -5785,7 +5879,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   placeholder={
                     canAuthorize && activeTab === 'HISTORICO_UNIDADE'
                       ? 'Campo aberto: pesquise qualquer dado da arma (modelo, série, marca, calibre, cofre) ou do usuário (nome, MASP, cargo, telefone)...'
-                      : canAuthorize && activeTab === 'DEFERIDAS'
+                      : canAuthorize && (activeTab === 'DEFERIDAS' || activeTab === 'INDEFERIDAS')
                         ? 'Pesquisar por usuário (nome/MASP), arma ou número de série...'
                         : 'Buscar por arma, série, calibre ou motivo...'
                   }
@@ -5845,6 +5939,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-black text-slate-100 border border-slate-600 whitespace-nowrap">
                     <span className="w-2.5 h-2.5 rounded-full bg-black ring-2 ring-slate-300 shrink-0" />
                     <span>Devolvidas</span>
+                  </span>
+                </div>
+              )}
+
+              {/* Indicador de Cautelas Indeferidas para Indeferidas <Sigla> (Armeiro) */}
+              {canAuthorize && activeTab === 'INDEFERIDAS' && (
+                <div className="flex items-center space-x-2 self-start sm:self-auto">
+                  <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-red-600 text-white shadow-sm whitespace-nowrap">
+                    Indeferidas ({displayedCautelas.length !== indeferidasCount ? `${displayedCautelas.length} de ${indeferidasCount}` : indeferidasCount})
                   </span>
                 </div>
               )}
@@ -5946,6 +6049,90 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         setDeferidasUserFilter('TODOS');
                         setDeferidasWeaponFilter('TODAS');
                         setDeferidasSerialFilter('');
+                        setSearchTerm('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1 border border-slate-700"
+                      title="Limpar filtros de usuário, arma e número de série"
+                    >
+                      <X className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Limpar</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Filtros por Usuário, Arma e Número de Série exclusivos da aba "Indeferidas <Sigla>" (Armeiro) */}
+            {canAuthorize && activeTab === 'INDEFERIDAS' && (
+              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Usuário:
+                  </label>
+                  <select
+                    value={indeferidasUserFilter}
+                    onChange={(e) => setIndeferidasUserFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-red-500"
+                  >
+                    <option value="TODOS">Todos os Usuários ({indeferidasUsers.length})</option>
+                    {indeferidasUsers.map(u => (
+                      <option key={u.key} value={u.key}>
+                        {u.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Arma:
+                  </label>
+                  <select
+                    value={indeferidasWeaponFilter}
+                    onChange={(e) => setIndeferidasWeaponFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-red-500"
+                  >
+                    <option value="TODAS">Todas as Armas ({indeferidasWeapons.length})</option>
+                    {indeferidasWeapons.map(w => (
+                      <option key={w.key} value={w.key}>
+                        {w.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Número de Série:
+                  </label>
+                  <input
+                    type="text"
+                    list="indeferidas-serial-options"
+                    value={indeferidasSerialFilter}
+                    onChange={(e) => setIndeferidasSerialFilter(e.target.value)}
+                    placeholder="Digite ou selecione o nº de série..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono placeholder-slate-500 focus:border-red-500"
+                  />
+                  <datalist id="indeferidas-serial-options">
+                    {indeferidasSerialNumbers.map(item => (
+                      <option key={item.serial} value={item.serial}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="sm:col-span-1 flex items-center justify-end">
+                  {(indeferidasUserFilter !== 'TODOS' ||
+                    indeferidasWeaponFilter !== 'TODAS' ||
+                    indeferidasSerialFilter.trim() !== '' ||
+                    searchTerm.trim() !== '') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIndeferidasUserFilter('TODOS');
+                        setIndeferidasWeaponFilter('TODAS');
+                        setIndeferidasSerialFilter('');
                         setSearchTerm('');
                       }}
                       className="w-full px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1 border border-slate-700"
@@ -6855,7 +7042,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             <div className="flex items-center space-x-2">
                               <XCircle className="w-3.5 h-3.5 text-red-400" />
                               <h4 className="text-xs font-bold text-red-400 uppercase tracking-wider">
-                                Solicitações Indeferidas — {userUnit?.name || 'Unidade'}
+                                {`Indeferidas ${unitSigla} — Solicitações Recusadas`}
                               </h4>
                             </div>
                             <span className="text-xs font-mono font-bold text-red-400 bg-red-950/60 px-2 py-0.5 rounded-md border border-red-800/60">
@@ -6864,8 +7051,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           </div>
 
                           {recusadas.length === 0 ? (
-                            <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                              Nenhuma solicitação de armamento foi indeferida na unidade {userUnit?.name || ''}.
+                            <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-400 space-y-2">
+                              <p>
+                                {indeferidasCount > 0
+                                  ? 'Nenhuma cautela indeferida encontrada para os filtros informados (usuário, arma ou número de série).'
+                                  : `Nenhuma solicitação de armamento foi indeferida na unidade ${unitSigla}.`}
+                              </p>
+                              {indeferidasCount > 0 &&
+                                (indeferidasUserFilter !== 'TODOS' ||
+                                  indeferidasWeaponFilter !== 'TODAS' ||
+                                  indeferidasSerialFilter.trim() !== '' ||
+                                  searchTerm.trim() !== '') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setIndeferidasUserFilter('TODOS');
+                                      setIndeferidasWeaponFilter('TODAS');
+                                      setIndeferidasSerialFilter('');
+                                      setSearchTerm('');
+                                    }}
+                                    className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition border border-slate-700"
+                                  >
+                                    <X className="w-3.5 h-3.5 text-slate-400" />
+                                    <span>Limpar filtros</span>
+                                  </button>
+                                )}
                             </div>
                           ) : (
                             <div className="grid grid-cols-1 gap-3">
