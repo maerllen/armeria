@@ -43,11 +43,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return units.find(u => u.id === currentUser.unitId);
   }, [units, currentUser.unitId]);
 
-  // Tabs: Minhas Cautelas (Aguardando Ação do Armeiro), Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Indeferidas, Nova
-  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
+  // Tabs: Solicitações Pendentes, Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Histórico de cautelas (Unidade), Indeferidas, Nova
+  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'HISTORICO_UNIDADE' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
   const [pendentesSubFilter, setPendentesSubFilter] = useState<'TODAS' | 'SOLICITACOES' | 'DEVOLUCOES'>('TODAS');
-  const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
-  const [propriaSubFilter, setPropriaSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('TODAS');
+  const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('ATIVAS');
+  const [propriaSubFilter, setPropriaSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('ATIVAS');
 
   const [lastDirectCautelaArma, setLastDirectCautelaArma] = useState<CautelaArma | null>(null);
   const [lastReceivedReturnInfo, setLastReceivedReturnInfo] = useState<{
@@ -76,6 +76,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [historyWeaponFilter, setHistoryWeaponFilter] = useState<string>('TODAS');
   const [historyDateFilter, setHistoryDateFilter] = useState<string>('');
   const [historyDecisionFilter, setHistoryDecisionFilter] = useState<'TODAS' | 'ATIVAS' | 'DEFERIDA' | 'INDEFERIDAS'>('TODAS');
+
+  // Filtros exclusivos da aba "Histórico de cautelas <Unidade>" (Armeiro)
+  const [unitHistoryUserFilter, setUnitHistoryUserFilter] = useState<string>('TODOS');
+  const [unitHistoryWeaponFilter, setUnitHistoryWeaponFilter] = useState<string>('TODAS');
+  const [unitHistoryDateFilter, setUnitHistoryDateFilter] = useState<string>('');
 
   // Modal de Impressão do Histórico de Cautelas (Policial)
   const [isPrintHistoryModalOpen, setIsPrintHistoryModalOpen] = useState(false);
@@ -1017,13 +1022,87 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return list;
   }, [allCautelas, currentUser, isPolicial, isGeral, weapons, vaultSpaces, isUserCautela, isUserWeapon, parseWeaponLocationRequester]);
 
+  // Chave única de identificação do usuário que realizou a cautela (para filtro por usuário no Histórico da Unidade)
+  const getCautelaRequesterFilterKey = useCallback(
+    (c: CautelaArma): string => {
+      const resolved = getResolvedRequester(c);
+      const mDigits = cleanDigits(resolved.masp || c.requesterMasp);
+      if (mDigits && mDigits.length >= 4) return `masp:${mDigits}`;
+      const rId = (c.requesterId || '').trim();
+      if (
+        rId &&
+        rId !== 'policial' &&
+        rId !== 'solicitante' &&
+        rId !== 'usr-policial' &&
+        rId !== 'usr-solicitante'
+      ) {
+        return `id:${rId}`;
+      }
+      const normName = normalizeStr(resolved.name || c.requesterName);
+      return normName ? `name:${normName}` : 'unknown';
+    },
+    [getResolvedRequester]
+  );
+
+  // Lista base de cautelas do Histórico da Unidade (todas as cautelas ativas e devolvidas da unidade)
+  const unitHistoryBaseCautelas = useMemo(() => {
+    if (!canAuthorize) return [] as CautelaArma[];
+    return scopedCautelas.filter(
+      c =>
+        c.status === 'AUTORIZADA' ||
+        c.status === 'DEVOLUCAO_PENDENTE' ||
+        c.status === 'DEVOLVIDA'
+    );
+  }, [scopedCautelas, canAuthorize]);
+
+  // Usuários distintos que realizaram cautelas na unidade (para o filtro por Usuários)
+  const unitHistoryUsers = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    unitHistoryBaseCautelas.forEach(c => {
+      const key = getCautelaRequesterFilterKey(c);
+      if (!key || key === 'unknown' || map.has(key)) return;
+      const resolved = getResolvedRequester(c);
+      const maspPart =
+        resolved.masp && resolved.masp !== 'N/I' ? ` (MASP: ${resolved.masp})` : '';
+      map.set(key, {
+        key,
+        label: `${resolved.name}${maspPart}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [unitHistoryBaseCautelas, getCautelaRequesterFilterKey, getResolvedRequester]);
+
+  // Armas distintas presentes no Histórico da Unidade (para o filtro por Armas)
+  const unitHistoryWeapons = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    unitHistoryBaseCautelas.forEach(c => {
+      const key = c.weaponSerialNumber || c.weaponId || c.weaponModel || '';
+      if (!key || map.has(key)) return;
+      const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+      const brandPart = wObj?.manufacturer ? `${wObj.manufacturer} ` : '';
+      const calPart = c.weaponCaliber || wObj?.caliber ? ` (${c.weaponCaliber || wObj?.caliber})` : '';
+      const serPart = c.weaponSerialNumber ? ` — Nº ${c.weaponSerialNumber}` : '';
+      map.set(key, {
+        key,
+        label: `${brandPart}${c.weaponModel || wObj?.model || 'Armamento'}${serPart}${calPart}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [unitHistoryBaseCautelas, weapons]);
+
   // Lista a exibir com base na aba ativa
   const displayedCautelas = useMemo(() => {
     let list = [...scopedCautelas];
 
+    const toLocalYMD = (iso?: string) => {
+      if (!iso) return '';
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) return '';
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+
     if (activeTab === 'MINHAS') {
-      // Aba "Cautela de arma em análise" (Policial) / "Solicitações Pendentes (Unidade)" (Armeiro):
-      // exibe todas as cautelas de armas aguardando comando do armeiro (autorização inicial ou recebimento de devolução)
+      // Aba "Cautela de arma em análise" (Policial) / "Solicitações Pendentes (Unidade)" (Armeiro)
       list = list.filter(c => isAwaitingArmorerCommand(c.status));
       if (canAuthorize) {
         if (pendentesSubFilter === 'SOLICITACOES') {
@@ -1037,36 +1116,51 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
     } else if (activeTab === 'DEFERIDAS') {
       if (!canAuthorize) {
-        // Aba "Minhas Cautelas" (Policial): exibe por padrão estritamente as cautelas ATIVAS EM POSSE (sem histórico de devolvidas)
+        // Aba "Minhas Cautelas" (Policial): estritamente cautelas ATIVAS EM POSSE
         list = list.filter(c => c.status === 'AUTORIZADA');
       } else {
-        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): exibe as cautelas da unidade cujo detentor da arma NÃO seja o próprio armeiro
+        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): apenas cautelas ATIVAS da unidade (sem histórico de devoluções)
         list = list.filter(
           c =>
-            (c.status === 'AUTORIZADA' ||
-              c.status === 'DEVOLUCAO_PENDENTE' ||
-              c.status === 'DEVOLVIDA') &&
+            (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
             !isOwnRecipientCautela(c)
         );
-        if (deferidasSubFilter === 'ATIVAS') {
-          list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
-        } else if (deferidasSubFilter === 'DEVOLVIDAS') {
-          list = list.filter(c => c.status === 'DEVOLVIDA');
-        }
       }
     } else if (activeTab === 'DEFERIDAS_PROPRIA') {
-      // Aba "Deferidas/Ativas Própria" (Armeiro): exibe as cautelas em que o próprio armeiro é o usuário que ficará com a arma
+      // Aba "Deferidas/Ativas Própria" (Armeiro): apenas cautelas ATIVAS em que o próprio armeiro é o usuário detentor da arma
       list = list.filter(
         c =>
-          (c.status === 'AUTORIZADA' ||
-            c.status === 'DEVOLUCAO_PENDENTE' ||
-            c.status === 'DEVOLVIDA') &&
+          (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
           isOwnRecipientCautela(c)
       );
-      if (propriaSubFilter === 'ATIVAS') {
-        list = list.filter(c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE');
-      } else if (propriaSubFilter === 'DEVOLVIDAS') {
-        list = list.filter(c => c.status === 'DEVOLVIDA');
+    } else if (activeTab === 'HISTORICO_UNIDADE') {
+      // Aba exclusiva "Histórico de cautelas <Unidade>" (Armeiro): cautelas ativas e devolvidas da unidade
+      list = list.filter(
+        c =>
+          c.status === 'AUTORIZADA' ||
+          c.status === 'DEVOLUCAO_PENDENTE' ||
+          c.status === 'DEVOLVIDA'
+      );
+
+      if (unitHistoryUserFilter !== 'TODOS') {
+        list = list.filter(c => getCautelaRequesterFilterKey(c) === unitHistoryUserFilter);
+      }
+
+      if (unitHistoryWeaponFilter !== 'TODAS') {
+        list = list.filter(c => {
+          const key = c.weaponSerialNumber || c.weaponId || c.weaponModel || '';
+          return key === unitHistoryWeaponFilter;
+        });
+      }
+
+      if (unitHistoryDateFilter) {
+        list = list.filter(
+          c =>
+            toLocalYMD(c.requestDate) === unitHistoryDateFilter ||
+            toLocalYMD(c.authorizedAt) === unitHistoryDateFilter ||
+            toLocalYMD(c.returnDate) === unitHistoryDateFilter ||
+            toLocalYMD(c.createdAt) === unitHistoryDateFilter
+        );
       }
     } else if (activeTab === 'INDEFERIDAS') {
       if (canAuthorize) {
@@ -1094,12 +1188,6 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         }
 
         if (historyDateFilter) {
-          const toLocalYMD = (iso?: string) => {
-            if (!iso) return '';
-            const d = new Date(iso);
-            if (isNaN(d.getTime())) return '';
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-          };
           list = list.filter(c =>
             toLocalYMD(c.requestDate) === historyDateFilter ||
             toLocalYMD(c.authorizedAt) === historyDateFilter ||
@@ -1111,29 +1199,109 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
 
     if (searchTerm.trim()) {
-      const term = searchTerm.toLowerCase();
+      const rawQuery = searchTerm.trim();
+      const normQuery = normalizeStr(rawQuery);
+      const tokens = normQuery.split(/\s+/).filter(Boolean);
+      const allUsersLookup = storage.getAllUsersForLookup();
+
       list = list.filter(c => {
         const reqResolved = getResolvedRequester(c);
-        return (
-          (c.weaponSerialNumber && c.weaponSerialNumber.toLowerCase().includes(term)) ||
-          (c.weaponModel && c.weaponModel.toLowerCase().includes(term)) ||
-          (c.weaponCaliber && c.weaponCaliber.toLowerCase().includes(term)) ||
-          (c.requesterName && c.requesterName.toLowerCase().includes(term)) ||
-          (c.requesterMasp && c.requesterMasp.toLowerCase().includes(term)) ||
-          (reqResolved.name && reqResolved.name.toLowerCase().includes(term)) ||
-          (reqResolved.masp && reqResolved.masp.toLowerCase().includes(term)) ||
-          (c.armorerName && c.armorerName.toLowerCase().includes(term)) ||
-          (c.reason && c.reason.toLowerCase().includes(term)) ||
-          (c.authorizationNotes && c.authorizationNotes.toLowerCase().includes(term))
+        const reqDigits = cleanDigits(reqResolved.masp || c.requesterMasp);
+        const matchedUser =
+          (c.requesterId ? allUsersLookup.find(u => u.id === c.requesterId) : undefined) ||
+          (reqDigits ? allUsersLookup.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+          allUsersLookup.find(u => normalizeStr(u.name) === normalizeStr(reqResolved.name));
+
+        const wObj = weapons.find(
+          w => w.id === c.weaponId || (w.serialNumber && w.serialNumber === c.weaponSerialNumber)
         );
+        const vaultObj = vaultSpaces.find(
+          v => v.id === (c.vaultSpaceId || wObj?.vaultSpaceId || wObj?.previousVaultSpaceId)
+        );
+        const unitObj = units.find(u => u.id === (c.unitId || wObj?.unitId));
+        const isAtivaStatus = c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE';
+        const statusKeywords = isAtivaStatus
+          ? 'ativa acautelada em posse'
+          : c.status === 'DEVOLVIDA'
+            ? 'devolvida ao cofre encerrada'
+            : c.status || '';
+
+        const searchableBlob = normalizeStr(
+          [
+            // Dados da Arma
+            c.weaponModel,
+            wObj?.model,
+            c.weaponType,
+            wObj?.type,
+            wObj?.manufacturer,
+            c.weaponSerialNumber,
+            wObj?.serialNumber,
+            c.weaponCaliber,
+            wObj?.caliber,
+            String(c.magazineQuantity || ''),
+            vaultObj?.code,
+            (vaultObj as any)?.description,
+            unitObj?.name,
+            (wObj as any)?.patrimonio,
+            (wObj as any)?.locationNote,
+            // Dados de Munição / Motivo / Observações
+            c.ammoCaliberName,
+            c.ammoFabricante,
+            c.ammoTipo,
+            c.ammoPeso,
+            c.ammoLote,
+            c.ammoDestinacao,
+            c.reason,
+            c.authorizationNotes,
+            c.returnObservations,
+            c.defectDescription,
+            c.malfunctionDescription,
+            // Dados do Usuário que realizou a cautela
+            c.requesterName,
+            reqResolved.name,
+            matchedUser?.name,
+            c.requesterMasp,
+            reqResolved.masp,
+            matchedUser?.masp,
+            reqDigits,
+            c.requesterCargo,
+            reqResolved.cargo,
+            matchedUser?.cargo,
+            c.requesterPhone,
+            matchedUser?.phone,
+            matchedUser?.role,
+            matchedUser?.professorSigla,
+            (matchedUser as any)?.email,
+            // Armeiro e Datas
+            c.armorerName,
+            c.armorerMasp,
+            c.returnArmorerName,
+            c.returnArmorerMasp,
+            c.authorizedAt ? new Date(c.authorizedAt).toLocaleDateString('pt-BR') : '',
+            c.returnDate ? new Date(c.returnDate).toLocaleDateString('pt-BR') : '',
+            c.requestDate ? new Date(c.requestDate).toLocaleDateString('pt-BR') : '',
+            statusKeywords
+          ]
+            .filter(Boolean)
+            .join(' ')
+        );
+
+        return tokens.every(tk => {
+          if (searchableBlob.includes(tk)) return true;
+          const tkDigits = cleanDigits(tk);
+          if (tkDigits.length >= 3 && reqDigits.includes(tkDigits)) return true;
+          const serialDigits = cleanDigits(c.weaponSerialNumber || wObj?.serialNumber);
+          if (tkDigits.length >= 3 && serialDigits.includes(tkDigits)) return true;
+          return false;
+        });
       });
     }
 
-    // Na aba "Meu Histórico" do policial, a cautela ativa fica SEMPRE fixa como primeiro resultado
-    if (!canAuthorize && activeTab === 'INDEFERIDAS') {
+    // Ordenação: em "Meu Histórico" (Policial) e "Histórico de cautelas" (Armeiro), cautelas ativas primeiro e mais recentes no topo
+    if ((!canAuthorize && activeTab === 'INDEFERIDAS') || (canAuthorize && activeTab === 'HISTORICO_UNIDADE')) {
       list.sort((a, b) => {
-        const aIsAtiva = a.status === 'AUTORIZADA' ? 1 : 0;
-        const bIsAtiva = b.status === 'AUTORIZADA' ? 1 : 0;
+        const aIsAtiva = a.status === 'AUTORIZADA' || a.status === 'DEVOLUCAO_PENDENTE' ? 1 : 0;
+        const bIsAtiva = b.status === 'AUTORIZADA' || b.status === 'DEVOLUCAO_PENDENTE' ? 1 : 0;
         if (aIsAtiva !== bIsAtiva) return bIsAtiva - aIsAtiva;
 
         const getTs = (item: CautelaArma) => {
@@ -1157,7 +1325,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     historyDecisionFilter,
     historyWeaponFilter,
     historyDateFilter,
+    unitHistoryUserFilter,
+    unitHistoryWeaponFilter,
+    unitHistoryDateFilter,
+    weapons,
+    vaultSpaces,
+    units,
     getResolvedRequester,
+    getCautelaRequesterFilterKey,
     isOwnRecipientCautela
   ]);
 
@@ -1193,19 +1368,6 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }).length;
   }, [scopedCautelas]);
 
-  const deferidasCount = useMemo(() => {
-    if (!canAuthorize) {
-      return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
-    }
-    return scopedCautelas.filter(
-      c =>
-        (c.status === 'AUTORIZADA' ||
-          c.status === 'DEVOLUCAO_PENDENTE' ||
-          c.status === 'DEVOLVIDA') &&
-        !isOwnRecipientCautela(c)
-    ).length;
-  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
-
   const activeCautelasCount = useMemo(() => {
     if (!canAuthorize) {
       return scopedCautelas.filter(c => c.status === 'AUTORIZADA').length;
@@ -1217,23 +1379,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     ).length;
   }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
+  const deferidasCount = activeCautelasCount;
+
   const returnedCautelasCount = useMemo(() => {
     if (!canAuthorize) {
       return scopedCautelas.filter(c => c.status === 'DEVOLVIDA').length;
     }
     return scopedCautelas.filter(
       c => c.status === 'DEVOLVIDA' && !isOwnRecipientCautela(c)
-    ).length;
-  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
-
-  const deferidasPropriaCount = useMemo(() => {
-    if (!canAuthorize) return 0;
-    return scopedCautelas.filter(
-      c =>
-        (c.status === 'AUTORIZADA' ||
-          c.status === 'DEVOLUCAO_PENDENTE' ||
-          c.status === 'DEVOLVIDA') &&
-        isOwnRecipientCautela(c)
     ).length;
   }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
@@ -1246,12 +1399,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     ).length;
   }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
 
+  const deferidasPropriaCount = activePropriaCount;
+
   const returnedPropriaCount = useMemo(() => {
     if (!canAuthorize) return 0;
     return scopedCautelas.filter(
       c => c.status === 'DEVOLVIDA' && isOwnRecipientCautela(c)
     ).length;
   }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
+
+  const unitHistoryTotalCount = useMemo(() => {
+    return unitHistoryBaseCautelas.length;
+  }, [unitHistoryBaseCautelas]);
 
   const indeferidasCount = useMemo(() => {
     return scopedCautelas.filter(c => c.status === 'RECUSADA').length;
@@ -2252,6 +2411,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       !canAuthorize ||
       (activeTab !== 'DEFERIDAS' &&
         activeTab !== 'DEFERIDAS_PROPRIA' &&
+        activeTab !== 'HISTORICO_UNIDADE' &&
         !editingActiveCautela)
     ) {
       return;
@@ -4969,6 +5129,26 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           </button>
         )}
 
+        {canAuthorize && (
+          <button
+            onClick={() => setActiveTab('HISTORICO_UNIDADE')}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
+              activeTab === 'HISTORICO_UNIDADE'
+                ? 'bg-sky-950/80 text-sky-300 border border-sky-700 shadow-sm'
+                : 'text-slate-400 hover:text-sky-300 hover:bg-slate-900'
+            }`}
+            title={`Histórico completo de cautelas ativas e devolvidas da unidade ${userUnit?.name || 'COE'}`}
+          >
+            <FileText className="w-3.5 h-3.5 text-sky-400" />
+            <span>{`Histórico de cautelas ${userUnit?.name || 'COE'}`}</span>
+            {unitHistoryTotalCount > 0 && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] bg-sky-500/20 text-sky-300 border border-sky-500/40 font-mono">
+                {unitHistoryTotalCount}
+              </span>
+            )}
+          </button>
+        )}
+
         <button
           onClick={() => setActiveTab('INDEFERIDAS')}
           className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${
@@ -5483,13 +5663,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           {/* Barra de Filtro e Busca */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="relative w-full sm:w-80">
+              <div className={`relative w-full ${canAuthorize && activeTab === 'HISTORICO_UNIDADE' ? 'sm:flex-1' : 'sm:w-80'}`}>
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="Buscar por arma, série, calibre ou motivo..."
+                  placeholder={
+                    canAuthorize && activeTab === 'HISTORICO_UNIDADE'
+                      ? 'Campo aberto: pesquise qualquer dado da arma (modelo, série, marca, calibre, cofre) ou do usuário (nome, MASP, cargo, telefone)...'
+                      : 'Buscar por arma, série, calibre ou motivo...'
+                  }
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500"
                 />
               </div>
@@ -5518,58 +5702,35 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </div>
               )}
 
-              {/* Sub-filtros para a aba Deferidas (Apenas para Armeiro; para Policial o padrão fixo é Ativas em Posse sem filtros de Todas/Devolvidas) */}
+              {/* Indicador de Cautelas Ativas para Deferidas / Ativas (Unidade) e Minhas Cautelas */}
               {activeTab === 'DEFERIDAS' && (
-                canAuthorize ? (
-                  <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
-                    {[
-                      { id: 'TODAS', label: `Todas (${deferidasCount})` },
-                      { id: 'ATIVAS', label: `Ativas em Posse (${activeCautelasCount})` },
-                      { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedCautelasCount})` }
-                    ].map(item => (
-                      <button
-                        key={item.id}
-                        onClick={() => setDeferidasSubFilter(item.id as any)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                          deferidasSubFilter === item.id
-                            ? 'bg-emerald-600 text-slate-950 font-black shadow-sm'
-                            : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex items-center space-x-2 self-start sm:self-auto">
-                    <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 text-slate-950 shadow-sm whitespace-nowrap">
-                      Ativas em Posse ({activeCautelasCount})
-                    </span>
-                  </div>
-                )
+                <div className="flex items-center space-x-2 self-start sm:self-auto">
+                  <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 text-slate-950 shadow-sm whitespace-nowrap">
+                    Ativas em Posse ({activeCautelasCount})
+                  </span>
+                </div>
               )}
 
-              {/* Sub-filtros para a aba Deferidas/Ativas Própria (Cautelas em que o próprio Armeiro ficará com a arma) */}
+              {/* Indicador de Cautelas Ativas para Deferidas/Ativas Própria */}
               {canAuthorize && activeTab === 'DEFERIDAS_PROPRIA' && (
-                <div className="flex items-center space-x-2 self-start sm:self-auto overflow-x-auto w-full sm:w-auto">
-                  {[
-                    { id: 'TODAS', label: `Todas (${deferidasPropriaCount})` },
-                    { id: 'ATIVAS', label: `Ativas em Posse (${activePropriaCount})` },
-                    { id: 'DEVOLVIDAS', label: `Devolvidas ao Cofre (${returnedPropriaCount})` }
-                  ].map(item => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setPropriaSubFilter(item.id as 'TODAS' | 'ATIVAS' | 'DEVOLVIDAS')}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
-                        propriaSubFilter === item.id
-                          ? 'bg-teal-500 text-slate-950 font-black shadow-sm'
-                          : 'bg-slate-950 text-slate-400 hover:text-slate-200 border border-slate-800'
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
+                <div className="flex items-center space-x-2 self-start sm:self-auto">
+                  <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-teal-500 text-slate-950 shadow-sm whitespace-nowrap">
+                    Ativas em Posse ({activePropriaCount})
+                  </span>
+                </div>
+              )}
+
+              {/* Legenda de Marcadores para Histórico de cautelas <Unidade> (Armeiro) */}
+              {canAuthorize && activeTab === 'HISTORICO_UNIDADE' && (
+                <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap">
+                  <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-emerald-950/70 text-emerald-300 border border-emerald-700/60 whitespace-nowrap">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.9)] shrink-0" />
+                    <span>Ativas</span>
+                  </span>
+                  <span className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold bg-black text-slate-100 border border-slate-600 whitespace-nowrap">
+                    <span className="w-2.5 h-2.5 rounded-full bg-black ring-2 ring-slate-300 shrink-0" />
+                    <span>Devolvidas</span>
+                  </span>
                 </div>
               )}
 
@@ -5598,6 +5759,80 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Filtros por Usuários, Armas e Data exclusivos da aba "Histórico de cautelas <Unidade>" (Armeiro) */}
+            {canAuthorize && activeTab === 'HISTORICO_UNIDADE' && (
+              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Usuário:
+                  </label>
+                  <select
+                    value={unitHistoryUserFilter}
+                    onChange={(e) => setUnitHistoryUserFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-sky-500"
+                  >
+                    <option value="TODOS">Todos os Usuários ({unitHistoryUsers.length})</option>
+                    {unitHistoryUsers.map(u => (
+                      <option key={u.key} value={u.key}>
+                        {u.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Arma:
+                  </label>
+                  <select
+                    value={unitHistoryWeaponFilter}
+                    onChange={(e) => setUnitHistoryWeaponFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-sky-500"
+                  >
+                    <option value="TODAS">Todas as Armas ({unitHistoryWeapons.length})</option>
+                    {unitHistoryWeapons.map(w => (
+                      <option key={w.key} value={w.key}>
+                        {w.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Data:
+                  </label>
+                  <input
+                    type="date"
+                    value={unitHistoryDateFilter}
+                    onChange={(e) => setUnitHistoryDateFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="sm:col-span-2 flex items-center justify-end">
+                  {(unitHistoryUserFilter !== 'TODOS' ||
+                    unitHistoryWeaponFilter !== 'TODAS' ||
+                    unitHistoryDateFilter ||
+                    searchTerm.trim()) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnitHistoryUserFilter('TODOS');
+                        setUnitHistoryWeaponFilter('TODAS');
+                        setUnitHistoryDateFilter('');
+                        setSearchTerm('');
+                      }}
+                      className="w-full sm:w-auto px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1.5 border border-slate-700"
+                    >
+                      <X className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Limpar</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Filtros por Arma, por Data e Ações de Impressão exclusivos da aba "Meu Histórico" (Policial) */}
             {!canAuthorize && activeTab === 'INDEFERIDAS' && (
@@ -6112,10 +6347,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   })()}
 
                   {/* Seção: Minhas Cautelas Ativas em Posse (Policial) / Cautelas Ativas da Unidade ou Próprias (Armeiro) */}
-                  {(
-                    (activeTab === 'DEFERIDAS' && (!canAuthorize || deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'ATIVAS')) ||
-                    (canAuthorize && activeTab === 'DEFERIDAS_PROPRIA' && (propriaSubFilter === 'TODAS' || propriaSubFilter === 'ATIVAS'))
-                  ) && (() => {
+                  {(activeTab === 'DEFERIDAS' || (canAuthorize && activeTab === 'DEFERIDAS_PROPRIA')) && (() => {
                     const isPropriaView = canAuthorize && activeTab === 'DEFERIDAS_PROPRIA';
                     const ativasList = displayedCautelas.filter(c => c.status === 'AUTORIZADA' || (canAuthorize && c.status === 'DEVOLUCAO_PENDENTE'));
                     return (
@@ -6756,85 +6988,180 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     );
                   })()}
 
-                  {/* Seção 4: Histórico de Cautelas Devolvidas (Exclusivo para Armeiro nas abas Deferidas da Unidade e Deferidas/Ativas Própria) */}
-                  {canAuthorize && (
-                    (activeTab === 'DEFERIDAS' && (deferidasSubFilter === 'TODAS' || deferidasSubFilter === 'DEVOLVIDAS')) ||
-                    (activeTab === 'DEFERIDAS_PROPRIA' && (propriaSubFilter === 'TODAS' || propriaSubFilter === 'DEVOLVIDAS'))
-                  ) && (() => {
-                    const isPropriaHistory = activeTab === 'DEFERIDAS_PROPRIA';
-                    const devolvidas = displayedCautelas.filter(c => c.status === 'DEVOLVIDA');
+                  {/* Aba Exclusiva: Histórico de cautelas <Unidade> (Armeiro) — Cautelas Ativas (Marcador Verde) e Devolvidas (Marcador Preto) */}
+                  {canAuthorize && activeTab === 'HISTORICO_UNIDADE' && (() => {
+                    const unitLabel = userUnit?.name || 'COE';
+                    const unitHistoryList = displayedCautelas;
+                    const activeInResults = unitHistoryList.filter(
+                      c => c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'
+                    ).length;
+                    const returnedInResults = unitHistoryList.filter(
+                      c => c.status === 'DEVOLVIDA'
+                    ).length;
+
                     return (
-                      <div className="space-y-3 pt-4 border-t border-slate-800">
-                        <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+                      <div className="space-y-4">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-800">
                           <div className="flex items-center space-x-2">
-                            <Clock className="w-3.5 h-3.5 text-slate-400" />
-                            <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                              {isPropriaHistory
-                                ? `Histórico de Devoluções Próprias — ${currentUser.name}`
-                                : `Histórico de Devoluções — ${userUnit?.name || 'Unidade'}`}
+                            <FileText className="w-4 h-4 text-sky-400" />
+                            <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
+                              {`Histórico de cautelas ${unitLabel}`}
                             </h4>
                           </div>
-                          <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded-md border border-slate-800">
-                            {devolvidas.length} registro(s)
-                          </span>
+                          <div className="flex flex-wrap items-center gap-2 text-xs font-mono">
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md bg-emerald-950/70 border border-emerald-700/60 text-emerald-300 font-bold">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.9)]" />
+                              <span>{activeInResults} ativa(s)</span>
+                            </span>
+                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-md bg-black border border-slate-600 text-slate-100 font-bold">
+                              <span className="w-2.5 h-2.5 rounded-full bg-black ring-2 ring-slate-300" />
+                              <span>{returnedInResults} devolvida(s)</span>
+                            </span>
+                            <span className="text-slate-400 bg-slate-950 px-2.5 py-0.5 rounded-md border border-slate-800">
+                              Total: {unitHistoryList.length}
+                            </span>
+                          </div>
                         </div>
 
-                        {devolvidas.length === 0 ? (
-                          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            {isPropriaHistory
-                              ? `Nenhum histórico de devolução de cautelas próprias registrado em nome de ${currentUser.name}.`
-                              : `Nenhum histórico de devolução de armas registrado na unidade ${userUnit?.name || ''}.`}
+                        {unitHistoryList.length === 0 ? (
+                          <div className="p-8 bg-slate-900/60 border border-slate-800 rounded-2xl text-center text-xs text-slate-400 space-y-2">
+                            <FileText className="w-7 h-7 text-slate-600 mx-auto" />
+                            <p className="font-semibold text-slate-300">
+                              {`Nenhuma cautela encontrada em Histórico de cautelas ${unitLabel} para os filtros informados.`}
+                            </p>
+                            {(unitHistoryUserFilter !== 'TODOS' ||
+                              unitHistoryWeaponFilter !== 'TODAS' ||
+                              unitHistoryDateFilter ||
+                              searchTerm.trim()) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setUnitHistoryUserFilter('TODOS');
+                                  setUnitHistoryWeaponFilter('TODAS');
+                                  setUnitHistoryDateFilter('');
+                                  setSearchTerm('');
+                                }}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-xs font-bold transition"
+                              >
+                                Limpar filtros e exibir todo o histórico
+                              </button>
+                            )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
-                            {devolvidas.map(cautela => {
-                              const weapon = weapons.find(w => w.id === cautela.weaponId || w.serialNumber === cautela.weaponSerialNumber);
-                              const returnVaultId = cautela.vaultSpaceId || weapon?.previousVaultSpaceId || weapon?.vaultSpaceId;
+                            {unitHistoryList.map(cautela => {
+                              const isAtiva =
+                                cautela.status === 'AUTORIZADA' ||
+                                cautela.status === 'DEVOLUCAO_PENDENTE';
+                              const isDevPendente = cautela.status === 'DEVOLUCAO_PENDENTE';
+                              const weapon = weapons.find(
+                                w =>
+                                  w.id === cautela.weaponId ||
+                                  w.serialNumber === cautela.weaponSerialNumber
+                              );
+                              const returnVaultId =
+                                cautela.vaultSpaceId ||
+                                weapon?.previousVaultSpaceId ||
+                                weapon?.vaultSpaceId;
                               const returnVault = vaultSpaces.find(v => v.id === returnVaultId);
                               const returnUnit = units.find(u => u.id === returnVault?.unitId);
-                              const returnVaultAddress = returnVault 
-                                ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}` 
-                                : 'Cofre de Origem';
+                              const returnVaultAddress = returnVault
+                                ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}`
+                                : 'Cofre da Unidade';
+
+                              const requesterInfo = getResolvedRequester(cautela);
+                              const armorerInfo = getResolvedArmorer(cautela);
+                              const retAmmoDetails = getRescuedAmmoDetails(cautela);
+                              const retAmmoVault = retAmmoDetails.vaultSpaceId
+                                ? vaultSpaces.find(v => v.id === retAmmoDetails.vaultSpaceId)
+                                : undefined;
 
                               return (
                                 <div
-                                  key={cautela.id}
-                                  className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 sm:p-5 hover:border-slate-700 transition space-y-3 opacity-90"
+                                  key={`unit-hist-${cautela.id}`}
+                                  className={`bg-slate-900 rounded-2xl p-4 sm:p-5 transition space-y-3 border-l-4 ${
+                                    isAtiva
+                                      ? 'border border-emerald-600/50 border-l-emerald-500 ring-1 ring-emerald-500/15 shadow-md'
+                                      : 'border border-slate-700/80 border-l-black shadow-sm'
+                                  }`}
                                 >
                                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
                                     <div className="flex items-center space-x-3">
-                                      <div className="p-2.5 rounded-xl border bg-slate-800 border-slate-700 text-slate-300">
+                                      {/* Ícone com marcador verde (ativa) ou preto (devolvida) */}
+                                      <div
+                                        className={`p-2.5 rounded-xl border relative ${
+                                          isAtiva
+                                            ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                                            : 'bg-black border-slate-600 text-slate-200'
+                                        }`}
+                                      >
                                         <Crosshair className="w-5 h-5" />
+                                        <span
+                                          className={`absolute -top-1 -right-1 w-3 h-3 rounded-full ${
+                                            isAtiva
+                                              ? 'bg-emerald-500 ring-2 ring-slate-900 shadow-[0_0_8px_rgba(16,185,129,0.95)]'
+                                              : 'bg-black ring-2 ring-slate-300'
+                                          }`}
+                                          title={isAtiva ? 'Marcador Verde: Cautela Ativa' : 'Marcador Preto: Cautela Devolvida'}
+                                        />
                                       </div>
+
                                       <div>
-                                        <div className="flex items-center space-x-2">
-                                          <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
+                                        <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                          {isAtiva ? (
+                                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/50">
+                                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.95)] shrink-0" />
+                                              <span>
+                                                {isDevPendente ? 'Cautela Ativa (Devolução Pendente)' : 'Cautela Ativa'}
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span className="inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-black text-white border border-slate-500 shadow-sm">
+                                              <span className="w-2.5 h-2.5 rounded-full bg-black ring-2 ring-slate-300 shrink-0" />
+                                              <span>Cautela Devolvida</span>
+                                            </span>
+                                          )}
+
+                                          <h4 className="text-sm font-bold text-slate-100">
+                                            {weapon?.manufacturer ? `${weapon.manufacturer} ` : ''}
+                                            {cautela.weaponModel}
+                                          </h4>
                                           <span className="font-mono text-xs text-amber-400 font-bold">
                                             Nº {cautela.weaponSerialNumber}
                                           </span>
-                                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-slate-800 text-slate-300 border-slate-700">
-                                            Devolvida ao Cofre
-                                          </span>
+                                          {(cautela.weaponCaliber || weapon?.caliber) && (
+                                            <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                              {cautela.weaponCaliber || weapon?.caliber}
+                                            </span>
+                                          )}
                                         </div>
-                                        <p className="text-xs text-slate-400 mt-0.5">
-                                          Devolvida em {cautela.returnDate ? new Date(cautela.returnDate).toLocaleString('pt-BR') : 'N/A'} por {cautela.returnArmorerName || 'Armeiro'}
+
+                                        <p className="text-xs text-slate-300 mt-1">
+                                          Usuário da Cautela:{' '}
+                                          <strong className="text-slate-100">{requesterInfo.name}</strong>{' '}
+                                          <span className="font-mono text-amber-300">
+                                            (MASP: {requesterInfo.masp})
+                                          </span>
+                                          {requesterInfo.cargo ? ` • ${requesterInfo.cargo}` : ''}
                                         </p>
                                       </div>
                                     </div>
 
-                                    <div className="flex items-center space-x-2">
-                                      <button
-                                        onClick={() => handlePrintReciboDevolucao(cautela)}
-                                        className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-900/50 hover:bg-emerald-800/60 border border-emerald-700/60 text-emerald-200 rounded-xl text-xs font-semibold transition"
-                                        title="Imprimir Recibo de Devolução da Arma e da Munição"
-                                      >
-                                        <Printer className="w-3.5 h-3.5 text-emerald-400" />
-                                        <span>Recibo de Devolução</span>
-                                      </button>
+                                    <div className="flex flex-wrap items-center gap-2 self-end sm:self-center">
+                                      {!isAtiva && (
+                                        <button
+                                          onClick={() => handlePrintReciboDevolucao(cautela)}
+                                          className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-900/50 hover:bg-emerald-800/60 border border-emerald-700/60 text-emerald-200 rounded-xl text-xs font-semibold transition"
+                                          title="Imprimir Recibo de Devolução da Arma e da Munição"
+                                        >
+                                          <Printer className="w-3.5 h-3.5 text-emerald-400" />
+                                          <span>Recibo de Devolução</span>
+                                        </button>
+                                      )}
                                       <button
                                         onClick={() => handlePrintTermo(cautela)}
                                         className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition"
-                                        title="Imprimir Termo Original de Cautela"
+                                        title="Imprimir Termo de Cautela"
                                       >
                                         <FileText className="w-3.5 h-3.5 text-amber-400" />
                                         <span>Termo</span>
@@ -6844,80 +7171,119 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
                                     <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Cofre de Retorno</span>
-                                      <span className="font-mono text-slate-200 font-bold truncate block" title={returnVault ? `Cofre ${returnVault.code} - ${returnUnit?.name || 'Unidade'}` : 'Cofre de Origem'}>
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        {isAtiva ? 'Cofre de Origem' : 'Cofre de Retorno'}
+                                      </span>
+                                      <span className="font-mono text-slate-200 font-bold truncate block">
                                         {returnVaultAddress}
                                       </span>
                                     </div>
                                     <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Carregadores</span>
-                                      <span className="font-bold text-slate-200">{cautela.magazineQuantity} unidade(s)</span>
-                                    </div>
-                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Data da Retirada</span>
-                                      <span className="text-slate-300">
-                                        {cautela.authorizedAt ? new Date(cautela.authorizedAt).toLocaleString('pt-BR') : new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        Carregadores
+                                      </span>
+                                      <span className="font-bold text-slate-200">
+                                        {isAtiva
+                                          ? `${cautela.magazineQuantity} unidade(s)`
+                                          : `${cautela.returnedMagazinesCount ?? cautela.magazineQuantity}/${cautela.magazineQuantity} devolvido(s)`}
                                       </span>
                                     </div>
                                     <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
-                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">Armeiro Recebedor</span>
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        Data da Retirada
+                                      </span>
+                                      <span className="text-slate-300">
+                                        {cautela.authorizedAt
+                                          ? new Date(cautela.authorizedAt).toLocaleString('pt-BR')
+                                          : new Date(cautela.requestDate).toLocaleString('pt-BR')}
+                                      </span>
+                                    </div>
+                                    <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800/80">
+                                      <span className="text-[10px] text-slate-500 uppercase block font-semibold">
+                                        {isAtiva ? 'Armeiro Autorizador' : 'Data / Armeiro Recebedor'}
+                                      </span>
                                       <span className="text-slate-200 font-semibold truncate block">
-                                        {cautela.returnArmorerName ? `${cautela.returnArmorerName} (${cautela.returnArmorerMasp})` : 'N/A'}
+                                        {isAtiva
+                                          ? armorerInfo.label
+                                          : `${cautela.returnDate ? new Date(cautela.returnDate).toLocaleString('pt-BR') : 'N/A'} • ${cautela.returnArmorerName || armorerInfo.name}`}
                                       </span>
                                     </div>
                                   </div>
 
-                                  {(() => {
-                                    const retAmmoDetails = getRescuedAmmoDetails(cautela);
-                                    if (!retAmmoDetails.hasAmmo) return null;
-                                    const retAmmoVault = retAmmoDetails.vaultSpaceId
-                                      ? vaultSpaces.find(v => v.id === retAmmoDetails.vaultSpaceId)
-                                      : undefined;
-                                    const returnedCount = retAmmoDetails.returnedQuantity ?? 0;
-                                    return (
-                                      <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                        <span className="text-amber-300 font-semibold flex items-center space-x-1.5">
-                                          <Disc className="w-3.5 h-3.5 text-amber-400" />
-                                          <span>
-                                            Munição vinculada ({retAmmoDetails.caliberName} • {retAmmoDetails.tipoMunicao} • Lote {retAmmoDetails.loteMunicao}):{' '}
-                                            {retAmmoDetails.seraDevolvida ? (
-                                              <strong className="text-emerald-300">
-                                                {returnedCount}/{retAmmoDetails.quantity} un. devolvidas{retAmmoVault ? ` ao cofre ${retAmmoVault.code}` : ''}
-                                              </strong>
-                                            ) : (
-                                              <strong className="text-slate-300">{retAmmoDetails.quantity} un. (Retirada Permanente)</strong>
-                                            )}
-                                          </span>
+                                  {retAmmoDetails.hasAmmo && retAmmoDetails.quantity > 0 && (
+                                    <div className="p-2.5 bg-slate-950/80 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                      <span className="text-amber-300 font-semibold flex items-center space-x-1.5">
+                                        <Disc className="w-3.5 h-3.5 text-amber-400" />
+                                        <span>
+                                          Munição vinculada ({retAmmoDetails.caliberName} • {retAmmoDetails.tipoMunicao} • Lote {retAmmoDetails.loteMunicao}):{' '}
+                                          {isAtiva ? (
+                                            <strong className="text-amber-200">
+                                              {retAmmoDetails.quantity} un. acauteladas
+                                            </strong>
+                                          ) : retAmmoDetails.seraDevolvida ? (
+                                            <strong className="text-emerald-300">
+                                              {retAmmoDetails.returnedQuantity ?? 0}/{retAmmoDetails.quantity} un. devolvidas
+                                              {retAmmoVault ? ` ao cofre ${retAmmoVault.code}` : ''}
+                                            </strong>
+                                          ) : (
+                                            <strong className="text-slate-300">
+                                              {retAmmoDetails.quantity} un. (Retirada Permanente)
+                                            </strong>
+                                          )}
                                         </span>
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border bg-slate-800 text-emerald-300 border-emerald-700/50">
-                                          Cautela de Munição: {retAmmoDetails.linkedStatus === 'DEVOLVIDA' || retAmmoDetails.seraDevolvida ? 'DEVOLVIDA (BAIXADA)' : 'ENCERRADA'}
-                                        </span>
-                                      </div>
-                                    );
-                                  })()}
+                                      </span>
+                                      <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase border bg-slate-800 text-slate-300 border-slate-700">
+                                        {isAtiva
+                                          ? `Destinação: ${retAmmoDetails.destinacao}`
+                                          : `Munição: ${retAmmoDetails.linkedStatus === 'DEVOLVIDA' || retAmmoDetails.seraDevolvida ? 'Devolvida' : 'Encerrada'}`}
+                                      </span>
+                                    </div>
+                                  )}
 
-                                  <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
-                                    <div className="flex items-center space-x-3">
-                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                        cautela.hadShots ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-slate-400'
-                                      }`}>
-                                        {cautela.hadShots ? `${cautela.shotsFired} tiros efetuados` : 'Zero tiros'}
-                                      </span>
-                                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                        cautela.isWorking ? 'bg-emerald-500/20 text-emerald-300' : 'bg-red-500/20 text-red-300'
-                                      }`}>
-                                        {cautela.isWorking ? 'Em Condições de Uso' : 'Apresenta Defeito (Manutenção)'}
-                                      </span>
-                                      {cautela.hadMalfunction && (
-                                        <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">
-                                          Pane Relatada
+                                  {!isAtiva && (
+                                    <div className="p-3 bg-slate-950/70 border border-slate-800 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                                      <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                        <span
+                                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                            cautela.hadShots
+                                              ? 'bg-amber-500/20 text-amber-300'
+                                              : 'bg-slate-800 text-slate-400'
+                                          }`}
+                                        >
+                                          {cautela.hadShots
+                                            ? `${cautela.shotsFired} tiros efetuados`
+                                            : 'Zero tiros'}
+                                        </span>
+                                        <span
+                                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                            cautela.isWorking !== false
+                                              ? 'bg-emerald-500/20 text-emerald-300'
+                                              : 'bg-red-500/20 text-red-300'
+                                          }`}
+                                        >
+                                          {cautela.isWorking !== false
+                                            ? 'Em Condições de Uso'
+                                            : 'Apresentou Defeito (Manutenção)'}
+                                        </span>
+                                        {cautela.hadMalfunction && (
+                                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300">
+                                            Pane Relatada
+                                          </span>
+                                        )}
+                                      </div>
+                                      {cautela.reason && (
+                                        <span className="text-[11px] text-slate-400 italic">
+                                          Finalidade: "{cautela.reason}"
                                         </span>
                                       )}
                                     </div>
-                                    <div className="text-[11px] text-slate-400">
-                                      Devolvido em {new Date(cautela.returnDate || cautela.updatedAt || '').toLocaleString('pt-BR')} por {cautela.returnArmorerName || 'Armeiro'}
-                                    </div>
-                                  </div>
+                                  )}
+
+                                  {isAtiva && cautela.reason && (
+                                    <p className="text-xs text-slate-400 italic">
+                                      Finalidade: "{cautela.reason}"
+                                    </p>
+                                  )}
                                 </div>
                               );
                             })}
