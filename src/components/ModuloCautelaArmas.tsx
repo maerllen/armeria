@@ -1258,7 +1258,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   React.useEffect(() => {
     if (authorizingCautela && availableAmmoForAuthorizingWeapon.length > 0) {
       if (!availableAmmoForAuthorizingWeapon.some(s => s.id === authStockId)) {
-        setAuthStockId(availableAmmoForAuthorizingWeapon[0].id);
+        const rawSug = (authorizingCautela.authorizationNotes || '').toLowerCase();
+        const suggestedMatch = rawSug
+          ? availableAmmoForAuthorizingWeapon.find(st => {
+              const t = (st.tipoMunicao || '').toLowerCase().trim();
+              const p = (st.pesoMunicao || '').toLowerCase().trim();
+              const matchTipo = t && rawSug.includes(t);
+              const matchPeso = !p || rawSug.includes(p);
+              return Boolean(matchTipo && matchPeso);
+            }) ||
+            availableAmmoForAuthorizingWeapon.find(st => {
+              const t = (st.tipoMunicao || '').toLowerCase().trim();
+              return Boolean(t && rawSug.includes(t));
+            })
+          : undefined;
+        setAuthStockId((suggestedMatch || availableAmmoForAuthorizingWeapon[0]).id);
       }
     }
   }, [authorizingCautela, availableAmmoForAuthorizingWeapon, authStockId]);
@@ -1526,8 +1540,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const handleOpenAuthorize = (cautela: CautelaArma) => {
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
     const hasAmmo = Boolean(cautela.linkedAmmoCautelaId || (cautela.ammoQuantity && cautela.ammoQuantity > 0) || linkedAmmo);
+    const hasAmmoSuggestion = Boolean((cautela.authorizationNotes || '').trim());
+    setAuthStockId('');
     setAuthorizingCautela(cautela);
-    setAuthWithAmmo(hasAmmo);
+    setAuthWithAmmo(hasAmmo || hasAmmoSuggestion);
     setAuthAmmoQty(cautela.ammoQuantity || linkedAmmo?.quantity || 30);
     const isTreinamento = (cautela.ammoDestinacao === 'Treinamento' || linkedAmmo?.destinacao === 'Treinamento');
     setAuthAmmoDestinacao(isTreinamento ? 'Treinamento' : 'Defesa');
@@ -4302,18 +4318,48 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                       </div>
                                     </div>
 
-                                    {/* Indicação Informativa de Munição pelo Policial */}
-                                    {cautela.authorizationNotes && (
-                                      <div className="p-3 bg-amber-950/25 border border-amber-800/50 rounded-xl space-y-1 text-xs">
-                                        <div className="flex items-center space-x-2 text-amber-300 font-bold">
-                                          <Disc className="w-3.5 h-3.5 text-amber-400" />
-                                          <span>Indicação do Policial (Informativa):</span>
+                                    {/* Sugestão de Munição (OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS) e opção "Desejo solicitar munições" */}
+                                    {(() => {
+                                      const sugestaoMunicao = (cautela.authorizationNotes || '').trim();
+                                      const marcouDesejoMunicoes = Boolean(sugestaoMunicao) || hasAmmo;
+
+                                      if (!canAuthorize && !sugestaoMunicao) return null;
+
+                                      return (
+                                        <div
+                                          className={`p-3 rounded-xl space-y-1.5 text-xs border ${
+                                            marcouDesejoMunicoes
+                                              ? 'bg-amber-950/25 border-amber-800/50'
+                                              : 'bg-slate-950/70 border-slate-800/80'
+                                          }`}
+                                        >
+                                          <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <div className="flex items-center space-x-2 font-bold text-amber-300">
+                                              <Disc className={`w-3.5 h-3.5 ${marcouDesejoMunicoes ? 'text-amber-400' : 'text-slate-500'}`} />
+                                              <span className={marcouDesejoMunicoes ? 'text-amber-300' : 'text-slate-300'}>
+                                                Sugestão de munição:
+                                              </span>
+                                            </div>
+                                            <span
+                                              className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold border ${
+                                                marcouDesejoMunicoes
+                                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                                  : 'bg-slate-900 text-slate-400 border-slate-700'
+                                              }`}
+                                            >
+                                              Desejo solicitar munições: {marcouDesejoMunicoes ? 'Sim' : 'Não'}
+                                            </span>
+                                          </div>
+                                          <p
+                                            className={`font-mono text-[11px] pl-5 ${
+                                              sugestaoMunicao ? 'text-amber-200/95 font-semibold' : 'text-slate-500 italic'
+                                            }`}
+                                          >
+                                            {sugestaoMunicao || 'Nenhuma sugestão de munição informada pelo solicitante.'}
+                                          </p>
                                         </div>
-                                        <p className="text-amber-200/95 font-mono text-[11px] pl-5">
-                                          {cautela.authorizationNotes}
-                                        </p>
-                                      </div>
-                                    )}
+                                      );
+                                    })()}
 
                                     {/* Munições solicitadas em conjunto */}
                                     {hasAmmo && (() => {
@@ -4941,7 +4987,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                     <div className="p-3 bg-amber-950/25 border border-amber-800/50 rounded-xl space-y-1 text-xs">
                                       <div className="flex items-center space-x-2 text-amber-300 font-bold">
                                         <Disc className="w-3.5 h-3.5 text-amber-400" />
-                                        <span>Indicação do Policial (Informativa):</span>
+                                        <span>Sugestão de munição:</span>
                                       </div>
                                       <p className="text-amber-200/95 font-mono text-[11px] pl-5">
                                         {cautela.authorizationNotes}
@@ -5603,15 +5649,46 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         <span className="italic">{authorizingCautela.reason}</span>
                       </div>
                     )}
-                    {authorizingCautela.authorizationNotes && (
-                      <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-xs flex items-start space-x-2">
-                        <Disc className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="block text-amber-200 uppercase text-[10px] tracking-wider">Munição Indicada pelo Policial:</strong>
-                          <span className="font-mono text-xs">{authorizingCautela.authorizationNotes}</span>
+                    {(() => {
+                      const authSugestaoMunicao = (authorizingCautela.authorizationNotes || '').trim();
+                      const authLinkedAmmo = getLinkedAmmoForCautela(authorizingCautela);
+                      const authMarcouMunicoes = Boolean(
+                        authSugestaoMunicao ||
+                          authorizingCautela.linkedAmmoCautelaId ||
+                          (authorizingCautela.ammoQuantity && authorizingCautela.ammoQuantity > 0) ||
+                          authLinkedAmmo
+                      );
+                      return (
+                        <div
+                          className={`p-2.5 rounded-lg text-xs space-y-1.5 border ${
+                            authMarcouMunicoes
+                              ? 'bg-amber-950/30 border-amber-800/40 text-amber-300'
+                              : 'bg-slate-900/70 border-slate-800 text-slate-300'
+                          }`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="flex items-center space-x-1.5">
+                              <Disc className={`w-4 h-4 shrink-0 ${authMarcouMunicoes ? 'text-amber-400' : 'text-slate-500'}`} />
+                              <strong className="uppercase text-[10px] tracking-wider text-amber-200">
+                                Sugestão de munição:
+                              </strong>
+                            </div>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                authMarcouMunicoes
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40'
+                                  : 'bg-slate-950 text-slate-400 border-slate-700'
+                              }`}
+                            >
+                              Desejo solicitar munições: {authMarcouMunicoes ? 'Sim' : 'Não'}
+                            </span>
+                          </div>
+                          <div className={`font-mono text-xs pl-5 ${authSugestaoMunicao ? 'text-amber-200 font-semibold' : 'text-slate-500 italic'}`}>
+                            {authSugestaoMunicao || 'Nenhuma sugestão de munição informada pelo solicitante.'}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}
