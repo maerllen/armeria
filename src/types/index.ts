@@ -1216,6 +1216,7 @@ export interface CautelaMunicao {
   unitId?: string;
   linkedWeaponCautelaId?: string;
   linkedWeaponSerialNumber?: string;
+  linkedWeaponModel?: string;
   weaponId?: string;
   requesterId: string;
   requesterName: string;

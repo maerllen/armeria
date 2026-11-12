@@ -107,7 +107,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [authWithAmmo, setAuthWithAmmo] = useState(false);
   const [authStockId, setAuthStockId] = useState('');
   const [authAmmoQty, setAuthAmmoQty] = useState<number>(30);
-  const [authAmmoDestinacao, setAuthAmmoDestinacao] = useState<'Defesa' | 'Treinamento'>('Defesa');
+  const [authAmmoDestinacao, setAuthAmmoDestinacao] = useState<'Treinamento' | 'Defesa' | 'Ensaio'>('Defesa');
   const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
   const [authNotes, setAuthNotes] = useState('');
 
@@ -1263,26 +1263,174 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
   }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, isGeral]);
 
-  // Munições disponíveis na unidade correspondentes ao armamento que o armeiro está autorizando
+  // Munições disponíveis na unidade correspondentes ao calibre do armamento e à Destinação selecionada (Defesa, Treinamento ou Ensaio)
   const availableAmmoForAuthorizingWeapon = useMemo(() => {
     if (!authorizingCautela) return [];
+    const normPlain = (s?: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
     const targetUnitId = authorizingCautela.unitId || currentUser.unitId;
-    const selCal = (authorizingCautela.weaponCaliber || '').toLowerCase().trim();
+    const selCal = normPlain(authorizingCautela.weaponCaliber);
+
     return ammoStocks.filter(st => {
-      const matchUnit = isGeral ? true : (st.unitId === targetUnitId);
-      const cal = calibers.find(c => c.id === st.caliberId);
-      const calName = (cal?.name || '').toLowerCase().trim();
-      const matchCaliber = !selCal ||
-                           (cal && (calName.includes(selCal) || selCal.includes(calName))) ||
-                           (st.caliberId === authorizingCautela.weaponCaliber);
-      return matchUnit && matchCaliber && st.quantity > 0;
+      if (Number(st.quantity) <= 0) return false;
+
+      const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+      const stUnitId = st.unitId || stVault?.unitId || '';
+      const matchUnit = isGeral ? true : (!targetUnitId || stUnitId === targetUnitId);
+      if (!matchUnit) return false;
+
+      const cal = calibers.find(
+        c => c.id === st.caliberId || normPlain(c.name) === normPlain(st.caliberId)
+      );
+      const calName = normPlain(cal?.name || st.caliberId || '');
+      const matchCaliber =
+        !selCal ||
+        calName === selCal ||
+        Boolean(calName && (calName.includes(selCal) || selCal.includes(calName))) ||
+        st.caliberId === authorizingCautela.weaponCaliber;
+      if (!matchCaliber) return false;
+
+      // Filtro por DESTINAÇÃO:
+      // - Ensaio: todas as munições disponíveis naquele calibre
+      // - Defesa: todas as munições de defesa/operacional daquele calibre
+      // - Treinamento: todas as munições de treinamento daquele calibre
+      if (authAmmoDestinacao === 'Ensaio') {
+        return true;
+      }
+
+      const destNorm = normPlain(st.destinacao || '');
+      const tipoNorm = normPlain(st.tipoMunicao || cal?.tipo || '');
+      const isTrainingByTipo =
+        tipoNorm.includes('treinamento') ||
+        tipoNorm.includes('treino') ||
+        tipoNorm.includes('ogival') ||
+        tipoNorm.includes('etog') ||
+        tipoNorm.includes('chog') ||
+        tipoNorm.includes('nta') ||
+        tipoNorm.includes('canto vivo');
+
+      if (authAmmoDestinacao === 'Treinamento') {
+        if (destNorm) {
+          return (
+            destNorm.includes('treinamento') ||
+            destNorm.includes('treino') ||
+            destNorm.includes('instrucao') ||
+            destNorm.includes('curso de formacao')
+          );
+        }
+        return isTrainingByTipo;
+      }
+
+      // authAmmoDestinacao === 'Defesa'
+      if (destNorm) {
+        return destNorm.includes('defesa') || destNorm.includes('operacional');
+      }
+      return !isTrainingByTipo;
     });
-  }, [authorizingCautela, ammoStocks, calibers, currentUser.unitId, isGeral]);
+  }, [authorizingCautela, ammoStocks, vaultSpaces, calibers, currentUser.unitId, isGeral, authAmmoDestinacao]);
+
+  // Comparação entre a munição solicitada pelo usuário em OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS
+  // e a munição selecionada pelo Armeiro em "De qual cofre / lote vai tirar as munições?"
+  const authAmmoComparison = useMemo(() => {
+    const normComp = (s?: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const baseObs = ((authorizingCautela?.authorizationNotes || '').split('|')[0] || '').trim();
+    const cleanedObs = baseObs
+      .replace(/^Solicito\s+muni[cç][aã]o(?:\s+tipo)?\s*:\s*/i, '')
+      .trim();
+
+    let reqCaliber = '';
+    let reqTipo = '';
+    if (cleanedObs) {
+      const weaponCalRaw = (authorizingCautela?.weaponCaliber || '').trim();
+      if (
+        weaponCalRaw &&
+        cleanedObs.toLowerCase().startsWith(`${weaponCalRaw.toLowerCase()},`)
+      ) {
+        reqCaliber = weaponCalRaw;
+        const rest = cleanedObs.slice(weaponCalRaw.length + 1).trim();
+        const restParts = rest.split(/,\s+/).map(p => p.trim()).filter(Boolean);
+        reqTipo = restParts[0] || rest;
+      } else {
+        const parts = cleanedObs.split(/,\s+/).map(p => p.trim()).filter(Boolean);
+        reqCaliber = parts[0] || '';
+        reqTipo = parts[1] || '';
+      }
+    }
+
+    const selectedStock = authWithAmmo
+      ? availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId)
+      : undefined;
+    const selectedCalObj = selectedStock
+      ? calibers.find(
+          c => c.id === selectedStock.caliberId || normComp(c.name) === normComp(selectedStock.caliberId)
+        )
+      : undefined;
+
+    const selectedCaliberDisplay = (
+      selectedCalObj?.name ||
+      selectedStock?.caliberId ||
+      authorizingCautela?.weaponCaliber ||
+      'Padrão'
+    ).trim();
+    const selectedTipoDisplay = (
+      selectedStock?.tipoMunicao ||
+      selectedCalObj?.tipo ||
+      'Comum'
+    ).trim();
+
+    const selCalNorm = normComp(selectedCaliberDisplay);
+    const reqCalNorm = normComp(reqCaliber);
+    const selTipoNorm = normComp(selectedTipoDisplay);
+    const reqTipoNorm = normComp(reqTipo);
+
+    const sameCaliber = Boolean(
+      reqCalNorm &&
+        selCalNorm &&
+        (selCalNorm === reqCalNorm ||
+          selCalNorm.includes(reqCalNorm) ||
+          reqCalNorm.includes(selCalNorm))
+    );
+    const sameTipo = Boolean(reqTipoNorm && selTipoNorm && selTipoNorm === reqTipoNorm);
+    const isSameRequestedCaliberAndTipo = Boolean(
+      selectedStock && baseObs && sameCaliber && sameTipo
+    );
+
+    const requestedAmmoConstant = cleanedObs || baseObs || 'Nenhuma munição solicitada';
+    const showDivergenceJustification = Boolean(
+      authWithAmmo && selectedStock && !isSameRequestedCaliberAndTipo
+    );
+
+    return {
+      baseObs,
+      requestedAmmoConstant,
+      reqCaliber,
+      reqTipo,
+      selectedStock,
+      selectedCalObj,
+      selectedCaliberDisplay,
+      selectedTipoDisplay,
+      isSameRequestedCaliberAndTipo,
+      showDivergenceJustification
+    };
+  }, [authorizingCautela, authWithAmmo, authStockId, availableAmmoForAuthorizingWeapon, calibers]);
 
   React.useEffect(() => {
     if (authorizingCautela && availableAmmoForAuthorizingWeapon.length > 0) {
       if (!availableAmmoForAuthorizingWeapon.some(s => s.id === authStockId)) {
-        const rawSug = (authorizingCautela.authorizationNotes || '').toLowerCase();
+        const rawSug = ((authorizingCautela.authorizationNotes || '').split('|')[0] || '').toLowerCase();
         const suggestedMatch = rawSug
           ? availableAmmoForAuthorizingWeapon.find(st => {
               const t = (st.tipoMunicao || '').toLowerCase().trim();
@@ -1298,6 +1446,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           : undefined;
         setAuthStockId((suggestedMatch || availableAmmoForAuthorizingWeapon[0]).id);
       }
+    } else if (authorizingCautela && availableAmmoForAuthorizingWeapon.length === 0 && authStockId !== '') {
+      setAuthStockId('');
     }
   }, [authorizingCautela, availableAmmoForAuthorizingWeapon, authStockId]);
 
@@ -1574,45 +1724,116 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const handleOpenAuthorize = (cautela: CautelaArma) => {
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
     const resolvedMotivo = getResolvedMotivoFinalidade(cautela);
+    setErrorMsg('');
     setAuthStockId('');
     setAuthorizingCautela(cautela);
     // Inicia desmarcado: somente acautela munições caso o usuário Armeiro marque explicitamente a opção
     setAuthWithAmmo(false);
     setAuthAmmoQty(cautela.ammoQuantity || linkedAmmo?.quantity || 30);
-    const isTreinamento = (
+    const isEnsaio =
+      cautela.ammoDestinacao === 'Ensaio' || linkedAmmo?.destinacao === 'Ensaio';
+    const isTreinamento =
       resolvedMotivo === 'Treinamento' ||
       cautela.ammoDestinacao === 'Treinamento' ||
-      linkedAmmo?.destinacao === 'Treinamento'
-    );
-    setAuthAmmoDestinacao(isTreinamento ? 'Treinamento' : 'Defesa');
-    setAuthSeraDevolvida(!isTreinamento);
-    setAuthNotes(cautela.authorizationNotes || '');
+      linkedAmmo?.destinacao === 'Treinamento';
+    const initialDest: 'Treinamento' | 'Defesa' | 'Ensaio' = isEnsaio
+      ? 'Ensaio'
+      : isTreinamento
+        ? 'Treinamento'
+        : 'Defesa';
+    setAuthAmmoDestinacao(initialDest);
+    setAuthSeraDevolvida(initialDest === 'Defesa');
+    setAuthNotes('');
   };
 
   // Confirmar autorização com seleção de cofre/lote e permanente vs devolver depois
   const handleConfirmAuthorizeWithAmmo = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authorizingCautela) return;
+
+    const selectedStock = authWithAmmo
+      ? availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId)
+      : undefined;
+
+    if (authWithAmmo) {
+      if (availableAmmoForAuthorizingWeapon.length === 0 || !selectedStock) {
+        setErrorMsg(
+          `Não há lote de munições disponível para a destinação "${authAmmoDestinacao}" no calibre ${authorizingCautela.weaponCaliber}.`
+        );
+        return;
+      }
+      if (!authAmmoQty || Number(authAmmoQty) < 1) {
+        setErrorMsg('Informe uma quantidade válida de munições para a cautela.');
+        return;
+      }
+      if (Number(authAmmoQty) > Number(selectedStock.quantity)) {
+        setErrorMsg(
+          `A quantidade informada (${authAmmoQty}) excede o saldo disponível no lote selecionado (${selectedStock.quantity} un.).`
+        );
+        return;
+      }
+      if (authAmmoComparison.showDivergenceJustification && !authNotes.trim()) {
+        setErrorMsg(
+          `Justifique o depósito da munição ${authAmmoComparison.selectedCaliberDisplay} - ${authAmmoComparison.selectedTipoDisplay}.`
+        );
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setErrorMsg('');
     try {
-      const selectedStock = authWithAmmo
-        ? availableAmmoForAuthorizingWeapon.find(s => s.id === authStockId)
-        : undefined;
       const resolvedAuthReq = getResolvedRequester(authorizingCautela);
+      const allUsers = storage.getAllUsersForLookup();
+      const reqDigits = cleanDigits(resolvedAuthReq.masp);
+      const matchedUser =
+        (authorizingCautela.requesterId
+          ? allUsers.find(u => u.id === authorizingCautela.requesterId)
+          : undefined) ||
+        (reqDigits ? allUsers.find(u => cleanDigits(u.masp) === reqDigits) : undefined) ||
+        allUsers.find(u => normalizeStr(u.name) === normalizeStr(resolvedAuthReq.name));
+
+      const resolvedRequesterId = matchedUser?.id || authorizingCautela.requesterId;
+      const resolvedMotivo = getResolvedMotivoFinalidade(authorizingCautela) || authorizingCautela.reason;
+
+      const justificationText =
+        authWithAmmo && authAmmoComparison.showDivergenceJustification && authNotes.trim()
+          ? authNotes.trim()
+          : undefined;
+
+      const notesToPersist = justificationText
+        ? authAmmoComparison.baseObs
+          ? `${authAmmoComparison.baseObs} | Justificativa do Armeiro (${authAmmoComparison.selectedCaliberDisplay} - ${authAmmoComparison.selectedTipoDisplay}): ${justificationText}`
+          : `Justificativa do Armeiro (${authAmmoComparison.selectedCaliberDisplay} - ${authAmmoComparison.selectedTipoDisplay}): ${justificationText}`
+        : undefined;
+
       const res = await storage.authorizeCautelaArma(authorizingCautela.id, {
         withAmmo: authWithAmmo,
-        notes: authNotes,
-        stockId: authWithAmmo ? (authStockId || undefined) : undefined,
+        notes: notesToPersist,
+        armorerJustification: justificationText,
+        stockId: authWithAmmo ? (selectedStock?.id || authStockId || undefined) : undefined,
         vaultSpaceId: authWithAmmo
           ? (selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId)
           : authorizingCautela.vaultSpaceId,
         seraDevolvida: authWithAmmo ? authSeraDevolvida : undefined,
         ammoQuantity: authWithAmmo ? Number(authAmmoQty) : 0,
         destinacao: authWithAmmo ? authAmmoDestinacao : undefined,
+        caliberId: authWithAmmo ? selectedStock?.caliberId : undefined,
+        caliberName: authWithAmmo ? authAmmoComparison.selectedCaliberDisplay : undefined,
+        fabricante: authWithAmmo ? (selectedStock?.fabricante || authAmmoComparison.selectedCalObj?.fabricante || 'CBC') : undefined,
+        tipoMunicao: authWithAmmo ? authAmmoComparison.selectedTipoDisplay : undefined,
+        pesoMunicao: authWithAmmo ? (selectedStock?.pesoMunicao || authAmmoComparison.selectedCalObj?.peso) : undefined,
+        loteMunicao: authWithAmmo ? selectedStock?.loteMunicao : undefined,
+        anoFabricacao: authWithAmmo ? selectedStock?.anoFabricacao : undefined,
         weaponId: authorizingCautela.weaponId,
         weaponSerialNumber: authorizingCautela.weaponSerialNumber,
+        weaponModel: authorizingCautela.weaponModel,
+        weaponCaliber: authorizingCautela.weaponCaliber,
+        departmentId: authorizingCautela.departmentId || matchedUser?.departmentId || currentUser.departmentId,
+        unitId: authorizingCautela.unitId || matchedUser?.unitId || currentUser.unitId,
+        reason: resolvedMotivo,
         cautelaId: authorizingCautela.id,
+        requesterId: resolvedRequesterId,
         requesterName: resolvedAuthReq.name,
         requesterMasp: resolvedAuthReq.masp,
         requesterCargo: resolvedAuthReq.cargo || authorizingCautela.requesterCargo,
@@ -1626,7 +1847,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         setSuccessMsg(
           `Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${
             authWithAmmo
-              ? ' Munições deduzidas e lançadas em Cautela de Munições.'
+              ? ` Cautela de munições (${authAmmoQty} un. • Destinação: ${authAmmoDestinacao}) gerada em nome de ${resolvedAuthReq.name}.`
               : ' Cautela exclusiva do armamento (sem geração de cautela de munições).'
           }`
         );
@@ -5808,11 +6029,17 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                       </label>
                       <select
                         value={authAmmoDestinacao}
-                        onChange={(e) => setAuthAmmoDestinacao(e.target.value as 'Defesa' | 'Treinamento')}
+                        onChange={(e) => {
+                          const nextDest = e.target.value as 'Treinamento' | 'Defesa' | 'Ensaio';
+                          setAuthAmmoDestinacao(nextDest);
+                          setAuthSeraDevolvida(nextDest === 'Defesa');
+                          setAuthStockId('');
+                        }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium focus:border-amber-500"
                       >
-                        <option value="Defesa">Defesa (Serviço Operacional / Plantão)</option>
-                        <option value="Treinamento">Treinamento (Instrução / Estande)</option>
+                        <option value="Treinamento">Treinamento</option>
+                        <option value="Defesa">Defesa</option>
+                        <option value="Ensaio">Ensaio</option>
                       </select>
                     </div>
                   </div>
@@ -5828,7 +6055,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
                     {availableAmmoForAuthorizingWeapon.length === 0 ? (
                       <div className="p-3 bg-red-950/40 border border-red-800 text-xs text-red-300 rounded-xl">
-                        ⚠ Não há estoque de munições no calibre <strong>{authorizingCautela.weaponCaliber}</strong> cadastrado nesta unidade.
+                        ⚠ {authAmmoDestinacao === 'Defesa'
+                          ? <>Não há munições de <strong>Defesa</strong> disponíveis no calibre <strong>{authorizingCautela.weaponCaliber}</strong> nesta unidade.</>
+                          : authAmmoDestinacao === 'Treinamento'
+                            ? <>Não há munições de <strong>Treinamento</strong> disponíveis no calibre <strong>{authorizingCautela.weaponCaliber}</strong> nesta unidade.</>
+                            : <>Não há munições disponíveis no calibre <strong>{authorizingCautela.weaponCaliber}</strong> nesta unidade.</>}
                       </div>
                     ) : (
                       <select
@@ -5892,7 +6123,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           <span className="font-bold text-slate-100">Retirada permanente</span>
                         </div>
                         <span className="text-[11px] text-slate-400 mt-1">
-                          Baixa definitiva: consumo, treinamento ou missão (não retornará ao cofre).
+                          Baixa definitiva: consumo, treinamento, ensaio ou missão (não retornará ao cofre).
                         </span>
                       </label>
                     </div>
@@ -5900,19 +6131,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </div>
               )}
 
-              {/* 3. Despacho / Observações do Armeiro */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                  Despacho / Observações do Armeiro (Opcional)
-                </label>
-                <textarea
-                  value={authNotes}
-                  onChange={(e) => setAuthNotes(e.target.value)}
-                  placeholder="Observações pertinentes à liberação do armamento e das munições..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-xs text-slate-100"
-                  rows={2}
-                />
-              </div>
+              {/* 3. Justificativa de Divergência da Munição (exibida somente quando o calibre/tipo selecionado diverge de OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS) */}
+              {authAmmoComparison.showDivergenceJustification && (
+                <div className="bg-amber-950/20 border border-amber-700/40 rounded-xl p-3 space-y-1.5">
+                  <label className="block text-xs font-semibold text-amber-200 tracking-wide">
+                    Usuário solicitou munição: {authAmmoComparison.requestedAmmoConstant}
+                  </label>
+                  <textarea
+                    value={authNotes}
+                    onChange={(e) => setAuthNotes(e.target.value)}
+                    placeholder={`Justifique o depósito da munição ${authAmmoComparison.selectedCaliberDisplay} - ${authAmmoComparison.selectedTipoDisplay}`}
+                    className="w-full bg-slate-950 border border-amber-700/50 focus:border-amber-500 rounded-xl p-2.5 text-xs text-slate-100 placeholder:text-amber-300/70"
+                    rows={2}
+                    required
+                  />
+                </div>
+              )}
 
               <div className="pt-2 flex justify-end space-x-3">
                 <button
@@ -5924,7 +6158,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={isSubmitting || (authWithAmmo && availableAmmoForAuthorizingWeapon.length > 0 && !authStockId)}
+                  disabled={
+                    isSubmitting ||
+                    (authWithAmmo && (availableAmmoForAuthorizingWeapon.length === 0 || !authStockId))
+                  }
                   className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
                 >
                   <Check className="w-4 h-4" />

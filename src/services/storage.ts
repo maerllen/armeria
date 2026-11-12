@@ -3226,14 +3226,28 @@ class StorageService {
     options?: string | { 
       withAmmo?: boolean;
       notes?: string; 
+      armorerJustification?: string;
       vaultSpaceId?: string; 
       stockId?: string; 
       seraDevolvida?: boolean; 
       ammoQuantity?: number; 
       destinacao?: string; 
+      caliberId?: string;
+      caliberName?: string;
+      fabricante?: string;
+      tipoMunicao?: string;
+      pesoMunicao?: string;
+      loteMunicao?: string;
+      anoFabricacao?: number | string;
       weaponId?: string; 
       weaponSerialNumber?: string; 
+      weaponModel?: string;
+      weaponCaliber?: string;
+      departmentId?: string;
+      unitId?: string;
+      reason?: string;
       cautelaId?: string; 
+      requesterId?: string;
       requesterName?: string; 
       requesterMasp?: string; 
       requesterCargo?: string;
@@ -3263,9 +3277,13 @@ class StorageService {
       const prevLinkedAmmoId = target.linkedAmmoCautelaId;
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
-      target.armorerId = (opts as any).armorerId || this.state.currentUser?.id;
-      target.armorerName = (opts as any).armorerName || this.state.currentUser?.name;
-      target.armorerMasp = (opts as any).armorerMasp || this.state.currentUser?.masp;
+      target.armorerId = opts.armorerId || this.state.currentUser?.id;
+      target.armorerName = opts.armorerName || this.state.currentUser?.name;
+      target.armorerMasp = opts.armorerMasp || this.state.currentUser?.masp;
+      if (opts.requesterId) target.requesterId = opts.requesterId;
+      if (opts.requesterName) target.requesterName = opts.requesterName;
+      if (opts.requesterMasp) target.requesterMasp = opts.requesterMasp;
+      if (opts.requesterCargo) target.requesterCargo = (opts.requesterCargo as any);
       if (opts.notes && opts.notes.trim()) {
         target.authorizationNotes = opts.notes.trim();
       }
@@ -3278,8 +3296,25 @@ class StorageService {
       }
 
       if (shouldIncludeAmmo) {
+        const resolvedDest = opts.destinacao || 'Defesa';
+        const resolvedCalName = opts.caliberName || target.weaponCaliber || 'Padrão';
+        const resolvedFab = opts.fabricante || target.ammoFabricante || 'CBC';
+        const resolvedTipo = opts.tipoMunicao || target.ammoTipo || 'Operacional';
+        const resolvedPeso = opts.pesoMunicao || target.ammoPeso || 'N/I';
+        const resolvedLote = opts.loteMunicao || target.ammoLote || 'Lote Unidade';
+        const resolvedSeraDev =
+          opts.seraDevolvida !== undefined ? opts.seraDevolvida : resolvedDest === 'Defesa';
+        const rescuedMotivo = opts.reason || target.reason || 'Serviço Ordinário';
+        const ammoReason = `${rescuedMotivo} — Cautela conjunta com arma ${target.weaponModel} Nº ${target.weaponSerialNumber} (Destinação: ${resolvedDest})`;
+
         target.ammoQuantity = Number(opts.ammoQuantity);
-        target.ammoDestinacao = opts.destinacao || 'Defesa';
+        target.ammoDestinacao = resolvedDest;
+        target.ammoCaliberName = resolvedCalName;
+        target.ammoFabricante = resolvedFab;
+        target.ammoTipo = resolvedTipo;
+        target.ammoPeso = resolvedPeso;
+        target.ammoLote = resolvedLote;
+        target.ammoSeraDevolvida = resolvedSeraDev;
         
         const linkedMun = (this.state.cautelasMunicoes || []).find(m => 
           (prevLinkedAmmoId && m.id === prevLinkedAmmoId) || 
@@ -3293,42 +3328,65 @@ class StorageService {
           linkedMun.armorerId = target.armorerId;
           linkedMun.armorerName = target.armorerName;
           linkedMun.armorerMasp = target.armorerMasp;
+          linkedMun.caliberId = opts.caliberId || linkedMun.caliberId;
+          linkedMun.caliberName = resolvedCalName;
           linkedMun.quantity = Number(opts.ammoQuantity);
-          linkedMun.destinacao = opts.destinacao || linkedMun.destinacao;
-          linkedMun.seraDevolvida = opts.seraDevolvida !== undefined ? opts.seraDevolvida : linkedMun.seraDevolvida;
+          linkedMun.fabricante = resolvedFab;
+          linkedMun.tipoMunicao = resolvedTipo;
+          linkedMun.pesoMunicao = resolvedPeso;
+          linkedMun.loteMunicao = resolvedLote;
+          linkedMun.anoFabricacao = opts.anoFabricacao ?? linkedMun.anoFabricacao;
+          linkedMun.destinacao = resolvedDest;
+          linkedMun.vaultSpaceId = opts.vaultSpaceId || linkedMun.vaultSpaceId || target.vaultSpaceId;
+          linkedMun.seraDevolvida = resolvedSeraDev;
+          linkedMun.departmentId = opts.departmentId || target.departmentId || linkedMun.departmentId;
+          linkedMun.unitId = opts.unitId || target.unitId || linkedMun.unitId;
+          linkedMun.requesterId = target.requesterId;
+          linkedMun.requesterName = target.requesterName;
+          linkedMun.requesterMasp = target.requesterMasp;
+          linkedMun.requesterCargo = target.requesterCargo;
+          linkedMun.reason = ammoReason;
           linkedMun.linkedWeaponCautelaId = target.id;
           linkedMun.linkedWeaponSerialNumber = target.weaponSerialNumber;
+          linkedMun.linkedWeaponModel = target.weaponModel;
           linkedMun.weaponId = target.weaponId;
+          if (opts.armorerJustification) {
+            linkedMun.observations = opts.armorerJustification;
+          }
         } else {
           const newMunId = `caut-mun-${Date.now()}`;
           target.linkedAmmoCautelaId = newMunId;
           const newMun: CautelaMunicao = {
             id: newMunId,
-            caliberName: target.weaponCaliber || 'Padrão',
+            caliberId: opts.caliberId,
+            caliberName: resolvedCalName,
             quantity: Number(opts.ammoQuantity),
-            fabricante: target.ammoFabricante || 'CBC',
-            tipoMunicao: target.ammoTipo || 'Operacional',
-            pesoMunicao: target.ammoPeso || '124gr',
-            loteMunicao: target.ammoLote || 'Lote Padrão',
-            destinacao: opts.destinacao || 'Defesa',
+            fabricante: resolvedFab,
+            tipoMunicao: resolvedTipo,
+            pesoMunicao: resolvedPeso,
+            loteMunicao: resolvedLote,
+            anoFabricacao: opts.anoFabricacao,
+            destinacao: resolvedDest,
             vaultSpaceId: opts.vaultSpaceId || target.vaultSpaceId,
-            departmentId: target.departmentId,
-            unitId: target.unitId,
+            departmentId: opts.departmentId || target.departmentId,
+            unitId: opts.unitId || target.unitId,
             linkedWeaponCautelaId: target.id,
             linkedWeaponSerialNumber: target.weaponSerialNumber,
+            linkedWeaponModel: target.weaponModel,
             weaponId: target.weaponId,
             requesterId: target.requesterId,
             requesterName: target.requesterName,
             requesterMasp: target.requesterMasp,
             requesterCargo: target.requesterCargo,
-            reason: `Cautela conjunta com arma ${target.weaponModel} Nº ${target.weaponSerialNumber}`,
+            reason: ammoReason,
             requestDate: target.requestDate || new Date().toISOString(),
             status: 'AUTORIZADA',
             armorerId: target.armorerId,
             armorerName: target.armorerName,
             armorerMasp: target.armorerMasp,
             authorizedAt: new Date().toISOString(),
-            seraDevolvida: opts.seraDevolvida !== undefined ? opts.seraDevolvida : (opts.destinacao === 'Defesa'),
+            seraDevolvida: resolvedSeraDev,
+            observations: opts.armorerJustification,
             createdAt: new Date().toISOString()
           };
           if (!this.state.cautelasMunicoes) this.state.cautelasMunicoes = [];
@@ -3365,20 +3423,34 @@ class StorageService {
         body: JSON.stringify({
           withAmmo: shouldIncludeAmmo,
           notes: opts.notes,
+          armorerJustification: shouldIncludeAmmo ? opts.armorerJustification : undefined,
           vaultSpaceId: opts.vaultSpaceId,
           stockId: shouldIncludeAmmo ? opts.stockId : undefined,
           seraDevolvida: shouldIncludeAmmo ? opts.seraDevolvida : undefined,
           ammoQuantity: shouldIncludeAmmo ? opts.ammoQuantity : 0,
           destinacao: shouldIncludeAmmo ? opts.destinacao : undefined,
-          weaponId: (opts as any).weaponId || target?.weaponId,
-          weaponSerialNumber: (opts as any).weaponSerialNumber || target?.weaponSerialNumber,
+          caliberId: shouldIncludeAmmo ? opts.caliberId : undefined,
+          caliberName: shouldIncludeAmmo ? opts.caliberName : undefined,
+          fabricante: shouldIncludeAmmo ? opts.fabricante : undefined,
+          tipoMunicao: shouldIncludeAmmo ? opts.tipoMunicao : undefined,
+          pesoMunicao: shouldIncludeAmmo ? opts.pesoMunicao : undefined,
+          loteMunicao: shouldIncludeAmmo ? opts.loteMunicao : undefined,
+          anoFabricacao: shouldIncludeAmmo ? opts.anoFabricacao : undefined,
+          weaponId: opts.weaponId || target?.weaponId,
+          weaponSerialNumber: opts.weaponSerialNumber || target?.weaponSerialNumber,
+          weaponModel: opts.weaponModel || target?.weaponModel,
+          weaponCaliber: opts.weaponCaliber || target?.weaponCaliber,
+          departmentId: opts.departmentId || target?.departmentId,
+          unitId: opts.unitId || target?.unitId,
+          reason: opts.reason || target?.reason,
           cautelaId: target?.id || id,
-          requesterName: target?.requesterName,
-          requesterMasp: target?.requesterMasp,
-          requesterCargo: target?.requesterCargo,
-          armorerId: (opts as any).armorerId || this.state.currentUser?.id,
-          armorerName: (opts as any).armorerName || this.state.currentUser?.name,
-          armorerMasp: (opts as any).armorerMasp || this.state.currentUser?.masp,
+          requesterId: opts.requesterId || target?.requesterId,
+          requesterName: opts.requesterName || target?.requesterName,
+          requesterMasp: opts.requesterMasp || target?.requesterMasp,
+          requesterCargo: opts.requesterCargo || target?.requesterCargo,
+          armorerId: opts.armorerId || this.state.currentUser?.id,
+          armorerName: opts.armorerName || this.state.currentUser?.name,
+          armorerMasp: opts.armorerMasp || this.state.currentUser?.masp,
           actor: this.state.currentUser
         })
       });
