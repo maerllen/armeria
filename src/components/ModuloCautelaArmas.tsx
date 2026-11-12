@@ -43,6 +43,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return units.find(u => u.id === currentUser.unitId);
   }, [units, currentUser.unitId]);
 
+  const unitSigla = useMemo(() => {
+    if (!userUnit) return 'COE';
+    const explicitSigla = ((userUnit as any).sigla || (userUnit as any).code || '').trim();
+    if (explicitSigla) return explicitSigla;
+    const rawName = (userUnit.name || '').trim();
+    if (!rawName) return 'COE';
+    const parenMatch = rawName.match(/\(([A-Z0-9ªº/.-]{2,15})\)\s*$/);
+    if (parenMatch) return parenMatch[1];
+    const dashParts = rawName.split(/\s+[—\-]\s+/);
+    if (dashParts.length >= 2 && dashParts[0].length <= 15) {
+      return dashParts[0].trim();
+    }
+    return rawName;
+  }, [userUnit]);
+
   // Tabs: Solicitações Pendentes, Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Histórico de cautelas (Unidade), Indeferidas, Nova
   const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'HISTORICO_UNIDADE' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
   const [pendentesSubFilter, setPendentesSubFilter] = useState<'TODAS' | 'SOLICITACOES' | 'DEVOLUCOES'>('TODAS');
@@ -76,6 +91,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [historyWeaponFilter, setHistoryWeaponFilter] = useState<string>('TODAS');
   const [historyDateFilter, setHistoryDateFilter] = useState<string>('');
   const [historyDecisionFilter, setHistoryDecisionFilter] = useState<'TODAS' | 'ATIVAS' | 'DEFERIDA' | 'INDEFERIDAS'>('TODAS');
+
+  // Filtros exclusivos da aba "Deferidas/Ativas <Sigla>" (Armeiro)
+  const [deferidasUserFilter, setDeferidasUserFilter] = useState<string>('TODOS');
+  const [deferidasWeaponFilter, setDeferidasWeaponFilter] = useState<string>('TODAS');
+  const [deferidasSerialFilter, setDeferidasSerialFilter] = useState<string>('');
 
   // Filtros exclusivos da aba "Histórico de cautelas <Unidade>" (Armeiro)
   const [unitHistoryUserFilter, setUnitHistoryUserFilter] = useState<string>('TODOS');
@@ -1044,6 +1064,72 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     [getResolvedRequester]
   );
 
+  // Lista base de cautelas ativas da aba "Deferidas/Ativas <Sigla>" (Armeiro)
+  const deferidasBaseCautelas = useMemo(() => {
+    if (!canAuthorize) return [] as CautelaArma[];
+    return scopedCautelas.filter(
+      c =>
+        (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
+        !isOwnRecipientCautela(c)
+    );
+  }, [scopedCautelas, canAuthorize, isOwnRecipientCautela]);
+
+  // Usuários distintos com cautelas ativas na aba "Deferidas/Ativas <Sigla>"
+  const deferidasUsers = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    deferidasBaseCautelas.forEach(c => {
+      const key = getCautelaRequesterFilterKey(c);
+      if (!key || key === 'unknown' || map.has(key)) return;
+      const resolved = getResolvedRequester(c);
+      const maspPart =
+        resolved.masp && resolved.masp !== 'N/I' ? ` (MASP: ${resolved.masp})` : '';
+      map.set(key, {
+        key,
+        label: `${resolved.name}${maspPart}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [deferidasBaseCautelas, getCautelaRequesterFilterKey, getResolvedRequester]);
+
+  // Armas distintas (modelo/fabricante/calibre) com cautelas ativas na aba "Deferidas/Ativas <Sigla>"
+  const deferidasWeapons = useMemo(() => {
+    const map = new Map<string, { key: string; label: string }>();
+    deferidasBaseCautelas.forEach(c => {
+      const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+      const rawModel = (c.weaponModel || wObj?.model || '').trim();
+      const key = normalizeStr(rawModel) || c.weaponId || '';
+      if (!key || map.has(key)) return;
+      const typePart = c.weaponType || wObj?.type ? `${c.weaponType || wObj?.type} ` : '';
+      const brandPart = wObj?.manufacturer ? `${wObj.manufacturer} ` : '';
+      const calPart = c.weaponCaliber || wObj?.caliber ? ` (${c.weaponCaliber || wObj?.caliber})` : '';
+      map.set(key, {
+        key,
+        label: `${typePart}${brandPart}${rawModel || 'Armamento'}${calPart}`.trim()
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [deferidasBaseCautelas, weapons]);
+
+  // Números de série distintos em cautelas ativas na aba "Deferidas/Ativas <Sigla>"
+  const deferidasSerialNumbers = useMemo(() => {
+    const map = new Map<string, { serial: string; label: string }>();
+    deferidasBaseCautelas.forEach(c => {
+      const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+      if (deferidasWeaponFilter !== 'TODAS') {
+        const modelKey = normalizeStr(c.weaponModel || wObj?.model || '') || c.weaponId || '';
+        if (modelKey !== deferidasWeaponFilter) return;
+      }
+      const serial = (c.weaponSerialNumber || wObj?.serialNumber || '').trim();
+      if (!serial || map.has(serial)) return;
+      const req = getResolvedRequester(c);
+      map.set(serial, {
+        serial,
+        label: `${c.weaponModel || wObj?.model || 'Arma'} — ${req.name}`
+      });
+    });
+    return Array.from(map.values()).sort((a, b) => a.serial.localeCompare(b.serial, 'pt-BR'));
+  }, [deferidasBaseCautelas, weapons, deferidasWeaponFilter, getResolvedRequester]);
+
   // Lista base de cautelas do Histórico da Unidade (todas as cautelas ativas e devolvidas da unidade)
   const unitHistoryBaseCautelas = useMemo(() => {
     if (!canAuthorize) return [] as CautelaArma[];
@@ -1119,12 +1205,36 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         // Aba "Minhas Cautelas" (Policial): estritamente cautelas ATIVAS EM POSSE
         list = list.filter(c => c.status === 'AUTORIZADA');
       } else {
-        // Aba "Deferidas / Ativas (Unidade)" (Armeiro): apenas cautelas ATIVAS da unidade (sem histórico de devoluções)
+        // Aba "Deferidas/Ativas <Sigla>" (Armeiro): apenas cautelas ATIVAS da unidade (sem histórico de devoluções)
         list = list.filter(
           c =>
             (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
             !isOwnRecipientCautela(c)
         );
+
+        if (deferidasUserFilter !== 'TODOS') {
+          list = list.filter(c => getCautelaRequesterFilterKey(c) === deferidasUserFilter);
+        }
+
+        if (deferidasWeaponFilter !== 'TODAS') {
+          list = list.filter(c => {
+            const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+            const modelKey = normalizeStr(c.weaponModel || wObj?.model || '') || c.weaponId || '';
+            return modelKey === deferidasWeaponFilter;
+          });
+        }
+
+        if (deferidasSerialFilter.trim()) {
+          const normSerialQuery = normalizeStr(deferidasSerialFilter);
+          const serialQueryDigits = cleanDigits(deferidasSerialFilter);
+          list = list.filter(c => {
+            const wObj = weapons.find(w => w.id === c.weaponId || w.serialNumber === c.weaponSerialNumber);
+            const rawSerial = c.weaponSerialNumber || wObj?.serialNumber || '';
+            if (normalizeStr(rawSerial).includes(normSerialQuery)) return true;
+            if (serialQueryDigits.length >= 2 && cleanDigits(rawSerial).includes(serialQueryDigits)) return true;
+            return false;
+          });
+        }
       }
     } else if (activeTab === 'DEFERIDAS_PROPRIA') {
       // Aba "Deferidas/Ativas Própria" (Armeiro): apenas cautelas ATIVAS em que o próprio armeiro é o usuário detentor da arma
@@ -1325,6 +1435,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     historyDecisionFilter,
     historyWeaponFilter,
     historyDateFilter,
+    deferidasUserFilter,
+    deferidasWeaponFilter,
+    deferidasSerialFilter,
     unitHistoryUserFilter,
     unitHistoryWeaponFilter,
     unitHistoryDateFilter,
@@ -5101,7 +5214,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }`}
         >
           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-          <span>{canAuthorize ? 'Deferidas / Ativas (Unidade)' : 'Minhas Cautelas'}</span>
+          <span>{canAuthorize ? `Deferidas/Ativas ${unitSigla}` : 'Minhas Cautelas'}</span>
           {deferidasCount > 0 && (
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono">
               {deferidasCount}
@@ -5663,7 +5776,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           {/* Barra de Filtro e Busca */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className={`relative w-full ${canAuthorize && activeTab === 'HISTORICO_UNIDADE' ? 'sm:flex-1' : 'sm:w-80'}`}>
+              <div className={`relative w-full ${canAuthorize && (activeTab === 'HISTORICO_UNIDADE' || activeTab === 'DEFERIDAS') ? 'sm:flex-1' : 'sm:w-80'}`}>
                 <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
@@ -5672,7 +5785,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   placeholder={
                     canAuthorize && activeTab === 'HISTORICO_UNIDADE'
                       ? 'Campo aberto: pesquise qualquer dado da arma (modelo, série, marca, calibre, cofre) ou do usuário (nome, MASP, cargo, telefone)...'
-                      : 'Buscar por arma, série, calibre ou motivo...'
+                      : canAuthorize && activeTab === 'DEFERIDAS'
+                        ? 'Pesquisar por usuário (nome/MASP), arma ou número de série...'
+                        : 'Buscar por arma, série, calibre ou motivo...'
                   }
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:border-amber-500"
                 />
@@ -5702,11 +5817,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </div>
               )}
 
-              {/* Indicador de Cautelas Ativas para Deferidas / Ativas (Unidade) e Minhas Cautelas */}
+              {/* Indicador de Cautelas Ativas para Deferidas/Ativas <Sigla> e Minhas Cautelas */}
               {activeTab === 'DEFERIDAS' && (
                 <div className="flex items-center space-x-2 self-start sm:self-auto">
                   <span className="px-3 py-1.5 rounded-lg text-xs font-black bg-emerald-600 text-slate-950 shadow-sm whitespace-nowrap">
-                    Ativas em Posse ({activeCautelasCount})
+                    Ativas em Posse ({canAuthorize && displayedCautelas.length !== activeCautelasCount ? `${displayedCautelas.length} de ${activeCautelasCount}` : activeCautelasCount})
                   </span>
                 </div>
               )}
@@ -5759,6 +5874,90 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Filtros por Usuário, Arma e Número de Série exclusivos da aba "Deferidas/Ativas <Sigla>" (Armeiro) */}
+            {canAuthorize && activeTab === 'DEFERIDAS' && (
+              <div className="pt-3 border-t border-slate-800/80 grid grid-cols-1 sm:grid-cols-12 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Usuário:
+                  </label>
+                  <select
+                    value={deferidasUserFilter}
+                    onChange={(e) => setDeferidasUserFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-emerald-500"
+                  >
+                    <option value="TODOS">Todos os Usuários ({deferidasUsers.length})</option>
+                    {deferidasUsers.map(u => (
+                      <option key={u.key} value={u.key}>
+                        {u.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-4">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Arma:
+                  </label>
+                  <select
+                    value={deferidasWeaponFilter}
+                    onChange={(e) => setDeferidasWeaponFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:border-emerald-500"
+                  >
+                    <option value="TODAS">Todas as Armas ({deferidasWeapons.length})</option>
+                    {deferidasWeapons.map(w => (
+                      <option key={w.key} value={w.key}>
+                        {w.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="sm:col-span-3">
+                  <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
+                    Filtrar por Número de Série:
+                  </label>
+                  <input
+                    type="text"
+                    list="deferidas-serial-options"
+                    value={deferidasSerialFilter}
+                    onChange={(e) => setDeferidasSerialFilter(e.target.value)}
+                    placeholder="Digite ou selecione o nº de série..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono placeholder-slate-500 focus:border-emerald-500"
+                  />
+                  <datalist id="deferidas-serial-options">
+                    {deferidasSerialNumbers.map(item => (
+                      <option key={item.serial} value={item.serial}>
+                        {item.label}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+
+                <div className="sm:col-span-1 flex items-center justify-end">
+                  {(deferidasUserFilter !== 'TODOS' ||
+                    deferidasWeaponFilter !== 'TODAS' ||
+                    deferidasSerialFilter.trim() !== '' ||
+                    searchTerm.trim() !== '') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDeferidasUserFilter('TODOS');
+                        setDeferidasWeaponFilter('TODAS');
+                        setDeferidasSerialFilter('');
+                        setSearchTerm('');
+                      }}
+                      className="w-full px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition flex items-center justify-center space-x-1 border border-slate-700"
+                      title="Limpar filtros de usuário, arma e número de série"
+                    >
+                      <X className="w-3.5 h-3.5 text-slate-400" />
+                      <span>Limpar</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Filtros por Usuários, Armas e Data exclusivos da aba "Histórico de cautelas <Unidade>" (Armeiro) */}
             {canAuthorize && activeTab === 'HISTORICO_UNIDADE' && (
@@ -6359,7 +6558,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                               {isPropriaView
                                 ? `Deferidas/Ativas Própria — Armas Acauteladas pelo Próprio Armeiro (${currentUser.name})`
                                 : canAuthorize
-                                  ? `Armamentos Acautelados / Cautelas Ativas — ${userUnit?.name || 'Unidade'}`
+                                  ? `Deferidas/Ativas ${unitSigla} — Armamentos Acautelados`
                                   : 'Minhas Cautelas — Ativas em Posse'}
                             </h4>
                           </div>
@@ -6373,12 +6572,37 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         </div>
 
                         {ativasList.length === 0 ? (
-                          <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-500">
-                            {isPropriaView
-                              ? `Nenhuma cautela ativa em que você (${currentUser.name}) seja o usuário detentor da arma no momento.`
-                              : canAuthorize
-                                ? `Nenhum armamento da unidade ${userUnit?.name || ''} está acautelado para outros policiais no momento.`
-                                : 'Você não possui nenhuma arma acautelada ativa no momento.'}
+                          <div className="p-5 bg-slate-900/60 border border-slate-800 rounded-xl text-center text-xs text-slate-400 space-y-2">
+                            <p>
+                              {isPropriaView
+                                ? `Nenhuma cautela ativa em que você (${currentUser.name}) seja o usuário detentor da arma no momento.`
+                                : canAuthorize
+                                  ? activeCautelasCount > 0
+                                    ? 'Nenhuma cautela ativa encontrada para os filtros informados (usuário, arma ou número de série).'
+                                    : `Nenhum armamento da unidade ${unitSigla} está acautelado para outros policiais no momento.`
+                                  : 'Você não possui nenhuma arma acautelada ativa no momento.'}
+                            </p>
+                            {canAuthorize &&
+                              !isPropriaView &&
+                              activeCautelasCount > 0 &&
+                              (deferidasUserFilter !== 'TODOS' ||
+                                deferidasWeaponFilter !== 'TODAS' ||
+                                deferidasSerialFilter.trim() !== '' ||
+                                searchTerm.trim() !== '') && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeferidasUserFilter('TODOS');
+                                    setDeferidasWeaponFilter('TODAS');
+                                    setDeferidasSerialFilter('');
+                                    setSearchTerm('');
+                                  }}
+                                  className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition border border-slate-700"
+                                >
+                                  <X className="w-3.5 h-3.5 text-slate-400" />
+                                  <span>Limpar filtros</span>
+                                </button>
+                              )}
                           </div>
                         ) : (
                           <div className="grid grid-cols-1 gap-3">
