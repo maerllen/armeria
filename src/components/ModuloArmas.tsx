@@ -1348,8 +1348,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* WEAPON DETAIL MODAL (Opens ONLY when a weapon is clicked/selected) */}
       {selectedWeaponDetail && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 my-auto">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl space-y-5 my-8">
             
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1639,8 +1639,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* Modal Add / Edit Weapon */}
       {showWeaponModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl my-8">
             <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800 flex items-center justify-between">
               <span>{editingWeapon ? 'Editar Arma' : 'Cadastrar Nova Arma'}</span>
               {!editingWeapon && (
@@ -1988,8 +1988,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* Modal History (Last 5 movements) */}
       {showHistoryModal && selectedWeapon && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
               <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
                 <History className="w-5 h-5 text-amber-400" />
@@ -2044,8 +2044,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* Transit Detail Modal */}
       {showTransitDetailModal && transitMovement && selectedWeapon && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl">
             <div className="flex items-center space-x-3 text-amber-400 mb-4 pb-2 border-b border-slate-800">
               <Info className="w-6 h-6 shrink-0" />
               <div>
@@ -2096,8 +2096,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* Armas Disponíveis Modal - Geral */}
       {showAvailableWeaponsModal && isGeral && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-5 my-8">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-2 text-amber-400">

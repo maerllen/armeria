@@ -1391,9 +1391,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
       {/* User Edit / Add Modal */}
       {showUserModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col overflow-hidden shadow-2xl my-auto">
-            <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-6 py-4 border-b border-slate-800 shrink-0">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl my-8">
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-4 pb-2 border-b border-slate-800">
               <h3 className="text-lg font-bold text-slate-100">
                 {editingUser ? 'Editar Policial' : 'Novo Policial'}
               </h3>
@@ -1409,8 +1409,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
               )}
             </div>
 
-            <form onSubmit={handleSaveUser} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-              <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-4">
+            <form onSubmit={handleSaveUser} className="space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 
                 {/* MASP */}
@@ -1826,9 +1825,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   )}
                 </div>
               </div>
-              </div>
 
-              <div className="px-4 sm:px-6 py-3.5 border-t border-slate-800 bg-slate-900 flex justify-end space-x-3 shrink-0">
+              <div className="pt-4 border-t border-slate-800 flex justify-end space-x-3">
                 <button
                   type="button"
                   onClick={() => setShowUserModal(false)}
@@ -1850,8 +1848,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
       {/* Course Management Modal */}
       {showCourseManagementModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl my-8">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <h3 className="text-lg font-bold text-slate-100 flex items-center space-x-2">
                 <GraduationCap className="w-5 h-5 text-amber-400" />
@@ -2046,8 +2044,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
       {/* Promote Existing User to Teacher Modal */}
       {showPromoteTeacherModal && existingMaspUser && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-4 my-auto">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4">
             <div className="flex items-center space-x-3 text-amber-400">
               <GraduationCap className="w-6 h-6 shrink-0" />
               <h3 className="text-base font-bold text-slate-100">Policial Já Cadastrado</h3>

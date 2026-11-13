@@ -333,11 +333,11 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
   const destDeptObj = allDepartments.find(d => d.id === (destUnitObj?.departmentId || destDeptId));
 
   return (
-    <div id="transfer-weapon-modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl my-auto overflow-hidden relative">
+    <div id="transfer-weapon-modal" className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl shadow-2xl my-8 overflow-hidden relative">
         
         {/* Header */}
-        <div className="p-4 sm:p-5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between shrink-0">
+        <div className="p-5 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
               <ArrowRightLeft className="w-6 h-6" />
@@ -361,7 +361,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handlePreSubmit} className="p-4 sm:p-6 space-y-6 flex-1 min-h-0 overflow-y-auto">
+        <form onSubmit={handlePreSubmit} className="p-6 space-y-6">
           {error && (
             <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
               <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
@@ -694,9 +694,9 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
         {showConfirmAlert && (
           <div
             id="transfer-confirmation-alertbox"
-            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 z-[60] overflow-y-auto"
+            className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-[60]"
           >
-            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl animate-in fade-in zoom-in-95 duration-150 my-auto">
+            <div className="bg-slate-900 border-2 border-amber-500/50 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150">
               
               {/* Alert Header */}
               <div className="p-5 bg-amber-500/10 border-b border-amber-500/20 flex items-center gap-3">
