@@ -104,28 +104,26 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
     return firstOther?.id || '';
   });
 
-  // Destination Armorer: lista todos os armeiros da unidade selecionada
+  // Destination Armorer: lista todos os usuários com perfil de Armeiro da unidade selecionada
   const availableDestArmorers = useMemo(() => {
-    const allUsers = storage.getUsers();
-    const inUnit = allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
-    const unitArmorers = inUnit.filter(u => 
-      u.role === 'Armeiro' || 
-      u.activeRole === 'Armeiro' || 
-      (u.roles && u.roles.includes('Armeiro')) ||
-      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    if (!destUnitId) return [];
+    const allUsers = storage.getAllUsersForLookup();
+    return allUsers.filter(u =>
+      u.unitId === destUnitId &&
+      u.hasSystemAccess !== false &&
+      (u.role === 'Armeiro' ||
+        u.activeRole === 'Armeiro' ||
+        (Array.isArray(u.roles) && u.roles.includes('Armeiro')))
     );
-    if (unitArmorers.length > 0) return unitArmorers;
-    if (inUnit.length > 0) return inUnit;
-    return allUsers.filter(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro' || u.role === 'Administrador' || u.role === 'Geral');
   }, [destUnitId]);
 
   const [destArmorerId, setDestArmorerId] = useState<string>('');
 
   useEffect(() => {
     if (availableDestArmorers.length > 0) {
-      const armorer = availableDestArmorers.find(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro') ||
-                      availableDestArmorers.find(u => u.role === 'Administrador') ||
-                      availableDestArmorers[0];
+      const armorer =
+        availableDestArmorers.find(u => u.activeRole === 'Armeiro' || u.role === 'Armeiro') ||
+        availableDestArmorers[0];
       setDestArmorerId(armorer?.id || '');
     } else {
       setDestArmorerId('');
@@ -147,9 +145,9 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
 
   // Transporter selection: Default is destination armorer; can be any officer from origin or destination unit
   const availableTransporters = useMemo(() => {
-    const allUsers = storage.getUsers();
-    return allUsers.filter(u => 
-      (u.unitId === originUnitId || u.unitId === destUnitId) &&
+    const allUsers = storage.getAllUsersForLookup();
+    return allUsers.filter(u =>
+      (u.unitId === originUnitId || (destUnitId && u.unitId === destUnitId)) &&
       u.hasSystemAccess !== false
     );
   }, [originUnitId, destUnitId]);
@@ -172,15 +170,22 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
         setTransporterName(arm.name);
         setTransporterMasp(arm.masp);
         setTransporterCargo(arm.cargo || arm.role || 'Armeiro');
+        return;
       }
-    } else if (availableTransporters.length > 0 && !selectedTransporterUserId) {
-      const first = availableTransporters[0];
-      setSelectedTransporterUserId(first.id);
-      setTransporterName(first.name);
-      setTransporterMasp(first.masp);
-      setTransporterCargo(first.cargo || first.role || 'Policial');
     }
-  }, [destArmorerId, availableDestArmorers, availableTransporters]);
+    const stillValid = availableTransporters.some(u => u.id === selectedTransporterUserId);
+    if (!stillValid) {
+      if (availableTransporters.length > 0) {
+        const first = availableTransporters[0];
+        setSelectedTransporterUserId(first.id);
+        setTransporterName(first.name);
+        setTransporterMasp(first.masp);
+        setTransporterCargo(first.cargo || first.role || 'Policial');
+      } else {
+        setSelectedTransporterUserId('');
+      }
+    }
+  }, [destArmorerId, availableDestArmorers, availableTransporters, selectedTransporterUserId]);
 
   // Selection form helpers (Cascata: Fabricante -> Calibre -> Locais no cofre com lote, ano e saldo -> Quantidade)
   const availableOriginFabricantes = useMemo(() => {
@@ -456,7 +461,7 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
                       setDraftItems([]);
                       if (destUnitId === nextOrigin) {
                         const altDest = allUnits.find(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== nextOrigin);
-                        if (altDest) setDestUnitId(altDest.id);
+                        setDestUnitId(altDest?.id || '');
                       }
                     }}
                     className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
@@ -515,9 +520,32 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
                   className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-sky-500 font-medium"
                   required
                 >
-                  {availableDestUnits.map(u => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
+                  {availableDestUnits.length === 0 ? (
+                    <option value="">Nenhuma outra unidade disponível neste departamento</option>
+                  ) : !destDeptId ? (
+                    <>
+                      {allDepartments.map(dept => {
+                        const deptUnits = availableDestUnits.filter(u => u.departmentId === dept.id);
+                        if (deptUnits.length === 0) return null;
+                        return (
+                          <optgroup key={dept.id} label={dept.code ? `${dept.code} - ${dept.name}` : dept.name}>
+                            {deptUnits.map(u => (
+                              <option key={u.id} value={u.id}>{u.name}</option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                      {availableDestUnits
+                        .filter(u => !allDepartments.some(d => d.id === u.departmentId))
+                        .map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                    </>
+                  ) : (
+                    availableDestUnits.map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -533,11 +561,11 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
                   className="w-full bg-slate-900 border border-sky-600/70 focus:border-sky-400 rounded-xl px-3 py-2 text-xs text-sky-200 font-medium"
                 >
                   {availableDestArmorers.length === 0 ? (
-                    <option value="">Nenhum usuário cadastrado nesta unidade (Geral receberá)</option>
+                    <option value="">Nenhum usuário com perfil de Armeiro cadastrado nesta unidade</option>
                   ) : (
                     availableDestArmorers.map(arm => (
                       <option key={arm.id} value={arm.id}>
-                        {arm.name} (MASP: {arm.masp}) - {arm.role}
+                        {arm.name} (MASP: {arm.masp}) - Armeiro
                       </option>
                     ))
                   )}

@@ -210,6 +210,42 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     return full.length > 0 ? full : allUsers;
   }, [allUsers, materiaisList, transfersList]);
 
+  const availableTransferDestUnits = useMemo(() => {
+    const originUnitId = transferMaterialTarget?.unidadeId || '';
+    return allUnitsList.filter(
+      u => (!transferDestDeptId || u.departmentId === transferDestDeptId) && u.id !== originUnitId
+    );
+  }, [allUnitsList, transferDestDeptId, transferMaterialTarget]);
+
+  const availableTransferDestArmorers = useMemo(() => {
+    if (!transferDestUnitId) return [];
+    return allUsersLookupList.filter(
+      u =>
+        u.unitId === transferDestUnitId &&
+        u.hasSystemAccess !== false &&
+        (u.role === 'Armeiro' ||
+          u.activeRole === 'Armeiro' ||
+          (Array.isArray(u.roles) && u.roles.includes('Armeiro')))
+    );
+  }, [allUsersLookupList, transferDestUnitId]);
+
+  useEffect(() => {
+    if (!showTransferModal) return;
+    if (availableTransferDestArmorers.length > 0) {
+      if (!availableTransferDestArmorers.some(u => u.id === transferDestArmorerId)) {
+        const preferred =
+          availableTransferDestArmorers.find(u => u.activeRole === 'Armeiro' || u.role === 'Armeiro') ||
+          availableTransferDestArmorers[0];
+        setTransferDestArmorerId(preferred.id);
+        if (!transferTransporterId) {
+          setTransferTransporterId(preferred.id);
+        }
+      }
+    } else if (transferDestArmorerId) {
+      setTransferDestArmorerId('');
+    }
+  }, [showTransferModal, availableTransferDestArmorers, transferDestArmorerId, transferTransporterId]);
+
   const materiais = materiaisList;
   const cautelas = cautelasList;
 
@@ -1043,16 +1079,20 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const handleOpenTransfer = (mat: Material) => {
     setTransferMaterialTarget(mat);
     setTransferQtd(1);
+    const originUnitId = mat.unidadeId || currentUser?.unitId || '';
     const otherUnitSameDept = allUnitsList.find(
-      u => u.departmentId === mat.departamentoId && u.id !== mat.unidadeId
+      u => u.departmentId === mat.departamentoId && u.id !== originUnitId
     );
-    const fallbackDept = allDepartmentsList.find(d => d.id !== mat.departamentoId) || allDepartmentsList[0];
-    const defaultDeptId = otherUnitSameDept ? mat.departamentoId : (fallbackDept?.id || mat.departamentoId || '');
+    const fallbackDept =
+      allDepartmentsList.find(d => allUnitsList.some(u => u.departmentId === d.id && u.id !== originUnitId)) ||
+      allDepartmentsList.find(d => d.id !== mat.departamentoId) ||
+      allDepartmentsList[0];
+    const defaultDeptId = otherUnitSameDept
+      ? (mat.departamentoId || fallbackDept?.id || '')
+      : (fallbackDept?.id || mat.departamentoId || '');
     const defaultUnitId = otherUnitSameDept
       ? otherUnitSameDept.id
-      : (allUnitsList.find(u => u.departmentId === defaultDeptId && u.id !== mat.unidadeId)?.id ||
-         allUnitsList.find(u => u.departmentId === defaultDeptId)?.id ||
-         '');
+      : (allUnitsList.find(u => u.departmentId === defaultDeptId && u.id !== originUnitId)?.id || '');
     setTransferDestDeptId(defaultDeptId);
     setTransferDestUnitId(defaultUnitId);
     setTransferDestArmorerId('');
@@ -3483,7 +3523,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                       const nextDeptId = e.target.value;
                       setTransferDestDeptId(nextDeptId);
                       const uList = allUnitsList.filter(
-                        u => u.departmentId === nextDeptId && u.id !== transferMaterialTarget.unidadeId
+                        u => (!nextDeptId || u.departmentId === nextDeptId) && u.id !== transferMaterialTarget.unidadeId
                       );
                       setTransferDestUnitId(uList[0]?.id || '');
                       setTransferDestArmorerId('');
@@ -3491,9 +3531,11 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                     required
                   >
-                    <option value="">Selecione...</option>
+                    <option value="">Selecione o departamento...</option>
                     {allDepartmentsList.map(d => (
-                      <option key={d.id} value={d.id}>{d.name}</option>
+                      <option key={d.id} value={d.id}>
+                        {d.code ? `${d.code} - ` : ''}{d.name}
+                      </option>
                     ))}
                   </select>
                 </div>
@@ -3511,16 +3553,15 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                     required
                   >
-                    <option value="">Selecione...</option>
-                    {allUnitsList
-                      .filter(
-                        u =>
-                          (!transferDestDeptId || u.departmentId === transferDestDeptId) &&
-                          u.id !== transferMaterialTarget.unidadeId
-                      )
-                      .map(u => (
+                    {!transferDestDeptId ? (
+                      <option value="">Selecione o departamento primeiro...</option>
+                    ) : availableTransferDestUnits.length === 0 ? (
+                      <option value="">Nenhuma outra unidade cadastrada neste departamento</option>
+                    ) : (
+                      availableTransferDestUnits.map(u => (
                         <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
+                      ))
+                    )}
                   </select>
                 </div>
               </div>
@@ -3536,16 +3577,20 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                       setTransferDestArmorerId(e.target.value);
                       if (!transferTransporterId) setTransferTransporterId(e.target.value);
                     }}
-                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
+                    disabled={!transferDestUnitId}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500 disabled:opacity-60"
                   >
-                    <option value="">Selecione o armeiro...</option>
-                    {allUsersLookupList
-                      .filter(u => !transferDestUnitId || u.unitId === transferDestUnitId)
-                      .map(u => (
+                    {!transferDestUnitId ? (
+                      <option value="">Selecione a unidade de destino...</option>
+                    ) : availableTransferDestArmorers.length === 0 ? (
+                      <option value="">Nenhum usuário com perfil de Armeiro cadastrado nesta unidade</option>
+                    ) : (
+                      availableTransferDestArmorers.map(u => (
                         <option key={u.id} value={u.id}>
-                          {u.name} (MASP: {u.masp}) - {u.role}
+                          {u.name} (MASP: {u.masp}) - Armeiro
                         </option>
-                      ))}
+                      ))
+                    )}
                   </select>
                 </div>
 
@@ -3559,11 +3604,16 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Selecione o transportador...</option>
-                    {allUsersLookupList.map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} (MASP: {u.masp}) - {u.unitName || u.role}
-                      </option>
-                    ))}
+                    {allUsersLookupList
+                      .filter(u => u.hasSystemAccess !== false)
+                      .map(u => {
+                        const unitObj = allUnitsList.find(unit => unit.id === u.unitId);
+                        return (
+                          <option key={u.id} value={u.id}>
+                            {u.name} (MASP: {u.masp}) - {unitObj?.name || u.role}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
               </div>

@@ -107,28 +107,26 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     return firstOther?.id || '';
   });
 
-  // Destination Armorer selection - armorer of destination unit who will receive and allocate in vault
+  // Destination Armorer selection - strictly users with Armeiro profile in the destination unit
   const availableDestArmorers = useMemo(() => {
-    const allUsers = storage.getUsers();
-    const inUnit = allUsers.filter(u => u.unitId === destUnitId && u.hasSystemAccess !== false);
-    const unitArmorers = inUnit.filter(u => 
-      u.role === 'Armeiro' || 
-      u.activeRole === 'Armeiro' || 
-      (u.roles && u.roles.includes('Armeiro')) ||
-      (u.cargo && u.cargo.toLowerCase().includes('armeiro'))
+    if (!destUnitId) return [];
+    const allUsers = storage.getAllUsersForLookup();
+    return allUsers.filter(u =>
+      u.unitId === destUnitId &&
+      u.hasSystemAccess !== false &&
+      (u.role === 'Armeiro' ||
+        u.activeRole === 'Armeiro' ||
+        (Array.isArray(u.roles) && u.roles.includes('Armeiro')))
     );
-    if (unitArmorers.length > 0) return unitArmorers;
-    if (inUnit.length > 0) return inUnit;
-    return allUsers.filter(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro' || u.role === 'Administrador' || u.role === 'Geral');
   }, [destUnitId]);
 
   const [destArmorerId, setDestArmorerId] = useState<string>('');
 
   React.useEffect(() => {
     if (availableDestArmorers.length > 0) {
-      const armorer = availableDestArmorers.find(u => u.role === 'Armeiro' || u.activeRole === 'Armeiro') ||
-                      availableDestArmorers.find(u => u.role === 'Administrador') ||
-                      availableDestArmorers[0];
+      const armorer =
+        availableDestArmorers.find(u => u.activeRole === 'Armeiro' || u.role === 'Armeiro') ||
+        availableDestArmorers[0];
       setDestArmorerId(armorer?.id || '');
     } else {
       setDestArmorerId('');
@@ -185,9 +183,8 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
     setSelectedWeaponIds([]);
     // Update dest units
     const newAvailableDestUnits = allUnits.filter(u => (!destDeptId || u.departmentId === destDeptId) && u.id !== newOriginId);
-    if (destUnitId === newOriginId && newAvailableDestUnits.length > 0) {
-      const nextDest = newAvailableDestUnits[0].id;
-      setDestUnitId(nextDest);
+    if (destUnitId === newOriginId) {
+      setDestUnitId(newAvailableDestUnits[0]?.id || '');
     }
   };
 
@@ -459,19 +456,28 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                     {availableDestUnits.length === 0 ? (
                       <option value="">Nenhuma outra unidade disponível</option>
                     ) : !destDeptId ? (
-                      allDepartments.map(dept => {
-                        const deptUnits = availableDestUnits.filter(u => u.departmentId === dept.id);
-                        if (deptUnits.length === 0) return null;
-                        return (
-                          <optgroup key={dept.id} label={dept.name}>
-                            {deptUnits.map(u => (
-                              <option key={u.id} value={u.id}>
-                                {u.name}
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })
+                      <>
+                        {allDepartments.map(dept => {
+                          const deptUnits = availableDestUnits.filter(u => u.departmentId === dept.id);
+                          if (deptUnits.length === 0) return null;
+                          return (
+                            <optgroup key={dept.id} label={dept.name}>
+                              {deptUnits.map(u => (
+                                <option key={u.id} value={u.id}>
+                                  {u.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          );
+                        })}
+                        {availableDestUnits
+                          .filter(u => !allDepartments.some(d => d.id === u.departmentId))
+                          .map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.name}
+                            </option>
+                          ))}
+                      </>
                     ) : (
                       availableDestUnits.map(u => (
                         <option key={u.id} value={u.id}>
@@ -483,20 +489,20 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs text-slate-400 mb-1">Armeiro / Responsável Destino que irá receber *</label>
+                  <label className="block text-xs text-slate-400 mb-1">Armeiro de Destino que irá receber *</label>
                   <select
                     id="transfer-dest-armorer-select"
                     value={destArmorerId}
                     onChange={e => setDestArmorerId(e.target.value)}
-                    required
+                    required={availableDestArmorers.length > 0}
                     className="w-full bg-slate-900 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
                   >
                     {availableDestArmorers.length === 0 ? (
-                      <option value="">Nenhum armeiro/policial cadastrado nesta unidade</option>
+                      <option value="">Nenhum usuário com perfil de Armeiro cadastrado nesta unidade</option>
                     ) : (
                       availableDestArmorers.map(u => (
                         <option key={u.id} value={u.id}>
-                          {u.name} (MASP: {u.masp}) - {u.role || u.cargo || 'Policial'}
+                          {u.name} (MASP: {u.masp}) - Armeiro
                         </option>
                       ))
                     )}
