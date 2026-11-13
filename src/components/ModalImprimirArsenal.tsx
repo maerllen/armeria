@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { User, Weapon, Department, Unit, VaultSpace } from '../types';
+import { User, Weapon, Department, Unit, VaultSpace, formatCaliberDisplay } from '../types';
+import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
 import { printDocumentInPage } from '../utils/printHelper';
 import {
@@ -123,9 +124,35 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
   }, [scopedWeapons]);
 
   const availableCalibers = useMemo(() => {
-    const set = new Set<string>();
-    scopedWeapons.forEach(w => { if (w.caliber) set.add(w.caliber.trim()); });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    const catalogCalibers = storage.getCalibers();
+    const weaponCalNames = new Set<string>();
+    scopedWeapons.forEach(w => { if (w.caliber) weaponCalNames.add(w.caliber.trim().toLowerCase()); });
+
+    const list: Array<{ value: string; label: string; caliberName: string }> = [];
+    const matchedNames = new Set<string>();
+
+    catalogCalibers.forEach(c => {
+      const cName = (c.name || '').trim();
+      if (!cName) return;
+      if (weaponCalNames.size === 0 || weaponCalNames.has(cName.toLowerCase())) {
+        matchedNames.add(cName.toLowerCase());
+        list.push({
+          value: c.id,
+          label: formatCaliberDisplay(c),
+          caliberName: cName
+        });
+      }
+    });
+
+    scopedWeapons.forEach(w => {
+      const wCal = (w.caliber || '').trim();
+      if (wCal && !matchedNames.has(wCal.toLowerCase())) {
+        matchedNames.add(wCal.toLowerCase());
+        list.push({ value: wCal, label: wCal, caliberName: wCal });
+      }
+    });
+
+    return list.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   }, [scopedWeapons]);
 
   // Final filtered list of weapons
@@ -147,8 +174,12 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       }
 
       // Caliber filter
-      if (filterCaliber !== 'TODOS' && (w.caliber || '').trim().toLowerCase() !== filterCaliber.trim().toLowerCase()) {
-        return false;
+      if (filterCaliber !== 'TODOS') {
+        const selectedOpt = availableCalibers.find(opt => opt.value === filterCaliber);
+        const targetCalName = (selectedOpt?.caliberName || filterCaliber).trim().toLowerCase();
+        if ((w.caliber || '').trim().toLowerCase() !== targetCalName) {
+          return false;
+        }
       }
 
       // Search term
@@ -259,7 +290,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       statusFilter === 'DISPONIVEL' ? 'Situação: DISPONÍVEIS NO COFRE' : (statusFilter === 'TRANSITO' ? 'Situação: EM TRÂNSITO' : 'Situação: TODAS AS ARMAS'),
       filterType !== 'TODOS' ? `Tipo: ${filterType}` : null,
       filterManufacturer !== 'TODOS' ? `Fabricante: ${filterManufacturer}` : null,
-      filterCaliber !== 'TODOS' ? `Calibre: ${filterCaliber}` : null,
+      filterCaliber !== 'TODOS' ? `Calibre: ${availableCalibers.find(opt => opt.value === filterCaliber)?.label || filterCaliber}` : null,
       mode === 'SELECTED' ? `Seleção Manual: ${sortedWeapons.length} arma(s)` : null
     ].filter(Boolean).join(' • ');
 
@@ -824,7 +855,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
                 >
                   <option value="TODOS">Todos os Calibres ({availableCalibers.length})</option>
                   {availableCalibers.map(c => (
-                    <option key={c} value={c}>{c}</option>
+                    <option key={c.value} value={c.value}>{c.label}</option>
                   ))}
                 </select>
               </div>

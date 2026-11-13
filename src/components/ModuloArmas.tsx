@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, isUserExplosivista } from '../types';
+import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, isUserExplosivista, formatCaliberDisplay } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
 import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2 } from 'lucide-react';
@@ -118,6 +118,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   const [manufacturer, setManufacturer] = useState('Taurus');
   const [model, setModel] = useState('');
   const [caliber, setCaliber] = useState('');
+  const [caliberOptionId, setCaliberOptionId] = useState('');
   const [magazineQuantity, setMagazineQuantity] = useState(4);
   const [deptId, setDeptId] = useState('');
   const [unitId, setUnitId] = useState('');
@@ -263,6 +264,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       setManufacturer(weap.manufacturer);
       setModel(weap.model);
       setCaliber(weap.caliber);
+      const matchedCal = calibers.find(c => c.name.trim().toLowerCase() === (weap.caliber || '').trim().toLowerCase());
+      setCaliberOptionId(matchedCal ? matchedCal.id : (weap.caliber || ''));
       setMagazineQuantity(weap.magazineQuantity);
       setDeptId(weap.departmentId);
       setUnitId(weap.unitId);
@@ -273,7 +276,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
       setSerialNumber('');
       setManufacturer('Taurus');
       setModel('T4');
-      setCaliber(calibers[0]?.name || '5,56x45mm');
+      const firstCal = calibers[0];
+      setCaliber(firstCal?.name || '5,56x45mm');
+      setCaliberOptionId(firstCal?.id || '5,56x45mm');
       setMagazineQuantity(4);
       const initialDept = (selectedDeptId && selectedDeptId !== 'ALL')
         ? selectedDeptId
@@ -488,10 +493,26 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   // Options for Calibre
   const availableCalibers = useMemo(() => {
-    const set = new Set<string>();
-    calibers.forEach(c => { if (c.name) set.add(c.name.trim()); });
-    baseWeaponsForOptions.forEach(w => { if (w.caliber) set.add(w.caliber.trim()); });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
+    const list: Array<{ value: string; label: string; caliberName: string }> = [];
+    const seenNames = new Set<string>();
+    calibers.forEach(c => {
+      if (!c.name) return;
+      const cleanName = c.name.trim();
+      seenNames.add(cleanName.toLowerCase());
+      list.push({
+        value: c.id,
+        label: formatCaliberDisplay(c),
+        caliberName: cleanName
+      });
+    });
+    baseWeaponsForOptions.forEach(w => {
+      const wCal = (w.caliber || '').trim();
+      if (wCal && !seenNames.has(wCal.toLowerCase())) {
+        seenNames.add(wCal.toLowerCase());
+        list.push({ value: wCal, label: wCal, caliberName: wCal });
+      }
+    });
+    return list.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
   }, [calibers, baseWeaponsForOptions]);
 
   const hasActiveAttributeFilters =
@@ -543,7 +564,9 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
     // Caliber Filter
     if (filterCaliber !== 'TODOS' && filterCaliber.trim()) {
-      if ((w.caliber || '').trim().toLowerCase() !== filterCaliber.trim().toLowerCase()) return false;
+      const selectedOpt = availableCalibers.find(opt => opt.value === filterCaliber);
+      const targetCalName = (selectedOpt?.caliberName || filterCaliber).trim().toLowerCase();
+      if ((w.caliber || '').trim().toLowerCase() !== targetCalName) return false;
     }
 
     // Search term matching (Modelo, Fabricante, Número de série, Calibre, Tipo, Unidade, Cofre)
@@ -1142,10 +1165,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       Todos os Calibres
                     </option>
                     {availableCalibers.map((c) => {
-                      const count = baseWeaponsForOptions.filter(w => (w.caliber || '').toLowerCase() === c.toLowerCase()).length;
+                      const count = baseWeaponsForOptions.filter(w => (w.caliber || '').trim().toLowerCase() === c.caliberName.toLowerCase()).length;
                       return (
-                        <option key={c} value={c} className="bg-slate-900 text-slate-200">
-                          {c} {count > 0 ? `(${count})` : ''}
+                        <option key={c.value} value={c.value} className="bg-slate-900 text-slate-200">
+                          {c.label} {count > 0 ? `(${count})` : ''}
                         </option>
                       );
                     })}
@@ -1183,7 +1206,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   )}
                   {filterCaliber !== 'TODOS' && (
                     <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
-                      <span>Calibre: {filterCaliber}</span>
+                      <span>Calibre: {availableCalibers.find(c => c.value === filterCaliber)?.label || filterCaliber}</span>
                       <button onClick={() => setFilterCaliber('TODOS')} className="hover:text-amber-100 ml-1">
                         <X className="w-3 h-3" />
                       </button>
@@ -1722,15 +1745,23 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                     Calibre
                   </label>
                   <select
-                    value={caliber}
-                    onChange={(e) => setCaliber(e.target.value)}
+                    value={caliberOptionId}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCaliberOptionId(val);
+                      const chosen = calibers.find(c => c.id === val);
+                      setCaliber(chosen ? chosen.name : val);
+                    }}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono"
                   >
                     {calibers.map((c) => (
-                      <option key={c.id} value={c.name}>
-                        {c.name}
+                      <option key={c.id} value={c.id}>
+                        {formatCaliberDisplay(c)}
                       </option>
                     ))}
+                    {caliber && !calibers.some(c => c.name.trim().toLowerCase() === caliber.trim().toLowerCase()) && (
+                      <option value={caliber}>{caliber}</option>
+                    )}
                   </select>
                 </div>
 

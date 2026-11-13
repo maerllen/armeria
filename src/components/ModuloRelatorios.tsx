@@ -10,7 +10,8 @@ import {
   VaultSpace,
   getSystemLogo,
   getAllowedModulesForUser,
-  isUserExplosivista
+  isUserExplosivista,
+  formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
@@ -307,9 +308,32 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       return (text || '').toLowerCase().includes(reasonFilter.toLowerCase());
     };
 
+    const selectedCalObj = selectedCaliber !== 'ALL'
+      ? calibers.find(c => c.id === selectedCaliber || (c.name || '').toLowerCase() === selectedCaliber.toLowerCase())
+      : undefined;
+    const selectedCalTargetName = (selectedCalObj?.name || selectedCaliber).trim().toLowerCase();
+    const selectedCalTargetTipo = (selectedCalObj?.tipo || '').trim().toLowerCase();
+    const selectedCalTargetPeso = (selectedCalObj?.peso || '').trim().toLowerCase();
+
     const matchesCaliber = (calName?: string | null): boolean => {
       if (!applyScreenFilters || selectedCaliber === 'ALL') return true;
-      return (calName || '').toLowerCase() === selectedCaliber.toLowerCase();
+      return (calName || '').trim().toLowerCase() === selectedCalTargetName;
+    };
+
+    const matchesAmmoCaliberSpec = (
+      calId?: string | null,
+      calName?: string | null,
+      tipo?: string | null,
+      peso?: string | null
+    ): boolean => {
+      if (!applyScreenFilters || selectedCaliber === 'ALL') return true;
+      if (selectedCalObj && calId && calId === selectedCalObj.id) return true;
+      if ((calName || '').trim().toLowerCase() !== selectedCalTargetName) return false;
+      const itemTipo = (tipo || '').trim().toLowerCase();
+      const itemPeso = (peso || '').trim().toLowerCase();
+      if (selectedCalTargetTipo && itemTipo && itemTipo !== selectedCalTargetTipo) return false;
+      if (selectedCalTargetPeso && itemPeso && itemPeso !== selectedCalTargetPeso) return false;
+      return true;
     };
 
     const matchesVault = (vaultId?: string | null, vaultId2?: string | null): boolean => {
@@ -483,7 +507,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       if (!matchesReason(t.reason || 'Transferência')) return;
       if (applyScreenFilters && selectedCaliber !== 'ALL') {
         const hasCal = (t.weapons || []).some(
-          w => (w.caliber || '').toLowerCase() === selectedCaliber.toLowerCase()
+          w => matchesCaliber(w.caliber)
         );
         if (!hasCal) return;
       }
@@ -518,7 +542,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         if (!matchesVault(s.vaultSpaceId)) return false;
         const cal = calibers.find(c => c.id === s.caliberId);
         const calName = cal ? cal.name : s.caliberId;
-        if (!matchesCaliber(calName)) return false;
+        if (!matchesAmmoCaliberSpec(s.caliberId, calName, s.tipoMunicao || cal?.tipo, s.pesoMunicao || cal?.peso)) return false;
         return true;
       })
       .map(s => {
@@ -557,7 +581,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       if (!matchesDateRange(m.createdAt)) return;
       const cal = calibers.find(c => c.id === m.caliberId);
       const calName = cal ? cal.name : m.caliberId;
-      if (!matchesCaliber(calName)) return;
+      if (!matchesAmmoCaliberSpec(m.caliberId, calName, m.tipoMunicao || cal?.tipo, m.pesoMunicao || cal?.peso)) return;
       if (!matchesVault(m.vaultSpaceId)) return;
       if (!matchesUser(m.responsibleUserId, m.userId)) return;
       if (!matchesReason(m.recipientOrReason)) return;
@@ -596,7 +620,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       if (!isAllowedDeptUnit(c.departmentId, c.unitId, c.vaultSpaceId)) return;
       const dateVal = c.requestDate || c.createdAt;
       if (!matchesDateRange(dateVal)) return;
-      if (!matchesCaliber(c.caliberName)) return;
+      if (!matchesAmmoCaliberSpec(c.caliberId, c.caliberName, c.tipoMunicao, c.pesoMunicao)) return;
       if (!matchesVault(c.vaultSpaceId)) return;
       if (!matchesUser(c.requesterId)) return;
       if (!matchesReason(c.reason || c.destinacao || 'Cautela')) return;
@@ -651,7 +675,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       if (!matchesReason(t.reason || 'Transferência')) return;
       if (applyScreenFilters && selectedCaliber !== 'ALL') {
         const hasCal = (t.items || []).some(
-          i => (i.caliberName || '').toLowerCase() === selectedCaliber.toLowerCase()
+          i => matchesAmmoCaliberSpec(i.caliberId, i.caliberName, i.tipoMunicao, i.pesoMunicao)
         );
         if (!hasCal) return;
       }
@@ -2349,7 +2373,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
               >
                 <option value="ALL">Todos os Calibres</option>
                 {calibers.map(c => (
-                  <option key={c.id} value={c.name}>{c.name}</option>
+                  <option key={c.id} value={c.id}>{formatCaliberDisplay(c)}</option>
                 ))}
               </select>
             </div>

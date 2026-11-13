@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { 
-  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo, DEFAULT_SYSTEM_LOGO 
+  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo, DEFAULT_SYSTEM_LOGO, formatCaliberDisplay 
 } from '../types';
 import { storage } from '../services/storage';
 import { 
@@ -7294,9 +7294,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                 {availableAmmoForSelectedWeapon.map(st => {
                                   const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
                                   const cal = calibers.find(c => c.id === st.caliberId);
+                                  const calDisplay = formatCaliberDisplay({
+                                    name: cal?.name || selectedWeapon?.caliber,
+                                    tipo: st.tipoMunicao || cal?.tipo || 'Padrão',
+                                    peso: st.pesoMunicao || cal?.peso
+                                  });
                                   return (
                                     <option key={st.id} value={st.id}>
-                                      Cofre: {vault ? vault.code : 'Cofre'} • Tipo: {st.tipoMunicao || cal?.tipo || 'Padrão'} • Peso: {st.pesoMunicao || cal?.peso || 'N/I'} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
+                                      Cofre: {vault ? vault.code : 'Cofre'} • {calDisplay} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
                                     </option>
                                   );
                                 })}
@@ -10131,9 +10136,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         {availableAmmoForAuthorizingWeapon.map(st => {
                           const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
                           const cal = calibers.find(c => c.id === st.caliberId);
+                          const calDisplay = formatCaliberDisplay({
+                            name: cal ? cal.name : (st.caliberId || authorizingCautela.weaponCaliber),
+                            tipo: st.tipoMunicao || cal?.tipo || 'Comum',
+                            peso: st.pesoMunicao || cal?.peso
+                          });
                           return (
                             <option key={st.id} value={st.id}>
-                              {vault ? vault.code : 'Cofre'} • {st.fabricante || 'CBC'} • Calibre: {cal ? cal.name : (st.caliberId || authorizingCautela.weaponCaliber)} • Tipo: {st.tipoMunicao || 'Comum'} • Peso: {st.pesoMunicao || 'N/I'} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
+                              {vault ? vault.code : 'Cofre'} • {st.fabricante || 'CBC'} • Calibre: {calDisplay} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
                             </option>
                           );
                         })}
@@ -10885,15 +10895,19 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           {availableAmmoForActiveEdit.map(st => {
                             const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
                             const cal = calibers.find(c => c.id === st.caliberId);
+                            const calDisplay = formatCaliberDisplay({
+                              name: cal
+                                ? cal.name
+                                : st.caliberId ||
+                                  activeEditSelectedWeapon?.caliber ||
+                                  editingActiveCautela.weaponCaliber,
+                              tipo: st.tipoMunicao || cal?.tipo || 'Comum',
+                              peso: st.pesoMunicao || cal?.peso
+                            });
                             return (
                               <option key={`act-st-${st.id}`} value={st.id}>
                                 {vault ? vault.code : 'Cofre'} • {st.fabricante || 'CBC'} • Calibre:{' '}
-                                {cal
-                                  ? cal.name
-                                  : st.caliberId ||
-                                    activeEditSelectedWeapon?.caliber ||
-                                    editingActiveCautela.weaponCaliber}{' '}
-                                • Tipo: {st.tipoMunicao || 'Comum'} • Peso: {st.pesoMunicao || 'N/I'}{' '}
+                                {calDisplay}{' '}
                                 • Lote: {st.loteMunicao || 'S/L'} — Saldo disp.: {st.effectiveQuantity}{' '}
                                 un.
                               </option>

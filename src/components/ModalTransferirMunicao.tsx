@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { AmmunitionStock, Caliber, Department, Unit, VaultSpace, User, AmmoTransfer, AmmoTransferItem } from '../types';
+import { AmmunitionStock, Caliber, Department, Unit, VaultSpace, User, AmmoTransfer, AmmoTransferItem, formatCaliberDisplay } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import {
@@ -607,7 +607,7 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
                         <option value="">Nenhum calibre</option>
                       ) : (
                         availableOriginCalibers.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
+                          <option key={c.id} value={c.id}>{formatCaliberDisplay(c)}</option>
                         ))
                       )}
                     </select>

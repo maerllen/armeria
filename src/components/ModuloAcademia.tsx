@@ -16,7 +16,8 @@ import {
   LessonPlanItem,
   AcademyCareer,
   AlunoTurma,
-  AlunoAula
+  AlunoAula,
+  formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
@@ -3242,15 +3243,36 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           }}
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-slate-100 font-mono text-[11px]"
                         >
-                          <option value="9x19mm">9x19mm</option>
-                          <option value=".40 S&W">.40 S&W</option>
-                          <option value="5,56x45mm">5,56x45mm</option>
-                          <option value=".12">.12</option>
-                          <option value=".38 SPL">.38 SPL</option>
-                          <option value=".380 ACP">.380 ACP</option>
-                          {ammoStocks.map(s => (
-                            <option key={s.id} value={s.caliber}>{s.caliber}</option>
-                          ))}
+                          {calibers.length > 0 ? (
+                            calibers.map(c => (
+                              <option key={c.id} value={c.name}>{formatCaliberDisplay(c)}</option>
+                            ))
+                          ) : (
+                            <>
+                              <option value="9x19mm">9x19mm</option>
+                              <option value=".40 S&W">.40 S&W</option>
+                              <option value="5,56x45mm">5,56x45mm</option>
+                              <option value=".12">.12</option>
+                              <option value=".38 SPL">.38 SPL</option>
+                              <option value=".380 ACP">.380 ACP</option>
+                            </>
+                          )}
+                          {ammoStocks.map(s => {
+                            const cal = calibers.find(c => c.id === s.caliberId || c.name.toLowerCase() === (s.caliber || '').toLowerCase());
+                            const label = formatCaliberDisplay({
+                              name: s.caliber || cal?.name,
+                              tipo: s.tipoMunicao || cal?.tipo,
+                              peso: s.pesoMunicao || cal?.peso
+                            });
+                            return (
+                              <option key={s.id} value={s.caliber}>{label || s.caliber}</option>
+                            );
+                          })}
+                          {item.caliberName &&
+                            !calibers.some(c => c.name === item.caliberName) &&
+                            !ammoStocks.some(s => s.caliber === item.caliberName) && (
+                              <option value={item.caliberName}>{item.caliberName}</option>
+                            )}
                         </select>
                       </div>
 
@@ -4253,7 +4275,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             >
                               <option value="">-- Selecione o Calibre --</option>
                               {calibers.map(c => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
+                                <option key={c.id} value={c.id}>{formatCaliberDisplay(c)}</option>
                               ))}
                             </select>
                           </div>

@@ -1,7 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { 
   User, Department, Unit, VaultSpace, Caliber, AmmunitionStock, 
-  AmmunitionMovement, AmmoTransfer, isUserExplosivista, getSystemLogo 
+  AmmunitionMovement, AmmoTransfer, isUserExplosivista, getSystemLogo,
+  formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
 import { printDocumentInPage } from '../utils/printHelper';
@@ -126,10 +127,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     });
   }, [vaultSpaces, selectedUnitId, selectedDeptId]);
 
-  // Available Caliber + Tipo options present in this unit's stocks for filter dropdown
-  // REGRA DO USUÁRIO: "o filtro 'Calibre da Munição:' deve conter além do calibre, o tipo da munição"
+  // Available Caliber + Tipo + Peso options present in this unit's stocks for filter dropdown
   const availableCaliberOptionsInUnit = useMemo(() => {
-    const optionsMap = new Map<string, { key: string; caliberId: string; caliberName: string; tipo: string; label: string }>();
+    const optionsMap = new Map<string, { key: string; caliberId: string; caliberName: string; tipo: string; peso: string; label: string }>();
 
     const unitStocks = stocks.filter(s => (!selectedUnitId || s.unitId === selectedUnitId));
 
@@ -137,8 +137,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       const cal = calibers.find(c => c.id === s.caliberId);
       const calName = cal?.name || 'Munição';
       const tipo = (s.tipoMunicao || cal?.tipo || '').trim();
-      const key = tipo ? `${s.caliberId}:::${tipo}` : s.caliberId;
-      const label = tipo ? `${calName} - ${tipo}` : calName;
+      const peso = (s.pesoMunicao || cal?.peso || '').trim();
+      const key = `${s.caliberId}:::${tipo}:::${peso}`;
+      const label = formatCaliberDisplay({ name: calName, tipo, peso });
 
       if (!optionsMap.has(key)) {
         optionsMap.set(key, {
@@ -146,6 +147,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           caliberId: s.caliberId,
           caliberName: calName,
           tipo,
+          peso,
           label
         });
       }
@@ -155,14 +157,16 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     if (optionsMap.size === 0) {
       calibers.forEach(c => {
         const tipo = (c.tipo || '').trim();
-        const key = tipo ? `${c.id}:::${tipo}` : c.id;
-        const label = tipo ? `${c.name} - ${tipo}` : c.name;
+        const peso = (c.peso || '').trim();
+        const key = `${c.id}:::${tipo}:::${peso}`;
+        const label = formatCaliberDisplay(c);
         if (!optionsMap.has(key)) {
           optionsMap.set(key, {
             key,
             caliberId: c.id,
             caliberName: c.name,
             tipo,
+            peso,
             label
           });
         }
@@ -170,7 +174,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
 
     return Array.from(optionsMap.values()).sort((a, b) => 
-      a.caliberName.localeCompare(b.caliberName) || a.tipo.localeCompare(b.tipo)
+      a.label.localeCompare(b.label, 'pt-BR')
     );
   }, [calibers, stocks, selectedUnitId]);
 
@@ -314,14 +318,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       // Filter: Cofre
       if (filterVaultId !== 'ALL' && stock.vaultSpaceId !== filterVaultId) return false;
 
-      // Filter: Calibre e Tipo da Munição
+      // Filter: Calibre, Tipo e Peso da Munição
       if (filterCaliberId !== 'ALL') {
         if (filterCaliberId.includes(':::')) {
-          const [targetCalId, targetTipo] = filterCaliberId.split(':::');
+          const [targetCalId, targetTipo = '', targetPeso = ''] = filterCaliberId.split(':::');
           if (stock.caliberId !== targetCalId) return false;
+          const stockCal = calibers.find(c => c.id === stock.caliberId);
           if (targetTipo) {
-            const stockTipo = (stock.tipoMunicao || calibers.find(c => c.id === stock.caliberId)?.tipo || '').trim().toLowerCase();
+            const stockTipo = (stock.tipoMunicao || stockCal?.tipo || '').trim().toLowerCase();
             if (stockTipo !== targetTipo.trim().toLowerCase()) return false;
+          }
+          if (targetPeso) {
+            const stockPeso = (stock.pesoMunicao || stockCal?.peso || '').trim().toLowerCase();
+            if (stockPeso !== targetPeso.trim().toLowerCase()) return false;
           }
         } else {
           if (stock.caliberId !== filterCaliberId) return false;
@@ -411,12 +420,13 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setEditingStock(null);
-    setStockCaliberId(calibers[0]?.id || '');
+    const firstCal = calibers[0];
+    setStockCaliberId(firstCal?.id || '');
     setStockVaultId(preselectedVaultId || candidateAmmoVaults[0]?.id || '');
     setStockQuantity(100);
-    setStockFabricante('CBC');
-    setStockTipo('Treino');
-    setStockPeso('124 gr');
+    setStockFabricante(firstCal?.fabricante || 'CBC');
+    setStockTipo(firstCal?.tipo || 'Treino');
+    setStockPeso(firstCal?.peso || '124 gr');
     setStockLote('');
     setStockAno(new Date().getFullYear());
     setStockDestinacao('Treinamento');
@@ -1345,7 +1355,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   {filterCaliberId !== 'ALL' && (
                     <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-md text-[10px] font-semibold bg-amber-500/15 border border-amber-500/40 text-amber-300">
                       <span>
-                        Calibre: {availableCaliberOptionsInUnit.find(opt => opt.key === filterCaliberId)?.label || calibers.find(c => c.id === filterCaliberId)?.name || filterCaliberId}
+                        Calibre: {availableCaliberOptionsInUnit.find(opt => opt.key === filterCaliberId)?.label || formatCaliberDisplay(calibers.find(c => c.id === filterCaliberId)) || filterCaliberId}
                       </span>
                       <button onClick={() => setFilterCaliberId('ALL')} className="hover:text-amber-100 ml-1">
                         <X className="w-3 h-3" />
@@ -1741,12 +1751,23 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   </label>
                   <select
                     value={stockCaliberId}
-                    onChange={e => setStockCaliberId(e.target.value)}
+                    onChange={e => {
+                      const nextId = e.target.value;
+                      setStockCaliberId(nextId);
+                      if (!editingStock) {
+                        const chosen = calibers.find(c => c.id === nextId);
+                        if (chosen) {
+                          if (chosen.fabricante) setStockFabricante(chosen.fabricante);
+                          if (chosen.tipo) setStockTipo(chosen.tipo);
+                          if (chosen.peso) setStockPeso(chosen.peso);
+                        }
+                      }
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                   >
                     {calibers.map(cal => (
                       <option key={cal.id} value={cal.id}>
-                        {cal.name} ({cal.fabricante || 'Padrão'} - {cal.tipo || 'Operacional'})
+                        {formatCaliberDisplay(cal)}
                       </option>
                     ))}
                   </select>
@@ -2229,9 +2250,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   {stocks.map(s => {
                     const cal = calibers.find(c => c.id === s.caliberId);
                     const vault = vaultSpaces.find(v => v.id === s.vaultSpaceId);
+                    const calDisplay = formatCaliberDisplay({
+                      name: cal?.name || 'Munição',
+                      tipo: s.tipoMunicao || cal?.tipo,
+                      peso: s.pesoMunicao || cal?.peso
+                    });
                     return (
                       <option key={s.id} value={s.id}>
-                        {cal?.name} • Lote: {s.loteMunicao || 'S/L'} • Cofre {vault?.code} (Disp: {s.quantity} un)
+                        {calDisplay} • Lote: {s.loteMunicao || 'S/L'} • Cofre {vault?.code} (Disp: {s.quantity} un)
                       </option>
                     );
                   })}
@@ -2496,7 +2522,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   required
                   value={calName}
                   onChange={e => setCalName(e.target.value)}
-                  placeholder="Ex: 9x19mm Luger, .40 S&W, 5,56x45mm"
+                  placeholder="Ex: 5,56x45mm, 9x19mm, .40 S&W (apenas o nome do calibre)"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                 />
               </div>

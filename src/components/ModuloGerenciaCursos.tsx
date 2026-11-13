@@ -9,7 +9,8 @@ import {
   WeaponBox,
   WeaponBoxReplacement,
   LessonPlan,
-  LessonPlanItem
+  LessonPlanItem,
+  formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
@@ -1576,8 +1577,11 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
                             className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-slate-100 text-xs focus:border-amber-500 focus:outline-none"
                           >
                             {calibers.map(c => (
-                              <option key={c.id} value={c.name}>{c.name}</option>
+                              <option key={c.id} value={c.name}>{formatCaliberDisplay(c)}</option>
                             ))}
+                            {item.caliberName && !calibers.some(c => c.name === item.caliberName) && (
+                              <option value={item.caliberName}>{item.caliberName}</option>
+                            )}
                           </select>
                         </div>
                       </div>

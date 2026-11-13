@@ -9,7 +9,8 @@ import {
   Unit,
   Department,
   getSystemLogo,
-  DEFAULT_SYSTEM_LOGO
+  DEFAULT_SYSTEM_LOGO,
+  formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
 import {
@@ -328,16 +329,22 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
 
   // Opções únicas para o Policial solicitar munição (Calibre -> Tipo -> Peso), sem expor cofre nem saldo
   const availableCaliberOptions = useMemo(() => {
-    const map = new Map<string, { id: string; name: string }>();
+    const map = new Map<string, { id: string; name: string; label: string }>();
     availableUnitStocks.forEach(s => {
+      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
       const name = getStockCaliberName(s);
       const key = s.caliberId || name;
       if (!map.has(key)) {
-        map.set(key, { id: key, name });
+        const label = formatCaliberDisplay({
+          name,
+          tipo: cal?.tipo || s.tipoMunicao,
+          peso: cal?.peso || s.pesoMunicao
+        });
+        map.set(key, { id: key, name, label });
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [availableUnitStocks, getStockCaliberName]);
+    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
+  }, [availableUnitStocks, getStockCaliberName, calibers]);
 
   const availableTipoOptions = useMemo(() => {
     if (!selectedCaliberId) return [];
@@ -1689,7 +1696,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   <option value="">-- Escolha o Calibre --</option>
                   {availableCaliberOptions.map(cal => (
                     <option key={cal.id} value={cal.id}>
-                      {cal.name}
+                      {cal.label}
                     </option>
                   ))}
                 </select>
@@ -1814,13 +1821,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
                 >
                   <option value="">-- Selecione o Lote e Cofre de Munição --</option>
-                  {availableUnitStocks.map(s => (
-                    <option key={s.id} value={s.id}>
-                      Calibre {getStockCaliberName(s)} • {s.tipoMunicao || 'Operacional'}
-                      {s.pesoMunicao ? ` (${s.pesoMunicao})` : ''} — Lote: {s.loteMunicao || 'Padrão'} — Saldo:{' '}
-                      {s.quantity} un. (Cofre: {getVaultCode(s.vaultSpaceId)})
-                    </option>
-                  ))}
+                  {availableUnitStocks.map(s => {
+                    const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+                    const calLabel = formatCaliberDisplay({
+                      name: getStockCaliberName(s),
+                      tipo: s.tipoMunicao || cal?.tipo || 'Operacional',
+                      peso: s.pesoMunicao || cal?.peso
+                    });
+                    return (
+                      <option key={s.id} value={s.id}>
+                        {calLabel} — Lote: {s.loteMunicao || 'Padrão'} — Saldo:{' '}
+                        {s.quantity} un. (Cofre: {getVaultCode(s.vaultSpaceId)})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
@@ -2370,13 +2384,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
               >
                 <option value="">-- Selecione o Cofre / Lote de Munições --</option>
-                {compatibleStocksForAuthorizeModal.map(s => (
-                  <option key={s.id} value={s.id}>
-                    Cofre: {getVaultCode(s.vaultSpaceId)} • {s.tipoMunicao || 'Operacional'}
-                    {s.pesoMunicao ? ` (${s.pesoMunicao})` : ''} • Lote: {s.loteMunicao || 'Padrão'} — Saldo:{' '}
-                    {s.quantity} un.
-                  </option>
-                ))}
+                {compatibleStocksForAuthorizeModal.map(s => {
+                  const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+                  const calLabel = formatCaliberDisplay({
+                    name: getStockCaliberName(s),
+                    tipo: s.tipoMunicao || cal?.tipo || 'Operacional',
+                    peso: s.pesoMunicao || cal?.peso
+                  });
+                  return (
+                    <option key={s.id} value={s.id}>
+                      Cofre: {getVaultCode(s.vaultSpaceId)} • {calLabel} • Lote: {s.loteMunicao || 'Padrão'} — Saldo:{' '}
+                      {s.quantity} un.
+                    </option>
+                  );
+                })}
               </select>
               <p className="text-[11px] text-slate-400 mt-1">
                 Ao confirmar o pagamento, <strong>{authorizeModalItem.quantity} cartuchos</strong> serão subtraídos imediatamente do cofre selecionado.

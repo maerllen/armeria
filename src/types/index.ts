@@ -144,6 +144,35 @@ export interface Caliber {
   createdAt: string;
 }
 
+export function formatCaliberDisplay(
+  caliber?: {
+    name?: string | null;
+    caliberName?: string | null;
+    tipo?: string | null;
+    tipoMunicao?: string | null;
+    peso?: string | null;
+    pesoMunicao?: string | null;
+  } | null
+): string {
+  if (!caliber) return '';
+  const name = (caliber.name || caliber.caliberName || '').trim();
+  const tipo = (caliber.tipo ?? caliber.tipoMunicao ?? '').trim();
+  const peso = (caliber.peso ?? caliber.pesoMunicao ?? '').trim();
+
+  const hasSegment = (base: string, seg: string): boolean => {
+    if (!base || !seg) return false;
+    const normBase = ` ${base.toLowerCase().replace(/\s+/g, ' ')} `;
+    const normSeg = ` ${seg.toLowerCase().replace(/\s+/g, ' ')} `;
+    return normBase.includes(normSeg);
+  };
+
+  const parts: string[] = [];
+  if (name) parts.push(name);
+  if (tipo && !hasSegment(name, tipo)) parts.push(tipo);
+  if (peso && !hasSegment(name, peso) && !hasSegment(tipo, peso)) parts.push(peso);
+  return parts.join(' ').trim();
+}
+
 export interface AmmunitionStock {
   id: string;
   caliberId: string;
