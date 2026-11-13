@@ -357,8 +357,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     });
   }, [selectedWeapon, ammoStocks, calibers, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
 
-  // Retorna especificações (tipo e peso) cadastradas no calibre da arma e disponíveis em estoque (> 0) na unidade
-  // (Sem jamais expor local do cofre ou quantidade de munições em estoque)
+  // Retorna especificações (tipo e peso) cadastradas no banco (CALIBRES) para o nome do calibre da arma,
+  // excluindo qualquer tipo que contenha a palavra "treina"
   const getAvailableUnitAmmoSpecsForWeapon = useCallback(
     (weapon?: Weapon | null) => {
       if (!weapon || !weapon.caliber) {
@@ -366,55 +366,33 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       }
       const norm = (s?: string) => (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
       const targetCalName = norm(weapon.caliber);
-      const targetUnitId = weapon.unitId || currentUser.unitId;
 
-      const matchingCalibers = calibers.filter(c => norm(c.name) === targetCalName);
-      const matchingCaliberIds = new Set(matchingCalibers.map(c => c.id));
+      let matchingCalibers = calibers.filter(c => norm(c.name) === targetCalName);
+      if (matchingCalibers.length === 0) {
+        matchingCalibers = calibers.filter(c => {
+          const cName = norm(c.name);
+          return Boolean(cName) && (targetCalName.startsWith(cName + ' ') || cName.startsWith(targetCalName + ' '));
+        });
+      }
 
       const specs: Array<{ tipo: string; peso: string }> = [];
-
-      ammoStocks.forEach(st => {
-        if (Number(st.quantity) <= 0) return;
-
-        const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
-        const stUnitId = st.unitId || stVault?.unitId || '';
-        const matchUnit = targetUnitId ? stUnitId === targetUnitId : true;
-        if (!matchUnit) return;
-
-        const calObj = calibers.find(
-          c => c.id === st.caliberId || norm(c.name) === norm(st.caliberId)
-        );
-        const matchCaliber =
-          matchingCaliberIds.has(st.caliberId) ||
-          Boolean(calObj && norm(calObj.name) === targetCalName) ||
-          norm(st.caliberId) === targetCalName;
-        if (!matchCaliber) return;
-
-        const resolvedTipo = (st.tipoMunicao || calObj?.tipo || '').trim();
+      matchingCalibers.forEach(calObj => {
+        const resolvedTipo = (calObj.tipo || '').trim();
         if (!resolvedTipo) return;
-
-        let resolvedPeso = (st.pesoMunicao || calObj?.peso || '').trim();
-        if (!resolvedPeso) {
-          const calWithSameTipo = matchingCalibers.find(
-            c => norm(c.tipo) === norm(resolvedTipo) && Boolean((c.peso || '').trim())
-          );
-          if (calWithSameTipo?.peso) {
-            resolvedPeso = calWithSameTipo.peso.trim();
-          }
-        }
+        if (norm(resolvedTipo).includes('treina')) return;
 
         specs.push({
           tipo: resolvedTipo,
-          peso: resolvedPeso
+          peso: (calObj.peso || '').trim()
         });
       });
 
       return specs;
     },
-    [ammoStocks, calibers, vaultSpaces, currentUser.unitId]
+    [calibers]
   );
 
-  // Somente tipos cadastrados no calibre da arma e disponíveis na unidade
+  // Somente tipos cadastrados no banco para o calibre da arma (excluindo "treina")
   const availablePoliceSpecs = useMemo(() => {
     return getAvailableUnitAmmoSpecsForWeapon(selectedWeapon);
   }, [getAvailableUnitAmmoSpecsForWeapon, selectedWeapon]);
@@ -429,10 +407,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         result.push(spec.tipo.trim());
       }
     });
-    return result;
+    return result.sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [availablePoliceSpecs]);
 
-  // Somente pesos cadastrados no tipo selecionado do calibre da arma e disponíveis na unidade
+  // Somente pesos cadastrados no tipo selecionado do calibre da arma
   const availablePolicePesos = useMemo(() => {
     if (!policialAmmoTipo) return [];
     const selectedTipoNorm = policialAmmoTipo.trim().toLowerCase().replace(/\s+/g, ' ');
@@ -448,7 +426,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         result.push(pesoClean);
       }
     });
-    return result;
+    return result.sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [availablePoliceSpecs, policialAmmoTipo]);
 
   // Sincroniza automaticamente o tipo e peso selecionados quando o armamento ou tipo mudam
@@ -1925,7 +1903,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         result.push(spec.tipo.trim());
       }
     });
-    return result;
+    return result.sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [availableEditPoliceSpecs]);
 
   const availableEditPolicePesos = useMemo(() => {
@@ -1943,7 +1921,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         result.push(pesoClean);
       }
     });
-    return result;
+    return result.sort((a, b) => a.localeCompare(b, 'pt-BR'));
   }, [availableEditPoliceSpecs, editAmmoTipo]);
 
   React.useEffect(() => {
@@ -2379,7 +2357,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       if (isPolicial && policialWantsAmmo) {
         if (availablePoliceTipos.length === 0 || !policialAmmoTipo) {
           setErrorMsg(
-            `Não há munições correspondentes ao calibre ${weapon.caliber} disponíveis na unidade no momento. Desmarque "Desejo solicitar munições" para solicitar apenas o armamento.`
+            `Não há tipos de munição cadastrados para o calibre ${weapon.caliber}. Desmarque "Desejo solicitar munições" para solicitar apenas o armamento.`
           );
           setIsSubmitting(false);
           return;
@@ -2751,7 +2729,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     if (editWantsAmmo) {
       if (availableEditPoliceTipos.length === 0 || !editAmmoTipo) {
         setErrorMsg(
-          `Não há munições correspondentes ao calibre ${chosenWeapon.caliber} disponíveis na unidade no momento. Desmarque "Desejo solicitar munições" para manter apenas o armamento.`
+          `Não há tipos de munição cadastrados para o calibre ${chosenWeapon.caliber}. Desmarque "Desejo solicitar munições" para manter apenas o armamento.`
         );
         return;
       }
@@ -7397,7 +7375,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         {!selectedWeapon ? (
                           <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
                             <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                            <span>Selecione primeiramente uma arma acima para carregar o calibre, os tipos e os pesos de munição disponíveis na unidade.</span>
+                            <span>Selecione primeiramente uma arma acima para carregar o calibre, os tipos e os pesos de munição cadastrados.</span>
                           </div>
                         ) : availablePoliceTipos.length === 0 ? (
                           <div className="space-y-3">
@@ -7416,7 +7394,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                             <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
                               <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
                               <span>
-                                Não há tipos de munição cadastrados para o calibre <strong>{selectedWeapon.caliber}</strong> disponíveis na sua unidade no momento.
+                                Não há tipos de munição cadastrados no banco para o calibre <strong>{selectedWeapon.caliber}</strong>.
                               </span>
                             </div>
                           </div>
@@ -10536,7 +10514,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     {!editSelectedWeapon ? (
                       <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
                         <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
-                        <span>Selecione uma arma acima para carregar o calibre, os tipos e os pesos disponíveis na unidade.</span>
+                        <span>Selecione uma arma acima para carregar o calibre, os tipos e os pesos cadastrados.</span>
                       </div>
                     ) : availableEditPoliceTipos.length === 0 ? (
                       <div className="space-y-3">
@@ -10555,7 +10533,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300 flex items-center space-x-2">
                           <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
                           <span>
-                            Não há tipos de munição cadastrados para o calibre <strong>{editSelectedWeapon.caliber}</strong> disponíveis na sua unidade no momento.
+                            Não há tipos de munição cadastrados no banco para o calibre <strong>{editSelectedWeapon.caliber}</strong>.
                           </span>
                         </div>
                       </div>

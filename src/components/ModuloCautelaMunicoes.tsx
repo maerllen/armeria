@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   User,
   Weapon,
@@ -327,56 +327,76 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     [calibers]
   );
 
-  // Opções únicas para o Policial solicitar munição (Calibre -> Tipo -> Peso), sem expor cofre nem saldo
+  // Opções únicas de nomes de calibre disponíveis na unidade para o Policial (sem repetir nomes)
   const availableCaliberOptions = useMemo(() => {
-    const map = new Map<string, { id: string; name: string; label: string }>();
+    const map = new Map<string, { id: string; name: string }>();
     availableUnitStocks.forEach(s => {
-      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
       const name = getStockCaliberName(s);
-      const key = s.caliberId || name;
-      if (!map.has(key)) {
-        const label = formatCaliberDisplay({
-          name,
-          tipo: cal?.tipo || s.tipoMunicao,
-          peso: cal?.peso || s.pesoMunicao
-        });
-        map.set(key, { id: key, name, label });
+      const normName = name.trim().toLowerCase();
+      if (!normName) return;
+      if (!map.has(normName)) {
+        map.set(normName, { id: s.caliberId || name, name });
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.label.localeCompare(b.label, 'pt-BR'));
-  }, [availableUnitStocks, getStockCaliberName, calibers]);
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [availableUnitStocks, getStockCaliberName]);
 
   const availableTipoOptions = useMemo(() => {
     if (!selectedCaliberId) return [];
-    const set = new Set<string>();
+    const targetNorm = selectedCaliberId.trim().toLowerCase();
+    const map = new Map<string, string>();
     availableUnitStocks.forEach(s => {
-      const name = getStockCaliberName(s);
-      const key = s.caliberId || name;
-      if (key === selectedCaliberId || name === selectedCaliberId) {
-        const tipo = (s.tipoMunicao || 'Operacional').trim() || 'Operacional';
-        set.add(tipo);
+      const name = getStockCaliberName(s).trim().toLowerCase();
+      if (name === targetNorm || s.caliberId === selectedCaliberId) {
+        const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+        const tipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim() || 'Operacional';
+        const key = tipo.toLowerCase();
+        if (!map.has(key)) map.set(key, tipo);
       }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [availableUnitStocks, selectedCaliberId, getStockCaliberName]);
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [availableUnitStocks, selectedCaliberId, getStockCaliberName, calibers]);
 
   const availablePesoOptions = useMemo(() => {
     if (!selectedCaliberId) return [];
-    const set = new Set<string>();
+    const targetNorm = selectedCaliberId.trim().toLowerCase();
+    const map = new Map<string, string>();
     availableUnitStocks.forEach(s => {
-      const name = getStockCaliberName(s);
-      const key = s.caliberId || name;
-      const tipo = (s.tipoMunicao || 'Operacional').trim() || 'Operacional';
+      const name = getStockCaliberName(s).trim().toLowerCase();
+      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+      const tipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim() || 'Operacional';
       if (
-        (key === selectedCaliberId || name === selectedCaliberId) &&
-        (!selectedTipoMunicao || tipo.toLowerCase() === selectedTipoMunicao.toLowerCase())
+        (name === targetNorm || s.caliberId === selectedCaliberId) &&
+        (!selectedTipoMunicao || tipo.toLowerCase() === selectedTipoMunicao.trim().toLowerCase())
       ) {
-        const peso = (s.pesoMunicao || '').trim() || 'Padrão';
-        set.add(peso);
+        const peso = (s.pesoMunicao || cal?.peso || '').trim() || 'Padrão';
+        const key = peso.toLowerCase();
+        if (!map.has(key)) map.set(key, peso);
       }
     });
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-  }, [availableUnitStocks, selectedCaliberId, selectedTipoMunicao, getStockCaliberName]);
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [availableUnitStocks, selectedCaliberId, selectedTipoMunicao, getStockCaliberName, calibers]);
+
+  // Pré-seleciona automaticamente o primeiro Tipo Disponível e Peso Disponível ao escolher o calibre
+  useEffect(() => {
+    if (!selectedCaliberId || availableTipoOptions.length === 0) {
+      if (selectedTipoMunicao !== '') setSelectedTipoMunicao('');
+      return;
+    }
+    if (!availableTipoOptions.includes(selectedTipoMunicao)) {
+      setSelectedTipoMunicao(availableTipoOptions[0]);
+    }
+  }, [selectedCaliberId, availableTipoOptions, selectedTipoMunicao]);
+
+  useEffect(() => {
+    if (!selectedCaliberId || !selectedTipoMunicao || availablePesoOptions.length === 0) {
+      if (selectedPesoMunicao !== '') setSelectedPesoMunicao('');
+      return;
+    }
+    if (!availablePesoOptions.includes(selectedPesoMunicao)) {
+      setSelectedPesoMunicao(availablePesoOptions[0]);
+    }
+  }, [selectedCaliberId, selectedTipoMunicao, availablePesoOptions, selectedPesoMunicao]);
 
   // =========================================================================
   // CONJUNTOS DE DADOS POR ABA E PERFIL
@@ -666,13 +686,27 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
         return;
       }
 
-      const calOption = availableCaliberOptions.find(c => c.id === selectedCaliberId);
+      const calOption = availableCaliberOptions.find(
+        c => c.name.toLowerCase() === selectedCaliberId.trim().toLowerCase() || c.id === selectedCaliberId
+      );
       const resolvedCaliberName = calOption?.name || selectedCaliberId;
       const pesoClean = selectedPesoMunicao === 'Padrão' ? '' : selectedPesoMunicao;
+      const matchedStock = availableUnitStocks.find(s => {
+        const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+        const sName = getStockCaliberName(s).trim().toLowerCase();
+        const sTipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim().toLowerCase();
+        const sPeso = (s.pesoMunicao || cal?.peso || '').trim().toLowerCase();
+        return (
+          sName === resolvedCaliberName.trim().toLowerCase() &&
+          sTipo === (selectedTipoMunicao || '').trim().toLowerCase() &&
+          (!pesoClean || sPeso === pesoClean.trim().toLowerCase())
+        );
+      });
+      const resolvedCaliberId = matchedStock?.caliberId || calOption?.id || resolvedCaliberName;
 
       setLoading(true);
       const res = await storage.requestCautelaMunicao({
-        caliberId: selectedCaliberId,
+        caliberId: resolvedCaliberId,
         caliberName: resolvedCaliberName,
         quantity: reqQuantity,
         tipoMunicao: selectedTipoMunicao || 'Operacional',
@@ -1695,8 +1729,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 >
                   <option value="">-- Escolha o Calibre --</option>
                   {availableCaliberOptions.map(cal => (
-                    <option key={cal.id} value={cal.id}>
-                      {cal.label}
+                    <option key={cal.name} value={cal.name}>
+                      {cal.name}
                     </option>
                   ))}
                 </select>
