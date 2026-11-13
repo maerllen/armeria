@@ -1348,8 +1348,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* WEAPON DETAIL MODAL (Opens ONLY when a weapon is clicked/selected) */}
       {selectedWeaponDetail && (
-        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl space-y-5 my-8">
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 my-auto">
             
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -1639,8 +1639,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
       {/* Modal Add / Edit Weapon */}
       {showWeaponModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl my-8">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
             <h3 className="text-lg font-bold text-slate-100 mb-4 pb-2 border-b border-slate-800 flex items-center justify-between">
               <span>{editingWeapon ? 'Editar Arma' : 'Cadastrar Nova Arma'}</span>
               {!editingWeapon && (

@@ -754,6 +754,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   // --- Handlers: Quick Movement (Entrada / Saída) ---
 
   const handleOpenMovementModal = (stock?: AmmunitionStock, preselectedType: 'Entrada' | 'Saída' = 'Saída') => {
+    if (isArmeiro) return;
     setErrorMsg('');
     setSuccessMsg('');
     const target = stock || stocks[0];
@@ -1203,13 +1204,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 <span>Cadastrar Munição</span>
               </button>
 
-              <button
-                onClick={() => handleOpenMovementModal(undefined, 'Saída')}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5"
-              >
-                <ArrowRightLeft className="w-4 h-4 text-amber-400" />
-                <span>Movimentação</span>
-              </button>
+              {!isArmeiro && (
+                <button
+                  onClick={() => handleOpenMovementModal(undefined, 'Saída')}
+                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl transition border border-slate-700 flex items-center space-x-1.5"
+                >
+                  <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                  <span>Movimentação</span>
+                </button>
+              )}
 
               <button
                 onClick={() => {
@@ -2415,7 +2418,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {/* ============================================================== */}
       {showPrintVaultSelectModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-3">
@@ -2603,9 +2606,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {/* ============================================================== */}
       {/* MODAL: MOVIMENTAÇÃO (ENTRADA / SAÍDA RÁPIDA)                   */}
       {/* ============================================================== */}
-      {showMovementModal && (
+      {!isArmeiro && showMovementModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-3">
@@ -2840,7 +2843,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {/* ============================================================== */}
       {returnTargetMov && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-3">
@@ -2913,7 +2916,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       {/* ============================================================== */}
       {isGeral && showCaliberModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
             
             <div className="flex items-center justify-between border-b border-slate-800 pb-4">
               <div className="flex items-center space-x-3">

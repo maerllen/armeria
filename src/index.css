@@ -127,6 +127,27 @@ input, select, textarea, button {
   overscroll-behavior: contain;
 }
 
+@media screen {
+  .fixed.inset-0.items-center.justify-center {
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .fixed.inset-0.items-center.justify-center > div,
+  .fixed.inset-0.items-center.justify-center > form {
+    max-height: calc(100dvh - 1.5rem);
+    max-width: calc(100vw - 1rem);
+    margin-top: auto;
+    margin-bottom: auto;
+    overscroll-behavior: contain;
+  }
+
+  .fixed.inset-0.items-center.justify-center > div:not(.flex-col),
+  .fixed.inset-0.items-center.justify-center > form:not(.flex-col) {
+    overflow-y: auto;
+  }
+}
+
 /* Custom Tactical Immersive UI Styles */
 .glass {
   background: rgba(15, 23, 42, 0.75);

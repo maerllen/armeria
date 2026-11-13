@@ -2647,9 +2647,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: NOVO / EDITAR MATERIAL                             */}
       {/* ========================================================= */}
       {showMaterialModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-8">
-            <div className="flex items-center justify-between px-6 py-4 bg-slate-800/80 border-b border-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 shrink-0">
               <div className="flex items-center space-x-2">
                 <Package className="w-5 h-5 text-amber-400" />
                 <h3 className="text-base font-bold text-slate-100">
@@ -2664,7 +2664,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveMaterial} className="p-6 space-y-4 text-xs sm:text-sm">
+            <form onSubmit={handleSaveMaterial} className="p-4 sm:p-6 space-y-4 text-xs sm:text-sm overflow-y-auto flex-1 min-h-0">
               {/* Tipo e Nome */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
@@ -2926,9 +2926,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: NOVO TIPO DE MATERIAL                              */}
       {/* ========================================================= */}
       {showTipoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden">
-            <div className="flex items-center justify-between px-6 py-4 bg-slate-800/80 border-b border-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 shrink-0">
               <div className="flex items-center space-x-2">
                 <Layers className="w-5 h-5 text-amber-400" />
                 <h3 className="text-base font-bold text-slate-100">Novo Tipo de Material</h3>
@@ -2941,7 +2941,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveTipoMaterial} className="p-6 space-y-4 text-xs sm:text-sm">
+            <form onSubmit={handleSaveTipoMaterial} className="p-4 sm:p-6 space-y-4 text-xs sm:text-sm overflow-y-auto flex-1 min-h-0">
               <div>
                 <label className="block text-slate-300 font-semibold mb-1">
                   Nome do Tipo <span className="text-rose-400">*</span>
@@ -3027,9 +3027,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: NOVA CAUTELA DE MATERIAL                           */}
       {/* ========================================================= */}
       {showCautelaModal && cautelaMaterialTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-8">
-            <div className="flex items-center justify-between px-6 py-4 bg-slate-800/80 border-b border-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 shrink-0">
               <div className="flex items-center space-x-2">
                 <ArrowRightLeft className="w-5 h-5 text-amber-400" />
                 <h3 className="text-base font-bold text-slate-100">
@@ -3044,7 +3044,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveCautela} className="p-6 space-y-4 text-xs sm:text-sm">
+            <form onSubmit={handleSaveCautela} className="p-4 sm:p-6 space-y-4 text-xs sm:text-sm overflow-y-auto flex-1 min-h-0">
               {/* Material Info summary */}
               <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex items-center justify-between">
                 <div>
@@ -3264,9 +3264,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: DEVOLUÇÃO / BAIXA / COMUNICAÇÃO DE ANOMALIA        */}
       {/* ========================================================= */}
       {showDevolucaoModal && selectedCautelaForReturn && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
-          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-8">
-            <div className="flex items-center justify-between px-6 py-4 bg-slate-800/80 border-b border-slate-700">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="relative w-full max-w-2xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="flex items-center justify-between px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 shrink-0">
               <div className="flex items-center space-x-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400" />
                 <h3 className="text-base font-bold text-slate-100">
@@ -3281,7 +3281,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveDevolucao} className="p-6 space-y-4 text-xs sm:text-sm">
+            <form onSubmit={handleSaveDevolucao} className="p-4 sm:p-6 space-y-4 text-xs sm:text-sm overflow-y-auto flex-1 min-h-0">
               {/* Summary */}
               <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex items-center justify-between">
@@ -3457,9 +3457,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: TRANSFERÊNCIA DE MATERIAL ENTRE UNIDADES           */}
       {/* ========================================================= */}
       {showTransferModal && transferMaterialTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fadeIn overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between shrink-0">
               <div className="flex items-center space-x-2.5">
                 <div className="p-2 bg-sky-500/20 text-sky-400 rounded-xl border border-sky-500/30">
                   <Building2 className="w-5 h-5" />
@@ -3482,7 +3482,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSaveTransfer} className="p-6 space-y-4 text-xs">
+            <form onSubmit={handleSaveTransfer} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1 min-h-0">
               
               <div className="p-3 bg-slate-950/60 rounded-xl border border-slate-800 space-y-1">
                 <div className="flex justify-between">
@@ -3900,9 +3900,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       {/* MODAL: RECEBER TRANSFERÊNCIA DE MATERIAL NO COFRE         */}
       {/* ========================================================= */}
       {receiveTransferTarget && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
-            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden my-auto max-h-[92vh] flex flex-col">
+            <div className="px-4 sm:px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between shrink-0">
               <h3 className="text-base font-bold text-slate-100">
                 Receber Material Transferido
               </h3>
@@ -3914,7 +3914,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleConfirmReceiveTransfer} className="p-6 space-y-4 text-xs">
+            <form onSubmit={handleConfirmReceiveTransfer} className="p-4 sm:p-6 space-y-4 text-xs overflow-y-auto flex-1 min-h-0">
               <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
                 <div className="font-bold text-slate-100 text-sm">{receiveTransferTarget.nomeMaterial}</div>
                 <div className="text-slate-400">Quantidade: <strong className="text-emerald-400">{receiveTransferTarget.quantidade} un</strong></div>
