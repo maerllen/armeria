@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, ChevronDown, ChevronUp, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 
 interface ParsedExcelUserRow {
@@ -48,16 +48,22 @@ export const UserModule: React.FC<UserModuleProps> = ({
   onRefresh
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [unitSearchTerm, setUnitSearchTerm] = useState('');
+  const [unitDeptFilter, setUnitDeptFilter] = useState('');
+  const [selectedUnitId, setSelectedUnitId] = useState<string | null>(null);
+  const [cargoFilter, setCargoFilter] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [accessFilter, setAccessFilter] = useState<'todos' | 'sim' | 'nao'>('todos');
   const [showUserModal, setShowUserModal] = useState(false);
   const [showCourseManagementModal, setShowCourseManagementModal] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
 
-  const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
-
-  const toggleDeptExpand = (deptId: string) => {
-    setExpandedDeptIds(prev =>
-      prev.includes(deptId) ? prev.filter(id => id !== deptId) : [...prev, deptId]
-    );
+  const handleSelectUnit = (targetUnitId: string) => {
+    setSelectedUnitId(targetUnitId);
+    setSearchTerm('');
+    setCargoFilter('');
+    setRoleFilter('');
+    setAccessFilter('todos');
   };
   const [maspRaw, setMaspRaw] = useState('');
   const [name, setName] = useState('');
@@ -201,12 +207,24 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCargo('INVESTIGADOR');
       setRole('Policial');
       setSelectedRoles(['Policial']);
+      const activeSelectedUnit =
+        selectedUnitId && selectedUnitId !== '__SEM_UNIDADE__'
+          ? units.find(u => u.id === selectedUnitId)
+          : undefined;
       const initialDept = isRestrictedRegistrar
         ? currentUser.departmentId
+        : activeSelectedUnit
+        ? activeSelectedUnit.departmentId
         : (isGeral ? (departments[0]?.id || '') : currentUser.departmentId);
       setDeptId(initialDept);
       const initialUnits = units.filter(u => u.departmentId === initialDept);
-      setUnitId(isRestrictedRegistrar ? currentUser.unitId : (initialUnits[0]?.id || ''));
+      setUnitId(
+        isRestrictedRegistrar
+          ? currentUser.unitId
+          : activeSelectedUnit
+          ? activeSelectedUnit.id
+          : (initialUnits[0]?.id || '')
+      );
       setCanMoveAmmo(false);
       setCanMoveWeapons(false);
       setHasSystemAccess(true);
@@ -708,27 +726,114 @@ export const UserModule: React.FC<UserModuleProps> = ({
     }
   };
 
-  // Search filter
-  const term = searchTerm.toLowerCase().trim();
-  const filteredUsers = users.filter(u => {
-    if (!term) return true;
-    const maspFmt = formatMasp(u.masp).toLowerCase();
-    const dept = departments.find(d => d.id === u.departmentId);
-    const unit = units.find(un => un.id === u.unitId);
-    return (
-      u.name.toLowerCase().includes(term) ||
-      u.masp.includes(term) ||
-      maspFmt.includes(term) ||
-      u.cargo.toLowerCase().includes(term) ||
-      (dept && (dept.name.toLowerCase().includes(term) || dept.code.toLowerCase().includes(term))) ||
-      (unit && unit.name.toLowerCase().includes(term))
-    );
-  });
+  // Unidades visíveis ordenadas por departamento e nome
+  const visibleDepts = useMemo(
+    () => (isGeral ? departments : departments.filter(d => d.id === currentUser.departmentId)),
+    [departments, isGeral, currentUser.departmentId]
+  );
 
-  // Filtered Departments to display
-  const visibleDepts = isGeral
-    ? departments
-    : departments.filter(d => d.id === currentUser.departmentId);
+  const visibleUnits = useMemo(() => {
+    const allowedDeptIds = new Set(visibleDepts.map(d => d.id));
+    const list = units.filter(u => isGeral || allowedDeptIds.has(u.departmentId) || u.id === currentUser.unitId);
+    return [...list].sort((a, b) => {
+      const deptA = departments.find(d => d.id === a.departmentId)?.name || '';
+      const deptB = departments.find(d => d.id === b.departmentId)?.name || '';
+      const deptCmp = deptA.localeCompare(deptB, 'pt-BR');
+      if (deptCmp !== 0) return deptCmp;
+      return (a.name || '').localeCompare(b.name || '', 'pt-BR');
+    });
+  }, [units, visibleDepts, isGeral, currentUser.unitId, departments]);
+
+  const visibleUnitIdsSet = useMemo(() => new Set(visibleUnits.map(u => u.id)), [visibleUnits]);
+
+  const usersCountByUnit = useMemo(() => {
+    const map = new Map<string, { total: number; activeAccess: number }>();
+    for (const u of users) {
+      const key = u.unitId && visibleUnitIdsSet.has(u.unitId) ? u.unitId : '__SEM_UNIDADE__';
+      const curr = map.get(key) || { total: 0, activeAccess: 0 };
+      curr.total += 1;
+      if (u.hasSystemAccess) curr.activeAccess += 1;
+      map.set(key, curr);
+    }
+    return map;
+  }, [users, visibleUnitIdsSet]);
+
+  const filteredUnitsList = useMemo(() => {
+    const uTerm = unitSearchTerm.trim().toLowerCase();
+    return visibleUnits.filter(u => {
+      if (unitDeptFilter && u.departmentId !== unitDeptFilter) return false;
+      if (!uTerm) return true;
+      const dept = departments.find(d => d.id === u.departmentId);
+      return (
+        (u.name || '').toLowerCase().includes(uTerm) ||
+        (dept?.name || '').toLowerCase().includes(uTerm) ||
+        (dept?.code || '').toLowerCase().includes(uTerm)
+      );
+    });
+  }, [visibleUnits, unitSearchTerm, unitDeptFilter, departments]);
+
+  const unassignedCount = usersCountByUnit.get('__SEM_UNIDADE__')?.total || 0;
+
+  const selectedUnitObj = useMemo(
+    () => (selectedUnitId && selectedUnitId !== '__SEM_UNIDADE__' ? visibleUnits.find(u => u.id === selectedUnitId) || null : null),
+    [selectedUnitId, visibleUnits]
+  );
+
+  const selectedUnitDeptObj = useMemo(
+    () => (selectedUnitObj ? departments.find(d => d.id === selectedUnitObj.departmentId) || null : null),
+    [selectedUnitObj, departments]
+  );
+
+  const usersInSelectedUnit = useMemo(() => {
+    if (!selectedUnitId) return [];
+    if (selectedUnitId === '__SEM_UNIDADE__') {
+      return users.filter(u => !u.unitId || !visibleUnitIdsSet.has(u.unitId));
+    }
+    return users.filter(u => u.unitId === selectedUnitId);
+  }, [selectedUnitId, users, visibleUnitIdsSet]);
+
+  const availableCargoFilterOptions = useMemo(() => {
+    const set = new Set<string>(cargosList);
+    for (const u of usersInSelectedUnit) {
+      if (u.cargo && u.cargo.trim()) {
+        set.add(u.cargo.trim().toUpperCase());
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [usersInSelectedUnit]);
+
+  const filteredUnitUsers = useMemo(() => {
+    const term = searchTerm.toLowerCase().trim();
+    return usersInSelectedUnit.filter(u => {
+      if (term) {
+        const maspFmt = formatMasp(u.masp).toLowerCase();
+        const matchesText =
+          u.name.toLowerCase().includes(term) ||
+          u.masp.toLowerCase().includes(term) ||
+          maspFmt.includes(term) ||
+          (u.cargo || '').toLowerCase().includes(term);
+        if (!matchesText) return false;
+      }
+
+      if (cargoFilter) {
+        if ((u.cargo || '').trim().toUpperCase() !== cargoFilter.trim().toUpperCase()) {
+          return false;
+        }
+      }
+
+      if (roleFilter) {
+        const uRoles = u.roles && u.roles.length > 0 ? u.roles : [u.role];
+        if (!uRoles.includes(roleFilter as UserRole)) return false;
+      }
+
+      if (accessFilter === 'sim' && !u.hasSystemAccess) return false;
+      if (accessFilter === 'nao' && u.hasSystemAccess) return false;
+
+      return true;
+    });
+  }, [usersInSelectedUnit, searchTerm, cargoFilter, roleFilter, accessFilter]);
+
+  const hasActiveUnitFilters = Boolean(searchTerm.trim() || cargoFilter || roleFilter || accessFilter !== 'todos');
 
   return (
     <div className="space-y-6">
@@ -740,9 +845,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
             <Users className="w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-slate-100">Gestão de Policiais por Departamento</h1>
+            <h1 className="text-xl font-bold text-slate-100">
+              {selectedUnitId
+                ? `Policiais Cadastrados — ${selectedUnitObj ? selectedUnitObj.name : 'Sem Unidade Vinculada'}`
+                : 'Gestão de Usuários por Unidade'}
+            </h1>
             <p className="text-xs text-slate-400">
-              Clique em um departamento para expandir e visualizar os policiais cadastrados.
+              {selectedUnitId
+                ? 'Filtre os policiais cadastrados nesta unidade por cargo, perfil de acesso e situação de acesso.'
+                : 'Escolha uma unidade abaixo para visualizar os policiais cadastrados.'}
             </p>
           </div>
         </div>
@@ -786,255 +897,497 @@ export const UserModule: React.FC<UserModuleProps> = ({
         </div>
       )}
 
-      {/* Filter Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex items-center justify-between">
-        <div className="relative w-full max-w-md">
-          <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
-          <input
-            type="text"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            placeholder="Buscar policial por nome, MASP, cargo ou unidade..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-          />
-        </div>
-        <span className="text-xs text-slate-400 font-medium hidden sm:inline">
-          Exibindo <strong className="text-amber-400">{filteredUsers.length}</strong> policial(is)
-        </span>
-      </div>
+      {/* ETAPA 1: APENAS AS UNIDADES (ANTES DE ESCOLHER A UNIDADE) */}
+      {!selectedUnitId ? (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex flex-1 flex-wrap items-center gap-2.5">
+              <div className="relative flex-1 min-w-[220px] max-w-md">
+                <Search className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                <input
+                  type="text"
+                  value={unitSearchTerm}
+                  onChange={(e) => setUnitSearchTerm(e.target.value)}
+                  placeholder="Filtrar unidade por nome ou departamento..."
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+              </div>
 
-      {/* Departments Accordion with Grouped Users */}
-      <div className="space-y-4">
-        {visibleDepts.map((dept) => {
-          const deptUsers = filteredUsers.filter(u => u.departmentId === dept.id);
-          const isExpanded = term !== '' || expandedDeptIds.includes(dept.id);
+              {visibleDepts.length > 1 && (
+                <select
+                  value={unitDeptFilter}
+                  onChange={(e) => setUnitDeptFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Departamentos</option>
+                  {visibleDepts.map(d => (
+                    <option key={d.id} value={d.id}>
+                      {d.code ? `${d.code} — ${d.name}` : d.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
 
-          // If searching and this department has no matching users, hide it
-          if (term !== '' && deptUsers.length === 0) return null;
+            <span className="text-xs text-slate-400 font-medium">
+              <strong className="text-amber-400">{filteredUnitsList.length}</strong> unidade(s) disponíve{filteredUnitsList.length === 1 ? 'l' : 'is'}
+            </span>
+          </div>
 
-          return (
-            <div key={dept.id} className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm transition">
-              
-              {/* Department Header Row */}
-              <div
-                onClick={() => toggleDeptExpand(dept.id)}
-                className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex items-center justify-between cursor-pointer select-none transition"
-              >
-                <div className="flex items-center space-x-3">
-                  <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
-                    <Building className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center space-x-2">
-                      <span className="text-xs font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
-                        {dept.code}
-                      </span>
-                      <h2 className="text-base font-bold text-slate-100">{dept.name}</h2>
+          {filteredUnitsList.length === 0 && unassignedCount === 0 ? (
+            <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
+              <Building2 className="w-10 h-10 text-slate-600 mx-auto" />
+              <p className="text-sm font-semibold text-slate-300">
+                Nenhuma unidade encontrada para o filtro informado.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredUnitsList.map((u) => {
+                const dept = departments.find(d => d.id === u.departmentId);
+                const stats = usersCountByUnit.get(u.id) || { total: 0, activeAccess: 0 };
+                const isOwnUnit = u.id === currentUser.unitId;
+
+                return (
+                  <button
+                    key={u.id}
+                    type="button"
+                    onClick={() => handleSelectUnit(u.id)}
+                    className="group text-left bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-5 shadow-sm transition flex flex-col justify-between gap-4"
+                  >
+                    <div className="space-y-2.5 w-full">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 group-hover:bg-amber-500/20 transition">
+                          <Building2 className="w-5 h-5" />
+                        </div>
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
+                          {isOwnUnit && (
+                            <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              Sua Unidade
+                            </span>
+                          )}
+                          {dept && (
+                            <span className="text-[10px] font-mono font-bold bg-slate-950 text-amber-400 px-2 py-0.5 rounded border border-slate-800">
+                              {dept.code || dept.name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h2 className="text-base font-bold text-slate-100 group-hover:text-amber-300 transition">
+                          {u.name}
+                        </h2>
+                        {dept && (
+                          <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">
+                            {dept.name}
+                          </p>
+                        )}
+                      </div>
                     </div>
-                    <p className="text-[11px] text-slate-400 mt-0.5">
-                      {deptUsers.length} policial(is) cadastrado(s) neste departamento
-                    </p>
-                  </div>
-                </div>
 
-                <div className="flex items-center space-x-3">
-                  <span className="text-xs bg-slate-950 text-amber-400 border border-slate-800 px-3 py-1 rounded-xl font-bold font-mono">
-                    {deptUsers.length} Policiais
-                  </span>
-                  <div className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800 flex items-center justify-center">
-                    {isExpanded ? <ChevronUp className="w-5 h-5 text-amber-400" /> : <ChevronDown className="w-5 h-5" />}
+                    <div className="flex items-center justify-between pt-3 border-t border-slate-800/80 w-full">
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 font-bold font-mono">
+                          {stats.total} {stats.total === 1 ? 'Cadastrado' : 'Cadastrados'}
+                        </span>
+                        {stats.total > 0 && (
+                          <span className="text-[11px] text-slate-400">
+                            ({stats.activeAccess} ativo{stats.activeAccess === 1 ? '' : 's'})
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs font-bold text-slate-400 group-hover:text-amber-400 flex items-center gap-1 transition">
+                        <span>Abrir</span>
+                        <ChevronRight className="w-4 h-4" />
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+
+              {unassignedCount > 0 && !unitSearchTerm.trim() && !unitDeptFilter && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectUnit('__SEM_UNIDADE__')}
+                  className="group text-left bg-slate-900 hover:bg-slate-800/90 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-5 shadow-sm transition flex flex-col justify-between gap-4"
+                >
+                  <div className="space-y-2.5 w-full">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="p-2.5 bg-slate-800 text-slate-400 rounded-xl border border-slate-700">
+                        <Building className="w-5 h-5" />
+                      </div>
+                      <span className="text-[10px] font-mono font-bold bg-slate-950 text-slate-400 px-2 py-0.5 rounded border border-slate-800">
+                        SEM VÍNCULO
+                      </span>
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-100 group-hover:text-amber-300 transition">
+                        Sem Unidade Vinculada
+                      </h2>
+                      <p className="text-[11px] text-slate-400 mt-0.5">
+                        Cadastros sem unidade associada no escopo atual
+                      </p>
+                    </div>
                   </div>
+                  <div className="flex items-center justify-between pt-3 border-t border-slate-800/80 w-full">
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 text-amber-400 font-bold font-mono text-xs">
+                      {unassignedCount} {unassignedCount === 1 ? 'Cadastrado' : 'Cadastrados'}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400 group-hover:text-amber-400 flex items-center gap-1 transition">
+                      <span>Abrir</span>
+                      <ChevronRight className="w-4 h-4" />
+                    </span>
+                  </div>
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : (
+        /* ETAPA 2: CADASTRADOS DA UNIDADE SELECIONADA + FILTROS (CARGO, PERFIL E ACESSO) */
+        <div className="space-y-4">
+          {/* Barra de Navegação da Unidade Selecionada */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => setSelectedUnitId(null)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold flex items-center space-x-1.5 transition"
+              >
+                <ArrowLeft className="w-4 h-4 text-amber-400" />
+                <span>Voltar para Unidades</span>
+              </button>
+
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-amber-500/10 text-amber-400 rounded-lg border border-amber-500/20">
+                  <Building2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-sm sm:text-base font-bold text-slate-100">
+                      {selectedUnitObj ? selectedUnitObj.name : 'Sem Unidade Vinculada'}
+                    </h2>
+                    {selectedUnitDeptObj && (
+                      <span className="text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded border border-amber-500/20">
+                        {selectedUnitDeptObj.code || selectedUnitDeptObj.name}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Total na unidade: <strong className="text-slate-200">{usersInSelectedUnit.length}</strong> policial(is)
+                    {hasActiveUnitFilters && (
+                      <> • Exibindo <strong className="text-amber-400">{filteredUnitUsers.length}</strong> com os filtros aplicados</>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {visibleUnits.length > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] text-slate-400 font-semibold whitespace-nowrap">Trocar Unidade:</span>
+                <select
+                  value={selectedUnitId}
+                  onChange={(e) => handleSelectUnit(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  {visibleUnits.map(u => (
+                    <option key={u.id} value={u.id}>
+                      {u.name} ({usersCountByUnit.get(u.id)?.total || 0})
+                    </option>
+                  ))}
+                  {unassignedCount > 0 && (
+                    <option value="__SEM_UNIDADE__">Sem Unidade Vinculada ({unassignedCount})</option>
+                  )}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* Barra de Filtros: Busca, Cargo, Perfil e Acesso */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-xs font-bold text-amber-400 uppercase tracking-wider">
+                <Filter className="w-3.5 h-3.5" />
+                <span>Filtros dos Cadastrados</span>
+              </div>
+              {hasActiveUnitFilters && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setCargoFilter('');
+                    setRoleFilter('');
+                    setAccessFilter('todos');
+                  }}
+                  className="text-xs text-amber-400 hover:underline font-semibold"
+                >
+                  Limpar Filtros
+                </button>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {/* Busca por Nome ou MASP */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                  Nome ou MASP
+                </label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Buscar nome ou MASP..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                  />
                 </div>
               </div>
 
-              {/* Users Table for this Department (Shown when Expanded) */}
-              {isExpanded && (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs text-slate-300">
-                    <thead className="bg-slate-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
-                      <tr>
-                        <th className="py-3 px-4">Policial / MASP</th>
-                        <th className="py-3 px-4">Cargo</th>
-                        <th className="py-3 px-4">Perfil</th>
-                        <th className="py-3 px-4">Unidade</th>
-                        <th className="py-3 px-4 text-center">Acesso</th>
-                        <th className="py-3 px-4">Permissões Especial</th>
-                        <th className="py-3 px-4">Cursos Habilitados</th>
-                        {!isPolicial && <th className="py-3 px-4 text-right">Ações</th>}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-800/60">
-                      {deptUsers.length === 0 ? (
-                        <tr>
-                          <td colSpan={8} className="py-6 text-center text-slate-500 italic">
-                            Nenhum policial cadastrado neste departamento.
+              {/* Filtro por Cargo */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                  Cargo
+                </label>
+                <select
+                  value={cargoFilter}
+                  onChange={(e) => setCargoFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Cargos</option>
+                  {availableCargoFilterOptions.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Perfil */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                  Perfil
+                </label>
+                <select
+                  value={roleFilter}
+                  onChange={(e) => setRoleFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Perfis</option>
+                  {allSystemRoles.map((r) => (
+                    <option key={r} value={r}>
+                      {r === 'operador_canino' ? 'Operador Canino' : r}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Filtro por Acesso */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                  Acesso ao Sistema
+                </label>
+                <select
+                  value={accessFilter}
+                  onChange={(e) => setAccessFilter(e.target.value as 'todos' | 'sim' | 'nao')}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="todos">Todos os Acessos</option>
+                  <option value="sim">Acesso Ativo (SIM)</option>
+                  <option value="nao">Acesso Bloqueado (NÃO)</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela de Cadastrados da Unidade Selecionada */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-950/60 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                  <tr>
+                    <th className="py-3 px-4">Policial / MASP</th>
+                    <th className="py-3 px-4">Cargo</th>
+                    <th className="py-3 px-4">Perfil</th>
+                    <th className="py-3 px-4">Unidade</th>
+                    <th className="py-3 px-4 text-center">Acesso</th>
+                    <th className="py-3 px-4">Permissões Especiais</th>
+                    <th className="py-3 px-4">Cursos Habilitados</th>
+                    {!isPolicial && <th className="py-3 px-4 text-right">Ações</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {filteredUnitUsers.length === 0 ? (
+                    <tr>
+                      <td colSpan={isPolicial ? 7 : 8} className="py-8 text-center text-slate-500 italic">
+                        {usersInSelectedUnit.length === 0
+                          ? 'Nenhum policial cadastrado nesta unidade.'
+                          : 'Nenhum policial encontrado com os filtros selecionados (cargo, perfil ou acesso).'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredUnitUsers.map((usr) => {
+                      const u = units.find(un => un.id === usr.unitId);
+
+                      return (
+                        <tr key={usr.id} className="hover:bg-slate-800/40 transition">
+                          {/* Name & MASP */}
+                          <td className="py-3 px-4">
+                            <div className="font-bold text-slate-100 text-sm">{usr.name}</div>
+                            <div className="text-[11px] font-mono text-amber-400">
+                              MASP: {formatMasp(usr.masp)}
+                            </div>
                           </td>
-                        </tr>
-                      ) : (
-                        deptUsers.map((usr) => {
-                          const u = units.find(un => un.id === usr.unitId);
 
-                          return (
-                            <tr key={usr.id} className="hover:bg-slate-800/40 transition">
-                              
-                              {/* Name & MASP */}
-                              <td className="py-3 px-4">
-                                <div className="font-bold text-slate-100 text-sm">{usr.name}</div>
-                                <div className="text-[11px] font-mono text-amber-400">
-                                  MASP: {formatMasp(usr.masp)}
-                                </div>
-                              </td>
+                          {/* Cargo */}
+                          <td className="py-3 px-4">
+                            <span className="bg-slate-800 text-slate-200 px-2 py-1 rounded font-medium">
+                              {usr.cargo}
+                            </span>
+                          </td>
 
-                              {/* Cargo */}
-                              <td className="py-3 px-4">
-                                <span className="bg-slate-800 text-slate-200 px-2 py-1 rounded font-medium">
-                                  {usr.cargo}
-                                </span>
-                              </td>
-
-                              {/* Role */}
-                              <td className="py-3 px-4">
-                                <div className="flex flex-wrap gap-1">
-                                  {(usr.roles && usr.roles.length > 0 ? usr.roles : [usr.role]).map((r) => (
-                                    <span
-                                      key={r}
-                                      className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
-                                        r === 'Geral'
-                                          ? 'bg-purple-950 text-purple-300 border-purple-800'
-                                          : r === 'Administrador'
-                                          ? 'bg-blue-950 text-blue-300 border-blue-800'
-                                          : r === 'Armeiro'
-                                          ? 'bg-amber-950 text-amber-300 border-amber-800'
-                                          : r === 'Explosivista'
-                                          ? 'bg-orange-950 text-orange-300 border-orange-800'
-                                          : r === 'operador_canino'
-                                          ? 'bg-teal-950 text-teal-300 border-teal-800'
-                                          : 'bg-emerald-950 text-emerald-300 border-emerald-800'
-                                      }`}
-                                    >
-                                      {r === 'operador_canino' ? 'Operador Canino' : r}
-                                    </span>
-                                  ))}
-                                </div>
-                                {usr.isTeacher && (
-                                  <div className="mt-1 flex flex-wrap items-center gap-1">
-                                    <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
-                                      Prof ({usr.teacherSubject || 'MEAF'})
-                                    </span>
-                                    {usr.professorSigla && (
-                                      <span className="bg-slate-950 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded text-[10px] font-mono font-black">
-                                        [{usr.professorSigla}]
-                                      </span>
-                                    )}
-                                  </div>
-                                )}
-                              </td>
-
-                              {/* Unit */}
-                              <td className="py-3 px-4 text-slate-300">
-                                <div className="font-semibold text-slate-200">{u ? u.name : 'N/A'}</div>
-                              </td>
-
-                              {/* System Access */}
-                              <td className="py-3 px-4 text-center">
+                          {/* Role */}
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap gap-1">
+                              {(usr.roles && usr.roles.length > 0 ? usr.roles : [usr.role]).map((r) => (
                                 <span
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                    usr.hasSystemAccess
-                                      ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                                      : 'bg-red-950 text-red-400 border border-red-800'
+                                  key={r}
+                                  className={`px-2 py-0.5 rounded font-bold border text-[11px] ${
+                                    r === 'Geral'
+                                      ? 'bg-purple-950 text-purple-300 border-purple-800'
+                                      : r === 'Administrador'
+                                      ? 'bg-blue-950 text-blue-300 border-blue-800'
+                                      : r === 'Armeiro'
+                                      ? 'bg-amber-950 text-amber-300 border-amber-800'
+                                      : r === 'Explosivista'
+                                      ? 'bg-orange-950 text-orange-300 border-orange-800'
+                                      : r === 'operador_canino'
+                                      ? 'bg-teal-950 text-teal-300 border-teal-800'
+                                      : 'bg-emerald-950 text-emerald-300 border-emerald-800'
                                   }`}
                                 >
-                                  {usr.hasSystemAccess ? 'SIM' : 'NÃO'}
+                                  {r === 'operador_canino' ? 'Operador Canino' : r}
                                 </span>
-                              </td>
+                              ))}
+                            </div>
+                            {usr.isTeacher && (
+                              <div className="mt-1 flex flex-wrap items-center gap-1">
+                                <span className="bg-amber-500/10 text-amber-400 border border-amber-500/30 px-1.5 py-0.5 rounded text-[10px] font-mono font-bold">
+                                  Prof ({usr.teacherSubject || 'MEAF'})
+                                </span>
+                                {usr.professorSigla && (
+                                  <span className="bg-slate-950 text-amber-300 border border-slate-700 px-1.5 py-0.5 rounded text-[10px] font-mono font-black">
+                                    [{usr.professorSigla}]
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </td>
 
-                                {/* Special Move Permissions */}
-                                <td className="py-3 px-4 space-y-1">
-                                  <div className="text-[10px]">
-                                    Munição: {' '}
-                                    <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                                      {usr.canMoveAmmunition ? 'Sim' : 'Não'}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px]">
-                                    Armas: {' '}
-                                    <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
-                                      {usr.canMoveWeapons ? 'Sim' : 'Não'}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10px]">
-                                    Abrangência: {' '}
-                                    <span className={`font-semibold ${usr.managementScope === 'department' ? 'text-amber-400' : 'text-slate-400'}`}>
-                                      {usr.managementScope === 'department' ? 'Departamento' : 'Unidade'}
-                                    </span>
-                                  </div>
-                                </td>
+                          {/* Unit */}
+                          <td className="py-3 px-4 text-slate-300">
+                            <div className="font-semibold text-slate-200">{u ? u.name : 'N/A'}</div>
+                          </td>
 
-                              {/* Courses */}
-                              <td className="py-3 px-4">
-                                <div className="flex flex-wrap gap-1 max-w-xs">
-                                  {usr.courses.length === 0 ? (
-                                    <span className="text-slate-500 italic text-[11px]">Nenhum</span>
-                                  ) : (
-                                    usr.courses.map((uc, i) => {
-                                      const cObj = courses.find(c => c.id === uc.courseId);
-                                      const expired = isCourseExpired(uc.completionDate);
+                          {/* System Access */}
+                          <td className="py-3 px-4 text-center">
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                usr.hasSystemAccess
+                                  ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
+                                  : 'bg-red-950 text-red-400 border border-red-800'
+                              }`}
+                            >
+                              {usr.hasSystemAccess ? 'SIM' : 'NÃO'}
+                            </span>
+                          </td>
 
-                                      return (
-                                        <span
-                                          key={i}
-                                          className={`px-2 py-0.5 rounded text-[10px] font-mono border font-semibold flex items-center space-x-1 ${
-                                            expired
-                                              ? 'bg-red-600 text-white border-red-500'
-                                              : 'bg-slate-950 text-amber-400 border-slate-800'
-                                          }`}
-                                          title={expired ? 'Curso Vencido (> 2 anos)' : 'Curso Válido'}
-                                        >
-                                          <span>{cObj ? cObj.name : uc.courseId}</span>
-                                          {expired && <AlertTriangle className="w-3 h-3 text-white inline" />}
-                                        </span>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              </td>
+                          {/* Special Move Permissions */}
+                          <td className="py-3 px-4 space-y-1">
+                            <div className="text-[10px]">
+                              Munição: {' '}
+                              <span className={usr.canMoveAmmunition ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                {usr.canMoveAmmunition ? 'Sim' : 'Não'}
+                              </span>
+                            </div>
+                            <div className="text-[10px]">
+                              Armas: {' '}
+                              <span className={usr.canMoveWeapons ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                                {usr.canMoveWeapons ? 'Sim' : 'Não'}
+                              </span>
+                            </div>
+                            <div className="text-[10px]">
+                              Abrangência: {' '}
+                              <span className={`font-semibold ${usr.managementScope === 'department' ? 'text-amber-400' : 'text-slate-400'}`}>
+                                {usr.managementScope === 'department' ? 'Departamento' : 'Unidade'}
+                              </span>
+                            </div>
+                          </td>
 
-                              {/* Actions */}
-                              {!isPolicial && (
-                                <td className="py-3 px-4 text-right">
-                                  <div className="flex items-center justify-end space-x-2">
-                                    <button
-                                      onClick={() => handleOpenUserModal(usr)}
-                                      className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                                      title="Editar Policial"
+                          {/* Courses */}
+                          <td className="py-3 px-4">
+                            <div className="flex flex-wrap gap-1 max-w-xs">
+                              {usr.courses.length === 0 ? (
+                                <span className="text-slate-500 italic text-[11px]">Nenhum</span>
+                              ) : (
+                                usr.courses.map((uc, i) => {
+                                  const cObj = courses.find(c => c.id === uc.courseId);
+                                  const expired = isCourseExpired(uc.completionDate);
+
+                                  return (
+                                    <span
+                                      key={i}
+                                      className={`px-2 py-0.5 rounded text-[10px] font-mono border font-semibold flex items-center space-x-1 ${
+                                        expired
+                                          ? 'bg-red-600 text-white border-red-500'
+                                          : 'bg-slate-950 text-amber-400 border-slate-800'
+                                      }`}
+                                      title={expired ? 'Curso Vencido (> 2 anos)' : 'Curso Válido'}
                                     >
-                                      <Edit2 className="w-4 h-4" />
-                                    </button>
-                                    {isGeral && (
-                                      <button
-                                        onClick={() => handleDeleteUser(usr)}
-                                        className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                                        title="Excluir Policial"
-                                      >
-                                        <Trash2 className="w-4 h-4" />
-                                      </button>
-                                    )}
-                                  </div>
-                                </td>
+                                      <span>{cObj ? cObj.name : uc.courseId}</span>
+                                      {expired && <AlertTriangle className="w-3 h-3 text-white inline" />}
+                                    </span>
+                                  );
+                                })
                               )}
-                            </tr>
-                          );
-                        })
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                            </div>
+                          </td>
 
+                          {/* Actions */}
+                          {!isPolicial && (
+                            <td className="py-3 px-4 text-right">
+                              <div className="flex items-center justify-end space-x-2">
+                                <button
+                                  onClick={() => handleOpenUserModal(usr)}
+                                  className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                                  title="Editar Policial"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+                                {isGeral && (
+                                  <button
+                                    onClick={() => handleDeleteUser(usr)}
+                                    className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                    title="Excluir Policial"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </div>
+          </div>
+        </div>
+      )}
 
       {/* User Edit / Add Modal */}
       {showUserModal && (
