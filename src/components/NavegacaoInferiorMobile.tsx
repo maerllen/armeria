@@ -80,41 +80,53 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   const visibleTabs = allQuickTabs.filter(tab => allowedModules.includes(tab.id));
 
   return (
-    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 py-1.5 flex items-center justify-around shadow-2xl print:hidden">
-      {visibleTabs.map((tab) => {
-        const Icon = tab.icon;
-        const isActive = activeModule === tab.id;
-        return (
-          <button
-            key={tab.id}
-            onClick={() => onSelectModule(tab.id)}
-            className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all relative ${
-              isActive
-                ? 'text-amber-400 font-bold bg-amber-500/10 scale-105'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <div className="relative">
-              <Icon className="w-5 h-5" />
-              {tab.badge !== undefined && (
-                <span className="absolute -top-1 -right-2 bg-amber-500 text-slate-950 text-[9px] font-black w-4 h-4 rounded-full flex items-center justify-center border border-slate-950">
-                  {tab.badge}
-                </span>
-              )}
-            </div>
-            <span className="text-[10px] mt-0.5 tracking-tight">{tab.label}</span>
-          </button>
-        );
-      })}
+    <nav
+      aria-label="Navegação Mobile"
+      className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-lg border-t border-slate-800/80 px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] pl-[max(0.5rem,env(safe-area-inset-left))] pr-[max(0.5rem,env(safe-area-inset-right))] flex items-center shadow-2xl print:hidden"
+    >
+      <div className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5 pr-1">
+        {visibleTabs.map((tab) => {
+          const Icon = tab.icon;
+          const isActive = activeModule === tab.id;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => onSelectModule(tab.id)}
+              className={`shrink-0 min-w-[66px] min-h-[48px] flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-all relative ${
+                isActive
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-300 hover:bg-slate-800/60 hover:text-amber-400'
+              }`}
+            >
+              <div className="relative">
+                <Icon className={`w-5 h-5 ${isActive ? 'text-slate-950' : ''}`} />
+                {tab.badge !== undefined && (
+                  <span
+                    className={`absolute -top-1.5 -right-2.5 text-[9px] font-black min-w-[16px] h-4 px-1 rounded-full flex items-center justify-center border ${
+                      isActive
+                        ? 'bg-slate-950 text-amber-400 border-amber-500'
+                        : 'bg-amber-500 text-slate-950 border-slate-950'
+                    }`}
+                  >
+                    {tab.badge}
+                  </span>
+                )}
+              </div>
+              <span className="text-[10px] mt-0.5 tracking-tight whitespace-nowrap leading-none">{tab.label}</span>
+            </button>
+          );
+        })}
+      </div>
 
-      {/* Menu Button to trigger sidebar drawer */}
+      {/* Pinned Menu Button to trigger full sidebar drawer */}
       <button
         onClick={onOpenMobileMenu}
-        className="flex flex-col items-center justify-center py-1 px-2 rounded-xl text-slate-400 hover:text-amber-400 transition-all"
+        className="shrink-0 min-w-[58px] min-h-[48px] flex flex-col items-center justify-center py-1 px-2 ml-1.5 pl-2.5 border-l border-slate-800/80 rounded-r-xl text-slate-300 hover:text-amber-400 transition-all"
+        aria-label="Abrir Menu Completo"
       >
         <Menu className="w-5 h-5" />
-        <span className="text-[10px] mt-0.5 tracking-tight">Menu</span>
+        <span className="text-[10px] mt-0.5 tracking-tight leading-none font-semibold">Menu</span>
       </button>
-    </div>
+    </nav>
   );
 };

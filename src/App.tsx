@@ -56,7 +56,7 @@ const moduleLabels: Record<ModuleType, string> = {
 };
 
 export default function App() {
-  const { deviceInfo, setDeviceMode } = useDeviceDetection();
+  const { deviceInfo } = useDeviceDetection();
   const { showPreloader, hidePreloader, setLogoUrl } = usePreloader();
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [activeModule, setActiveModule] = useState<ModuleType>('meu-perfil');
@@ -360,7 +360,7 @@ export default function App() {
   // Se a aplicação ainda estiver inicializando os dados pela primeira vez, exibe preloader completo
   if (!isAppReady) {
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
+      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
         <div className="text-center max-w-sm w-full space-y-6">
           <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
             <div className="absolute inset-0 rounded-full border-2 border-dashed border-amber-500/40 border-t-amber-400 animate-spin-slow" />
@@ -405,7 +405,7 @@ export default function App() {
   if (!currentUser) {
     if (isMobileUrlMode) {
       return (
-        <div className="min-h-screen bg-slate-950 text-slate-100 font-sans">
+        <div className="min-h-[100dvh] bg-slate-950 text-slate-100 font-sans">
           <MobileClassModule
             currentUser={({ id: 'temp-mobile', masp: '', name: 'Instrutor', role: 'Armeiro', cargo: 'Inspetor de Polícia' } as unknown as User)}
             onRefresh={refreshData}
@@ -415,7 +415,7 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
         <LoginModal
           onLoginSuccess={handleLoginSubmit}
           onLocalFallbackLogin={handleLocalFallbackLogin}
@@ -426,7 +426,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
+    <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col font-sans">
       
       {/* Top Navigation */}
       <Navbar
@@ -434,8 +434,6 @@ export default function App() {
         onLogout={handleLogout}
         onChangePasswordClick={() => setShowChangePasswordModal(true)}
         onUserSwitched={refreshData}
-        deviceInfo={deviceInfo}
-        onSetDeviceMode={setDeviceMode}
         isMobileMenuOpen={isMobileMenuOpen}
         onToggleMobileMenu={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         logoUrl={currentLogo}
@@ -461,7 +459,7 @@ export default function App() {
         />
 
         {/* Main Workspace */}
-        <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
+        <main className="flex-1 p-3 sm:p-6 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
           {/* Dashboard Summary Cards (Oculto nos módulos especificados a pedido) */}
           {!['explosivos', 'meu-perfil', 'cautela-armas', 'cautela-municoes', 'cautela-materiais', 'armas', 'municoes', 'movimentacoes', 'unidade', 'usuarios', 'cofre', 'materiais'].includes(activeModule) && (
@@ -739,7 +737,7 @@ export default function App() {
           {/* Footer Bar with Audit Log Trigger */}
           <footer className="pt-6 border-t border-slate-800 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 print:hidden">
             <div>
-              Polícia Civil • <strong className="text-slate-400">Armeria</strong> v2.0 ({deviceInfo.isMobile ? 'Modo Celular' : 'Modo Computador'})
+              Polícia Civil • <strong className="text-slate-400">Armeria</strong> v2.0
             </div>
 
             <button

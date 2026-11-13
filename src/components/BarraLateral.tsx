@@ -238,7 +238,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   key={item.id}
                   onClick={() => handleItemClick(item.id)}
-                  className={`w-full flex items-center justify-between px-3.5 py-2.5 text-xs font-medium rounded-xl transition-all duration-200 ${
+                  className={`w-full flex items-center justify-between px-3.5 py-3 md:py-2.5 min-h-[44px] md:min-h-0 text-xs font-medium rounded-xl transition-all duration-200 ${
                     isActive
                       ? 'bg-amber-500 text-slate-950 font-bold shadow-lg shadow-amber-500/20 neon-border'
                       : 'text-slate-300 hover:bg-slate-800/80 hover:text-amber-400'
@@ -288,7 +288,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <>
       {/* Desktop Sidebar */}
-      <aside className="hidden md:flex w-64 glass border-r border-slate-800/80 shrink-0 min-h-[calc(100vh-4rem)] flex-col justify-between print:hidden">
+      <aside className="hidden md:flex w-64 glass border-r border-slate-800/80 shrink-0 min-h-[calc(100dvh-4rem)] flex-col justify-between print:hidden">
         {sidebarContent}
       </aside>
 
@@ -302,7 +302,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
 
           {/* Drawer Container */}
-          <div className="relative w-4/5 max-w-xs bg-slate-900 border-r border-slate-800 h-full shadow-2xl flex flex-col z-10 overflow-y-auto">
+          <div className="relative w-[84vw] max-w-xs bg-slate-900 border-r border-slate-800 h-[100dvh] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] shadow-2xl flex flex-col z-10 overflow-y-auto overscroll-contain">
             {sidebarContent}
           </div>
         </div>

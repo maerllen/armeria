@@ -2,7 +2,13 @@
 <html lang="pt-BR" class="theme-light">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="ARMARIA" />
+    <meta name="format-detection" content="telephone=no" />
+    <meta name="theme-color" content="#e6ebf2" />
     <link rel="icon" type="image/png" href="/assets/aistudio/Distintivo_da_Pol_cia_Civil_de_Minas_Gerais_15bab05c.png" />
     <link rel="shortcut icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/assets/aistudio/Distintivo_da_Pol_cia_Civil_de_Minas_Gerais_15bab05c.png" />
@@ -15,6 +21,10 @@
           var isDark = saved === 'dark';
           document.documentElement.classList.add(isDark ? 'theme-dark' : 'theme-light');
           document.documentElement.classList.remove(isDark ? 'theme-light' : 'theme-dark');
+          var themeMeta = document.querySelector('meta[name="theme-color"]');
+          if (themeMeta) {
+            themeMeta.setAttribute('content', isDark ? '#020617' : '#e6ebf2');
+          }
         } catch(e) {}
       })();
     </script>

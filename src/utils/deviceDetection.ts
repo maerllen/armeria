@@ -1,25 +1,26 @@
 import { useState, useEffect } from 'react';
 
-export type DeviceMode = 'auto' | 'mobile' | 'desktop';
-
 export interface DeviceInfo {
   isMobile: boolean;
   isDesktop: boolean;
   isTablet: boolean;
   isTouch: boolean;
+  isAndroid: boolean;
+  isIOS: boolean;
   width: number;
   height: number;
   deviceType: 'mobile' | 'desktop';
-  overrideMode: DeviceMode;
 }
 
-export function getRawDeviceInfo(): Omit<DeviceInfo, 'overrideMode'> {
+export function getRawDeviceInfo(): DeviceInfo {
   if (typeof window === 'undefined') {
     return {
       isMobile: false,
       isDesktop: true,
       isTablet: false,
       isTouch: false,
+      isAndroid: false,
+      isIOS: false,
       width: 1280,
       height: 800,
       deviceType: 'desktop'
@@ -27,22 +28,30 @@ export function getRawDeviceInfo(): Omit<DeviceInfo, 'overrideMode'> {
   }
 
   const ua = navigator.userAgent || navigator.vendor || (window as any).opera || '';
-  const isMobileUA = /android|webos|iphone|ipad|ipod|blackberry|iemobile|opera mini|mobile/i.test(ua);
-  const isTabletUA = /ipad|android(?!.*mobile)|tablet/i.test(ua);
   const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  
+  const isAndroid = /android/i.test(ua);
+  const isIPadOS = /macintosh/i.test(ua) && navigator.maxTouchPoints > 1;
+  const isIOS = /iphone|ipad|ipod/i.test(ua) || isIPadOS;
+
+  const isPhoneUA = /android.*mobile|iphone|ipod|blackberry|iemobile|opera mini|windows phone/i.test(ua);
+  const isTabletUA = /ipad|android(?!.*mobile)|tablet/i.test(ua) || isIPadOS;
+
   const width = window.innerWidth;
   const height = window.innerHeight;
+  const isCompactViewport = window.matchMedia
+    ? window.matchMedia('(max-width: 767px)').matches
+    : width < 768;
 
-  const isMobileScreen = width < 768;
-  const isMobile = isMobileUA || (isTouch && isMobileScreen) || isMobileScreen;
-  const isTablet = isTabletUA || (isTouch && width >= 768 && width <= 1024);
+  const isMobile = isCompactViewport || isPhoneUA;
+  const isTablet = !isMobile && (isTabletUA || (isTouch && width >= 768 && width <= 1024));
 
   return {
     isMobile,
-    isDesktop: !isMobile && !isTablet,
+    isDesktop: !isMobile,
     isTablet,
     isTouch,
+    isAndroid,
+    isIOS,
     width,
     height,
     deviceType: isMobile ? 'mobile' : 'desktop'
@@ -50,46 +59,26 @@ export function getRawDeviceInfo(): Omit<DeviceInfo, 'overrideMode'> {
 }
 
 export function useDeviceDetection() {
-  const [overrideMode, setOverrideMode] = useState<DeviceMode>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('armeria_device_mode');
-      if (saved === 'mobile' || saved === 'desktop') return saved;
-    }
-    return 'auto';
-  });
-
-  const [rawInfo, setRawInfo] = useState<Omit<DeviceInfo, 'overrideMode'>>(getRawDeviceInfo);
+  const [deviceInfo, setDeviceInfo] = useState<DeviceInfo>(getRawDeviceInfo);
 
   useEffect(() => {
+    try {
+      localStorage.removeItem('armeria_device_mode');
+    } catch {
+      // ignore storage access issues
+    }
+
     const handleResize = () => {
-      setRawInfo(getRawDeviceInfo());
+      setDeviceInfo(getRawDeviceInfo());
     };
 
     window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
+    };
   }, []);
 
-  const effectiveIsMobile = overrideMode === 'mobile' ? true : overrideMode === 'desktop' ? false : rawInfo.isMobile;
-  const effectiveIsDesktop = !effectiveIsMobile;
-
-  const setDeviceMode = (mode: DeviceMode) => {
-    setOverrideMode(mode);
-    if (typeof window !== 'undefined') {
-      if (mode === 'auto') {
-        localStorage.removeItem('armeria_device_mode');
-      } else {
-        localStorage.setItem('armeria_device_mode', mode);
-      }
-    }
-  };
-
-  const deviceInfo: DeviceInfo = {
-    ...rawInfo,
-    isMobile: effectiveIsMobile,
-    isDesktop: effectiveIsDesktop,
-    deviceType: effectiveIsMobile ? 'mobile' : 'desktop',
-    overrideMode
-  };
-
-  return { deviceInfo, setDeviceMode };
+  return { deviceInfo };
 }

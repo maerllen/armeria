@@ -43,6 +43,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       body.classList.add('theme-dark');
       body.classList.remove('theme-light');
     }
+
+    const themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (themeMeta) {
+      themeMeta.setAttribute('content', newTheme === 'light' ? '#e6ebf2' : '#020617');
+    }
   };
 
   useEffect(() => {
