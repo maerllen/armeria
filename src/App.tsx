@@ -722,9 +722,9 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'relatorio' && (
+          {activeModule === 'relatorio' && effectiveUser && (
             <ReportModule
-              currentUser={currentUser}
+              currentUser={effectiveUser}
               movements={movements}
               ammoMovements={ammoMovements}
               departments={departments}

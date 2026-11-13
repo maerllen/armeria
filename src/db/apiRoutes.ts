@@ -1088,7 +1088,7 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
 
     try {
       const [activeLoans]: any = await pool.query(
-        `SELECT * FROM MOVIMENTACOES_ARMAS WHERE POLICIAL_ID_MOVIMENTACOES_ARMAS = ? AND STATUS_MOVIMENTACOES_ARMAS IN ('Em Trânsito', 'Pendente Recibo', 'Pendente Aprovação')`,
+        `SELECT * FROM MOVIMENTACOES_ARMAS WHERE REQUERENTE_ID_MOVIMENTACOES_ARMAS = ? AND STATUS_MOVIMENTACOES_ARMAS IN ('Em Trânsito', 'Pendente Recibo', 'Pendente Aprovação')`,
         [id]
       );
 
@@ -1117,7 +1117,7 @@ apiRouter.delete('/users/:id', async (req: Request, res: Response) => {
 apiRouter.get('/available-weapon-types', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT id, name, models, created_at as createdAt FROM available_weapon_types ORDER BY name ASC');
+    const [rows]: any = await pool.query('SELECT ID_TIPOS_ARMAS as id, NOME_TIPOS_ARMAS as name, MODELOS_TIPOS_ARMAS as models, DATA_CRIACAO_TIPOS_ARMAS as createdAt FROM TIPOS_ARMAS ORDER BY NOME_TIPOS_ARMAS ASC');
     const mapped = (rows || []).map((wt: any) => ({
       id: wt.id,
       name: wt.name,
@@ -1141,7 +1141,7 @@ apiRouter.post('/available-weapon-types', async (req: Request, res: Response) =>
     const modelsArr = Array.isArray(models) ? models : [];
 
     // Check if updating or inserting
-    const [existing]: any = await pool.query('SELECT id FROM available_weapon_types WHERE id = ?', [finalId]);
+    const [existing]: any = await pool.query('SELECT ID_TIPOS_ARMAS as id FROM TIPOS_ARMAS WHERE ID_TIPOS_ARMAS = ?', [finalId]);
     if (existing && existing.length > 0) {
       await pool.query(
         'UPDATE TIPOS_ARMAS SET NOME_TIPOS_ARMAS = ?, MODELOS_TIPOS_ARMAS = ? WHERE ID_TIPOS_ARMAS = ?',
@@ -1843,7 +1843,7 @@ apiRouter.get('/ammo-movements', async (req: Request, res: Response) => {
           OBSERVACAO_MOVIMENTACOES_MUNICOES as observation, 
           QUANTIDADE_DEVOLVIDA_MOVIMENTACOES_MUNICOES as returnedQuantity, 
           DATA_DEVOLUCAO_MOVIMENTACOES_MUNICOES as returnedAt,
-          NOME_USUARIO_RECEBIMENTO_MOVIMENTACOES_MUNICOES as returnedByUserName, 
+          COALESCE(NOME_USUARIO_RECEBIMENTO_MOVIMENTACOES_MUNICOES, DEVOLVIDO_POR_NOME_MOVIMENTACOES_MUNICOES) as returnedByUserName, 
           USUARIO_ID_MOVIMENTACOES_MUNICOES as userId, 
           NOME_USUARIO_MOVIMENTACOES_MUNICOES as userName, 
           DATA_CRIACAO_MOVIMENTACOES_MUNICOES as createdAt
@@ -2102,7 +2102,20 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
     }
 
     // Retrieve movement to reconcile inventory stocks before deletion
-    const [rows]: any = await pool.query('SELECT * FROM ammo_movements WHERE id = ?', [id]);
+    const [rows]: any = await pool.query(
+      `SELECT 
+        ID_MOVIMENTACOES_MUNICOES as id,
+        TIPO_MOVIMENTACOES_MUNICOES as type,
+        CALIBRE_ID_MOVIMENTACOES_MUNICOES as caliber_id,
+        QUANTIDADE_MOVIMENTACOES_MUNICOES as quantity,
+        QUANTIDADE_DEVOLVIDA_MOVIMENTACOES_MUNICOES as returned_quantity,
+        DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES as department_id,
+        UNIDADE_ID_MOVIMENTACOES_MUNICOES as unit_id,
+        COFRE_ID_MOVIMENTACOES_MUNICOES as vault_space_id,
+        DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES as recipient_or_reason
+       FROM MOVIMENTACOES_MUNICOES WHERE ID_MOVIMENTACOES_MUNICOES = ?`,
+      [id]
+    );
     if (rows && rows.length > 0) {
       const mov = rows[0];
 
@@ -2111,7 +2124,7 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
         const netConsumed = Math.max(0, mov.quantity - (mov.returned_quantity || 0));
         if (netConsumed > 0 && mov.vault_space_id && mov.caliber_id) {
           const [stocks]: any = await pool.query(
-            'SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?',
+            'SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?',
             [mov.vault_space_id, mov.caliber_id]
           );
           if (stocks && stocks.length > 0) {
@@ -2120,7 +2133,7 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
           } else {
             const stockId = `stock-${Date.now()}`;
             await pool.query(
-              'INSERT INTO ammo_stocks (id, caliber_id, quantity, department_id, unit_id, vault_space_id) VALUES (?, ?, ?, ?, ?, ?)',
+              'INSERT INTO ESTOQUE_MUNICOES (ID_ESTOQUE_MUNICOES, CALIBRE_ID_ESTOQUE_MUNICOES, QUANTIDADE_ESTOQUE_MUNICOES, DEPARTAMENTO_ID_ESTOQUE_MUNICOES, UNIDADE_ID_ESTOQUE_MUNICOES, COFRE_ID_ESTOQUE_MUNICOES, DATA_ATUALIZACAO_ESTOQUE_MUNICOES) VALUES (?, ?, ?, ?, ?, ?, NOW())',
               [stockId, mov.caliber_id, netConsumed, mov.department_id, mov.unit_id, mov.vault_space_id]
             );
           }
@@ -2130,7 +2143,7 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
       else if (mov.type === 'Entrada') {
         if (mov.quantity > 0 && mov.vault_space_id && mov.caliber_id) {
           const [stocks]: any = await pool.query(
-            'SELECT * FROM ammo_stocks WHERE vault_space_id = ? AND caliber_id = ?',
+            'SELECT ID_ESTOQUE_MUNICOES as id, QUANTIDADE_ESTOQUE_MUNICOES as quantity FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND CALIBRE_ID_ESTOQUE_MUNICOES = ?',
             [mov.vault_space_id, mov.caliber_id]
           );
           if (stocks && stocks.length > 0) {
@@ -2824,14 +2837,35 @@ apiRouter.get('/movements', async (req: Request, res: Response) => {
     const pool = getPool();
     const [rows]: any = await pool.query(`
       SELECT 
-        id, weapon_id as weaponId, weapon_serial_number as weaponSerialNumber, weapon_model as weaponModel, weapon_type as weaponType, caliber,
-        department_id as departmentId, unit_id as unitId, requester_id as requesterId, requester_name as requesterName, requester_masp as requesterMasp,
-        withdrawal_vault_space_id as withdrawalVaultSpaceId, return_vault_space_id as returnVaultSpaceId, ammunition_count as ammunitionCount,
-        magazine_count as magazineCount, returning_ammunition_count as returningAmmunitionCount, returning_magazine_count as returningMagazineCount,
-        status, approved_by_user_id as approvedByUserId, approved_by_user_name as approvedByUserName, approval_date as approvalDate,
-        receipt_confirmed_by_user_id as receiptConfirmedByUserId, receipt_confirmed_by_user_name as receiptConfirmedByUserName, receipt_date as receiptDate,
-        has_divergence as hasDivergence, divergence_justification as divergenceJustification, created_at as createdAt, updated_at as updatedAt
-      FROM weapon_movements ORDER BY created_at DESC
+        ID_MOVIMENTACOES_ARMAS as id,
+        ARMA_ID_MOVIMENTACOES_ARMAS as weaponId,
+        NUMERO_SERIE_ARMA_MOVIMENTACOES_ARMAS as weaponSerialNumber,
+        MODELO_ARMA_MOVIMENTACOES_ARMAS as weaponModel,
+        TIPO_ARMA_MOVIMENTACOES_ARMAS as weaponType,
+        CALIBRE_MOVIMENTACOES_ARMAS as caliber,
+        DEPARTAMENTO_ID_MOVIMENTACOES_ARMAS as departmentId,
+        UNIDADE_ID_MOVIMENTACOES_ARMAS as unitId,
+        REQUERENTE_ID_MOVIMENTACOES_ARMAS as requesterId,
+        NOME_REQUERENTE_MOVIMENTACOES_ARMAS as requesterName,
+        MASP_REQUERENTE_MOVIMENTACOES_ARMAS as requesterMasp,
+        COFRE_RETIRADA_ID_MOVIMENTACOES_ARMAS as withdrawalVaultSpaceId,
+        COFRE_DEVOLUCAO_ID_MOVIMENTACOES_ARMAS as returnVaultSpaceId,
+        QUANTIDADE_MUNICAO_MOVIMENTACOES_ARMAS as ammunitionCount,
+        QUANTIDADE_CARREGADORES_MOVIMENTACOES_ARMAS as magazineCount,
+        QUANTIDADE_MUNICAO_DEVOLUCAO_MOVIMENTACOES_ARMAS as returningAmmunitionCount,
+        QUANTIDADE_CARREGADORES_DEVOLUCAO_MOVIMENTACOES_ARMAS as returningMagazineCount,
+        STATUS_MOVIMENTACOES_ARMAS as status,
+        APROVADO_POR_USUARIO_ID_MOVIMENTACOES_ARMAS as approvedByUserId,
+        APROVADO_POR_NOME_MOVIMENTACOES_ARMAS as approvedByUserName,
+        DATA_APROVACAO_MOVIMENTACOES_ARMAS as approvalDate,
+        RECIBO_CONFIRMADO_POR_USUARIO_ID_MOVIMENTACOES_ARMAS as receiptConfirmedByUserId,
+        RECIBO_CONFIRMADO_POR_NOME_MOVIMENTACOES_ARMAS as receiptConfirmedByUserName,
+        DATA_RECIBO_MOVIMENTACOES_ARMAS as receiptDate,
+        POSSUI_DIVERGENCIA_MOVIMENTACOES_ARMAS as hasDivergence,
+        JUSTIFICATIVA_DIVERGENCIA_MOVIMENTACOES_ARMAS as divergenceJustification,
+        DATA_CRIACAO_MOVIMENTACOES_ARMAS as createdAt,
+        DATA_ATUALIZACAO_MOVIMENTACOES_ARMAS as updatedAt
+      FROM MOVIMENTACOES_ARMAS ORDER BY DATA_CRIACAO_MOVIMENTACOES_ARMAS DESC
     `);
     return res.json(rows || []);
   } catch (err: any) {
@@ -2855,10 +2889,12 @@ apiRouter.post('/movements/request-withdrawal', async (req: Request, res: Respon
 
     const movId = `mov-${Date.now()}`;
     await pool.query(
-      `INSERT INTO weapon_movements (
-        id, weapon_id, weapon_serial_number, weapon_model, weapon_type, caliber, department_id, unit_id,
-        requester_id, requester_name, requester_masp, withdrawal_vault_space_id, ammunition_count, magazine_count,
-        status, created_at, updated_at
+      `INSERT INTO MOVIMENTACOES_ARMAS (
+        ID_MOVIMENTACOES_ARMAS, ARMA_ID_MOVIMENTACOES_ARMAS, NUMERO_SERIE_ARMA_MOVIMENTACOES_ARMAS, MODELO_ARMA_MOVIMENTACOES_ARMAS,
+        TIPO_ARMA_MOVIMENTACOES_ARMAS, CALIBRE_MOVIMENTACOES_ARMAS, DEPARTAMENTO_ID_MOVIMENTACOES_ARMAS, UNIDADE_ID_MOVIMENTACOES_ARMAS,
+        REQUERENTE_ID_MOVIMENTACOES_ARMAS, NOME_REQUERENTE_MOVIMENTACOES_ARMAS, MASP_REQUERENTE_MOVIMENTACOES_ARMAS,
+        COFRE_RETIRADA_ID_MOVIMENTACOES_ARMAS, QUANTIDADE_MUNICAO_MOVIMENTACOES_ARMAS, QUANTIDADE_CARREGADORES_MOVIMENTACOES_ARMAS,
+        STATUS_MOVIMENTACOES_ARMAS, DATA_CRIACAO_MOVIMENTACOES_ARMAS, DATA_ATUALIZACAO_MOVIMENTACOES_ARMAS
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente Aprovação', NOW(), NOW())`,
       [
         movId,
@@ -3054,7 +3090,15 @@ apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
         DATAS_CURSOS_ACADEMIA as dates,
         NOME_DEPARTAMENTO_CURSOS_ACADEMIA as department_name,
         DATA_INICIO_CURSOS_ACADEMIA as start_date,
+        DATA_FIM_CURSOS_ACADEMIA as end_date,
         NUMERO_MODULO_CURSOS_ACADEMIA as module_number,
+        MODULO_CURSOS_ACADEMIA as module,
+        NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA as teaching_department_name,
+        DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA as teaching_department_id,
+        NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA as location_department_name,
+        DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA as location_department_id,
+        DURACAO_DIAS_CURSOS_ACADEMIA as duration_days,
+        DISCIPLINA_CURSOS_ACADEMIA as subject,
         QUANTIDADE_AULAS_CURSOS_ACADEMIA as lesson_count,
         DADOS_AULAS_CURSOS_ACADEMIA as lessons_data,
         DEPARTAMENTO_ID_CURSOS_ACADEMIA as department_id,
@@ -3109,9 +3153,12 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
       await pool.query(
         `INSERT INTO CURSOS_ACADEMIA (
           ID_CURSOS_ACADEMIA, NOME_CURSOS_ACADEMIA, TIPO_CURSOS_ACADEMIA, CARREIRA_CURSOS_ACADEMIA, CODIGO_CURSOS_ACADEMIA,
-          DATAS_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_CURSOS_ACADEMIA, DATA_INICIO_CURSOS_ACADEMIA, NUMERO_MODULO_CURSOS_ACADEMIA,
+          DATAS_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_CURSOS_ACADEMIA, DATA_INICIO_CURSOS_ACADEMIA, DATA_FIM_CURSOS_ACADEMIA,
+          NUMERO_MODULO_CURSOS_ACADEMIA, MODULO_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA,
+          DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA,
+          DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA, DURACAO_DIAS_CURSOS_ACADEMIA, DISCIPLINA_CURSOS_ACADEMIA,
           QUANTIDADE_AULAS_CURSOS_ACADEMIA, DADOS_AULAS_CURSOS_ACADEMIA, DEPARTAMENTO_ID_CURSOS_ACADEMIA, UNIDADE_ID_CURSOS_ACADEMIA, DATA_CRIACAO_CURSOS_ACADEMIA
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           id,
           name.trim(),
@@ -3121,7 +3168,15 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
           JSON.stringify(dates || []),
           departmentName ? departmentName.trim() : null,
           startDate || null,
+          endDate || null,
           moduleNumber || null,
+          module || null,
+          teachingDepartmentName ? teachingDepartmentName.trim() : null,
+          teachingDepartmentId || null,
+          locationDepartmentName ? locationDepartmentName.trim() : null,
+          locationDepartmentId || null,
+          durationDays ? Number(durationDays) : 1,
+          subject || null,
           lessonCount || 1,
           JSON.stringify(lessonsData || []),
           departmentId || null,
@@ -3462,14 +3517,14 @@ apiRouter.put('/weapon-boxes/:id', async (req: Request, res: Response) => {
     const pool = getPool();
 
     await pool.query(
-      `UPDATE weapon_boxes SET
-        name = ?,
-        course_type = ?,
-        weapon_count = ?,
-        weapon_ids = ?,
-        department_id = ?,
-        unit_id = ?
-       WHERE id = ?`,
+      `UPDATE CAIXAS_ARMAS SET
+        NOME_CAIXAS_ARMAS = ?,
+        TIPO_CURSO_CAIXAS_ARMAS = ?,
+        QUANTIDADE_ARMAS_CAIXAS_ARMAS = ?,
+        IDS_ARMAS_CAIXAS_ARMAS = ?,
+        DEPARTAMENTO_ID_CAIXAS_ARMAS = ?,
+        UNIDADE_ID_CAIXAS_ARMAS = ?
+       WHERE ID_CAIXAS_ARMAS = ?`,
       [
         name,
         courseType,
@@ -3522,8 +3577,13 @@ apiRouter.post('/weapon-boxes/:id/replace-weapon', async (req: Request, res: Res
     const finalRespName = responsibleUserName || teacherName || actor?.name || 'Armeiro Responsável';
     const repId = `rep-${Date.now()}`;
     await pool.query(
-      `INSERT INTO weapon_box_replacements (id, box_id, box_name, old_weapon_id, old_weapon_desc, new_weapon_id, new_weapon_desc, reason, teacher_name, responsible_user_name, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      `INSERT INTO SUBSTITUICOES_CAIXA_ARMAS (
+        ID_SUBSTITUICOES_CAIXA_ARMAS, CAIXA_ID_SUBSTITUICOES_CAIXA_ARMAS, NOME_CAIXA_SUBSTITUICOES_CAIXA_ARMAS,
+        ARMA_ANTIGA_ID_SUBSTITUICOES_CAIXA_ARMAS, DESCRICAO_ARMA_ANTIGA_SUBSTITUICOES_CAIXA_ARMAS,
+        ARMA_NOVA_ID_SUBSTITUICOES_CAIXA_ARMAS, DESCRICAO_ARMA_NOVA_SUBSTITUICOES_CAIXA_ARMAS,
+        MOTIVO_SUBSTITUICOES_CAIXA_ARMAS, NOME_PROFESSOR_SUBSTITUICOES_CAIXA_ARMAS,
+        NOME_RESPONSAVEL_SUBSTITUICOES_CAIXA_ARMAS, DATA_CRIACAO_SUBSTITUICOES_CAIXA_ARMAS
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         repId,
         id,
@@ -3597,22 +3657,23 @@ apiRouter.get('/course-classes', async (req: Request, res: Response) => {
         CARREIRA_TURMAS_CURSO as career,
         SIGLA_CARREIRA_TURMAS_CURSO as career_abbreviation,
         NUMERO_TURMA_TURMAS_CURSO as turma_number,
-        CODIGO_TURMAS_CURSO as turma_code,
+        CODIGO_TURMAS_CURSO as code,
         QUANTIDADE_ALUNOS_TURMAS_CURSO as student_count,
-        IDS_PROFESSORES_TURMAS_CURSO as teacher_ids,
+        COALESCE(PROFESSORES_IDS_TURMAS_CURSO, IDS_PROFESSORES_TURMAS_CURSO) as teacher_user_ids,
         NOME_PROFESSOR_TURMAS_CURSO as teacher_name,
+        PLANO_DE_AULA_TURMAS_CURSO as plano_de_aula,
         DEPARTAMENTO_ID_TURMAS_CURSO as department_id,
         UNIDADE_ID_TURMAS_CURSO as unit_id,
-        PRIMEIRA_DATA_AULA_TURMAS_CURSO as first_lesson_date,
-        ULTIMA_DATA_AULA_TURMAS_CURSO as last_lesson_date,
-        TURMA_CALENDARIO_TURMAS_CURSO as calendar_turma,
+        COALESCE(DATA_PRIMEIRA_AULA_TURMAS_CURSO, PRIMEIRA_DATA_AULA_TURMAS_CURSO) as first_class_date,
+        COALESCE(DATA_ULTIMA_AULA_TURMAS_CURSO, ULTIMA_DATA_AULA_TURMAS_CURSO) as last_class_date,
+        TURMA_CALENDARIO_TURMAS_CURSO as turma_calendario,
         DATA_CRIACAO_TURMAS_CURSO as created_at
       FROM TURMAS_CURSO ORDER BY DATA_CRIACAO_TURMAS_CURSO DESC
     `);
 
     let teacherMap: Record<string, string> = {};
     try {
-      const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+      const [tchRows]: any = await pool.query('SELECT ID_USUARIOS as id, NOME_USUARIOS as name, ID_USUARIOS as user_id FROM USUARIOS WHERE EH_PROFESSOR_USUARIOS = 1');
       (tchRows || []).forEach((t: any) => {
         if (t.id) teacherMap[t.id] = t.name;
         if (t.user_id) teacherMap[t.user_id] = t.name;
@@ -3702,7 +3763,7 @@ apiRouter.post('/course-classes', async (req: Request, res: Response) => {
     if (!finalTeacherName && finalTeacherUserIds.length > 0) {
       try {
         let teacherMap: Record<string, string> = {};
-        const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+        const [tchRows]: any = await pool.query('SELECT ID_USUARIOS as id, NOME_USUARIOS as name, ID_USUARIOS as user_id FROM USUARIOS WHERE EH_PROFESSOR_USUARIOS = 1');
         (tchRows || []).forEach((t: any) => {
           if (t.id) teacherMap[t.id] = t.name;
           if (t.user_id) teacherMap[t.user_id] = t.name;
@@ -3803,7 +3864,7 @@ apiRouter.put('/course-classes/:id', async (req: Request, res: Response) => {
     if (!finalTeacherName && finalTeacherUserIds.length > 0) {
       try {
         let teacherMap: Record<string, string> = {};
-        const [tchRows]: any = await pool.query('SELECT id, name, user_id FROM teachers');
+        const [tchRows]: any = await pool.query('SELECT ID_USUARIOS as id, NOME_USUARIOS as name, ID_USUARIOS as user_id FROM USUARIOS WHERE EH_PROFESSOR_USUARIOS = 1');
         (tchRows || []).forEach((t: any) => {
           if (t.id) teacherMap[t.id] = t.name;
           if (t.user_id) teacherMap[t.user_id] = t.name;
@@ -3884,9 +3945,9 @@ apiRouter.get('/course-movements', async (req: Request, res: Response) => {
         ID_MOVIMENTACOES_TURMA as id,
         CURSO_ID_MOVIMENTACOES_TURMA as course_id,
         TURMA_ID_MOVIMENTACOES_TURMA as class_id,
-        CODIGO_TURMA_MOVIMENTACOES_TURMA as class_code,
+        CODIGO_TURMA_MOVIMENTACOES_TURMA as turma_code,
         PLANO_AULA_ID_MOVIMENTACOES_TURMA as lesson_plan_id,
-        NOME_PLANO_AULA_MOVIMENTACOES_TURMA as lesson_name,
+        NOME_PLANO_AULA_MOVIMENTACOES_TURMA as lesson_plan_name,
         NUMERO_AULA_MOVIMENTACOES_TURMA as lesson_number,
         NOME_PROFESSOR_MOVIMENTACOES_TURMA as teacher_name,
         CAIXA_ARMAS_ID_MOVIMENTACOES_TURMA as weapon_box_id,
@@ -3894,16 +3955,16 @@ apiRouter.get('/course-movements', async (req: Request, res: Response) => {
         IDS_ARMAS_MOVIMENTACOES_TURMA as weapon_ids,
         CALIBRE_ID_MOVIMENTACOES_TURMA as caliber_id,
         COFRE_ID_MOVIMENTACOES_TURMA as vault_space_id,
-        MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA as ammo_provided,
+        MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA as ammo_supplied,
         QUANTIDADE_ALUNOS_MOVIMENTACOES_TURMA as student_count,
         TIROS_POR_ALUNO_MOVIMENTACOES_TURMA as shots_per_student,
         TIROS_INSTRUTOR_MOVIMENTACOES_TURMA as instructor_shots,
         MUNICAO_USADA_MOVIMENTACOES_TURMA as ammo_used,
         MUNICAO_DEVOLVIDA_MOVIMENTACOES_TURMA as ammo_returned,
-        CARREGADORES_EXTRAS_MOVIMENTACOES_TURMA as extra_magazines,
+        CARREGADORES_EXTRAS_MOVIMENTACOES_TURMA as extra_magazines_count,
         STATUS_MOVIMENTACOES_TURMA as status,
-        EMITIDO_POR_NOME_MOVIMENTACOES_TURMA as issued_by_name,
-        DEVOLVIDO_POR_NOME_MOVIMENTACOES_TURMA as returned_by_name,
+        EMITIDO_POR_NOME_MOVIMENTACOES_TURMA as issued_by_user_name,
+        DEVOLVIDO_POR_NOME_MOVIMENTACOES_TURMA as returned_by_user_name,
         MATERIAIS_DEVOLVIDOS_MOVIMENTACOES_TURMA as returned_materials,
         OBSERVACOES_MOVIMENTACOES_TURMA as notes,
         DATA_CRIACAO_MOVIMENTACOES_TURMA as created_at,
@@ -3989,8 +4050,13 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
 
     const executeInsertMovement = async () => {
       await pool.query(
-        `INSERT INTO course_class_movements
-          (id, course_id, class_id, turma_code, lesson_plan_id, lesson_plan_name, lesson_number, teacher_name, weapon_box_id, weapon_box_name, weapon_ids, caliber_id, vault_space_id, ammo_supplied, student_count, shots_per_student, instructor_shots, ammo_used, extra_magazines_count, status, issued_by_user_name, created_at)
+        `INSERT INTO MOVIMENTACOES_TURMA
+          (ID_MOVIMENTACOES_TURMA, CURSO_ID_MOVIMENTACOES_TURMA, TURMA_ID_MOVIMENTACOES_TURMA, CODIGO_TURMA_MOVIMENTACOES_TURMA,
+           PLANO_AULA_ID_MOVIMENTACOES_TURMA, NOME_PLANO_AULA_MOVIMENTACOES_TURMA, NUMERO_AULA_MOVIMENTACOES_TURMA, NOME_PROFESSOR_MOVIMENTACOES_TURMA,
+           CAIXA_ARMAS_ID_MOVIMENTACOES_TURMA, NOME_CAIXA_ARMAS_MOVIMENTACOES_TURMA, IDS_ARMAS_MOVIMENTACOES_TURMA, CALIBRE_ID_MOVIMENTACOES_TURMA,
+           COFRE_ID_MOVIMENTACOES_TURMA, MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA, QUANTIDADE_ALUNOS_MOVIMENTACOES_TURMA, TIROS_POR_ALUNO_MOVIMENTACOES_TURMA,
+           TIROS_INSTRUTOR_MOVIMENTACOES_TURMA, MUNICAO_USADA_MOVIMENTACOES_TURMA, CARREGADORES_EXTRAS_MOVIMENTACOES_TURMA, STATUS_MOVIMENTACOES_TURMA,
+           EMITIDO_POR_NOME_MOVIMENTACOES_TURMA, DATA_CRIACAO_MOVIMENTACOES_TURMA)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Aula', ?, NOW())`,
         [
           id,
@@ -4020,8 +4086,8 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
     try {
       await executeInsertMovement();
     } catch (insertErr: any) {
-      if (insertErr.message && (insertErr.message.includes('course_id') || insertErr.message.includes('cannot be null'))) {
-        try { await pool.query('ALTER TABLE course_class_movements MODIFY COLUMN course_id VARCHAR(64) NULL DEFAULT NULL;'); } catch (e) {}
+      if (insertErr.message && (insertErr.message.includes('CURSO_ID_MOVIMENTACOES_TURMA') || insertErr.message.includes('cannot be null'))) {
+        try { await pool.query('ALTER TABLE MOVIMENTACOES_TURMA MODIFY COLUMN CURSO_ID_MOVIMENTACOES_TURMA VARCHAR(64) NULL DEFAULT NULL;'); } catch (e) {}
         await executeInsertMovement();
       } else {
         throw insertErr;
@@ -4064,16 +4130,18 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
         const newQty = Math.max(0, targetStock.quantity - finalAmmoSupplied);
         await pool.query('UPDATE ESTOQUE_MUNICOES SET QUANTIDADE_ESTOQUE_MUNICOES = ? WHERE ID_ESTOQUE_MUNICOES = ?', [newQty, targetStock.id]);
 
-        // Register movement in ammo_movements as (Aula CFTP)
+        // Register movement in MOVIMENTACOES_MUNICOES as (Aula CFTP)
         try {
           const ammoMovId = `ammo-mov-${Date.now()}`;
           await pool.query(
-            `INSERT INTO ammo_movements (id, stock_id, caliber_id, vault_space_id, type, quantity, recipient_or_reason, responsible_user_name, department_id, created_at)
-             VALUES (?, ?, ?, ?, 'Saída', ?, ?, ?, ?, NOW())`,
+            `INSERT INTO MOVIMENTACOES_MUNICOES (
+              ID_MOVIMENTACOES_MUNICOES, CALIBRE_ID_MOVIMENTACOES_MUNICOES, COFRE_ID_MOVIMENTACOES_MUNICOES,
+              TIPO_MOVIMENTACOES_MUNICOES, QUANTIDADE_MOVIMENTACOES_MUNICOES, DESTINATARIO_OU_MOTIVO_MOVIMENTACOES_MUNICOES,
+              NOME_USUARIO_MOVIMENTACOES_MUNICOES, DEPARTAMENTO_ID_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES
+             ) VALUES (?, ?, ?, 'Saída', ?, ?, ?, ?, NOW())`,
             [
               ammoMovId,
-              targetStock.id,
-              targetStock.caliber_id || caliberId || null,
+              targetStock.caliber_id || caliberId || '',
               targetStock.vault_space_id || vaultSpaceId || null,
               finalAmmoSupplied,
               `(Aula CFTP) - Turma ${finalTurmaCode} (Prof. ${finalTeacherName})`,
@@ -4082,7 +4150,7 @@ apiRouter.post('/course-movements/saida', async (req: Request, res: Response) =>
             ]
           );
         } catch (mErr) {
-          console.error('Erro ao registrar ammo_movement para Aula CFTP:', mErr);
+          console.error('Erro ao registrar MOVIMENTACOES_MUNICOES para Aula CFTP:', mErr);
         }
       }
     }
@@ -4105,8 +4173,10 @@ apiRouter.post('/course-movements/:id/retorno', async (req: Request, res: Respon
     const [movs]: any = await pool.query(`
       SELECT 
         ID_MOVIMENTACOES_TURMA as id,
+        CODIGO_TURMA_MOVIMENTACOES_TURMA as turma_code,
+        NUMERO_AULA_MOVIMENTACOES_TURMA as lesson_number,
         IDS_ARMAS_MOVIMENTACOES_TURMA as weapon_ids,
-        MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA as ammo_provided,
+        MUNICAO_FORNECIDA_MOVIMENTACOES_TURMA as ammo_supplied,
         COFRE_ID_MOVIMENTACOES_TURMA as vault_space_id,
         CALIBRE_ID_MOVIMENTACOES_TURMA as caliber_id
       FROM MOVIMENTACOES_TURMA WHERE ID_MOVIMENTACOES_TURMA = ?
@@ -5000,21 +5070,21 @@ apiRouter.post('/calendario-aulas/import', async (req: Request, res: Response) =
 
       await pool.query(
         `INSERT INTO CALENDARIO_AULAS 
-          (ID_CALENDARIO_AULAS, DATA_CALENDARIO_CALENDARIO_AULAS, HORARIO_CALENDARIO_CALENDARIO_AULAS, TURMA_CALENDARIO_CALENDARIO_AULAS, SIGLA_CALENDARIO_CALENDARIO_AULAS, DISCIPLINA_CALENDARIO_CALENDARIO_AULAS, SALA_CALENDARIO_CALENDARIO_AULAS, CURSO_CALENDARIO_CALENDARIO_AULAS, MODULO_CALENDARIO_CALENDARIO_AULAS, ANO_CALENDARIO_CALENDARIO_AULAS, NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS, EQUIPE_CALENDARIO_CALENDARIO_AULAS, OBSERVACAO_CALENDARIO_CALENDARIO_AULAS, DATA_CRIACAO_CALENDARIO_AULAS)
+          (ID_CALENDARIO_AULAS, DATA_CALENDARIO_AULAS, HORARIO_CALENDARIO_AULAS, TURMA_CALENDARIO_AULAS, SIGLA_CALENDARIO_AULAS, DISCIPLINA_CALENDARIO_AULAS, SALA_CALENDARIO_AULAS, CURSO_CALENDARIO_AULAS, MODULO_CALENDARIO_AULAS, ANO_CALENDARIO_AULAS, NUMERO_AULA_CALENDARIO_AULAS, EQUIPE_CALENDARIO_AULAS, OBSERVACAO_CALENDARIO_AULAS, DATA_CRIACAO_CALENDARIO_AULAS)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
          ON DUPLICATE KEY UPDATE
-          DATA_CALENDARIO_CALENDARIO_AULAS = VALUES(DATA_CALENDARIO_CALENDARIO_AULAS),
-          HORARIO_CALENDARIO_CALENDARIO_AULAS = VALUES(HORARIO_CALENDARIO_CALENDARIO_AULAS),
-          TURMA_CALENDARIO_CALENDARIO_AULAS = VALUES(TURMA_CALENDARIO_CALENDARIO_AULAS),
-          SIGLA_CALENDARIO_CALENDARIO_AULAS = VALUES(SIGLA_CALENDARIO_CALENDARIO_AULAS),
-          DISCIPLINA_CALENDARIO_CALENDARIO_AULAS = VALUES(DISCIPLINA_CALENDARIO_CALENDARIO_AULAS),
-          SALA_CALENDARIO_CALENDARIO_AULAS = VALUES(SALA_CALENDARIO_CALENDARIO_AULAS),
-          CURSO_CALENDARIO_CALENDARIO_AULAS = VALUES(CURSO_CALENDARIO_CALENDARIO_AULAS),
-          MODULO_CALENDARIO_CALENDARIO_AULAS = VALUES(MODULO_CALENDARIO_CALENDARIO_AULAS),
-          ANO_CALENDARIO_CALENDARIO_AULAS = VALUES(ANO_CALENDARIO_CALENDARIO_AULAS),
-          NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS = VALUES(NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS),
-          EQUIPE_CALENDARIO_CALENDARIO_AULAS = VALUES(EQUIPE_CALENDARIO_CALENDARIO_AULAS),
-          OBSERVACAO_CALENDARIO_CALENDARIO_AULAS = VALUES(OBSERVACAO_CALENDARIO_CALENDARIO_AULAS)`,
+          DATA_CALENDARIO_AULAS = VALUES(DATA_CALENDARIO_AULAS),
+          HORARIO_CALENDARIO_AULAS = VALUES(HORARIO_CALENDARIO_AULAS),
+          TURMA_CALENDARIO_AULAS = VALUES(TURMA_CALENDARIO_AULAS),
+          SIGLA_CALENDARIO_AULAS = VALUES(SIGLA_CALENDARIO_AULAS),
+          DISCIPLINA_CALENDARIO_AULAS = VALUES(DISCIPLINA_CALENDARIO_AULAS),
+          SALA_CALENDARIO_AULAS = VALUES(SALA_CALENDARIO_AULAS),
+          CURSO_CALENDARIO_AULAS = VALUES(CURSO_CALENDARIO_AULAS),
+          MODULO_CALENDARIO_AULAS = VALUES(MODULO_CALENDARIO_AULAS),
+          ANO_CALENDARIO_AULAS = VALUES(ANO_CALENDARIO_AULAS),
+          NUMERO_AULA_CALENDARIO_AULAS = VALUES(NUMERO_AULA_CALENDARIO_AULAS),
+          EQUIPE_CALENDARIO_AULAS = VALUES(EQUIPE_CALENDARIO_AULAS),
+          OBSERVACAO_CALENDARIO_AULAS = VALUES(OBSERVACAO_CALENDARIO_AULAS)`,
         [id, dataCal, horaCal, turmaCal, siglaCal, discCal, salaCal, cursoCal, moduloCal, anoCal, numAulaCal, equipeCal, obsCal]
       );
       importedCount++;
@@ -5057,21 +5127,21 @@ apiRouter.post('/calendario-aulas', async (req: Request, res: Response) => {
 
     await pool.query(
       `INSERT INTO CALENDARIO_AULAS 
-        (ID_CALENDARIO_AULAS, DATA_CALENDARIO_CALENDARIO_AULAS, HORARIO_CALENDARIO_CALENDARIO_AULAS, TURMA_CALENDARIO_CALENDARIO_AULAS, SIGLA_CALENDARIO_CALENDARIO_AULAS, DISCIPLINA_CALENDARIO_CALENDARIO_AULAS, SALA_CALENDARIO_CALENDARIO_AULAS, CURSO_CALENDARIO_CALENDARIO_AULAS, MODULO_CALENDARIO_CALENDARIO_AULAS, ANO_CALENDARIO_CALENDARIO_AULAS, NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS, EQUIPE_CALENDARIO_CALENDARIO_AULAS, OBSERVACAO_CALENDARIO_CALENDARIO_AULAS, DATA_CRIACAO_CALENDARIO_AULAS)
+        (ID_CALENDARIO_AULAS, DATA_CALENDARIO_AULAS, HORARIO_CALENDARIO_AULAS, TURMA_CALENDARIO_AULAS, SIGLA_CALENDARIO_AULAS, DISCIPLINA_CALENDARIO_AULAS, SALA_CALENDARIO_AULAS, CURSO_CALENDARIO_AULAS, MODULO_CALENDARIO_AULAS, ANO_CALENDARIO_AULAS, NUMERO_AULA_CALENDARIO_AULAS, EQUIPE_CALENDARIO_AULAS, OBSERVACAO_CALENDARIO_AULAS, DATA_CRIACAO_CALENDARIO_AULAS)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
        ON DUPLICATE KEY UPDATE
-        DATA_CALENDARIO_CALENDARIO_AULAS = VALUES(DATA_CALENDARIO_CALENDARIO_AULAS),
-        HORARIO_CALENDARIO_CALENDARIO_AULAS = VALUES(HORARIO_CALENDARIO_CALENDARIO_AULAS),
-        TURMA_CALENDARIO_CALENDARIO_AULAS = VALUES(TURMA_CALENDARIO_CALENDARIO_AULAS),
-        SIGLA_CALENDARIO_CALENDARIO_AULAS = VALUES(SIGLA_CALENDARIO_CALENDARIO_AULAS),
-        DISCIPLINA_CALENDARIO_CALENDARIO_AULAS = VALUES(DISCIPLINA_CALENDARIO_CALENDARIO_AULAS),
-        SALA_CALENDARIO_CALENDARIO_AULAS = VALUES(SALA_CALENDARIO_CALENDARIO_AULAS),
-        CURSO_CALENDARIO_CALENDARIO_AULAS = VALUES(CURSO_CALENDARIO_CALENDARIO_AULAS),
-        MODULO_CALENDARIO_CALENDARIO_AULAS = VALUES(MODULO_CALENDARIO_CALENDARIO_AULAS),
-        ANO_CALENDARIO_CALENDARIO_AULAS = VALUES(ANO_CALENDARIO_CALENDARIO_AULAS),
-        NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS = VALUES(NUMERO_AULA_CALENDARIO_CALENDARIO_AULAS),
-        EQUIPE_CALENDARIO_CALENDARIO_AULAS = VALUES(EQUIPE_CALENDARIO_CALENDARIO_AULAS),
-        OBSERVACAO_CALENDARIO_CALENDARIO_AULAS = VALUES(OBSERVACAO_CALENDARIO_CALENDARIO_AULAS)`,
+        DATA_CALENDARIO_AULAS = VALUES(DATA_CALENDARIO_AULAS),
+        HORARIO_CALENDARIO_AULAS = VALUES(HORARIO_CALENDARIO_AULAS),
+        TURMA_CALENDARIO_AULAS = VALUES(TURMA_CALENDARIO_AULAS),
+        SIGLA_CALENDARIO_AULAS = VALUES(SIGLA_CALENDARIO_AULAS),
+        DISCIPLINA_CALENDARIO_AULAS = VALUES(DISCIPLINA_CALENDARIO_AULAS),
+        SALA_CALENDARIO_AULAS = VALUES(SALA_CALENDARIO_AULAS),
+        CURSO_CALENDARIO_AULAS = VALUES(CURSO_CALENDARIO_AULAS),
+        MODULO_CALENDARIO_AULAS = VALUES(MODULO_CALENDARIO_AULAS),
+        ANO_CALENDARIO_AULAS = VALUES(ANO_CALENDARIO_AULAS),
+        NUMERO_AULA_CALENDARIO_AULAS = VALUES(NUMERO_AULA_CALENDARIO_AULAS),
+        EQUIPE_CALENDARIO_AULAS = VALUES(EQUIPE_CALENDARIO_AULAS),
+        OBSERVACAO_CALENDARIO_AULAS = VALUES(OBSERVACAO_CALENDARIO_AULAS)`,
       [
         id,
         data_calendario,
@@ -5538,9 +5608,9 @@ apiRouter.get('/certificados', async (req: Request, res: Response) => {
     // Select columns (optionally omit heavy base64 for fast listing)
     const sql = includePdf 
       ? 'SELECT ID_CERTIFICADOS as id, CODIGO_AUTENTICACAO_CERTIFICADOS as codigo_autenticacao, TITULO_CERTIFICADOS as titulo, NOME_ALUNO_CERTIFICADOS as nome_aluno, CPF_MASP_CERTIFICADOS as cpf_masp, DESCRICAO_CERTIFICADOS as descricao, NOME_ARQUIVO_CERTIFICADOS as nome_arquivo, PDF_BASE64_CERTIFICADOS as pdf_base64, PDF_STAMPED_BASE64_CERTIFICADOS as pdf_stamped_base64, TAMANHO_BYTES_CERTIFICADOS as tamanho_bytes, TIPO_MIME_CERTIFICADOS as tipo_mime, DATA_EMISSAO_CERTIFICADOS as data_emissao, CRIADO_POR_USUARIO_ID_CERTIFICADOS as criado_por_usuario_id, CRIADO_POR_NOME_CERTIFICADOS as criado_por_nome, STATUS_CERTIFICADOS as status, DATA_CRIACAO_CERTIFICADOS as data_criacao, DATA_ATUALIZACAO_CERTIFICADOS as data_atualizacao FROM CERTIFICADOS ORDER BY DATA_CRIACAO_CERTIFICADOS DESC'
-      : `SELECT id, codigo_autenticacao, titulo, nome_aluno, cpf_masp, descricao, 
-                nome_arquivo, tamanho_bytes, tipo_mime, data_emissao, 
-                criado_por_usuario_id, criado_por_nome, status, data_criacao, data_atualizacao 
+      : `SELECT ID_CERTIFICADOS as id, CODIGO_AUTENTICACAO_CERTIFICADOS as codigo_autenticacao, TITULO_CERTIFICADOS as titulo, NOME_ALUNO_CERTIFICADOS as nome_aluno, CPF_MASP_CERTIFICADOS as cpf_masp, DESCRICAO_CERTIFICADOS as descricao,
+                NOME_ARQUIVO_CERTIFICADOS as nome_arquivo, TAMANHO_BYTES_CERTIFICADOS as tamanho_bytes, TIPO_MIME_CERTIFICADOS as tipo_mime, DATA_EMISSAO_CERTIFICADOS as data_emissao,
+                CRIADO_POR_USUARIO_ID_CERTIFICADOS as criado_por_usuario_id, CRIADO_POR_NOME_CERTIFICADOS as criado_por_nome, STATUS_CERTIFICADOS as status, DATA_CRIACAO_CERTIFICADOS as data_criacao, DATA_ATUALIZACAO_CERTIFICADOS as data_atualizacao
          FROM CERTIFICADOS ORDER BY DATA_CRIACAO_CERTIFICADOS DESC`;
          
     const [rows]: any = await pool.query(sql);
