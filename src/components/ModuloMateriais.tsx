@@ -3,6 +3,8 @@ import {
   Material,
   TipoMaterial,
   CautelaMaterial,
+  MaterialTransfer,
+  VaultSpace,
   User,
   Department,
   Unit
@@ -34,7 +36,10 @@ import {
   X,
   ExternalLink,
   Flame,
-  Info
+  Info,
+  Eye,
+  Vault,
+  Send
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 import { MaterialReceiptModal } from './ModalReciboMaterial';
@@ -44,6 +49,7 @@ interface MaterialModuleProps {
   departments: Department[];
   units: Unit[];
   allUsers: User[];
+  vaultSpaces?: VaultSpace[];
   onRefresh: () => void;
 }
 
@@ -52,6 +58,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   departments,
   units,
   allUsers,
+  vaultSpaces: vaultSpacesProp,
   onRefresh
 }) => {
   const [activeTab, setActiveTab] = useState<'estoque' | 'cautelas' | 'tipos'>('estoque');
@@ -60,6 +67,8 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const [selectedDeptFilter, setSelectedDeptFilter] = useState('');
   const [selectedUnitFilter, setSelectedUnitFilter] = useState('');
   const [cautelaStatusFilter, setCautelaStatusFilter] = useState<string>('todas');
+  const [selectedCautelaMaterialId, setSelectedCautelaMaterialId] = useState<string>('');
+  const [selectedVaultDetailsId, setSelectedVaultDetailsId] = useState<string | null>(null);
 
   // Modals
   const [showMaterialModal, setShowMaterialModal] = useState(false);
@@ -90,7 +99,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const [formDepartamentoId, setFormDepartamentoId] = useState('');
   const [formUnidadeId, setFormUnidadeId] = useState('');
   const [formValidade, setFormValidade] = useState('');
+  const [formVaultSpaceId, setFormVaultSpaceId] = useState('');
   const [formLocalGuarda, setFormLocalGuarda] = useState('');
+  const [formPassivoDeposito, setFormPassivoDeposito] = useState<'SIM' | 'NAO'>('SIM');
   const [formNumeroSerie, setFormNumeroSerie] = useState('');
   const [formObservacoes, setFormObservacoes] = useState('');
 
@@ -153,6 +164,14 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const [tiposMateriais, setTiposMateriais] = useState<TipoMaterial[]>(() => storage.getTiposMateriais());
   const [materiaisList, setMateriaisList] = useState<Material[]>(() => storage.getMateriais(currentUser));
   const [cautelasList, setCautelasList] = useState<CautelaMaterial[]>(() => storage.getCautelasMateriais(currentUser));
+  const [transfersList, setTransfersList] = useState<MaterialTransfer[]>(() => storage.getMaterialTransfers(currentUser));
+  const [vaultsList, setVaultsList] = useState<VaultSpace[]>(() =>
+    (vaultSpacesProp && vaultSpacesProp.length > 0) ? vaultSpacesProp : storage.getVaultSpaces(currentUser)
+  );
+  const [receiveTransferTarget, setReceiveTransferTarget] = useState<MaterialTransfer | null>(null);
+  const [receiveVaultId, setReceiveVaultId] = useState('');
+  const [receiveObs, setReceiveObs] = useState('');
+
   const materiais = materiaisList;
   const cautelas = cautelasList;
 
@@ -165,11 +184,31 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     setTiposMateriais(storage.getTiposMateriais());
     setMateriaisList(storage.getMateriais(currentUser));
     setCautelasList(storage.getCautelasMateriais(currentUser));
+    setTransfersList(storage.getMaterialTransfers(currentUser));
+    setVaultsList(storage.getVaultSpaces(currentUser));
   };
 
   useEffect(() => {
     reloadMateriais();
   }, [currentUser]);
+
+  useEffect(() => {
+    if (vaultSpacesProp && vaultSpacesProp.length > 0) {
+      setVaultsList(vaultSpacesProp);
+    }
+  }, [vaultSpacesProp]);
+
+  const materialVaults = useMemo(() => {
+    return (vaultsList || []).filter(v => v.type === 'MATERIAIS');
+  }, [vaultsList]);
+
+  const materialVaultsForForm = useMemo(() => {
+    return materialVaults.filter(v => {
+      if (formUnidadeId) return v.unitId === formUnidadeId;
+      if (formDepartamentoId) return v.departmentId === formDepartamentoId;
+      return true;
+    });
+  }, [materialVaults, formUnidadeId, formDepartamentoId]);
 
   // Filtered materials
   const filteredMateriais = useMemo(() => {
@@ -192,11 +231,69 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     });
   }, [materiaisList, searchTerm, selectedTypeFilter, selectedDeptFilter, selectedUnitFilter]);
 
+  const getVaultForMaterial = (m: Material): VaultSpace | undefined => {
+    if (m.vaultSpaceId) {
+      const byId = materialVaults.find(v => v.id === m.vaultSpaceId);
+      if (byId) return byId;
+    }
+    return materialVaults.find(
+      v => v.code === m.localGuarda && (!m.unidadeId || v.unitId === m.unidadeId)
+    );
+  };
+
+  // Vault cards for Estoque de Materiais tab
+  const filteredMaterialVaults = useMemo(() => {
+    const search = (searchTerm || '').trim().toLowerCase();
+    return materialVaults.filter(v => {
+      if (selectedDeptFilter && v.departmentId !== selectedDeptFilter) return false;
+      if (selectedUnitFilter && v.unitId !== selectedUnitFilter) return false;
+
+      const itemsInVault = (materiaisList || []).filter(m => {
+        if (m.vaultSpaceId) return m.vaultSpaceId === v.id;
+        return m.localGuarda === v.code && (!m.unidadeId || m.unidadeId === v.unitId);
+      });
+
+      if (selectedTypeFilter && !itemsInVault.some(m => m.tipoMaterialId === selectedTypeFilter)) {
+        return false;
+      }
+
+      if (!search) return true;
+      const uName = (units.find(u => u.id === v.unitId)?.name || '').toLowerCase();
+      const dName = (departments.find(d => d.id === v.departmentId)?.name || '').toLowerCase();
+      const matchesVault =
+        (v.code || '').toLowerCase().includes(search) ||
+        (v.descricaoCurta || '').toLowerCase().includes(search) ||
+        uName.includes(search) ||
+        dName.includes(search);
+      const matchesMaterial = itemsInVault.some(m =>
+        (m.nome || '').toLowerCase().includes(search) ||
+        (m.tipoMaterialNome || '').toLowerCase().includes(search) ||
+        (m.numeroSerie || '').toLowerCase().includes(search)
+      );
+      return matchesVault || matchesMaterial;
+    });
+  }, [materialVaults, materiaisList, units, departments, selectedDeptFilter, selectedUnitFilter, selectedTypeFilter, searchTerm]);
+
+  const legacyUnlinkedMaterials = useMemo(() => {
+    const vaultIds = new Set(materialVaults.map(v => v.id));
+    return (filteredMateriais || []).filter(m => {
+      if (m.vaultSpaceId && vaultIds.has(m.vaultSpaceId)) return false;
+      const matchedByCode = materialVaults.some(
+        v => v.code === m.localGuarda && (!m.unidadeId || v.unitId === m.unidadeId)
+      );
+      return !matchedByCode;
+    });
+  }, [filteredMateriais, materialVaults]);
+
   // Filtered cautelas
   const filteredCautelas = useMemo(() => {
     const search = (searchTerm || '').trim().toLowerCase();
     return (cautelasList || []).filter(c => {
       if (!c) return false;
+      if (selectedCautelaMaterialId && c.materialId !== selectedCautelaMaterialId) return false;
+      if (selectedDeptFilter && c.departamentoId !== selectedDeptFilter) return false;
+      if (selectedUnitFilter && c.unidadeId !== selectedUnitFilter) return false;
+
       const matchSearch = !search || (
         (c.materialNome || '').toLowerCase().includes(search) ||
         (c.protocolo && c.protocolo.toLowerCase().includes(search)) ||
@@ -209,18 +306,39 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
         cautelaStatusFilter === 'todas'
           ? true
           : cautelaStatusFilter === 'em_uso'
-          ? c.status === 'Em Uso'
+          ? c.status === 'Em Uso' || c.status === 'AUTORIZADA'
           : cautelaStatusFilter === 'devolvidas'
-          ? c.status === 'Devolvido'
+          ? c.status === 'Devolvido' || c.status === 'DEVOLVIDA'
           : cautelaStatusFilter === 'consumidas'
-          ? c.status === 'Consumido' || c.foiConsumido
+          ? c.status === 'Consumido' || c.status === 'CONSUMIDA' || c.foiConsumido
           : cautelaStatusFilter === 'anomalias'
           ? c.status === 'Devolvido com Anomalia'
           : true;
 
       return matchSearch && matchStatus;
     });
-  }, [cautelasList, searchTerm, cautelaStatusFilter]);
+  }, [cautelasList, searchTerm, cautelaStatusFilter, selectedCautelaMaterialId, selectedDeptFilter, selectedUnitFilter]);
+
+  const filteredTransfers = useMemo(() => {
+    const search = (searchTerm || '').trim().toLowerCase();
+    return (transfersList || []).filter(t => {
+      if (selectedCautelaMaterialId && t.materialId !== selectedCautelaMaterialId) return false;
+      if (selectedDeptFilter && t.originDepartmentId !== selectedDeptFilter && t.destinationDepartmentId !== selectedDeptFilter) return false;
+      if (selectedUnitFilter && t.originUnitId !== selectedUnitFilter && t.destinationUnitId !== selectedUnitFilter) return false;
+      if (!search) return true;
+      return (
+        (t.nomeMaterial || '').toLowerCase().includes(search) ||
+        (t.protocolNumber || '').toLowerCase().includes(search) ||
+        (t.originUnitName || '').toLowerCase().includes(search) ||
+        (t.destinationUnitName || '').toLowerCase().includes(search)
+      );
+    });
+  }, [transfersList, selectedCautelaMaterialId, selectedDeptFilter, selectedUnitFilter, searchTerm]);
+
+  const selectedTransferCandidateMaterial = useMemo(() => {
+    if (!selectedCautelaMaterialId) return null;
+    return materiaisList.find(m => m.id === selectedCautelaMaterialId) || null;
+  }, [materiaisList, selectedCautelaMaterialId]);
 
   // Departments & Units for select dropdowns
   const availableUnitsForForm = useMemo(() => {
@@ -229,29 +347,40 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   }, [units, formDepartamentoId]);
 
   // Reset / Open Material Modal
-  const handleOpenNewMaterialModal = () => {
+  const handleOpenNewMaterialModal = (presetVault?: VaultSpace) => {
     setEditingMaterial(null);
     setFormTipoMaterialId(tiposMateriais[0]?.id || '');
     setFormNome('');
     setFormQuantidade(1);
 
-    if (isGeral) {
-      setFormDepartamentoId(departments[0]?.id || '');
-      const firstUnit = units.find(u => u.departmentId === departments[0]?.id);
-      setFormUnidadeId(firstUnit?.id || '');
+    let targetDept = '';
+    let targetUnit = '';
+    if (presetVault) {
+      targetDept = presetVault.departmentId || userDeptId;
+      targetUnit = presetVault.unitId || userUnitId;
+    } else if (isGeral) {
+      targetDept = departments[0]?.id || '';
+      const firstUnit = units.find(u => u.departmentId === targetDept);
+      targetUnit = firstUnit?.id || '';
     } else {
-      // Armeiro ou Administrador: Depto pré-selecionado
-      setFormDepartamentoId(userDeptId);
+      targetDept = userDeptId;
       if (isOnlyUnitAccess) {
-        setFormUnidadeId(userUnitId);
+        targetUnit = userUnitId;
       } else {
         const firstDeptUnit = units.find(u => u.departmentId === userDeptId);
-        setFormUnidadeId(firstDeptUnit?.id || userUnitId || '');
+        targetUnit = firstDeptUnit?.id || userUnitId || '';
       }
     }
 
+    setFormDepartamentoId(targetDept);
+    setFormUnidadeId(targetUnit);
+
+    const matchingVaults = materialVaults.filter(v => v.unitId === targetUnit);
+    const chosenVault = presetVault || matchingVaults[0];
+    setFormVaultSpaceId(chosenVault?.id || '');
+    setFormLocalGuarda(chosenVault?.code || '');
+    setFormPassivoDeposito('SIM');
     setFormValidade('');
-    setFormLocalGuarda('');
     setFormNumeroSerie('');
     setFormObservacoes('');
     setShowMaterialModal(true);
@@ -265,7 +394,10 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     setFormDepartamentoId(material.departamentoId);
     setFormUnidadeId(material.unidadeId);
     setFormValidade(material.validade || '');
-    setFormLocalGuarda(material.localGuarda);
+    const matchedVault = getVaultForMaterial(material);
+    setFormVaultSpaceId(material.vaultSpaceId || matchedVault?.id || '');
+    setFormLocalGuarda(material.localGuarda || matchedVault?.code || '');
+    setFormPassivoDeposito(material.passivoDepositoPoliciais === false ? 'NAO' : 'SIM');
     setFormNumeroSerie(material.numeroSerie || '');
     setFormObservacoes(material.observacoes || '');
     setShowMaterialModal(true);
@@ -287,8 +419,10 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setErrorMessage('Selecione o tipo do material.');
       return;
     }
-    if (!formLocalGuarda.trim()) {
-      setErrorMessage('Informe o local de guarda do material.');
+    const chosenVault = materialVaults.find(v => v.id === formVaultSpaceId);
+    const effectiveLocalGuarda = chosenVault?.code || formLocalGuarda.trim();
+    if (!formVaultSpaceId && !effectiveLocalGuarda) {
+      setErrorMessage('Selecione um Cofre de Materiais cadastrado para guarda do material.');
       return;
     }
     if (!formDepartamentoId || !formUnidadeId) {
@@ -314,7 +448,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       unidadeId: formUnidadeId,
       unidadeNome: unitObj?.name || '',
       validade: formValidade ? formValidade : undefined,
-      localGuarda: formLocalGuarda.trim(),
+      vaultSpaceId: chosenVault?.id || formVaultSpaceId || undefined,
+      localGuarda: effectiveLocalGuarda,
+      passivoDepositoPoliciais: formPassivoDeposito === 'SIM',
       numeroSerie: formNumeroSerie ? formNumeroSerie.trim() : undefined,
       observacoes: formObservacoes ? formObservacoes.trim() : undefined
     };
@@ -408,18 +544,51 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     setShowCautelaModal(true);
   };
 
-  // Open Transfer Modal for a Material
+  // Open Transfer Modal for a Material (allows same department / other unit OR another department)
   const handleOpenTransfer = (mat: Material) => {
     setTransferMaterialTarget(mat);
     setTransferQtd(1);
-    setTransferDestDeptId(departments[0]?.id || '');
-    const firstUnits = units.filter(u => u.departmentId === (departments[0]?.id || ''));
-    setTransferDestUnitId(firstUnits[0]?.id || '');
+    const otherUnitSameDept = units.find(
+      u => u.departmentId === mat.departamentoId && u.id !== mat.unidadeId
+    );
+    const fallbackDept = departments.find(d => d.id !== mat.departamentoId) || departments[0];
+    const defaultDeptId = otherUnitSameDept ? mat.departamentoId : (fallbackDept?.id || mat.departamentoId || '');
+    const defaultUnitId = otherUnitSameDept
+      ? otherUnitSameDept.id
+      : (units.find(u => u.departmentId === defaultDeptId && u.id !== mat.unidadeId)?.id ||
+         units.find(u => u.departmentId === defaultDeptId)?.id ||
+         '');
+    setTransferDestDeptId(defaultDeptId);
+    setTransferDestUnitId(defaultUnitId);
     setTransferDestArmorerId('');
     setTransferTransporterId('');
     setTransferReason('Abastecimento e suprimento de carga');
     setTransferObs('');
     setShowTransferModal(true);
+  };
+
+  const handleConfirmReceiveTransfer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!receiveTransferTarget) return;
+    if (!receiveVaultId) {
+      setErrorMessage('Selecione o Cofre de Materiais de destino para receber o item.');
+      return;
+    }
+    setIsSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await storage.receiveMaterialTransfer(receiveTransferTarget.id, receiveVaultId, receiveObs);
+      setReceiveTransferTarget(null);
+      setReceiveObs('');
+      setSuccessMessage('Transferência recebida e incorporada ao Cofre de Materiais com sucesso!');
+      setTimeout(() => setSuccessMessage(null), 4000);
+      onRefresh();
+      reloadMateriais();
+    } catch (err: any) {
+      setErrorMessage(err.message || 'Erro ao receber transferência.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Submit Material Transfer
@@ -667,7 +836,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
           {canInsertMaterial && (
             <>
               <button
-                onClick={handleOpenNewMaterialModal}
+                onClick={() => handleOpenNewMaterialModal()}
                 className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs sm:text-sm rounded-xl flex items-center space-x-2 transition shadow-lg shadow-amber-500/10"
               >
                 <Plus className="w-4 h-4" />
@@ -861,173 +1030,170 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
         )}
 
         {activeTab === 'cautelas' && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <select
               value={cautelaStatusFilter}
               onChange={(e) => setCautelaStatusFilter(e.target.value)}
               className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500"
             >
               <option value="todas">Todos os Status</option>
-              <option value="em_uso">Em Uso (Ativas)</option>
+              <option value="em_uso">Em Uso / Autorizadas</option>
               <option value="devolvidas">Devolvidas</option>
               <option value="consumidas">Consumidas em Serviço</option>
               <option value="anomalias">Com Anomalias</option>
             </select>
+
+            {isGeral && (
+              <select
+                value={selectedDeptFilter}
+                onChange={(e) => {
+                  setSelectedDeptFilter(e.target.value);
+                  setSelectedUnitFilter('');
+                }}
+                className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os Deptos</option>
+                {departments.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            )}
+
+            {(isGeral || !isOnlyUnitAccess) && (
+              <select
+                value={selectedUnitFilter}
+                onChange={(e) => setSelectedUnitFilter(e.target.value)}
+                className="px-3 py-2 bg-slate-950 border border-slate-800 rounded-xl text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todas as Unidades</option>
+                {(selectedDeptFilter ? units.filter(u => u.departmentId === selectedDeptFilter) : units).map(u => (
+                  <option key={u.id} value={u.id}>{u.name}</option>
+                ))}
+              </select>
+            )}
           </div>
         )}
       </div>
 
-      {/* TAB 1: ESTOQUE DE MATERIAIS */}
+      {/* TAB 1: ESTOQUE DE MATERIAIS (COFRES DE MATERIAIS NO FORMATO DE CARDS DE TIPOS DE MATERIAIS) */}
       {activeTab === 'estoque' && (
-        <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden">
-          {filteredMateriais.length === 0 ? (
-            <div className="p-12 text-center text-slate-400 space-y-3">
-              <Package className="w-10 h-10 mx-auto text-slate-600" />
-              <p className="text-base font-semibold">Nenhum material encontrado no estoque.</p>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-slate-400">
+              Cofres destinados à guarda de materiais operacionais. Clique em <strong className="text-slate-200">Ver Detalhes do Cofre</strong> para listar todos os itens armazenados.
+            </p>
+            <span className="text-xs font-mono text-amber-400 font-bold">
+              {filteredMaterialVaults.length} Cofre(s) • {filteredMateriais.length} Item(ns)
+            </span>
+          </div>
+
+          {filteredMaterialVaults.length === 0 && legacyUnlinkedMaterials.length === 0 ? (
+            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 p-12 text-center text-slate-400 space-y-3">
+              <Vault className="w-10 h-10 mx-auto text-slate-600" />
+              <p className="text-base font-semibold">Nenhum Cofre de Materiais encontrado.</p>
               <p className="text-xs text-slate-500">
-                {searchTerm ? 'Tente ajustar os termos da busca ou os filtros.' : 'Clique no botão "+ Novo Material" para cadastrar.'}
+                Cadastre um cofre específico no módulo <strong className="text-slate-300">Locais do Cofre (+ Novo Cofre de Materiais)</strong> para organizar e armazenar materiais.
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-950/70 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold font-mono">
-                  <tr>
-                    <th className="p-3.5">Material & Tipo</th>
-                    <th className="p-3.5">Localização / Unidade</th>
-                    <th className="p-3.5 text-center">Total</th>
-                    <th className="p-3.5 text-center">Disponível</th>
-                    <th className="p-3.5 text-center">Em Uso</th>
-                    <th className="p-3.5">Local de Guarda</th>
-                    <th className="p-3.5">Validade</th>
-                    <th className="p-3.5 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80 text-slate-200">
-                  {filteredMateriais.map((mat) => {
-                    const isLowStock = mat.quantidadeDisponivel === 0;
-                    return (
-                      <tr key={mat.id} className="hover:bg-slate-800/40 transition">
-                        <td className="p-3.5">
-                          <div className="font-bold text-sm text-slate-100 flex items-center space-x-2">
-                            <span>{mat.nome}</span>
-                            {mat.numeroSerie && (
-                              <span className="text-[10px] font-mono px-1.5 py-0.5 bg-slate-800 text-slate-300 rounded border border-slate-700">
-                                S/N: {mat.numeroSerie}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-[11px] text-amber-400 flex items-center space-x-1.5 mt-0.5">
-                            <Tag className="w-3 h-3" />
-                            <span>{mat.tipoMaterialNome}</span>
-                          </div>
-                          {mat.observacoes && (
-                            <p className="text-[10px] text-slate-400 italic mt-1 line-clamp-1">
-                              Obs: {mat.observacoes}
-                            </p>
-                          )}
-                        </td>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredMaterialVaults.map((vault) => {
+                const itemsInVault = filteredMateriais.filter(m =>
+                  m.vaultSpaceId
+                    ? m.vaultSpaceId === vault.id
+                    : (m.localGuarda === vault.code && (!m.unidadeId || m.unidadeId === vault.unitId))
+                );
+                const totalUnitsInVault = itemsInVault.reduce((acc, m) => acc + Number(m.quantidade || 0), 0);
+                const availUnitsInVault = itemsInVault.reduce((acc, m) => acc + Number(m.quantidadeDisponivel || 0), 0);
+                const vaultUnit = units.find(u => u.id === vault.unitId);
+                const vaultDept = departments.find(d => d.id === vault.departmentId);
 
-                        <td className="p-3.5">
-                          <div className="text-slate-200 font-medium">{mat.unidadeNome || mat.unidadeId}</div>
-                          <div className="text-[10px] text-slate-500">{mat.departamentoNome || mat.departamentoId}</div>
-                        </td>
+                return (
+                  <div
+                    key={vault.id}
+                    className="bg-slate-900/60 p-4 rounded-xl border border-slate-800 flex flex-col justify-between hover:border-amber-500/40 transition"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 text-amber-400 rounded border border-slate-700 truncate">
+                          {vaultUnit?.name || vaultDept?.name || 'Unidade'}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-500/15 text-emerald-300 rounded border border-emerald-500/30 flex items-center space-x-1 shrink-0">
+                          <Vault className="w-3 h-3" />
+                          <span>Cofre de Materiais</span>
+                        </span>
+                      </div>
 
-                        <td className="p-3.5 text-center font-mono font-bold text-sm text-slate-200">
-                          {mat.quantidade}
-                        </td>
+                      <h3 className="font-black font-mono text-lg text-slate-100 mt-2.5 tracking-wider">
+                        {vault.code}
+                      </h3>
 
-                        <td className="p-3.5 text-center font-mono">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold ${
-                            isLowStock
-                              ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                              : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                          }`}>
-                            {mat.quantidadeDisponivel} un
-                          </span>
-                        </td>
+                      <p className="text-xs text-slate-300 mt-1 leading-relaxed">
+                        {vault.descricaoCurta || 'Sem descrição curta informada'}
+                      </p>
 
-                        <td className="p-3.5 text-center font-mono font-semibold">
-                          {mat.quantidadeEmUso > 0 ? (
-                            <span className="px-2 py-0.5 rounded text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              {mat.quantidadeEmUso} un
-                            </span>
-                          ) : (
-                            <span className="text-slate-500">0</span>
-                          )}
-                        </td>
+                      <div className="mt-3 p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80 flex items-center justify-between text-xs">
+                        <span className="text-slate-400">Quantidade dentro do cofre:</span>
+                        <span className="font-mono font-bold text-emerald-400">
+                          {totalUnitsInVault} un ({itemsInVault.length} {itemsInVault.length === 1 ? 'item' : 'itens'})
+                        </span>
+                      </div>
+                    </div>
 
-                        <td className="p-3.5 font-medium text-slate-300">
-                          <div className="flex items-center space-x-1.5">
-                            <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                            <span>{mat.localGuarda}</span>
-                          </div>
-                        </td>
+                    <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        Disp.: <strong className="text-slate-200">{availUnitsInVault}</strong> un
+                      </span>
 
-                        <td className="p-3.5">
-                          {getValidityBadge(mat.validade)}
-                        </td>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedVaultDetailsId(vault.id)}
+                        className="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>Ver Detalhes do Cofre</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
 
-                        <td className="p-3.5 text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
-                            {/* Cautelar Button */}
-                            <button
-                              onClick={() => handleOpenCautela(mat)}
-                              disabled={mat.quantidadeDisponivel <= 0}
-                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition ${
-                                mat.quantidadeDisponivel > 0
-                                  ? 'bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30'
-                                  : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-800'
-                              }`}
-                              title={mat.quantidadeDisponivel > 0 ? "Realizar cautela / empréstimo" : "Sem estoque disponível"}
-                            >
-                              <ArrowRightLeft className="w-3.5 h-3.5" />
-                              <span>Cautelar</span>
-                            </button>
-
-                            {/* Transferir Material Button (Armeiro / Admin / Geral) */}
-                            {canInsertMaterial && (
-                              <button
-                                onClick={() => handleOpenTransfer(mat)}
-                                disabled={mat.quantidadeDisponivel <= 0}
-                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition ${
-                                  mat.quantidadeDisponivel > 0
-                                    ? 'bg-sky-500/20 hover:bg-sky-500 text-sky-300 hover:text-slate-950 border border-sky-500/30'
-                                    : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-800'
-                                }`}
-                                title="Transferir material para outra unidade"
-                              >
-                                <Building2 className="w-3.5 h-3.5" />
-                                <span>Transferir</span>
-                              </button>
-                            )}
-
-                            {canInsertMaterial && (
-                              <>
-                                <button
-                                  onClick={() => handleOpenEditMaterialModal(mat)}
-                                  className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                                  title="Editar Material"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </button>
-
-                                <button
-                                  onClick={() => handleDeleteMaterial(mat.id, mat.nome)}
-                                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
-                                  title="Excluir Material"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+              {legacyUnlinkedMaterials.length > 0 && (
+                <div className="bg-slate-900/60 p-4 rounded-xl border border-amber-800/50 flex flex-col justify-between hover:border-amber-500/50 transition">
+                  <div>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-mono px-2 py-0.5 bg-slate-800 text-amber-400 rounded border border-slate-700">
+                        Registros Anteriores
+                      </span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-500/15 text-amber-300 rounded border border-amber-500/30">
+                        Sem Cofre Vinculado
+                      </span>
+                    </div>
+                    <h3 className="font-black font-mono text-lg text-slate-100 mt-2.5">
+                      OUTROS LOCAIS
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                      Materiais cadastrados antes da vinculação obrigatória a um Cofre de Materiais.
+                    </p>
+                    <div className="mt-3 p-2.5 rounded-lg bg-slate-950/70 border border-slate-800/80 flex items-center justify-between text-xs">
+                      <span className="text-slate-400">Quantidade:</span>
+                      <span className="font-mono font-bold text-amber-300">
+                        {legacyUnlinkedMaterials.reduce((acc, m) => acc + Number(m.quantidade || 0), 0)} un ({legacyUnlinkedMaterials.length} itens)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedVaultDetailsId('__LEGACY__')}
+                      className="px-3 py-1.5 bg-amber-500/15 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30 rounded-lg text-xs font-bold flex items-center space-x-1.5 transition"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Ver Detalhes do Cofre</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1035,153 +1201,286 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
 
       {/* TAB 2: CAUTELAS E MOVIMENTAÇÕES */}
       {activeTab === 'cautelas' && (
-        <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden">
-          {filteredCautelas.length === 0 ? (
-            <div className="p-12 text-center text-slate-400 space-y-3">
-              <ArrowRightLeft className="w-10 h-10 mx-auto text-slate-600" />
-              <p className="text-base font-semibold">Nenhuma cautela de material encontrada.</p>
-              <p className="text-xs text-slate-500">
-                Vá até a aba de Estoque e clique em "Cautelar" para registrar retiradas de materiais.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead className="bg-slate-950/70 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold font-mono">
-                  <tr>
-                    <th className="p-3.5">Protocolo & Material</th>
-                    <th className="p-3.5">Destinatário</th>
-                    <th className="p-3.5 text-center">Quantidade</th>
-                    <th className="p-3.5">Retirada & Previsão</th>
-                    <th className="p-3.5">Status</th>
-                    <th className="p-3.5">Finalidade</th>
-                    <th className="p-3.5 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/80 text-slate-200">
-                  {filteredCautelas.map((caut) => {
-                    const isEmUso = caut.status === 'Em Uso';
-                    return (
-                      <tr key={caut.id} className="hover:bg-slate-800/40 transition">
-                        <td className="p-3.5">
-                          <div className="font-bold text-sm text-slate-100 flex items-center space-x-2">
-                            <span>{caut.materialNome}</span>
-                          </div>
-                          <div className="text-[11px] font-mono text-amber-400 mt-0.5">
-                            {caut.protocolo || caut.id}
-                          </div>
-                          <div className="text-[10px] text-slate-500">
-                            Entregue por: {caut.responsavelEntregaNome}
-                          </div>
-                        </td>
+        <div className="space-y-5">
+          {/* Painel de Filtro de Material Específico + Transferência entre Unidades / Departamentos */}
+          {canInsertMaterial && (
+            <div className="bg-slate-900/70 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3">
+                <div className="flex-1 space-y-1">
+                  <label className="block text-[11px] font-bold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>Filtrar Material Específico e Transferir entre Unidades / Departamentos</span>
+                  </label>
+                  <select
+                    value={selectedCautelaMaterialId}
+                    onChange={(e) => setSelectedCautelaMaterialId(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-xs sm:text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                  >
+                    <option value="">Todos os materiais (selecione um material específico para transferir)...</option>
+                    {materiaisList
+                      .filter(m => (!selectedDeptFilter || m.departamentoId === selectedDeptFilter) && (!selectedUnitFilter || m.unidadeId === selectedUnitFilter))
+                      .map(m => (
+                        <option key={m.id} value={m.id}>
+                          {m.nome} {m.numeroSerie ? `(S/N: ${m.numeroSerie})` : ''} — {m.unidadeNome || m.unidadeId} • Cofre: {m.localGuarda} ({m.quantidadeDisponivel} disp.)
+                        </option>
+                      ))}
+                  </select>
+                </div>
 
-                        <td className="p-3.5">
-                          {caut.tipoDestinatario === 'interno' ? (
-                            <div>
-                              <div className="font-semibold text-slate-200 flex items-center space-x-1">
-                                <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                <span>{caut.usuarioInternoNome}</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-mono">
-                                MASP: {formatMasp(caut.usuarioInternoMasp || '')}
-                                {caut.usuarioInternoCargo ? ` • ${caut.usuarioInternoCargo}` : ''}
-                              </div>
-                            </div>
-                          ) : (
-                            <div>
-                              <div className="font-semibold text-slate-200 flex items-center space-x-1">
-                                <ExternalLink className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                                <span>{cautelaUsuarioExternoNome || caut.usuarioExternoNome}</span>
-                                <span className="text-[9px] px-1 bg-purple-500/20 text-purple-300 rounded">Externo</span>
-                              </div>
-                              <div className="text-[10px] text-slate-400">
-                                {caut.usuarioExternoOrgao || 'Órgão não especificado'}
-                                {caut.usuarioExternoDocumento ? ` (Doc: ${caut.usuarioExternoDocumento})` : ''}
-                              </div>
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="p-3.5 text-center font-mono font-bold text-sm">
-                          <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200">
-                            {caut.quantidade} un
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 font-mono text-[11px]">
-                          <div className="text-slate-200">
-                            Ret: {new Date(caut.dataRetirada).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
-                          </div>
-                          <div className="text-slate-400">
-                            Prev: {caut.dataPrevistaDevolucao ? new Date(caut.dataPrevistaDevolucao).toLocaleDateString('pt-BR') : 'Não estipulada'}
-                          </div>
-                          {caut.dataDevolucao && (
-                            <div className="text-emerald-400 text-[10px]">
-                              Devolvido: {new Date(caut.dataDevolucao).toLocaleDateString('pt-BR')}
-                            </div>
-                          )}
-                        </td>
-
-                        <td className="p-3.5">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center space-x-1 ${
-                            isEmUso
-                              ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                              : caut.status === 'Consumido' || caut.foiConsumido
-                              ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                              : caut.status === 'Devolvido com Anomalia'
-                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                              : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          }`}>
-                            {isEmUso && <Clock className="w-3 h-3" />}
-                            {caut.status === 'Consumido' && <Flame className="w-3 h-3" />}
-                            {caut.status === 'Devolvido com Anomalia' && <AlertTriangle className="w-3 h-3" />}
-                            {!isEmUso && caut.status === 'Devolvido' && <CheckCircle2 className="w-3 h-3" />}
-                            <span>{caut.status}</span>
-                          </span>
-                        </td>
-
-                        <td className="p-3.5 max-w-xs">
-                          <p className="text-slate-300 truncate" title={caut.finalidade}>
-                            {caut.finalidade}
-                          </p>
-                          {caut.relatoUsoAnomalias && (
-                            <p className="text-[10px] text-amber-400/90 italic truncate mt-0.5" title={caut.relatoUsoAnomalias}>
-                              Relato: {caut.relatoUsoAnomalias}
-                            </p>
-                          )}
-                        </td>
-
-                        <td className="p-3.5 text-right">
-                          <div className="flex items-center justify-end space-x-1.5">
-                            {/* Devolução / Baixa Button */}
-                            {isEmUso && (
-                              <button
-                                onClick={() => handleOpenDevolucaoModal(caut)}
-                                className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 font-bold text-xs rounded-lg border border-emerald-500/30 transition flex items-center space-x-1"
-                                title="Registrar devolução ou comunicar uso/anomalias"
-                              >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Devolução / Baixa</span>
-                              </button>
-                            )}
-
-                            {/* Print Receipt Button */}
-                            <button
-                              onClick={() => setReceiptCautela(caut)}
-                              className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Visualizar Comprovante / Termo"
-                            >
-                              <Printer className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                <div className="flex items-center gap-2 shrink-0">
+                  {selectedCautelaMaterialId && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCautelaMaterialId('')}
+                      className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition"
+                    >
+                      Limpar Filtro
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!selectedTransferCandidateMaterial || selectedTransferCandidateMaterial.quantidadeDisponivel <= 0}
+                    onClick={() => {
+                      if (selectedTransferCandidateMaterial) {
+                        handleOpenTransfer(selectedTransferCandidateMaterial);
+                      }
+                    }}
+                    className="px-4 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-bold text-xs sm:text-sm rounded-xl flex items-center space-x-2 transition shadow"
+                  >
+                    <Send className="w-4 h-4" />
+                    <span>Transferir para Outro Depto / Unidade</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
+
+          {/* Transferências entre Departamentos / Unidades */}
+          {filteredTransfers.length > 0 && (
+            <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden">
+              <div className="px-4 py-3 bg-slate-950/60 border-b border-slate-800 flex items-center justify-between">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-sky-400 flex items-center gap-2">
+                  <Building2 className="w-4 h-4" />
+                  <span>Transferências de Materiais entre Departamentos / Unidades ({filteredTransfers.length})</span>
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-950/50 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-mono text-[10px]">
+                    <tr>
+                      <th className="p-3">Protocolo / Material</th>
+                      <th className="p-3">Origem</th>
+                      <th className="p-3">Destino</th>
+                      <th className="p-3 text-center">Qtd</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80 text-slate-200">
+                    {filteredTransfers.map((trf) => {
+                      const canReceiveTrf =
+                        trf.status === 'Pendente' &&
+                        canInsertMaterial &&
+                        (isGeral ||
+                          (isDeptArmeiro && trf.destinationDepartmentId === userDeptId) ||
+                          trf.destinationUnitId === userUnitId);
+                      return (
+                        <tr key={trf.id} className="hover:bg-slate-800/40">
+                          <td className="p-3">
+                            <div className="font-bold text-slate-100">{trf.nomeMaterial}</div>
+                            <div className="text-[10px] font-mono text-sky-400">{trf.protocolNumber || trf.id}</div>
+                            <div className="text-[10px] text-slate-400">{trf.reason}</div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-medium text-slate-200">{trf.originUnitName || trf.originUnitId}</div>
+                            <div className="text-[10px] text-slate-500">{trf.originDepartmentName}</div>
+                          </td>
+                          <td className="p-3">
+                            <div className="font-medium text-slate-200">{trf.destinationUnitName || trf.destinationUnitId}</div>
+                            <div className="text-[10px] text-slate-500">{trf.destinationDepartmentName}</div>
+                          </td>
+                          <td className="p-3 text-center font-mono font-bold">{trf.quantidade} un</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold border ${
+                              trf.status === 'Pendente'
+                                ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            }`}>
+                              {trf.status}
+                            </span>
+                          </td>
+                          <td className="p-3 text-right">
+                            {canReceiveTrf && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const destVaults = materialVaults.filter(v => v.unitId === trf.destinationUnitId);
+                                  setReceiveVaultId(destVaults[0]?.id || '');
+                                  setReceiveObs('');
+                                  setReceiveTransferTarget(trf);
+                                }}
+                                className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 font-bold text-xs rounded-lg border border-emerald-500/30 transition"
+                              >
+                                Receber no Cofre
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Lista de Cautelas */}
+          <div className="bg-slate-900/60 rounded-2xl border border-slate-800 overflow-hidden">
+            {filteredCautelas.length === 0 ? (
+              <div className="p-12 text-center text-slate-400 space-y-3">
+                <ArrowRightLeft className="w-10 h-10 mx-auto text-slate-600" />
+                <p className="text-base font-semibold">Nenhuma cautela de material encontrada.</p>
+                <p className="text-xs text-slate-500">
+                  Abra os detalhes de um Cofre de Materiais na aba de Estoque ou utilize o módulo <strong className="text-slate-300">Cautela de Materiais</strong>.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead className="bg-slate-950/70 border-b border-slate-800 text-slate-400 uppercase tracking-wider font-semibold font-mono">
+                    <tr>
+                      <th className="p-3.5">Protocolo & Material</th>
+                      <th className="p-3.5">Destinatário</th>
+                      <th className="p-3.5 text-center">Quantidade</th>
+                      <th className="p-3.5">Retirada & Previsão</th>
+                      <th className="p-3.5">Status</th>
+                      <th className="p-3.5">Finalidade</th>
+                      <th className="p-3.5 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80 text-slate-200">
+                    {filteredCautelas.map((caut) => {
+                      const isEmUso = caut.status === 'Em Uso' || caut.status === 'AUTORIZADA';
+                      return (
+                        <tr key={caut.id} className="hover:bg-slate-800/40 transition">
+                          <td className="p-3.5">
+                            <div className="font-bold text-sm text-slate-100 flex items-center space-x-2">
+                              <span>{caut.materialNome}</span>
+                            </div>
+                            <div className="text-[11px] font-mono text-amber-400 mt-0.5">
+                              {caut.protocolo || caut.id}
+                            </div>
+                            <div className="text-[10px] text-slate-500">
+                              Entregue por: {caut.responsavelEntregaNome}
+                            </div>
+                          </td>
+
+                          <td className="p-3.5">
+                            {caut.tipoDestinatario === 'interno' ? (
+                              <div>
+                                <div className="font-semibold text-slate-200 flex items-center space-x-1">
+                                  <UserCheck className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  <span>{caut.usuarioInternoNome}</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400 font-mono">
+                                  MASP: {formatMasp(caut.usuarioInternoMasp || '')}
+                                  {caut.usuarioInternoCargo ? ` • ${caut.usuarioInternoCargo}` : ''}
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="font-semibold text-slate-200 flex items-center space-x-1">
+                                  <ExternalLink className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                                  <span>{caut.usuarioExternoNome}</span>
+                                  <span className="text-[9px] px-1 bg-purple-500/20 text-purple-300 rounded">Externo</span>
+                                </div>
+                                <div className="text-[10px] text-slate-400">
+                                  {caut.usuarioExternoOrgao || 'Órgão não especificado'}
+                                  {caut.usuarioExternoDocumento ? ` (Doc: ${caut.usuarioExternoDocumento})` : ''}
+                                </div>
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="p-3.5 text-center font-mono font-bold text-sm">
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200">
+                              {caut.quantidade} un
+                            </span>
+                          </td>
+
+                          <td className="p-3.5 font-mono text-[11px]">
+                            <div className="text-slate-200">
+                              Ret: {new Date(caut.dataRetirada).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                            </div>
+                            <div className="text-slate-400">
+                              Prev: {caut.dataPrevistaDevolucao ? new Date(caut.dataPrevistaDevolucao).toLocaleDateString('pt-BR') : 'Não estipulada'}
+                            </div>
+                            {caut.dataDevolucao && (
+                              <div className="text-emerald-400 text-[10px]">
+                                Devolvido: {new Date(caut.dataDevolucao).toLocaleDateString('pt-BR')}
+                              </div>
+                            )}
+                          </td>
+
+                          <td className="p-3.5">
+                            <span className={`px-2.5 py-1 rounded-lg text-xs font-bold inline-flex items-center space-x-1 ${
+                              isEmUso
+                                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                                : caut.status === 'Consumido' || caut.status === 'CONSUMIDA' || caut.foiConsumido
+                                ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
+                                : caut.status === 'Devolvido com Anomalia'
+                                ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                                : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            }`}>
+                              {isEmUso && <Clock className="w-3 h-3" />}
+                              {(caut.status === 'Consumido' || caut.status === 'CONSUMIDA') && <Flame className="w-3 h-3" />}
+                              {caut.status === 'Devolvido com Anomalia' && <AlertTriangle className="w-3 h-3" />}
+                              {!isEmUso && (caut.status === 'Devolvido' || caut.status === 'DEVOLVIDA') && <CheckCircle2 className="w-3 h-3" />}
+                              <span>{caut.status}</span>
+                            </span>
+                          </td>
+
+                          <td className="p-3.5 max-w-xs">
+                            <p className="text-slate-300 truncate" title={caut.finalidade}>
+                              {caut.finalidade}
+                            </p>
+                            {caut.relatoUsoAnomalias && (
+                              <p className="text-[10px] text-amber-400/90 italic truncate mt-0.5" title={caut.relatoUsoAnomalias}>
+                                Relato: {caut.relatoUsoAnomalias}
+                              </p>
+                            )}
+                          </td>
+
+                          <td className="p-3.5 text-right">
+                            <div className="flex items-center justify-end space-x-1.5">
+                              {isEmUso && (
+                                <button
+                                  onClick={() => handleOpenDevolucaoModal(caut)}
+                                  className="px-2.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 font-bold text-xs rounded-lg border border-emerald-500/30 transition flex items-center space-x-1"
+                                  title="Registrar devolução ou comunicar uso/anomalias"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Devolução / Baixa</span>
+                                </button>
+                              )}
+
+                              <button
+                                onClick={() => setReceiptCautela(caut)}
+                                className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Visualizar Comprovante / Termo"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1368,9 +1667,14 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     value={formDepartamentoId}
                     disabled={!isGeral}
                     onChange={(e) => {
-                      setFormDepartamentoId(e.target.value);
-                      const firstUnit = units.find(u => u.departmentId === e.target.value);
-                      setFormUnidadeId(firstUnit?.id || '');
+                      const nextDept = e.target.value;
+                      setFormDepartamentoId(nextDept);
+                      const firstUnit = units.find(u => u.departmentId === nextDept);
+                      const nextUnit = firstUnit?.id || '';
+                      setFormUnidadeId(nextUnit);
+                      const firstVault = materialVaults.find(v => v.unitId === nextUnit);
+                      setFormVaultSpaceId(firstVault?.id || '');
+                      setFormLocalGuarda(firstVault?.code || '');
                     }}
                     required
                     className={`w-full px-3 py-2 bg-slate-900 border rounded-xl text-slate-100 focus:outline-none ${
@@ -1400,7 +1704,13 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   <select
                     value={formUnidadeId}
                     disabled={isOnlyUnitAccess}
-                    onChange={(e) => setFormUnidadeId(e.target.value)}
+                    onChange={(e) => {
+                      const nextUnit = e.target.value;
+                      setFormUnidadeId(nextUnit);
+                      const firstVault = materialVaults.find(v => v.unitId === nextUnit);
+                      setFormVaultSpaceId(firstVault?.id || '');
+                      setFormLocalGuarda(firstVault?.code || '');
+                    }}
                     required
                     className={`w-full px-3 py-2 bg-slate-900 border rounded-xl text-slate-100 focus:outline-none ${
                       isOnlyUnitAccess
@@ -1416,20 +1726,35 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                 </div>
               </div>
 
-              {/* Local de Guarda e Validade */}
+              {/* Cofre de Materiais e Validade */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">
-                    Local de Guarda do Material <span className="text-rose-400">*</span>
+                    Cofre de Guarda do Material <span className="text-rose-400">*</span>
                   </label>
-                  <input
-                    type="text"
+                  <select
+                    value={formVaultSpaceId}
+                    onChange={(e) => {
+                      const vid = e.target.value;
+                      setFormVaultSpaceId(vid);
+                      const v = materialVaultsForForm.find(item => item.id === vid);
+                      setFormLocalGuarda(v?.code || '');
+                    }}
                     required
-                    placeholder="Ex: Armário de Proteção Balística 01"
-                    value={formLocalGuarda}
-                    onChange={(e) => setFormLocalGuarda(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500"
-                  />
+                  >
+                    <option value="">Selecione um Cofre de Materiais...</option>
+                    {materialVaultsForForm.map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.code}{v.descricaoCurta ? ` — ${v.descricaoCurta}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {materialVaultsForForm.length === 0 && (
+                    <span className="text-[10px] text-amber-400 block mt-1">
+                      Nenhum cofre do tipo Materiais cadastrado nesta unidade. Cadastre em "Locais do Cofre &rarr; + Novo Cofre de Materiais".
+                    </span>
+                  )}
                 </div>
 
                 <div>
@@ -1446,6 +1771,25 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     Recomendado para sprays químicos, kits APH e coletes com prazo de validade balística.
                   </span>
                 </div>
+              </div>
+
+              {/* SelectList: Passivo de depósito para policiais? */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Material é passivo de depósito para policiais? <span className="text-rose-400">*</span>
+                </label>
+                <select
+                  value={formPassivoDeposito}
+                  onChange={(e) => setFormPassivoDeposito(e.target.value as 'SIM' | 'NAO')}
+                  required
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-amber-500 font-semibold"
+                >
+                  <option value="SIM">SIM</option>
+                  <option value="NAO">NÃO</option>
+                </select>
+                <span className="text-[10px] text-slate-400 block mt-1">
+                  Apenas materiais marcados como SIM ficam visíveis para cautela pelos policiais no módulo Cautela de Materiais.
+                </span>
               </div>
 
               {/* Observações */}
@@ -2203,6 +2547,290 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   className="px-5 py-2 font-bold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-50 rounded-xl transition shadow"
                 >
                   {isSubmitting ? 'Despachando...' : 'Despachar Transferência'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL: VER DETALHES DO COFRE (LISTA DE ITENS DO COFRE)    */}
+      {/* ========================================================= */}
+      {selectedVaultDetailsId && (() => {
+        const isLegacyGroup = selectedVaultDetailsId === '__LEGACY__';
+        const vaultObj = isLegacyGroup ? null : materialVaults.find(v => v.id === selectedVaultDetailsId);
+        const vaultItems = isLegacyGroup
+          ? legacyUnlinkedMaterials
+          : filteredMateriais.filter(m =>
+              vaultObj
+                ? (m.vaultSpaceId
+                    ? m.vaultSpaceId === vaultObj.id
+                    : (m.localGuarda === vaultObj.code && (!m.unidadeId || m.unidadeId === vaultObj.unitId)))
+                : false
+            );
+        const vaultUnit = vaultObj ? units.find(u => u.id === vaultObj.unitId) : null;
+        const vaultDept = vaultObj ? departments.find(d => d.id === vaultObj.departmentId) : null;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm overflow-y-auto">
+            <div className="relative w-full max-w-4xl bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl overflow-hidden my-8 max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between px-6 py-4 bg-slate-800/80 border-b border-slate-700 shrink-0">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2.5 bg-emerald-500/15 text-emerald-400 rounded-xl border border-emerald-500/30">
+                    <Vault className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-slate-100 font-mono">
+                      {isLegacyGroup ? 'OUTROS LOCAIS (Legado)' : `Cofre ${vaultObj?.code || ''}`}
+                    </h3>
+                    <p className="text-xs text-slate-300">
+                      {isLegacyGroup
+                        ? 'Materiais sem cofre vinculado'
+                        : `${vaultObj?.descricaoCurta || 'Sem descrição curta'} • ${vaultUnit?.name || ''} ${vaultDept ? `(${vaultDept.code})` : ''}`}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {canInsertMaterial && vaultObj && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedVaultDetailsId(null);
+                        handleOpenNewMaterialModal(vaultObj);
+                      }}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center space-x-1 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Novo Material neste Cofre</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedVaultDetailsId(null)}
+                    className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-700 transition"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 overflow-y-auto flex-1 space-y-3">
+                {vaultItems.length === 0 ? (
+                  <div className="p-10 text-center text-slate-400 space-y-2 bg-slate-950/50 rounded-xl border border-dashed border-slate-800">
+                    <Package className="w-9 h-9 mx-auto text-slate-600" />
+                    <p className="text-sm font-semibold">Nenhum item armazenado neste cofre.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-800 border border-slate-800 rounded-xl bg-slate-950/60 overflow-hidden">
+                    {vaultItems.map((mat) => (
+                      <div key={mat.id} className="p-4 hover:bg-slate-900/60 transition space-y-3">
+                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h4 className="text-sm font-black text-slate-100">{mat.nome}</h4>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                                {mat.tipoMaterialNome}
+                              </span>
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                mat.passivoDepositoPoliciais !== false
+                                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                              }`}>
+                                Cautelável p/ Policiais: {mat.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1 text-xs text-slate-300 pt-1">
+                              <div>
+                                <span className="text-slate-500">Nº Série / Patr.:</span>{' '}
+                                <span className="font-mono text-slate-200">{mat.numeroSerie || 'Não informado'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Unidade:</span>{' '}
+                                <span className="text-slate-200">{mat.unidadeNome || mat.unidadeId}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Departamento:</span>{' '}
+                                <span className="text-slate-200">{mat.departamentoNome || mat.departamentoId}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Local / Cofre:</span>{' '}
+                                <span className="font-mono text-emerald-300">{mat.localGuarda}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-slate-500">Validade:</span>
+                                {getValidityBadge(mat.validade)}
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Estoque:</span>{' '}
+                                <span className="font-mono font-bold text-slate-100">
+                                  Total: {mat.quantidade} | Disp: <span className="text-emerald-400">{mat.quantidadeDisponivel}</span> | Em Uso: <span className="text-amber-400">{mat.quantidadeEmUso}</span> | Cons.: <span className="text-purple-400">{mat.quantidadeConsumida}</span>
+                                </span>
+                              </div>
+                            </div>
+
+                            {mat.observacoes && (
+                              <p className="text-[11px] text-slate-400 italic pt-1">
+                                Observações: {mat.observacoes}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedVaultDetailsId(null);
+                                handleOpenCautela(mat);
+                              }}
+                              disabled={mat.quantidadeDisponivel <= 0}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition ${
+                                mat.quantidadeDisponivel > 0
+                                  ? 'bg-amber-500/20 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-amber-500/30'
+                                  : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-800'
+                              }`}
+                            >
+                              <ArrowRightLeft className="w-3.5 h-3.5" />
+                              <span>Cautelar</span>
+                            </button>
+
+                            {canInsertMaterial && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedVaultDetailsId(null);
+                                    handleOpenTransfer(mat);
+                                  }}
+                                  disabled={mat.quantidadeDisponivel <= 0}
+                                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center space-x-1 transition ${
+                                    mat.quantidadeDisponivel > 0
+                                      ? 'bg-sky-500/20 hover:bg-sky-500 text-sky-300 hover:text-slate-950 border border-sky-500/30'
+                                      : 'bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-800'
+                                  }`}
+                                >
+                                  <Building2 className="w-3.5 h-3.5" />
+                                  <span>Transferir</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedVaultDetailsId(null);
+                                    handleOpenEditMaterialModal(mat);
+                                  }}
+                                  className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-slate-800 rounded-lg transition"
+                                  title="Editar Material"
+                                >
+                                  <Edit2 className="w-4 h-4" />
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMaterial(mat.id, mat.nome)}
+                                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition"
+                                  title="Excluir Material"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="px-6 py-3.5 border-t border-slate-800 flex justify-end shrink-0 bg-slate-900">
+                <button
+                  type="button"
+                  onClick={() => setSelectedVaultDetailsId(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl"
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* ========================================================= */}
+      {/* MODAL: RECEBER TRANSFERÊNCIA DE MATERIAL NO COFRE         */}
+      {/* ========================================================= */}
+      {receiveTransferTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md shadow-2xl overflow-hidden">
+            <div className="px-6 py-4 bg-slate-800/80 border-b border-slate-700 flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-100">
+                Receber Material Transferido
+              </h3>
+              <button
+                type="button"
+                onClick={() => setReceiveTransferTarget(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleConfirmReceiveTransfer} className="p-6 space-y-4 text-xs">
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
+                <div className="font-bold text-slate-100 text-sm">{receiveTransferTarget.nomeMaterial}</div>
+                <div className="text-slate-400">Quantidade: <strong className="text-emerald-400">{receiveTransferTarget.quantidade} un</strong></div>
+                <div className="text-slate-400">Origem: <strong className="text-slate-200">{receiveTransferTarget.originUnitName}</strong></div>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Cofre de Materiais de Destino *
+                </label>
+                <select
+                  value={receiveVaultId}
+                  onChange={(e) => setReceiveVaultId(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-emerald-500"
+                >
+                  <option value="">Selecione o cofre...</option>
+                  {materialVaults
+                    .filter(v => v.unitId === receiveTransferTarget.destinationUnitId)
+                    .map(v => (
+                      <option key={v.id} value={v.id}>
+                        {v.code}{v.descricaoCurta ? ` — ${v.descricaoCurta}` : ''}
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1">
+                  Observação de Recebimento (Opcional)
+                </label>
+                <input
+                  type="text"
+                  value={receiveObs}
+                  onChange={(e) => setReceiveObs(e.target.value)}
+                  placeholder="Ex: Conferido fisicamente em boas condições"
+                  className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100"
+                />
+              </div>
+
+              <div className="flex justify-end space-x-3 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setReceiveTransferTarget(null)}
+                  className="px-4 py-2 text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="px-5 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl"
+                >
+                  {isSubmitting ? 'Recebendo...' : 'Confirmar Recebimento'}
                 </button>
               </div>
             </form>

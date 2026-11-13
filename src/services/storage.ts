@@ -195,7 +195,8 @@ class StorageService {
         produtosVeterinariosRes,
         movimentacoesVeterinariasRes,
         cautelasArmasRes,
-        cautelasMunicoesRes
+        cautelasMunicoesRes,
+        materialTransfersRes
       ] = await Promise.all([
         fetchSync('/api/users'),
         fetchSync('/api/departments'),
@@ -234,7 +235,8 @@ class StorageService {
         fetchSync('/api/produtos-veterinarios'),
         fetchSync('/api/movimentacoes-veterinarias'),
         fetchSync('/api/cautelas-armas'),
-        fetchSync('/api/cautelas-municoes')
+        fetchSync('/api/cautelas-municoes'),
+        fetchSync('/api/material-transfers')
       ]);
 
       this.state.users = usersRes || [];
@@ -282,11 +284,18 @@ class StorageService {
       } catch {
         this.state.explosivoTransfers = [];
       }
-      try {
-        const rawMatTrf = localStorage.getItem('pcmg_material_transfers');
-        this.state.materialTransfers = rawMatTrf ? JSON.parse(rawMatTrf) : [];
-      } catch {
-        this.state.materialTransfers = [];
+      if (Array.isArray(materialTransfersRes)) {
+        this.state.materialTransfers = materialTransfersRes;
+        try {
+          localStorage.setItem('pcmg_material_transfers', JSON.stringify(materialTransfersRes));
+        } catch {}
+      } else {
+        try {
+          const rawMatTrf = localStorage.getItem('pcmg_material_transfers');
+          this.state.materialTransfers = rawMatTrf ? JSON.parse(rawMatTrf) : [];
+        } catch {
+          this.state.materialTransfers = [];
+        }
       }
 
       // Refresh current user reference if logged in, keeping activeRole if user had selected one
@@ -1810,16 +1819,11 @@ class StorageService {
       throw new Error(`Quantidade disponível insuficiente (${mat.quantidadeDisponivel}).`);
     }
 
-    await this.saveMaterial({
-      ...mat,
-      quantidade: Math.max(0, mat.quantidade - data.quantidade),
-      quantidadeDisponivel: Math.max(0, mat.quantidadeDisponivel - data.quantidade)
-    });
-
     const transferId = `TRF-MAT-${Date.now()}`;
+    const proto = `TRF-MAT-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
     const newTransfer: MaterialTransfer = {
       id: transferId,
-      protocolNumber: `TRF-MAT-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`,
+      protocolNumber: proto,
       transferDate: new Date().toISOString(),
       originDepartmentId: data.originDepartmentId || mat.departamentoId || actor.departmentId || '',
       originDepartmentName: data.originDepartmentName || this.state.departments.find(d => d.id === mat.departamentoId)?.name || '',
@@ -1851,13 +1855,18 @@ class StorageService {
       createdAt: new Date().toISOString()
     };
 
-    if (!this.state.materialTransfers) this.state.materialTransfers = [];
-    this.state.materialTransfers.unshift(newTransfer);
-    try {
-      localStorage.setItem('pcmg_material_transfers', JSON.stringify(this.state.materialTransfers));
-    } catch {}
+    const res = await fetch('/api/material-transfers', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newTransfer)
+    });
+    const resData = await res.json();
+    if (!res.ok) {
+      throw new Error(resData.error || 'Erro ao registrar transferência de material.');
+    }
 
-    return newTransfer;
+    await this.refreshFromServer();
+    return { ...newTransfer, id: resData.id || transferId, protocolNumber: resData.protocolNumber || proto };
   }
 
   public async receiveMaterialTransfer(
@@ -1868,57 +1877,23 @@ class StorageService {
     const actor = this.state.currentUser;
     if (!actor) throw new Error('Usuário não autenticado.');
 
-    const transfer = (this.state.materialTransfers || []).find(t => t.id === transferId);
-    if (!transfer) throw new Error('Transferência de material não encontrada.');
-    if (transfer.status !== 'Pendente') throw new Error('Esta transferência já foi recebida ou cancelada.');
-
-    const vault = this.state.vaultSpaces.find(v => v.id === destinationVaultSpaceId);
-    const vaultCode = vault ? vault.code : 'Armário Central';
-
-    transfer.status = 'Recebido';
-    transfer.receivedAt = new Date().toISOString();
-    transfer.receivedByUserId = actor.id;
-    transfer.receivedByUserName = actor.name;
-    transfer.receivedByUserMasp = actor.masp;
-    transfer.destinationVaultSpaceId = destinationVaultSpaceId;
-    transfer.destinationVaultSpaceCode = vaultCode;
-    if (observation) {
-      transfer.observation = (transfer.observation ? transfer.observation + ' | ' : '') + `Recibo: ${observation}`;
-    }
-
-    try {
-      localStorage.setItem('pcmg_material_transfers', JSON.stringify(this.state.materialTransfers));
-    } catch {}
-
-    const destMat = this.state.materiais.find(m =>
-      m.unidadeId === transfer.destinationUnitId &&
-      (m.nome || '').trim().toLowerCase() === (transfer.nomeMaterial || '').trim().toLowerCase() &&
-      (transfer.numeroSerie ? m.numeroSerie === transfer.numeroSerie : true)
-    );
-
-    if (destMat) {
-      await this.saveMaterial({
-        ...destMat,
-        quantidade: destMat.quantidade + transfer.quantidade,
-        quantidadeDisponivel: destMat.quantidadeDisponivel + transfer.quantidade,
-        localGuarda: vaultCode
-      });
-    } else {
-      const origMat = this.state.materiais.find(m => m.id === transfer.materialId);
-      await this.saveMaterial({
-        nome: transfer.nomeMaterial,
-        tipoMaterialId: origMat?.tipoMaterialId || '',
-        tipoMaterialNome: transfer.tipoNome || origMat?.tipoMaterialNome || 'Geral',
-        quantidade: transfer.quantidade,
-        quantidadeDisponivel: transfer.quantidade,
-        quantidadeEmUso: 0,
-        quantidadeConsumida: 0,
-        departamentoId: transfer.destinationDepartmentId,
-        unidadeId: transfer.destinationUnitId,
-        localGuarda: vaultCode,
-        numeroSerie: transfer.numeroSerie,
-        observacoes: `Recebido via Transferência ${transfer.protocolNumber || transfer.id} da unidade ${transfer.originUnitName}`
-      });
+    const res = await fetch(`/api/material-transfers/${transferId}/receive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        destinationVaultSpaceId,
+        observation,
+        actor: {
+          id: actor.id,
+          name: actor.name,
+          masp: actor.masp,
+          role: actor.activeRole || actor.role
+        }
+      })
+    });
+    const resData = await res.json();
+    if (!res.ok) {
+      throw new Error(resData.error || 'Erro ao confirmar recebimento da transferência de material.');
     }
 
     await this.refreshFromServer();
@@ -2744,15 +2719,20 @@ class StorageService {
       return list;
     }
 
+    if (role === 'Policial') {
+      const cleanDigits = (v?: string | null) => String(v || '').replace(/\D/g, '');
+      const myMasp = cleanDigits(currentUser.masp);
+      return list.filter(c =>
+        c.usuarioInternoId === currentUser.id ||
+        (myMasp && cleanDigits(c.usuarioInternoMasp) === myMasp)
+      );
+    }
+
     if (this.hasDepartmentScope(currentUser) && currentUser.departmentId) {
       const deptUnits = this.getDepartmentUnitIds(currentUser.departmentId);
       return list.filter(c =>
         this.belongsToDepartment(c.unidadeId, c.departamentoId, currentUser.departmentId, deptUnits)
       );
-    }
-
-    if (role === 'Policial') {
-      return list.filter(c => c.usuarioInternoId === currentUser.id || c.unidadeId === currentUser.unitId);
     }
 
     if (currentUser.unitId) {
@@ -2787,22 +2767,124 @@ class StorageService {
     }
   }
 
+  public async requestCautelaMaterial(params: {
+    materialId: string;
+    materialNome: string;
+    tipoMaterialNome?: string;
+    quantidade: number;
+    tipoDestinatario?: 'interno' | 'externo';
+    usuarioInternoId?: string;
+    usuarioInternoNome?: string;
+    usuarioInternoMasp?: string;
+    usuarioInternoCargo?: string;
+    dataPrevistaDevolucao?: string;
+    finalidade: string;
+    seraDevolvida?: boolean;
+    directAuthorized?: boolean;
+    observacoes?: string;
+    departamentoId?: string;
+    unidadeId?: string;
+  }): Promise<{ success: boolean; id?: string; protocolo?: string; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const isDirect = Boolean(params.directAuthorized);
+      const payload = {
+        ...params,
+        tipoDestinatario: params.tipoDestinatario || 'interno',
+        enforceDepositEligible: true,
+        directAuthorized: isDirect,
+        responsavelEntregaId: isDirect ? (actor?.id || 'sistema') : 'pendente',
+        responsavelEntregaNome: isDirect ? (actor?.name || 'Armeiro') : 'Aguardando Armeiro',
+        responsavelEntregaMasp: isDirect ? (actor?.masp || '') : ''
+      };
+
+      const res = await fetch('/api/cautelas-materiais', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id, protocolo: data.protocolo };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async authorizeCautelaMaterial(
+    id: string,
+    params?: { seraDevolvida?: boolean; notes?: string }
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const res = await fetch(`/api/cautelas-materiais/${id}/autorizar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          seraDevolvida: params?.seraDevolvida,
+          notes: params?.notes,
+          armorerId: actor?.id || 'sistema',
+          armorerName: actor?.name || 'Armeiro',
+          armorerMasp: actor?.masp || ''
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async rejectCautelaMaterial(
+    id: string,
+    reason?: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const actor = this.state.currentUser;
+      const res = await fetch(`/api/cautelas-materiais/${id}/recusar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reason,
+          armorerId: actor?.id || 'sistema',
+          armorerName: actor?.name || 'Armeiro',
+          armorerMasp: actor?.masp || ''
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public async returnCautelaMaterial(
     id: string,
     params: {
-      status: 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia';
+      status: 'Devolvido' | 'DEVOLVIDA' | 'Consumido' | 'CONSUMIDA' | 'Devolvido com Anomalia';
       foiConsumido?: boolean;
+      returnedQuantity?: number;
+      destinationVaultSpaceId?: string;
       relatoUsoAnomalias?: string;
       dataDevolucao?: string;
+      pendingReceipt?: boolean;
     }
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const actor = this.state.currentUser;
       const payload = {
         ...params,
-        responsavelRecebimentoId: actor?.id || 'sistema',
-        responsavelRecebimentoNome: actor?.name || 'Armeiro',
-        responsavelRecebimentoMasp: actor?.masp || ''
+        responsavelRecebimentoId: params.pendingReceipt ? undefined : (actor?.id || 'sistema'),
+        responsavelRecebimentoNome: params.pendingReceipt ? undefined : (actor?.name || 'Armeiro'),
+        responsavelRecebimentoMasp: params.pendingReceipt ? undefined : (actor?.masp || '')
       };
 
       const res = await fetch(`/api/cautelas-materiais/${id}/devolucao`, {

@@ -25,7 +25,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   onRefresh
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS'>('ALL');
+  const [typeFilter, setTypeFilter] = useState<'ALL' | 'ARMAS' | 'MUNIÇÕES' | 'MATERIAIS' | 'EXPLOSIVOS'>('ALL');
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string>('ALL');
   const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
   const [selectedVaultForDetails, setSelectedVaultForDetails] = useState<VaultSpace | null>(null);
@@ -35,6 +35,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const [showModal, setShowModal] = useState(false);
   const [editingVault, setEditingVault] = useState<VaultSpace | null>(null);
   const [code, setCode] = useState('');
+  const [descricaoCurta, setDescricaoCurta] = useState('');
   const [type, setType] = useState<VaultSpaceType>('ARMAS');
   const [deptId, setDeptId] = useState('');
   const [unitId, setUnitId] = useState('');
@@ -84,7 +85,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     if (isGeral) return vaultSpaces;
     if (isArmeiro) {
       return vaultSpaces.filter(v => 
-        (v.type === 'ARMAS' || v.type === 'MUNIÇÕES') &&
+        (v.type === 'ARMAS' || v.type === 'MUNIÇÕES' || v.type === 'MATERIAIS') &&
         (isDeptArmeiro
           ? (v.departmentId === effectiveDeptId || (v.unitId ? deptUnitIds.has(v.unitId) : false))
           : (v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId)))
@@ -102,6 +103,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   // Global counts for filter badges
   const totalArmas = useMemo(() => userScopedVaults.filter(v => v.type === 'ARMAS').length, [userScopedVaults]);
   const totalMunicoes = useMemo(() => userScopedVaults.filter(v => v.type === 'MUNIÇÕES').length, [userScopedVaults]);
+  const totalMateriais = useMemo(() => userScopedVaults.filter(v => v.type === 'MATERIAIS').length, [userScopedVaults]);
   const totalExplosivos = useMemo(() => userScopedVaults.filter(v => v.type === 'EXPLOSIVOS').length, [userScopedVaults]);
   const totalAll = userScopedVaults.length;
 
@@ -132,13 +134,18 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setErrorMsg('');
     setEditingVault(null);
     setCode('');
+    setDescricaoCurta('');
     
     // Explosivista só pode criar locais vinculados a explosivos
     if (isExplosivista) {
       setType('EXPLOSIVOS');
     } else if (isArmeiro) {
-      if (presetType === 'MUNIÇÕES' || typeFilter === 'MUNIÇÕES') {
+      if (presetType === 'MUNIÇÕES' || presetType === 'MATERIAIS' || presetType === 'ARMAS') {
+        setType(presetType);
+      } else if (typeFilter === 'MUNIÇÕES') {
         setType('MUNIÇÕES');
+      } else if (typeFilter === 'MATERIAIS') {
+        setType('MATERIAIS');
       } else {
         setType('ARMAS');
       }
@@ -146,6 +153,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       setType(presetType);
     } else if (typeFilter === 'MUNIÇÕES') {
       setType('MUNIÇÕES');
+    } else if (typeFilter === 'MATERIAIS') {
+      setType('MATERIAIS');
     } else if (typeFilter === 'EXPLOSIVOS') {
       setType('EXPLOSIVOS');
     } else {
@@ -168,7 +177,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const handleOpenEditModal = (vault: VaultSpace) => {
     if (isArmeiro) {
       if (vault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem editar locais de armas e munições.');
+        setErrorMsg('Usuários armeiros só podem editar locais de armas, munições e materiais.');
         return;
       }
       if (!isVaultInArmeiroScope(vault) && !isAdmin && !isGeral) {
@@ -187,6 +196,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     setErrorMsg('');
     setEditingVault(vault);
     setCode(vault.code);
+    setDescricaoCurta(vault.descricaoCurta || '');
     setType(vault.type);
     setDeptId(vault.departmentId || effectiveDeptId);
     setUnitId(vault.unitId || currentUser.unitId || '');
@@ -208,14 +218,18 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       setErrorMsg('Informe a identificação/código do local do cofre.');
       return;
     }
+    if (type === 'MATERIAIS' && !descricaoCurta.trim()) {
+      setErrorMsg('Informe a descrição curta do material armazenado neste cofre.');
+      return;
+    }
     if (!finalUnitId) {
       setErrorMsg('Selecione uma unidade para o local do cofre.');
       return;
     }
 
     if (isArmeiro) {
-      if (type !== 'ARMAS' && type !== 'MUNIÇÕES') {
-        setErrorMsg('Usuários armeiros só podem cadastrar ou alterar locais vinculados a armas e munições.');
+      if (type !== 'ARMAS' && type !== 'MUNIÇÕES' && type !== 'MATERIAIS') {
+        setErrorMsg('Usuários armeiros só podem cadastrar ou alterar locais vinculados a armas, munições e materiais.');
         return;
       }
       if (!isDeptArmeiro && currentUser.unitId && finalUnitId !== currentUser.unitId) {
@@ -234,22 +248,27 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     }
 
     try {
-      const typeLabel = type === 'ARMAS' ? 'Cofre para Armas' : type === 'MUNIÇÕES' ? 'Cofre para Munições' : 'Paiol / Cofre de Explosivos';
+      const effectiveType = isExplosivista ? 'EXPLOSIVOS' : type;
+      const typeLabel =
+        effectiveType === 'ARMAS'
+          ? 'Cofre para Armas'
+          : effectiveType === 'MUNIÇÕES'
+          ? 'Cofre para Munições'
+          : effectiveType === 'MATERIAIS'
+          ? 'Cofre de Materiais'
+          : 'Paiol / Cofre de Explosivos';
+      const payload = {
+        code: code.trim().toUpperCase(),
+        type: effectiveType,
+        descricaoCurta: effectiveType === 'MATERIAIS' ? descricaoCurta.trim() : undefined,
+        departmentId: finalDeptId,
+        unitId: finalUnitId
+      };
       if (editingVault) {
-        await storage.updateVaultSpace(editingVault.id, {
-          code: code.trim().toUpperCase(),
-          type: isExplosivista ? 'EXPLOSIVOS' : type,
-          departmentId: finalDeptId,
-          unitId: finalUnitId
-        });
+        await storage.updateVaultSpace(editingVault.id, payload);
         setSuccessMsg(`Local de cofre "${code.toUpperCase()}" (${typeLabel}) atualizado com sucesso.`);
       } else {
-        await storage.addVaultSpace({
-          code: code.trim().toUpperCase(),
-          type: isExplosivista ? 'EXPLOSIVOS' : type,
-          departmentId: finalDeptId,
-          unitId: finalUnitId
-        });
+        await storage.addVaultSpace(payload);
         setSuccessMsg(`Novo local "${code.toUpperCase()}" (${typeLabel}) cadastrado com sucesso.`);
       }
       setShowModal(false);
@@ -262,7 +281,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
   const handleDelete = (vault: VaultSpace) => {
     if (isArmeiro) {
       if (vault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições.');
+        setErrorMsg('Usuários armeiros só podem excluir locais de armas, munições e materiais.');
         return;
       }
       if (!isVaultInArmeiroScope(vault) && !isAdmin && !isGeral) {
@@ -285,7 +304,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     if (!deleteTargetVault) return;
     if (isArmeiro) {
       if (deleteTargetVault.type === 'EXPLOSIVOS') {
-        setErrorMsg('Usuários armeiros só podem excluir locais de armas e munições.');
+        setErrorMsg('Usuários armeiros só podem excluir locais de armas, munições e materiais.');
         setDeleteTargetVault(null);
         return;
       }
@@ -323,12 +342,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const unit = units.find(u => u.id === vault.unitId);
     const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === vault.id && w.status === 'No Cofre');
     const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === vault.id);
+    const storedMaterials = storage.getMateriais({ role: 'Geral' } as User).filter(
+      m => m.vaultSpaceId === vault.id || (!m.vaultSpaceId && m.localGuarda === vault.code && m.unidadeId === vault.unitId)
+    );
     const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === vault.id || e.localArmazenamento === vault.code);
 
-    const typeLabel = vault.type === 'ARMAS' 
-      ? 'COFRE PARA ARMAS' 
-      : vault.type === 'MUNIÇÕES' 
-      ? 'COFRE PARA MUNIÇÕES' 
+    const typeLabel = vault.type === 'ARMAS'
+      ? 'COFRE PARA ARMAS'
+      : vault.type === 'MUNIÇÕES'
+      ? 'COFRE PARA MUNIÇÕES'
+      : vault.type === 'MATERIAIS'
+      ? 'COFRE DE MATERIAIS'
       : 'PAIOL / COFRE PARA EXPLOSIVOS';
 
     let pagesHtml = '';
@@ -579,6 +603,106 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             </div>
           `;
         }).join('');
+      }
+    } else if (vault.type === 'MATERIAIS') {
+      if (storedMaterials.length === 0) {
+        pagesHtml = `
+          <div class="report-page">
+            <div class="header">
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">SISTEMA DE ARMARIA • RELATÓRIO OFICIAL DE COFRE DE MATERIAIS</div>
+              </div>
+              <div class="badge">
+                COFRE<br>
+                <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+              </div>
+            </div>
+
+            <div class="meta-box">
+              <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+              <div class="meta-item"><label>Unidade:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+              <div class="meta-item"><label>Descrição Curta:</label> <span>${vault.descricaoCurta || 'Não informada'}</span></div>
+              <div class="meta-item"><label>Data da Emissão:</label> <span>${new Date().toLocaleString('pt-BR')}</span></div>
+            </div>
+
+            <div style="background: #f8fafc; border: 1px dashed #94a3b8; border-radius: 8px; padding: 30px; text-align: center; margin: 40px 0; color: #475569; font-style: italic;">
+              Espaço de guarda atualmente sem materiais armazenados no cofre.
+            </div>
+
+            <div class="signatures">
+              <div class="sig-line">
+                ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Armaria</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              Relatório oficial emitido em ${new Date().toLocaleString('pt-BR')} através do Sistema de Armaria PCMG.
+            </div>
+          </div>
+        `;
+      } else {
+        pagesHtml = `
+          <div class="report-page">
+            <div>
+              <div class="header">
+                <div>
+                  <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                  <div class="subtitle">SISTEMA DE ARMARIA • INVENTÁRIO OFICIAL DO COFRE DE MATERIAIS</div>
+                </div>
+                <div class="badge">
+                  LOCAL COFRE<br>
+                  <span style="font-size: 16px; font-weight: 900; color: #000;">${vault.code}</span>
+                </div>
+              </div>
+
+              <div class="meta-box">
+                <div class="meta-item"><label>Departamento:</label> <span>${dept ? dept.name : 'N/A'} (${dept ? dept.code : ''})</span></div>
+                <div class="meta-item"><label>Unidade Policial:</label> <span>${unit ? unit.name : 'N/A'}</span></div>
+                <div class="meta-item"><label>Descrição Curta do Material:</label> <span>${vault.descricaoCurta || 'Geral'}</span></div>
+                <div class="meta-item"><label>Total de Registros / Itens:</label> <span>${storedMaterials.length} item(ns) • ${storedMaterials.reduce((acc, m) => acc + Number(m.quantidade || 0), 0)} un.</span></div>
+              </div>
+
+              <div class="section-title">RELAÇÃO DE MATERIAIS ARMAZENADOS NO COFRE</div>
+
+              <table class="detail-table">
+                <thead>
+                  <tr style="background:#f1f5f9;">
+                    <td class="dt-label">Material</td>
+                    <td class="dt-label">Tipo</td>
+                    <td class="dt-label">Série / Patr.</td>
+                    <td class="dt-label">Disp. / Total</td>
+                    <td class="dt-label">Cautelável?</td>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${storedMaterials.map(m => `
+                    <tr>
+                      <td class="dt-value" style="font-weight:bold;">${m.nome}</td>
+                      <td class="dt-value">${m.tipoMaterialNome || '-'}</td>
+                      <td class="dt-value font-mono">${m.numeroSerie || '-'}</td>
+                      <td class="dt-value font-mono"><strong>${m.quantidadeDisponivel}</strong> / ${m.quantidade} un</td>
+                      <td class="dt-value">${m.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            </div>
+
+            <div>
+              <div class="signatures">
+                <div class="sig-line">
+                  ${currentUser.name} (MASP: ${currentUser.masp || 'Armeiro'})<br>
+                  <span style="font-weight: normal; font-size: 9px; color: #4b5563;">Armeiro / Responsável pela Armaria</span>
+                </div>
+              </div>
+              <div class="footer">
+                Relatório emitido em ${new Date().toLocaleString('pt-BR')} via Sistema de Armaria PCMG.
+              </div>
+            </div>
+          </div>
+        `;
       }
     } else {
       if (storedExplosives.length === 0) {
@@ -836,17 +960,21 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
     const dept = departments.find(d => d.id === v.departmentId);
     const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
     const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
+    const storedMaterials = storage.getMateriais({ role: 'Geral' } as User).filter(
+      m => m.vaultSpaceId === v.id || (!m.vaultSpaceId && m.localGuarda === v.code && m.unidadeId === v.unitId)
+    );
     const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === v.id || e.localArmazenamento === v.code);
     const isArmas = v.type === 'ARMAS';
     const isMunicoes = v.type === 'MUNIÇÕES';
+    const isMateriais = v.type === 'MATERIAIS';
     const isMyUnitVault = v.unitId === currentUser.unitId || (!v.unitId && v.departmentId === effectiveDeptId);
     const isScopedArmeiroVault = isVaultInArmeiroScope(v);
-    const canEditThisVault = isGeral || 
-      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+    const canEditThisVault = isGeral ||
+      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES' || v.type === 'MATERIAIS')) ||
       (isExplosivista && isMyUnitVault && v.type === 'EXPLOSIVOS') ||
       isAdmin;
-    const canDeleteThisVault = isGeral || 
-      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES')) ||
+    const canDeleteThisVault = isGeral ||
+      (isArmeiro && isScopedArmeiroVault && (v.type === 'ARMAS' || v.type === 'MUNIÇÕES' || v.type === 'MATERIAIS')) ||
       (isExplosivista && isMyUnitVault && v.type === 'EXPLOSIVOS') ||
       isAdmin;
 
@@ -854,17 +982,19 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       <div
         key={v.id}
         className={`bg-slate-900 border rounded-2xl p-5 flex flex-col justify-between space-y-4 shadow-sm transition hover:border-slate-600 ${
-          isArmas 
-            ? 'border-amber-900/30 hover:border-amber-500/50' 
+          isArmas
+            ? 'border-amber-900/30 hover:border-amber-500/50'
             : isMunicoes
             ? 'border-cyan-900/30 hover:border-cyan-500/50'
+            : isMateriais
+            ? 'border-emerald-900/30 hover:border-emerald-500/50'
             : 'border-red-900/30 hover:border-red-500/50'
         }`}
       >
         <div>
           <div className="flex items-start justify-between gap-2">
             <div>
-              <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                 <span className="text-lg font-black text-slate-100 font-mono tracking-wider">
                   {v.code}
                 </span>
@@ -874,6 +1004,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       ? 'bg-amber-950/80 text-amber-300 border-amber-800/80'
                       : isMunicoes
                       ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800/80'
+                      : isMateriais
+                      ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/80'
                       : 'bg-red-950/80 text-red-300 border-red-800/80'
                   }`}
                 >
@@ -881,6 +1013,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     <Crosshair className="w-3 h-3 text-amber-400" />
                   ) : isMunicoes ? (
                     <Disc className="w-3 h-3 text-cyan-400" />
+                  ) : isMateriais ? (
+                    <Package className="w-3 h-3 text-emerald-400" />
                   ) : (
                     <Bomb className="w-3 h-3 text-red-400" />
                   )}
@@ -889,10 +1023,17 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       ? 'Cofre para Armas'
                       : isMunicoes
                       ? 'Cofre para Munições'
+                      : isMateriais
+                      ? 'Cofre de Materiais'
                       : 'Paiol / Cofre de Explosivos'}
                   </span>
                 </span>
               </div>
+              {isMateriais && v.descricaoCurta && (
+                <p className="mt-1.5 text-xs font-semibold text-emerald-300">
+                  {v.descricaoCurta}
+                </p>
+              )}
               <div className="mt-1 text-xs text-slate-300">
                 <p className="font-semibold text-slate-200">{unit ? unit.name : 'Unidade N/A'}</p>
                 <p className="text-[11px] text-slate-400">{dept ? dept.name : ''}</p>
@@ -942,9 +1083,22 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   Munições armazenadas:
                 </span>
                 <span className={`font-mono font-bold ${storedAmmo.length > 0 ? 'text-cyan-400' : 'text-slate-500'}`}>
-                  {storedAmmo.length > 0 
+                  {storedAmmo.length > 0
                     ? `${storedAmmo.reduce((acc, s) => acc + s.quantity, 0)} un (${storedAmmo.length} lote/cal)`
                     : 'Sem munições'
+                  }
+                </span>
+              </div>
+            ) : isMateriais ? (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400 flex items-center gap-1.5">
+                  <Package className="w-3.5 h-3.5 text-emerald-400" />
+                  Itens no cofre:
+                </span>
+                <span className={`font-mono font-bold ${storedMaterials.length > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
+                  {storedMaterials.length > 0
+                    ? `${storedMaterials.reduce((acc, m) => acc + Number(m.quantidade || 0), 0)} un (${storedMaterials.length} reg.)`
+                    : 'Cofre Livre'
                   }
                 </span>
               </div>
@@ -955,7 +1109,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   Explosivos armazenados:
                 </span>
                 <span className={`font-mono font-bold ${storedExplosives.length > 0 ? 'text-red-400' : 'text-slate-500'}`}>
-                  {storedExplosives.length > 0 
+                  {storedExplosives.length > 0
                     ? `${storedExplosives.length} material(is) (${storedExplosives.reduce((acc, e) => acc + Number(e.quantidade || 0), 0)} un/kg)`
                     : 'Paiol Livre'
                   }
@@ -1013,7 +1167,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
           <div>
             <h1 className="text-xl font-bold text-slate-100">Gestão de Locais no Cofre</h1>
             <p className="text-xs text-slate-400">
-              Separação física e controle de locais para armamentos, munições e explosivos por departamento e unidade.
+              Separação física e controle de locais para armamentos, munições, materiais e explosivos por departamento e unidade.
             </p>
           </div>
         </div>
@@ -1036,6 +1190,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               >
                 <Plus className="w-4 h-4" />
                 <span>Novo Cofre de Munições</span>
+              </button>
+            )}
+            {!isExplosivista && (
+              <button
+                onClick={() => handleOpenModal('MATERIAIS')}
+                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ Novo Cofre de Materiais</span>
               </button>
             )}
             {!isArmeiro && (
@@ -1129,6 +1292,25 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               </span>
             </button>
 
+            {/* Filter: Cofre de Materiais */}
+            <button
+              type="button"
+              onClick={() => setTypeFilter('MATERIAIS')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap ${
+                typeFilter === 'MATERIAIS'
+                  ? 'bg-emerald-950/90 text-emerald-300 border border-emerald-800 shadow-sm'
+                  : 'text-slate-400 hover:text-emerald-300 hover:bg-slate-900'
+              }`}
+            >
+              <Package className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Cofre de Materiais</span>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                typeFilter === 'MATERIAIS' ? 'bg-emerald-900/80 text-emerald-200' : 'bg-slate-900 text-slate-500'
+              }`}>
+                {totalMateriais}
+              </span>
+            </button>
+
             {/* Filter: Paiol / Cofre para Explosivos */}
             {!isArmeiro && (
               <button
@@ -1214,10 +1396,14 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
             const unit = units.find(u => u.id === v.unitId);
             const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
             const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
+            const storedMaterials = storage.getMateriais({ role: 'Geral' } as User).filter(
+              m => m.vaultSpaceId === v.id || (!m.vaultSpaceId && m.localGuarda === v.code && m.unidadeId === v.unitId)
+            );
             const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === v.id || e.localArmazenamento === v.code);
 
             const matchesBasic = v.code.toLowerCase().includes(term) ||
               v.type.toLowerCase().includes(term) ||
+              (v.descricaoCurta && v.descricaoCurta.toLowerCase().includes(term)) ||
               dept.name.toLowerCase().includes(term) ||
               dept.code.toLowerCase().includes(term) ||
               (unit && unit.name.toLowerCase().includes(term));
@@ -1233,6 +1419,12 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               return cal?.name.toLowerCase().includes(term);
             });
 
+            const matchesMaterials = storedMaterials.some(m =>
+              (m.nome || '').toLowerCase().includes(term) ||
+              (m.tipoMaterialNome || '').toLowerCase().includes(term) ||
+              (m.numeroSerie || '').toLowerCase().includes(term)
+            );
+
             const matchesExplosives = storedExplosives.some(e =>
               (e?.nome || '').toLowerCase().includes(term) ||
               (e?.tipo || '').toLowerCase().includes(term) ||
@@ -1240,12 +1432,13 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               (e?.lote || '').toLowerCase().includes(term)
             );
 
-            return matchesBasic || matchesWeapons || matchesAmmo || matchesExplosives;
+            return matchesBasic || matchesWeapons || matchesAmmo || matchesMaterials || matchesExplosives;
           });
 
           // Separate by type within this department
           const armasVaults = deptVaults.filter(v => v.type === 'ARMAS');
           const municoesVaults = deptVaults.filter(v => v.type === 'MUNIÇÕES');
+          const materiaisVaults = deptVaults.filter(v => v.type === 'MATERIAIS');
           const explosivosVaults = deptVaults.filter(v => v.type === 'EXPLOSIVOS');
 
           // Auto expand if searching or explicitly toggled
@@ -1291,6 +1484,10 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     <span className="text-xs bg-cyan-950/60 text-cyan-300 border border-cyan-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
                       <Disc className="w-3 h-3 text-cyan-400" />
                       <span>{municoesVaults.length} Munições</span>
+                    </span>
+                    <span className="text-xs bg-emerald-950/60 text-emerald-300 border border-emerald-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
+                      <Package className="w-3 h-3 text-emerald-400" />
+                      <span>{materiaisVaults.length} Materiais</span>
                     </span>
                     {!isArmeiro && (
                       <span className="text-xs bg-red-950/60 text-red-300 border border-red-800/60 px-2.5 py-1 rounded-xl font-bold flex items-center gap-1.5">
@@ -1409,6 +1606,50 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                         </div>
                       )}
 
+                      {/* SECTION 2B: COFRES PARA MATERIAIS */}
+                      {(typeFilter === 'ALL' || typeFilter === 'MATERIAIS') && (
+                        <div className="space-y-4">
+                          <div className="flex items-center justify-between pb-2 border-b border-emerald-900/30">
+                            <div className="flex items-center space-x-2.5">
+                              <div className="p-1.5 bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 rounded-lg flex items-center justify-center">
+                                <Package className="w-4 h-4" />
+                              </div>
+                              <div>
+                                <h3 className="text-sm font-bold text-emerald-300 uppercase tracking-wide">
+                                  Cofres de Materiais
+                                </h3>
+                                <p className="text-[11px] text-slate-400">
+                                  Locais e armários destinados à guarda de equipamentos e materiais operacionais
+                                </p>
+                              </div>
+                            </div>
+
+                            <span className="text-xs font-mono font-bold bg-emerald-950 text-emerald-300 border border-emerald-800 px-2.5 py-0.5 rounded-full">
+                              {materiaisVaults.length} {materiaisVaults.length === 1 ? 'espaço' : 'espaços'}
+                            </span>
+                          </div>
+
+                          {materiaisVaults.length === 0 ? (
+                            <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                              Nenhum cofre de materiais cadastrado neste departamento.
+                              {canManageVault && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenModal('MATERIAIS')}
+                                  className="mt-2 block mx-auto text-emerald-400 hover:text-emerald-300 font-bold underline"
+                                >
+                                  + Cadastrar cofre de materiais
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                              {materiaisVaults.map(renderVaultCard)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       {/* SECTION 3: PAIÓIS / COFRES PARA EXPLOSIVOS */}
                       {!isArmeiro && (typeFilter === 'ALL' || typeFilter === 'EXPLOSIVOS') && (
                         <div className="space-y-4">
@@ -1469,6 +1710,9 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         const unit = units.find(u => u.id === v.unitId);
         const storedWeapons = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.vaultSpaceId === v.id && w.status === 'No Cofre');
         const storedAmmo = storage.getAmmoStocks({ role: 'Geral' } as User).filter(s => s.vaultSpaceId === v.id);
+        const storedMaterials = storage.getMateriais({ role: 'Geral' } as User).filter(
+          m => m.vaultSpaceId === v.id || (!m.vaultSpaceId && m.localGuarda === v.code && m.unidadeId === v.unitId)
+        );
         const storedExplosives = storage.getExplosivos({ role: 'Geral' } as User).filter(e => e.cofreId === v.id || e.localArmazenamento === v.code);
         const vaultMovements = storage.getMovimentacoesExplosivosByVault(v.id || v.code);
         const vaultAmmoMovements = storage.getAmmoMovements({ role: 'Geral' } as User).filter(m => m.vaultSpaceId === v.id);
@@ -1477,6 +1721,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
         const isArmas = v.type === 'ARMAS';
         const isMunicoes = v.type === 'MUNIÇÕES';
+        const isMateriais = v.type === 'MATERIAIS';
         const isExplosivos = v.type === 'EXPLOSIVOS';
 
         return (
@@ -1487,16 +1732,20 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
               <div className="flex items-center justify-between border-b border-slate-800 pb-4 shrink-0">
                 <div className="flex items-center space-x-3">
                   <div className={`p-3 rounded-2xl border ${
-                    isArmas 
-                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' 
+                    isArmas
+                      ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
                       : isMunicoes
                       ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/20'
+                      : isMateriais
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                       : 'bg-red-500/10 text-red-400 border-red-500/20'
                   }`}>
                     {isArmas ? (
                       <Crosshair className="w-6 h-6 text-amber-400" />
                     ) : isMunicoes ? (
                       <Disc className="w-6 h-6 text-cyan-400" />
+                    ) : isMateriais ? (
+                      <Package className="w-6 h-6 text-emerald-400" />
                     ) : (
                       <Bomb className="w-6 h-6 text-red-400" />
                     )}
@@ -1510,6 +1759,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                             ? 'bg-amber-950/80 text-amber-300 border-amber-800'
                             : isMunicoes
                             ? 'bg-cyan-950/80 text-cyan-300 border-cyan-800'
+                            : isMateriais
+                            ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
                             : 'bg-red-950/80 text-red-300 border-red-800'
                         }`}
                       >
@@ -1517,6 +1768,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                           <Crosshair className="w-3 h-3 text-amber-400" />
                         ) : isMunicoes ? (
                           <Disc className="w-3 h-3 text-cyan-400" />
+                        ) : isMateriais ? (
+                          <Package className="w-3 h-3 text-emerald-400" />
                         ) : (
                           <Bomb className="w-3 h-3 text-red-400" />
                         )}
@@ -1525,10 +1778,15 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                             ? 'Cofre para Armas'
                             : isMunicoes
                             ? 'Cofre para Munições'
+                            : isMateriais
+                            ? 'Cofre de Materiais'
                             : 'Paiol / Cofre de Explosivos'}
                         </span>
                       </span>
                     </div>
+                    {isMateriais && v.descricaoCurta && (
+                      <p className="text-xs font-semibold text-emerald-300 mt-1">{v.descricaoCurta}</p>
+                    )}
                     <p className="text-xs text-slate-400 mt-0.5">
                       {unit ? unit.name : 'Unidade N/A'} • {dept ? dept.name : ''}
                     </p>
@@ -1849,6 +2107,63 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       )}
                     </>
                   )
+                ) : isMateriais ? (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                        Materiais Armazenados no Cofre ({v.code})
+                      </h4>
+                      <span className="text-xs font-mono font-bold text-emerald-400">
+                        {storedMaterials.length} Item(ns) Cadastrado(s)
+                      </span>
+                    </div>
+
+                    {storedMaterials.length === 0 ? (
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs italic">
+                        Este cofre de materiais está atualmente livre / sem materiais armazenados.
+                      </div>
+                    ) : (
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                        <table className="w-full text-left text-xs text-slate-300">
+                          <thead className="bg-slate-900 text-slate-400 text-[10px] uppercase tracking-wider border-b border-slate-800">
+                            <tr>
+                              <th className="py-2.5 px-3">Material & Série</th>
+                              <th className="py-2.5 px-3">Tipo</th>
+                              <th className="py-2.5 px-3 text-center">Disp. / Total</th>
+                              <th className="py-2.5 px-3 text-center">Em Uso</th>
+                              <th className="py-2.5 px-3">Passivo Cautela</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {storedMaterials.map((m) => (
+                              <tr key={m.id} className="hover:bg-slate-900/50">
+                                <td className="py-2.5 px-3">
+                                  <div className="font-bold text-slate-100">{m.nome}</div>
+                                  {m.numeroSerie && <div className="text-[10px] font-mono text-amber-400">S/N: {m.numeroSerie}</div>}
+                                </td>
+                                <td className="py-2.5 px-3 text-slate-300">{m.tipoMaterialNome || '-'}</td>
+                                <td className="py-2.5 px-3 text-center font-mono font-bold text-emerald-400">
+                                  {m.quantidadeDisponivel} / {m.quantidade} un
+                                </td>
+                                <td className="py-2.5 px-3 text-center font-mono text-amber-300">
+                                  {m.quantidadeEmUso} un
+                                </td>
+                                <td className="py-2.5 px-3">
+                                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                    m.passivoDepositoPoliciais !== false
+                                      ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                      : 'bg-slate-800 text-slate-400 border-slate-700'
+                                  }`}>
+                                    {m.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   /* EXPLOSIVOS SECTION */
                   vaultDetailsTab === 'ITEMS' ? (
@@ -2244,7 +2559,7 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                     </div>
                   </div>
                 ) : (
-                  <div className={`grid grid-cols-1 ${isArmeiro ? 'sm:grid-cols-2' : 'sm:grid-cols-3'} gap-2.5`}>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                     <button
                       type="button"
                       onClick={() => setType('ARMAS')}
@@ -2281,6 +2596,24 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                       </span>
                     </button>
 
+                    <button
+                      type="button"
+                      onClick={() => setType('MATERIAIS')}
+                      className={`p-3 rounded-xl border text-left transition flex flex-col justify-between ${
+                        type === 'MATERIAIS'
+                          ? 'bg-emerald-950/70 border-emerald-500 text-emerald-200 shadow-sm'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2 mb-1.5">
+                        <Package className={`w-4 h-4 ${type === 'MATERIAIS' ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        <span className="text-xs font-bold text-slate-100">Cofre de Materiais</span>
+                      </div>
+                      <span className="text-[10px] text-slate-400 leading-tight">
+                        Para equipamentos, coletes e materiais táticos
+                      </span>
+                    </button>
+
                     {!isArmeiro && (
                       <button
                         type="button"
@@ -2303,6 +2636,26 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
                   </div>
                 )}
               </div>
+
+              {type === 'MATERIAIS' && (
+                <div>
+                  <label className="block text-xs font-semibold text-emerald-300 uppercase tracking-wider mb-1">
+                    Descrição Curta do Material *
+                  </label>
+                  <input
+                    type="text"
+                    value={descricaoCurta}
+                    onChange={(e) => setDescricaoCurta(e.target.value)}
+                    placeholder="Ex: Coletes Balísticos III-A, Algemas e Rádios"
+                    maxLength={180}
+                    className="w-full bg-slate-950 border border-emerald-800/80 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400 mt-1">
+                    Resumo dos materiais guardados neste cofre (exibido no módulo de Materiais).
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">

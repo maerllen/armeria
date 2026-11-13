@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModuleType, User as UserType, getAllowedModulesForUser } from '../types';
-import { User, Crosshair, ArrowRightLeft, Smartphone, Menu, Bomb, Disc } from 'lucide-react';
+import { User, Crosshair, ArrowRightLeft, Smartphone, Menu, Bomb, Disc, Package } from 'lucide-react';
 
 interface MobileBottomNavProps {
   currentUser?: UserType | null;
@@ -10,6 +10,7 @@ interface MobileBottomNavProps {
   pendingMovementsCount?: number;
   pendingWeaponCautelasCount?: number;
   pendingAmmoCautelasCount?: number;
+  pendingMaterialCautelasCount?: number;
 }
 
 export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
@@ -19,7 +20,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   onOpenMobileMenu,
   pendingMovementsCount = 0,
   pendingWeaponCautelasCount = 0,
-  pendingAmmoCautelasCount = 0
+  pendingAmmoCautelasCount = 0,
+  pendingMaterialCautelasCount = 0
 }) => {
   const allowedModules = getAllowedModulesForUser(currentUser);
 
@@ -40,6 +42,12 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       label: 'Cautela Mun.',
       icon: Disc,
       badge: pendingAmmoCautelasCount > 0 ? pendingAmmoCautelasCount : undefined
+    },
+    {
+      id: 'cautela-materiais',
+      label: 'Cautela Mat.',
+      icon: Package,
+      badge: pendingMaterialCautelasCount > 0 ? pendingMaterialCautelasCount : undefined
     },
     {
       id: 'explosivos',

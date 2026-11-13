@@ -4,6 +4,7 @@ export type ModuleType =
   | 'meu-perfil' 
   | 'cautela-armas'
   | 'cautela-municoes'
+  | 'cautela-materiais'
   | 'unidade' 
   | 'usuarios' 
   | 'cofre' 
@@ -126,8 +127,9 @@ export type VaultSpaceType = 'ARMAS' | 'MUNIÇÕES' | 'EXPLOSIVOS' | 'MATERIAIS'
 
 export interface VaultSpace {
   id: string;
-  code: string; // e.g., "A1-G1", "C1-L1", "PAIOL-01"
+  code: string; // e.g., "A1-G1", "C1-L1", "PAIOL-01", "MAT-01"
   type: VaultSpaceType;
+  descricaoCurta?: string; // Descrição curta do material armazenado (para cofres de materiais)
   departmentId: string;
   unitId: string;
   createdAt: string;
@@ -870,7 +872,9 @@ export interface Material {
   unidadeId: string;
   unidadeNome?: string;
   validade?: string | null; // YYYY-MM-DD ou null
-  localGuarda: string; // Ex: Armário 01, Gaveta 3, Prateleira B, Sala de Armas
+  localGuarda: string; // Código do cofre de materiais / local
+  vaultSpaceId?: string; // ID do cofre específico de materiais
+  passivoDepositoPoliciais?: boolean; // SIM = true, NÃO = false (visível para cautelas de materiais)
   numeroSerie?: string; // Número de série ou patrimônio
   observacoes?: string;
   criadoPorUsuarioId?: string;
@@ -880,7 +884,17 @@ export interface Material {
 }
 
 export type DestinatarioMaterialTipo = 'interno' | 'externo';
-export type CautelaMaterialStatus = 'Em Uso' | 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia';
+export type CautelaMaterialStatus =
+  | 'PENDENTE'
+  | 'AUTORIZADA'
+  | 'DEVOLUCAO_PENDENTE'
+  | 'DEVOLVIDA'
+  | 'CONSUMIDA'
+  | 'RECUSADA'
+  | 'Em Uso'
+  | 'Devolvido'
+  | 'Consumido'
+  | 'Devolvido com Anomalia';
 
 export interface CautelaMaterial {
   id: string;
@@ -909,9 +923,16 @@ export interface CautelaMaterial {
   finalidade: string;
   status: CautelaMaterialStatus;
   
-  // Consumo / Perda / Anomalias
+  // Consumo / Perda / Anomalias / Fluxo Armeiro x Policial
   foiConsumido?: boolean; // Material utilizado que se perdeu e não retornará mais
   relatoUsoAnomalias?: string; // Campo para comunicar uso ou anomalias
+  vaultSpaceId?: string; // Cofre de origem
+  destinationVaultSpaceId?: string; // Cofre de destino na devolução
+  seraDevolvida?: boolean; // true = passiva de devolução; false = consumo
+  returnedQuantity?: number; // Quantidade informada para devolução
+  authorizedAt?: string;
+  rejectionReason?: string;
+  observacoes?: string;
   
   responsavelEntregaId: string;
   responsavelEntregaNome: string;
@@ -1267,6 +1288,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
+      'cautela-materiais',
       'explosivos',
       'armas',
       'municoes',
@@ -1292,6 +1314,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
+      'cautela-materiais',
       'explosivos',
       'armas',
       'municoes',
@@ -1310,6 +1333,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
+      'cautela-materiais',
       'explosivos',
       'armas',
       'municoes',
@@ -1327,6 +1351,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
+      'cautela-materiais',
       'explosivos',
       'materiais',
       'unidade',
@@ -1348,7 +1373,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     const policeModules: ModuleType[] = [
       'meu-perfil',
       'cautela-armas',
-      'cautela-municoes'
+      'cautela-municoes',
+      'cautela-materiais'
     ];
     if (isUserExplosivista(user)) {
       policeModules.push('explosivos');
@@ -1360,7 +1386,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   return [
     'meu-perfil',
     'cautela-armas',
-    'cautela-municoes'
+    'cautela-municoes',
+    'cautela-materiais'
   ];
 };
 

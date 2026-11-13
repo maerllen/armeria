@@ -32,6 +32,7 @@ interface SidebarProps {
   pendingMovementsCount?: number;
   pendingWeaponCautelasCount?: number;
   pendingAmmoCautelasCount?: number;
+  pendingMaterialCautelasCount?: number;
   readyReceiptsCount?: number;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
@@ -45,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   pendingMovementsCount = 0,
   pendingWeaponCautelasCount = 0,
   pendingAmmoCautelasCount = 0,
+  pendingMaterialCautelasCount = 0,
   readyReceiptsCount = 0,
   isOpenMobile = false,
   onCloseMobile
@@ -83,6 +85,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
       visible: allowedModules.includes('cautela-municoes'),
       hasNotification: pendingAmmoCautelasCount > 0,
       badge: pendingAmmoCautelasCount > 0 ? pendingAmmoCautelasCount : undefined
+    },
+    {
+      id: 'cautela-materiais',
+      label: 'Cautela de materiais',
+      icon: Package,
+      visible: allowedModules.includes('cautela-materiais'),
+      hasNotification: pendingMaterialCautelasCount > 0,
+      badge: pendingMaterialCautelasCount > 0 ? pendingMaterialCautelasCount : undefined
     },
     {
       id: 'explosivos',

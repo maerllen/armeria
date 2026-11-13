@@ -1298,7 +1298,7 @@ apiRouter.delete('/courses/:id', async (req: Request, res: Response) => {
 apiRouter.get('/vault-spaces', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query('SELECT ID_COFRES as id, CODIGO_COFRES as code, TIPO_COFRES as type, DEPARTAMENTO_ID_COFRES as departmentId, UNIDADE_ID_COFRES as unitId, DATA_CRIACAO_COFRES as createdAt FROM COFRES ORDER BY DATA_CRIACAO_COFRES ASC');
+    const [rows]: any = await pool.query('SELECT ID_COFRES as id, CODIGO_COFRES as code, TIPO_COFRES as type, DESCRICAO_CURTA_COFRES as descricaoCurta, DEPARTAMENTO_ID_COFRES as departmentId, UNIDADE_ID_COFRES as unitId, DATA_CRIACAO_COFRES as createdAt FROM COFRES ORDER BY DATA_CRIACAO_COFRES ASC');
     return res.json(rows || []);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1307,16 +1307,17 @@ apiRouter.get('/vault-spaces', async (req: Request, res: Response) => {
 
 apiRouter.post('/vault-spaces', async (req: Request, res: Response) => {
   try {
-    const { code, type, departmentId, unitId, actor } = req.body;
+    const { code, type, descricaoCurta, departmentId, unitId, actor } = req.body;
     const pool = getPool();
     const id = `vault-${Date.now()}`;
+    const cleanDesc = descricaoCurta ? String(descricaoCurta).trim() : null;
     await pool.query(
-      'INSERT INTO COFRES (ID_COFRES, CODIGO_COFRES, TIPO_COFRES, DEPARTAMENTO_ID_COFRES, UNIDADE_ID_COFRES, DATA_CRIACAO_COFRES) VALUES (?, ?, ?, ?, ?, NOW())',
-      [id, code, type, departmentId || null, unitId || null]
+      'INSERT INTO COFRES (ID_COFRES, CODIGO_COFRES, TIPO_COFRES, DESCRICAO_CURTA_COFRES, DEPARTAMENTO_ID_COFRES, UNIDADE_ID_COFRES, DATA_CRIACAO_COFRES) VALUES (?, ?, ?, ?, ?, ?, NOW())',
+      [id, code, type, cleanDesc, departmentId || null, unitId || null]
     );
 
-    await insertAuditLog('Cofre', 'Criar', `Criado local de guarda: ${code} (${type})`, actor, req.ip);
-    return res.json({ id, code, type, departmentId, unitId, createdAt: new Date().toISOString() });
+    await insertAuditLog('Cofre', 'Criar', `Criado local de guarda: ${code} (${type})${cleanDesc ? ` — ${cleanDesc}` : ''}`, actor, req.ip);
+    return res.json({ id, code, type, descricaoCurta: cleanDesc, departmentId, unitId, createdAt: new Date().toISOString() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1325,16 +1326,17 @@ apiRouter.post('/vault-spaces', async (req: Request, res: Response) => {
 apiRouter.put('/vault-spaces/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { code, type, departmentId, unitId, actor } = req.body;
+    const { code, type, descricaoCurta, departmentId, unitId, actor } = req.body;
     const pool = getPool();
+    const cleanDesc = descricaoCurta !== undefined ? (descricaoCurta ? String(descricaoCurta).trim() : null) : undefined;
 
     await pool.query(
-      'UPDATE COFRES SET CODIGO_COFRES = ?, TIPO_COFRES = ?, DEPARTAMENTO_ID_COFRES = ?, UNIDADE_ID_COFRES = ? WHERE ID_COFRES = ?',
-      [code, type, departmentId || null, unitId || null, id]
+      'UPDATE COFRES SET CODIGO_COFRES = ?, TIPO_COFRES = ?, DESCRICAO_CURTA_COFRES = ?, DEPARTAMENTO_ID_COFRES = ?, UNIDADE_ID_COFRES = ? WHERE ID_COFRES = ?',
+      [code, type, cleanDesc ?? null, departmentId || null, unitId || null, id]
     );
 
     await insertAuditLog('Cofre', 'Editar', `Atualizado local de guarda no cofre: ${code} (${type})`, actor, req.ip);
-    return res.json({ id, code, type, departmentId, unitId });
+    return res.json({ id, code, type, descricaoCurta: cleanDesc ?? null, departmentId, unitId });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -1348,9 +1350,10 @@ apiRouter.delete('/vault-spaces/:id', async (req: Request, res: Response) => {
 
     const [weaps]: any = await pool.query("SELECT COUNT(*) as cnt FROM ARMAS WHERE COFRE_ID_ARMAS = ? AND STATUS_ARMAS = 'No Cofre'", [id]);
     const [ammos]: any = await pool.query('SELECT COUNT(*) as cnt FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND QUANTIDADE_ESTOQUE_MUNICOES > 0', [id]);
+    const [mats]: any = await pool.query('SELECT COUNT(*) as cnt FROM MATERIAIS WHERE COFRE_ID_MATERIAIS = ? AND QUANTIDADE_MATERIAIS > 0', [id]);
 
-    if (weaps[0].cnt > 0 || ammos[0].cnt > 0) {
-      return res.status(400).json({ error: 'Não é possível excluir o local do cofre pois há armas ou munições armazenadas nele.' });
+    if (weaps[0].cnt > 0 || ammos[0].cnt > 0 || (mats[0]?.cnt || 0) > 0) {
+      return res.status(400).json({ error: 'Não é possível excluir o local do cofre pois há armas, munições ou materiais armazenados nele.' });
     }
 
     await pool.query('DELETE FROM COFRES WHERE ID_COFRES = ?', [id]);
@@ -7303,6 +7306,8 @@ apiRouter.get('/materiais', async (req: Request, res: Response) => {
         UNIDADE_NOME_MATERIAIS as unidade_nome,
         VALIDADE_MATERIAIS as validade,
         LOCAL_GUARDA_MATERIAIS as local_guarda,
+        COFRE_ID_MATERIAIS as vault_space_id,
+        PASSIVO_DEPOSITO_POLICIAIS as passivo_deposito_policiais,
         NUMERO_SERIE_MATERIAIS as numero_serie,
         OBSERVACOES_MATERIAIS as observacoes,
         CRIADO_POR_USUARIO_ID_MATERIAIS as criado_por_usuario_id,
@@ -7339,6 +7344,8 @@ apiRouter.get('/materiais', async (req: Request, res: Response) => {
       unidadeNome: r.unidade_nome,
       validade: r.validade ? (r.validade instanceof Date ? r.validade.toISOString().split('T')[0] : String(r.validade).substring(0, 10)) : null,
       localGuarda: r.local_guarda,
+      vaultSpaceId: r.vault_space_id || undefined,
+      passivoDepositoPoliciais: r.passivo_deposito_policiais !== undefined && r.passivo_deposito_policiais !== null ? Boolean(r.passivo_deposito_policiais) : true,
       numeroSerie: r.numero_serie,
       observacoes: r.observacoes,
       criadoPorUsuarioId: r.criado_por_usuario_id,
@@ -7368,6 +7375,8 @@ apiRouter.post('/materiais', async (req: Request, res: Response) => {
       unidadeNome,
       validade,
       localGuarda,
+      vaultSpaceId,
+      passivoDepositoPoliciais,
       numeroSerie,
       observacoes,
       criadoPorUsuarioId,
@@ -7383,17 +7392,27 @@ apiRouter.post('/materiais', async (req: Request, res: Response) => {
     if (!departamentoId || !unidadeId) {
       return res.status(400).json({ error: 'Departamento e Unidade são obrigatórios.' });
     }
-    if (!localGuarda || !localGuarda.trim()) {
-      return res.status(400).json({ error: 'O local de guarda é obrigatório.' });
+
+    let resolvedLocalGuarda = (localGuarda || '').trim();
+    if (vaultSpaceId) {
+      const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [vaultSpaceId]);
+      if (vRows && vRows.length > 0 && vRows[0].CODIGO_COFRES) {
+        resolvedLocalGuarda = vRows[0].CODIGO_COFRES;
+      }
+    }
+
+    if (!resolvedLocalGuarda) {
+      return res.status(400).json({ error: 'O cofre de guarda do material é obrigatório.' });
     }
 
     const qty = Math.max(1, parseInt(quantidade || '1', 10));
     const newId = id || `mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const passivoFlag = passivoDepositoPoliciais === false || passivoDepositoPoliciais === 0 || passivoDepositoPoliciais === 'NAO' ? 0 : 1;
 
     await pool.query(
       `INSERT INTO MATERIAIS 
-        (ID_MATERIAIS, TIPO_MATERIAL_ID_MATERIAIS, TIPO_MATERIAL_NOME_MATERIAIS, NOME_MATERIAIS, QUANTIDADE_MATERIAIS, QUANTIDADE_DISPONIVEL_MATERIAIS, QUANTIDADE_EM_USO_MATERIAIS, QUANTIDADE_CONSUMIDA_MATERIAIS, DEPARTAMENTO_ID_MATERIAIS, DEPARTAMENTO_NOME_MATERIAIS, UNIDADE_ID_MATERIAIS, UNIDADE_NOME_MATERIAIS, VALIDADE_MATERIAIS, LOCAL_GUARDA_MATERIAIS, NUMERO_SERIE_MATERIAIS, OBSERVACOES_MATERIAIS, CRIADO_POR_USUARIO_ID_MATERIAIS, CRIADO_POR_NOME_MATERIAIS, DATA_CRIACAO_MATERIAIS, DATA_ATUALIZACAO_MATERIAIS)
-       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        (ID_MATERIAIS, TIPO_MATERIAL_ID_MATERIAIS, TIPO_MATERIAL_NOME_MATERIAIS, NOME_MATERIAIS, QUANTIDADE_MATERIAIS, QUANTIDADE_DISPONIVEL_MATERIAIS, QUANTIDADE_EM_USO_MATERIAIS, QUANTIDADE_CONSUMIDA_MATERIAIS, DEPARTAMENTO_ID_MATERIAIS, DEPARTAMENTO_NOME_MATERIAIS, UNIDADE_ID_MATERIAIS, UNIDADE_NOME_MATERIAIS, VALIDADE_MATERIAIS, LOCAL_GUARDA_MATERIAIS, COFRE_ID_MATERIAIS, PASSIVO_DEPOSITO_POLICIAIS, NUMERO_SERIE_MATERIAIS, OBSERVACOES_MATERIAIS, CRIADO_POR_USUARIO_ID_MATERIAIS, CRIADO_POR_NOME_MATERIAIS, DATA_CRIACAO_MATERIAIS, DATA_ATUALIZACAO_MATERIAIS)
+       VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         newId,
         tipoMaterialId,
@@ -7406,7 +7425,9 @@ apiRouter.post('/materiais', async (req: Request, res: Response) => {
         unidadeId,
         unidadeNome || null,
         validade ? validade : null,
-        localGuarda.trim(),
+        resolvedLocalGuarda,
+        vaultSpaceId || null,
+        passivoFlag,
         numeroSerie ? numeroSerie.trim() : null,
         observacoes || null,
         criadoPorUsuarioId || null,
@@ -7417,7 +7438,7 @@ apiRouter.post('/materiais', async (req: Request, res: Response) => {
     await insertAuditLog(
       'Materiais',
       'Cadastro de Material',
-      `Novo material cadastrado: "${nome}" (Qtd: ${qty}, Local: ${localGuarda}, Tipo: ${tipoMaterialNome}) na unidade ${unidadeNome || unidadeId}.`,
+      `Novo material cadastrado: "${nome}" (Qtd: ${qty}, Cofre: ${resolvedLocalGuarda}, Passivo de depósito: ${passivoFlag ? 'SIM' : 'NÃO'}, Tipo: ${tipoMaterialNome}) na unidade ${unidadeNome || unidadeId}.`,
       { id: criadoPorUsuarioId, name: criadoPorNome },
       req.ip
     );
@@ -7444,13 +7465,15 @@ apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
       unidadeNome,
       validade,
       localGuarda,
+      vaultSpaceId,
+      passivoDepositoPoliciais,
       numeroSerie,
       observacoes,
       updatedByUserId,
       updatedByName
     } = req.body;
 
-    const [existingRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, QUANTIDADE_MATERIAIS as quantidade, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida FROM MATERIAIS WHERE ID_MATERIAIS = ?', [id]);
+    const [existingRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, QUANTIDADE_MATERIAIS as quantidade, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida, COFRE_ID_MATERIAIS as vault_space_id, PASSIVO_DEPOSITO_POLICIAIS as passivo_deposito_policiais FROM MATERIAIS WHERE ID_MATERIAIS = ?', [id]);
     if (!existingRows || existingRows.length === 0) {
       return res.status(404).json({ error: 'Material não encontrado.' });
     }
@@ -7459,6 +7482,18 @@ apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
     const newTotal = quantidade !== undefined ? Math.max(0, parseInt(quantidade, 10)) : current.quantidade;
     const inUse = Number(current.quantidade_em_uso || 0);
     const newDisponivel = Math.max(0, newTotal - inUse);
+
+    let resolvedLocalGuarda = localGuarda ? localGuarda.trim() : null;
+    if (vaultSpaceId) {
+      const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [vaultSpaceId]);
+      if (vRows && vRows.length > 0 && vRows[0].CODIGO_COFRES) {
+        resolvedLocalGuarda = vRows[0].CODIGO_COFRES;
+      }
+    }
+
+    const passivoFlag = passivoDepositoPoliciais !== undefined
+      ? (passivoDepositoPoliciais === false || passivoDepositoPoliciais === 0 || passivoDepositoPoliciais === 'NAO' ? 0 : 1)
+      : (current.passivo_deposito_policiais ?? 1);
 
     await pool.query(
       `UPDATE MATERIAIS SET
@@ -7473,6 +7508,8 @@ apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
         UNIDADE_NOME_MATERIAIS = COALESCE(?, UNIDADE_NOME_MATERIAIS),
         VALIDADE_MATERIAIS = ?,
         LOCAL_GUARDA_MATERIAIS = COALESCE(?, LOCAL_GUARDA_MATERIAIS),
+        COFRE_ID_MATERIAIS = COALESCE(?, COFRE_ID_MATERIAIS),
+        PASSIVO_DEPOSITO_POLICIAIS = ?,
         NUMERO_SERIE_MATERIAIS = ?,
         OBSERVACOES_MATERIAIS = ?,
         DATA_ATUALIZACAO_MATERIAIS = NOW()
@@ -7488,7 +7525,9 @@ apiRouter.put('/materiais/:id', async (req: Request, res: Response) => {
         unidadeId || null,
         unidadeNome || null,
         validade ? validade : null,
-        localGuarda ? localGuarda.trim() : null,
+        resolvedLocalGuarda,
+        vaultSpaceId || null,
+        passivoFlag,
         numeroSerie ? numeroSerie.trim() : null,
         observacoes !== undefined ? observacoes : null,
         id
@@ -7572,6 +7611,13 @@ apiRouter.get('/cautelas-materiais', async (req: Request, res: Response) => {
         STATUS_CAUTELAS_MATERIAIS as status,
         FOI_CONSUMIDO_CAUTELAS_MATERIAIS as foi_consumido,
         RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS as relato_uso_anomalias,
+        COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS as vault_space_id,
+        COFRE_DESTINO_ID_CAUTELAS_MATERIAIS as destination_vault_space_id,
+        SERA_DEVOLVIDA_CAUTELAS_MATERIAIS as sera_devolvida,
+        QUANTIDADE_DEVOLVIDA_CAUTELAS_MATERIAIS as returned_quantity,
+        DATA_AUTORIZACAO_CAUTELAS_MATERIAIS as authorized_at,
+        MOTIVO_RECUSA_CAUTELAS_MATERIAIS as rejection_reason,
+        OBSERVACOES_CAUTELAS_MATERIAIS as observacoes,
         RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS as responsavel_entrega_id,
         RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS as responsavel_entrega_nome,
         RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS as responsavel_entrega_masp,
@@ -7623,6 +7669,13 @@ apiRouter.get('/cautelas-materiais', async (req: Request, res: Response) => {
       status: r.status,
       foiConsumido: Boolean(r.foi_consumido),
       relatoUsoAnomalias: r.relato_uso_anomalias,
+      vaultSpaceId: r.vault_space_id || undefined,
+      destinationVaultSpaceId: r.destination_vault_space_id || undefined,
+      seraDevolvida: r.sera_devolvida !== undefined && r.sera_devolvida !== null ? Boolean(r.sera_devolvida) : true,
+      returnedQuantity: r.returned_quantity !== undefined && r.returned_quantity !== null ? Number(r.returned_quantity) : undefined,
+      authorizedAt: r.authorized_at || undefined,
+      rejectionReason: r.rejection_reason || undefined,
+      observacoes: r.observacoes || undefined,
       responsavelEntregaId: r.responsavel_entrega_id,
       responsavelEntregaNome: r.responsavel_entrega_nome,
       responsavelEntregaMasp: r.responsavel_entrega_masp,
@@ -7663,6 +7716,10 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
       dataRetirada,
       dataPrevistaDevolucao,
       finalidade,
+      seraDevolvida,
+      directAuthorized,
+      observacoes,
+      enforceDepositEligible,
       responsavelEntregaId,
       responsavelEntregaNome,
       responsavelEntregaMasp,
@@ -7676,18 +7733,24 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
     const qty = Math.max(1, parseInt(quantidade || '1', 10));
 
     // Verify stock availability
-    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, TIPO_MATERIAL_NOME_MATERIAIS as tipo_material_nome, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida, DEPARTAMENTO_ID_MATERIAIS as departamento_id, UNIDADE_ID_MATERIAIS as unidade_id FROM MATERIAIS WHERE ID_MATERIAIS = ?', [materialId]);
+    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, TIPO_MATERIAL_NOME_MATERIAIS as tipo_material_nome, QUANTIDADE_DISPONIVEL_MATERIAIS as quantidade_disponivel, QUANTIDADE_EM_USO_MATERIAIS as quantidade_em_uso, QUANTIDADE_CONSUMIDA_MATERIAIS as quantidade_consumida, COFRE_ID_MATERIAIS as vault_space_id, PASSIVO_DEPOSITO_POLICIAIS as passivo_deposito_policiais, DEPARTAMENTO_ID_MATERIAIS as departamento_id, UNIDADE_ID_MATERIAIS as unidade_id FROM MATERIAIS WHERE ID_MATERIAIS = ?', [materialId]);
     if (!matRows || matRows.length === 0) {
       return res.status(404).json({ error: 'Material não encontrado no estoque.' });
     }
     const mat = matRows[0];
-    if (mat.quantidade_disponivel < qty) {
+
+    if (enforceDepositEligible && mat.passivo_deposito_policiais === 0) {
+      return res.status(400).json({ error: 'Este material está configurado como NÃO passivo de depósito/cautela para policiais.' });
+    }
+
+    const isDirect = directAuthorized !== false;
+    if (isDirect && mat.quantidade_disponivel < qty) {
       return res.status(400).json({
         error: `Estoque insuficiente para cautela. Disponível: ${mat.quantidade_disponivel}, Solicitado: ${qty}.`
       });
     }
 
-    if (tipoDestinatario === 'interno') {
+    if ((tipoDestinatario || 'interno') === 'interno') {
       if (!usuarioInternoId || !usuarioInternoNome) {
         return res.status(400).json({ error: 'Usuário interno (policial) é obrigatório.' });
       }
@@ -7704,17 +7767,19 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
     const newId = id || `caut-mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const proto = protocolo || `CM-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const effectiveRetirada = dataRetirada ? new Date(dataRetirada) : new Date();
+    const initialStatus = isDirect ? (enforceDepositEligible ? 'AUTORIZADA' : 'Em Uso') : 'PENDENTE';
+    const seraDevFlag = seraDevolvida === false ? 0 : 1;
 
-    // Insert cautela
     await pool.query(
       `INSERT INTO CAUTELAS_MATERIAIS (
         ID_CAUTELAS_MATERIAIS, PROTOCOLO_CAUTELAS_MATERIAIS, MATERIAL_ID_CAUTELAS_MATERIAIS, MATERIAL_NOME_CAUTELAS_MATERIAIS, TIPO_MATERIAL_NOME_CAUTELAS_MATERIAIS, QUANTIDADE_CAUTELAS_MATERIAIS,
         TIPO_DESTINATARIO_CAUTELAS_MATERIAIS, USUARIO_INTERNO_ID_CAUTELAS_MATERIAIS, USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS, USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS, USUARIO_INTERNO_CARGO_CAUTELAS_MATERIAIS,
         USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_DOCUMENTO_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_ORGAO_CAUTELAS_MATERIAIS, USUARIO_EXTERNO_TELEFONE_CAUTELAS_MATERIAIS,
         DATA_RETIRADA_CAUTELAS_MATERIAIS, DATA_PREVISTA_DEVOLUCAO_CAUTELAS_MATERIAIS, FINALIDADE_CAUTELAS_MATERIAIS, STATUS_CAUTELAS_MATERIAIS, FOI_CONSUMIDO_CAUTELAS_MATERIAIS,
+        COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS, SERA_DEVOLVIDA_CAUTELAS_MATERIAIS, DATA_AUTORIZACAO_CAUTELAS_MATERIAIS, OBSERVACOES_CAUTELAS_MATERIAIS,
         RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS, RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS, RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS,
         DEPARTAMENTO_ID_CAUTELAS_MATERIAIS, UNIDADE_ID_CAUTELAS_MATERIAIS, DATA_CRIACAO_CAUTELAS_MATERIAIS, DATA_ATUALIZACAO_CAUTELAS_MATERIAIS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Em Uso', 0, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         newId,
         proto,
@@ -7734,53 +7799,192 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
         effectiveRetirada,
         dataPrevistaDevolucao || null,
         finalidade.trim(),
-        responsavelEntregaId || 'sistema',
-        responsavelEntregaNome || 'Armeiro',
+        initialStatus,
+        mat.vault_space_id || null,
+        seraDevFlag,
+        isDirect ? new Date() : null,
+        observacoes ? String(observacoes).trim() : null,
+        responsavelEntregaId || (isDirect ? 'sistema' : 'pendente'),
+        responsavelEntregaNome || (isDirect ? 'Armeiro' : 'Aguardando Armeiro'),
         responsavelEntregaMasp || null,
         departamentoId || mat.departamento_id,
         unidadeId || mat.unidade_id
       ]
     );
 
-    // Update material quantities: reduce available, increase in_use
-    await pool.query(
-      `UPDATE MATERIAIS SET 
-        QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS - ?,
-        QUANTIDADE_EM_USO_MATERIAIS = QUANTIDADE_EM_USO_MATERIAIS + ?,
-        DATA_ATUALIZACAO_MATERIAIS = NOW()
-       WHERE ID_MATERIAIS = ?`,
-      [qty, qty, materialId]
-    );
+    if (isDirect) {
+      await pool.query(
+        `UPDATE MATERIAIS SET 
+          QUANTIDADE_DISPONIVEL_MATERIAIS = GREATEST(0, QUANTIDADE_DISPONIVEL_MATERIAIS - ?),
+          QUANTIDADE_EM_USO_MATERIAIS = QUANTIDADE_EM_USO_MATERIAIS + ?,
+          DATA_ATUALIZACAO_MATERIAIS = NOW()
+         WHERE ID_MATERIAIS = ?`,
+        [qty, qty, materialId]
+      );
+    }
 
-    const recipientDesc = tipoDestinatario === 'interno'
+    const recipientDesc = (tipoDestinatario || 'interno') === 'interno'
       ? `${usuarioInternoNome} (MASP: ${usuarioInternoMasp || 'N/D'})`
       : `${usuarioExternoNome} (Externo - ${usuarioExternoOrgao || 'Sem órgão informado'})`;
 
     await insertAuditLog(
       'Materiais',
-      'Cautela de Material',
-      `Cautela realizada (${proto}): ${qty}x "${mat.nome}" entregue para ${recipientDesc}. Finalidade: ${finalidade}.`,
-      { id: responsavelEntregaId, name: responsavelEntregaNome, masp: responsavelEntregaMasp },
+      isDirect ? 'Cautela de Material' : 'Solicitação de Cautela de Material',
+      `${isDirect ? 'Cautela realizada' : 'Solicitação enviada para análise'} (${proto}): ${qty}x "${mat.nome}" para ${recipientDesc}. Finalidade: ${finalidade}.`,
+      { id: responsavelEntregaId || usuarioInternoId, name: responsavelEntregaNome || usuarioInternoNome, masp: responsavelEntregaMasp || usuarioInternoMasp },
       req.ip
     );
 
-    return res.json({ success: true, id: newId, protocolo: proto });
+    return res.json({ success: true, id: newId, protocolo: proto, status: initialStatus });
   } catch (err: any) {
     console.error('Error creating cautela_material:', err);
     return res.status(500).json({ error: err.message });
   }
 });
 
-// Registrar Devolução / Comunicação de Uso ou Anomalias / Material que se perca
+// Armeiro autoriza solicitação pendente e deduz estoque do material
+apiRouter.put('/cautelas-materiais/:id/autorizar', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const {
+      seraDevolvida,
+      notes,
+      armorerId,
+      armorerName,
+      armorerMasp
+    } = req.body;
+
+    const [cautRows]: any = await pool.query('SELECT * FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
+    if (!cautRows || cautRows.length === 0) {
+      return res.status(404).json({ error: 'Solicitação de cautela de material não encontrada.' });
+    }
+    const caut = cautRows[0];
+    if (caut.STATUS_CAUTELAS_MATERIAIS !== 'PENDENTE') {
+      return res.status(400).json({ error: `Esta solicitação já foi processada (${caut.STATUS_CAUTELAS_MATERIAIS}).` });
+    }
+
+    const qty = Number(caut.QUANTIDADE_CAUTELAS_MATERIAIS || 1);
+    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, QUANTIDADE_DISPONIVEL_MATERIAIS as disp, COFRE_ID_MATERIAIS as vaultId FROM MATERIAIS WHERE ID_MATERIAIS = ?', [caut.MATERIAL_ID_CAUTELAS_MATERIAIS]);
+    if (!matRows || matRows.length === 0) {
+      return res.status(404).json({ error: 'Material vinculado não encontrado no estoque.' });
+    }
+    const mat = matRows[0];
+    if (mat.disp < qty) {
+      return res.status(400).json({ error: `Saldo insuficiente no estoque para pagamento (${mat.disp} disponíveis para ${qty} solicitados).` });
+    }
+
+    const seraDevFlag = seraDevolvida === false ? 0 : 1;
+
+    await pool.query(
+      `UPDATE CAUTELAS_MATERIAIS SET
+        STATUS_CAUTELAS_MATERIAIS = 'AUTORIZADA',
+        SERA_DEVOLVIDA_CAUTELAS_MATERIAIS = ?,
+        OBSERVACOES_CAUTELAS_MATERIAIS = COALESCE(?, OBSERVACOES_CAUTELAS_MATERIAIS),
+        COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS = COALESCE(COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS, ?),
+        DATA_AUTORIZACAO_CAUTELAS_MATERIAIS = NOW(),
+        RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS = ?,
+        DATA_ATUALIZACAO_CAUTELAS_MATERIAIS = NOW()
+       WHERE ID_CAUTELAS_MATERIAIS = ?`,
+      [
+        seraDevFlag,
+        notes ? String(notes).trim() : null,
+        mat.vaultId || null,
+        armorerId || 'sistema',
+        armorerName || 'Armeiro',
+        armorerMasp || null,
+        id
+      ]
+    );
+
+    await pool.query(
+      `UPDATE MATERIAIS SET
+        QUANTIDADE_DISPONIVEL_MATERIAIS = GREATEST(0, QUANTIDADE_DISPONIVEL_MATERIAIS - ?),
+        QUANTIDADE_EM_USO_MATERIAIS = QUANTIDADE_EM_USO_MATERIAIS + ?,
+        DATA_ATUALIZACAO_MATERIAIS = NOW()
+       WHERE ID_MATERIAIS = ?`,
+      [qty, qty, mat.id]
+    );
+
+    await insertAuditLog(
+      'Materiais',
+      'Autorização de Cautela de Material',
+      `Pagamento autorizado (${caut.PROTOCOLO_CAUTELAS_MATERIAIS || id}): ${qty}x "${mat.nome}" para ${caut.USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS || caut.USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS}.`,
+      { id: armorerId, name: armorerName, masp: armorerMasp },
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error authorizing cautela_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Armeiro recusa solicitação pendente
+apiRouter.put('/cautelas-materiais/:id/recusar', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const { reason, armorerId, armorerName, armorerMasp } = req.body;
+
+    const [cautRows]: any = await pool.query('SELECT * FROM CAUTELAS_MATERIAIS WHERE ID_CAUTELAS_MATERIAIS = ?', [id]);
+    if (!cautRows || cautRows.length === 0) {
+      return res.status(404).json({ error: 'Solicitação de cautela não encontrada.' });
+    }
+    const caut = cautRows[0];
+    if (caut.STATUS_CAUTELAS_MATERIAIS !== 'PENDENTE') {
+      return res.status(400).json({ error: 'Somente solicitações pendentes podem ser recusadas.' });
+    }
+
+    await pool.query(
+      `UPDATE CAUTELAS_MATERIAIS SET
+        STATUS_CAUTELAS_MATERIAIS = 'RECUSADA',
+        MOTIVO_RECUSA_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS = ?,
+        RESPONSAVEL_ENTREGA_MASP_CAUTELAS_MATERIAIS = ?,
+        DATA_ATUALIZACAO_CAUTELAS_MATERIAIS = NOW()
+       WHERE ID_CAUTELAS_MATERIAIS = ?`,
+      [
+        reason ? String(reason).trim() : 'Indeferida pelo Armeiro',
+        armorerId || 'sistema',
+        armorerName || 'Armeiro',
+        armorerMasp || null,
+        id
+      ]
+    );
+
+    await insertAuditLog(
+      'Materiais',
+      'Recusa de Cautela de Material',
+      `Solicitação (${caut.PROTOCOLO_CAUTELAS_MATERIAIS || id}) de ${caut.MATERIAL_NOME_CAUTELAS_MATERIAIS} recusada. Motivo: ${reason || 'N/I'}.`,
+      { id: armorerId, name: armorerName, masp: armorerMasp },
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error rejecting cautela_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Registrar Devolução / Solicitação de Devolução / Baixa por Consumo ou Anomalia
 apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const { id } = req.params;
     const {
-      status, // 'Devolvido' | 'Consumido' | 'Devolvido com Anomalia'
-      foiConsumido, // Se foi utilizado e não retornará mais
-      relatoUsoAnomalias, // Comunicação de uso ou anomalias
+      status, // 'Devolvido' | 'DEVOLVIDA' | 'Consumido' | 'CONSUMIDA' | 'Devolvido com Anomalia'
+      foiConsumido,
+      returnedQuantity,
+      destinationVaultSpaceId,
+      relatoUsoAnomalias,
       dataDevolucao,
+      pendingReceipt,
       responsavelRecebimentoId,
       responsavelRecebimentoNome,
       responsavelRecebimentoMasp
@@ -7791,23 +7995,55 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
       return res.status(404).json({ error: 'Cautela de material não encontrada.' });
     }
     const caut = cautRows[0];
-    if (caut.status !== 'Em Uso') {
+    const allowedActiveStatuses = ['Em Uso', 'AUTORIZADA', 'DEVOLUCAO_PENDENTE'];
+    if (!allowedActiveStatuses.includes(caut.status)) {
       return res.status(400).json({ error: `Esta cautela já se encontra finalizada com status "${caut.status}".` });
     }
 
-    const qty = Number(caut.quantidade || 1);
-    const isConsumed = Boolean(foiConsumido || status === 'Consumido');
-    const finalStatus = isConsumed
-      ? 'Consumido'
-      : (status === 'Devolvido com Anomalia' ? 'Devolvido com Anomalia' : 'Devolvido');
+    const totalQty = Number(caut.quantidade || 1);
+    const isConsumed = Boolean(foiConsumido || status === 'Consumido' || status === 'CONSUMIDA');
+    const retQty = returnedQuantity !== undefined && returnedQuantity !== null
+      ? Math.max(0, Math.min(totalQty, Number(returnedQuantity)))
+      : (isConsumed ? 0 : totalQty);
+    const consumedQty = Math.max(0, totalQty - retQty);
+
+    // Fluxo 1: Policial solicitando devolução (aguarda recebimento físico do Armeiro)
+    if (pendingReceipt) {
+      await pool.query(
+        `UPDATE CAUTELAS_MATERIAIS SET
+          STATUS_CAUTELAS_MATERIAIS = 'DEVOLUCAO_PENDENTE',
+          FOI_CONSUMIDO_CAUTELAS_MATERIAIS = ?,
+          QUANTIDADE_DEVOLVIDA_CAUTELAS_MATERIAIS = ?,
+          RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS = COALESCE(?, RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS),
+          DATA_ATUALIZACAO_CAUTELAS_MATERIAIS = NOW()
+         WHERE ID_CAUTELAS_MATERIAIS = ?`,
+        [
+          isConsumed ? 1 : 0,
+          retQty,
+          relatoUsoAnomalias ? String(relatoUsoAnomalias).trim() : null,
+          id
+        ]
+      );
+
+      return res.json({ success: true, status: 'DEVOLUCAO_PENDENTE', pendingReceipt: true });
+    }
+
+    // Fluxo 2: Armeiro confirmando recebimento / baixa definitiva
+    const finalStatus = (isConsumed && retQty === 0) || retQty === 0
+      ? (status === 'Consumido' ? 'Consumido' : 'CONSUMIDA')
+      : (status === 'Devolvido com Anomalia'
+        ? 'Devolvido com Anomalia'
+        : (caut.status === 'Em Uso' && status === 'Devolvido' ? 'Devolvido' : 'DEVOLVIDA'));
+
     const returnDate = dataDevolucao ? new Date(dataDevolucao) : new Date();
 
-    // 1. Update cautela record
     await pool.query(
       `UPDATE CAUTELAS_MATERIAIS SET
         STATUS_CAUTELAS_MATERIAIS = ?,
         FOI_CONSUMIDO_CAUTELAS_MATERIAIS = ?,
-        RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS = ?,
+        QUANTIDADE_DEVOLVIDA_CAUTELAS_MATERIAIS = ?,
+        COFRE_DESTINO_ID_CAUTELAS_MATERIAIS = COALESCE(?, COFRE_DESTINO_ID_CAUTELAS_MATERIAIS),
+        RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS = COALESCE(?, RELATO_USO_ANOMALIAS_CAUTELAS_MATERIAIS),
         DATA_DEVOLUCAO_CAUTELAS_MATERIAIS = ?,
         RESPONSAVEL_RECEBIMENTO_ID_CAUTELAS_MATERIAIS = ?,
         RESPONSAVEL_RECEBIMENTO_NOME_CAUTELAS_MATERIAIS = ?,
@@ -7816,8 +8052,10 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
        WHERE ID_CAUTELAS_MATERIAIS = ?`,
       [
         finalStatus,
-        isConsumed ? 1 : 0,
-        relatoUsoAnomalias || null,
+        consumedQty > 0 ? 1 : 0,
+        retQty,
+        destinationVaultSpaceId || null,
+        relatoUsoAnomalias ? String(relatoUsoAnomalias).trim() : null,
         returnDate,
         responsavelRecebimentoId || null,
         responsavelRecebimentoNome || null,
@@ -7826,29 +8064,17 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
       ]
     );
 
-    // 2. Update material inventory
-    if (isConsumed) {
-      // Material foi utilizado e não retornará mais ao estoque!
-      await pool.query(
-        `UPDATE MATERIAIS SET
-          QUANTIDADE_MATERIAIS = GREATEST(0, QUANTIDADE_MATERIAIS - ?),
-          QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
-          QUANTIDADE_CONSUMIDA_MATERIAIS = QUANTIDADE_CONSUMIDA_MATERIAIS + ?,
-          DATA_ATUALIZACAO_MATERIAIS = NOW()
-         WHERE ID_MATERIAIS = ?`,
-        [qty, qty, qty, caut.material_id]
-      );
-    } else {
-      // Retorna ao estoque disponível
-      await pool.query(
-        `UPDATE MATERIAIS SET
-          QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS + ?,
-          QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
-          DATA_ATUALIZACAO_MATERIAIS = NOW()
-         WHERE ID_MATERIAIS = ?`,
-        [qty, qty, caut.material_id]
-      );
-    }
+    // Update material inventory cleanly (supports both full return, full consumption, or partial return)
+    await pool.query(
+      `UPDATE MATERIAIS SET
+        QUANTIDADE_MATERIAIS = GREATEST(0, QUANTIDADE_MATERIAIS - ?),
+        QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS + ?,
+        QUANTIDADE_EM_USO_MATERIAIS = GREATEST(0, QUANTIDADE_EM_USO_MATERIAIS - ?),
+        QUANTIDADE_CONSUMIDA_MATERIAIS = QUANTIDADE_CONSUMIDA_MATERIAIS + ?,
+        DATA_ATUALIZACAO_MATERIAIS = NOW()
+       WHERE ID_MATERIAIS = ?`,
+      [consumedQty, retQty, totalQty, consumedQty, caut.material_id]
+    );
 
     const actor = {
       id: responsavelRecebimentoId,
@@ -7856,23 +8082,20 @@ apiRouter.put('/cautelas-materiais/:id/devolucao', async (req: Request, res: Res
       masp: responsavelRecebimentoMasp
     };
 
-    let detailsMsg = `Devolução/Baixa de material (${caut.protocolo || caut.id}): ${qty}x "${caut.material_nome}" finalizada com status "${finalStatus}".`;
-    if (isConsumed) {
-      detailsMsg += ` Material declarado como CONSUMIDO/UTILIZADO EM OPERAÇÃO (baixa permanente no estoque).`;
-    }
+    let detailsMsg = `Devolução/Baixa de material (${caut.protocolo || caut.id}): ${retQty}x devolvido(s) e ${consumedQty}x consumido(s) de "${caut.material_nome}" (${finalStatus}).`;
     if (relatoUsoAnomalias) {
       detailsMsg += ` Relato/Anomalias: "${relatoUsoAnomalias}".`;
     }
 
     await insertAuditLog(
       'Materiais',
-      isConsumed ? 'Baixa de Material (Consumo)' : 'Devolução de Material',
+      consumedQty === totalQty ? 'Baixa de Material (Consumo)' : 'Devolução de Material',
       detailsMsg,
       actor,
       req.ip
     );
 
-    return res.json({ success: true, status: finalStatus, isConsumed });
+    return res.json({ success: true, status: finalStatus, isConsumed: consumedQty > 0, returnedQuantity: retQty });
   } catch (err: any) {
     console.error('Error updating cautela_material devolucao:', err);
     return res.status(500).json({ error: err.message });
@@ -7891,8 +8114,8 @@ apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) 
     }
     const caut = cautRows[0];
 
-    // If deleting an active loan, restore available stock
-    if (caut.status === 'Em Uso') {
+    // If deleting an active loan (not PENDENTE), restore available stock
+    if (caut.status === 'Em Uso' || caut.status === 'AUTORIZADA' || caut.status === 'DEVOLUCAO_PENDENTE') {
       const qty = Number(caut.quantidade || 1);
       await pool.query(
         `UPDATE MATERIAIS SET
@@ -7917,6 +8140,275 @@ apiRouter.delete('/cautelas-materiais/:id', async (req: Request, res: Response) 
     return res.json({ success: true });
   } catch (err: any) {
     console.error('Error deleting cautela_material:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 4. TRANSFERÊNCIAS DE MATERIAIS ---
+apiRouter.get('/material-transfers', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_TRANSFERENCIAS_MATERIAIS as id,
+        NUMERO_PROTOCOLO_TRANSFERENCIAS_MATERIAIS as protocolNumber,
+        DATA_TRANSFERENCIA_TRANSFERENCIAS_MATERIAIS as transferDate,
+        ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_MATERIAIS as originDepartmentId,
+        ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_MATERIAIS as originDepartmentName,
+        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS as originUnitId,
+        ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS as originUnitName,
+        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MATERIAIS as destinationDepartmentId,
+        DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_MATERIAIS as destinationDepartmentName,
+        DESTINO_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS as destinationUnitId,
+        DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS as destinationUnitName,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_MATERIAIS as destinationArmorerId,
+        DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_MATERIAIS as destinationArmorerName,
+        DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_MATERIAIS as destinationArmorerMasp,
+        DESTINO_COFRE_ID_TRANSFERENCIAS_MATERIAIS as destinationVaultSpaceId,
+        DESTINO_COFRE_CODIGO_TRANSFERENCIAS_MATERIAIS as destinationVaultSpaceCode,
+        RESPONSAVEL_ID_TRANSFERENCIAS_MATERIAIS as transferredByUserId,
+        RESPONSAVEL_NOME_TRANSFERENCIAS_MATERIAIS as transferredByUserName,
+        RESPONSAVEL_MASP_TRANSFERENCIAS_MATERIAIS as transferredByUserMasp,
+        RESPONSAVEL_PERFIL_TRANSFERENCIAS_MATERIAIS as transferredByUserRole,
+        TRANSPORTADOR_NOME_TRANSFERENCIAS_MATERIAIS as receiverOrTransporterName,
+        TRANSPORTADOR_MASP_TRANSFERENCIAS_MATERIAIS as receiverOrTransporterMasp,
+        TRANSPORTADOR_CARGO_TRANSFERENCIAS_MATERIAIS as receiverOrTransporterCargo,
+        MOTIVO_TRANSFERENCIAS_MATERIAIS as reason,
+        MATERIAL_ID_TRANSFERENCIAS_MATERIAIS as materialId,
+        NOME_MATERIAL_TRANSFERENCIAS_MATERIAIS as nomeMaterial,
+        TIPO_NOME_TRANSFERENCIAS_MATERIAIS as tipoNome,
+        NUMERO_SERIE_TRANSFERENCIAS_MATERIAIS as numeroSerie,
+        QUANTIDADE_TRANSFERENCIAS_MATERIAIS as quantidade,
+        ORIGIN_VAULT_CODE_TRANSFERENCIAS_MATERIAIS as originVaultCode,
+        OBSERVACAO_TRANSFERENCIAS_MATERIAIS as observation,
+        STATUS_TRANSFERENCIAS_MATERIAIS as status,
+        RECEBIDO_EM_TRANSFERENCIAS_MATERIAIS as receivedAt,
+        RECEBIDO_POR_USUARIO_ID_TRANSFERENCIAS_MATERIAIS as receivedByUserId,
+        RECEBIDO_POR_NOME_TRANSFERENCIAS_MATERIAIS as receivedByUserName,
+        RECEBIDO_POR_MASP_TRANSFERENCIAS_MATERIAIS as receivedByUserMasp,
+        RECEBIDO_POR_PERFIL_TRANSFERENCIAS_MATERIAIS as receivedByUserRole,
+        DATA_CRIACAO_TRANSFERENCIAS_MATERIAIS as createdAt
+      FROM TRANSFERENCIAS_MATERIAIS
+      ORDER BY DATA_TRANSFERENCIA_TRANSFERENCIAS_MATERIAIS DESC
+    `);
+    return res.json(rows || []);
+  } catch (err: any) {
+    console.error('Error fetching material transfers:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/material-transfers', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const t = req.body;
+    const id = t.id || `TRF-MAT-${Date.now()}`;
+    const proto = t.protocolNumber || `TRF-MAT-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
+    const qty = Math.max(1, Number(t.quantidade || 1));
+
+    const [matRows]: any = await pool.query(
+      'SELECT * FROM MATERIAIS WHERE ID_MATERIAIS = ?',
+      [t.materialId]
+    );
+    if (!matRows || matRows.length === 0) {
+      return res.status(404).json({ error: 'Material não encontrado.' });
+    }
+    const mat = matRows[0];
+    if (Number(mat.QUANTIDADE_DISPONIVEL_MATERIAIS || 0) < qty) {
+      return res.status(400).json({ error: `Quantidade disponível insuficiente (${mat.QUANTIDADE_DISPONIVEL_MATERIAIS}).` });
+    }
+
+    await pool.query(
+      `UPDATE MATERIAIS SET
+        QUANTIDADE_MATERIAIS = GREATEST(0, QUANTIDADE_MATERIAIS - ?),
+        QUANTIDADE_DISPONIVEL_MATERIAIS = GREATEST(0, QUANTIDADE_DISPONIVEL_MATERIAIS - ?),
+        DATA_ATUALIZACAO_MATERIAIS = NOW()
+       WHERE ID_MATERIAIS = ?`,
+      [qty, qty, mat.ID_MATERIAIS]
+    );
+
+    await pool.query(
+      `INSERT INTO TRANSFERENCIAS_MATERIAIS (
+        ID_TRANSFERENCIAS_MATERIAIS, NUMERO_PROTOCOLO_TRANSFERENCIAS_MATERIAIS, DATA_TRANSFERENCIA_TRANSFERENCIAS_MATERIAIS,
+        ORIGEM_DEPARTAMENTO_ID_TRANSFERENCIAS_MATERIAIS, ORIGEM_DEPARTAMENTO_NOME_TRANSFERENCIAS_MATERIAIS,
+        ORIGEM_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS, ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS,
+        DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MATERIAIS, DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_MATERIAIS,
+        DESTINO_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS, DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS,
+        DESTINO_ARMEIRO_ID_TRANSFERENCIAS_MATERIAIS, DESTINO_ARMEIRO_NOME_TRANSFERENCIAS_MATERIAIS, DESTINO_ARMEIRO_MASP_TRANSFERENCIAS_MATERIAIS,
+        RESPONSAVEL_ID_TRANSFERENCIAS_MATERIAIS, RESPONSAVEL_NOME_TRANSFERENCIAS_MATERIAIS, RESPONSAVEL_MASP_TRANSFERENCIAS_MATERIAIS, RESPONSAVEL_PERFIL_TRANSFERENCIAS_MATERIAIS,
+        TRANSPORTADOR_NOME_TRANSFERENCIAS_MATERIAIS, TRANSPORTADOR_MASP_TRANSFERENCIAS_MATERIAIS, TRANSPORTADOR_CARGO_TRANSFERENCIAS_MATERIAIS,
+        MOTIVO_TRANSFERENCIAS_MATERIAIS, MATERIAL_ID_TRANSFERENCIAS_MATERIAIS, NOME_MATERIAL_TRANSFERENCIAS_MATERIAIS,
+        TIPO_NOME_TRANSFERENCIAS_MATERIAIS, NUMERO_SERIE_TRANSFERENCIAS_MATERIAIS, QUANTIDADE_TRANSFERENCIAS_MATERIAIS,
+        ORIGIN_VAULT_CODE_TRANSFERENCIAS_MATERIAIS, OBSERVACAO_TRANSFERENCIAS_MATERIAIS, STATUS_TRANSFERENCIAS_MATERIAIS
+      ) VALUES (?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Pendente')`,
+      [
+        id,
+        proto,
+        t.originDepartmentId || mat.DEPARTAMENTO_ID_MATERIAIS || null,
+        t.originDepartmentName || mat.DEPARTAMENTO_NOME_MATERIAIS || null,
+        t.originUnitId || mat.UNIDADE_ID_MATERIAIS || null,
+        t.originUnitName || mat.UNIDADE_NOME_MATERIAIS || null,
+        t.destinationDepartmentId || null,
+        t.destinationDepartmentName || null,
+        t.destinationUnitId || null,
+        t.destinationUnitName || null,
+        t.destinationArmorerId || null,
+        t.destinationArmorerName || null,
+        t.destinationArmorerMasp || null,
+        t.transferredByUserId || 'sistema',
+        t.transferredByUserName || 'Armeiro',
+        t.transferredByUserMasp || '',
+        t.transferredByUserRole || 'Armeiro',
+        t.receiverOrTransporterName || 'Armeiro Destino',
+        t.receiverOrTransporterMasp || 'N/A',
+        t.receiverOrTransporterCargo || null,
+        t.reason || 'Transferência de Material',
+        mat.ID_MATERIAIS,
+        mat.NOME_MATERIAIS,
+        mat.TIPO_MATERIAL_NOME_MATERIAIS || null,
+        mat.NUMERO_SERIE_MATERIAIS || null,
+        qty,
+        mat.LOCAL_GUARDA_MATERIAIS || null,
+        t.observation || null
+      ]
+    );
+
+    await insertAuditLog(
+      'Materiais',
+      'Transferência de Material',
+      `Despachada transferência (${proto}) de ${qty}x "${mat.NOME_MATERIAIS}" de ${t.originUnitName || mat.UNIDADE_NOME_MATERIAIS} para ${t.destinationUnitName || t.destinationUnitId}.`,
+      { id: t.transferredByUserId, name: t.transferredByUserName, masp: t.transferredByUserMasp },
+      req.ip
+    );
+
+    return res.json({ success: true, id, protocolNumber: proto });
+  } catch (err: any) {
+    console.error('Error creating material transfer:', err);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/material-transfers/:id/receive', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const { destinationVaultSpaceId, observation, actor } = req.body;
+
+    const [tRows]: any = await pool.query('SELECT * FROM TRANSFERENCIAS_MATERIAIS WHERE ID_TRANSFERENCIAS_MATERIAIS = ?', [id]);
+    if (!tRows || tRows.length === 0) {
+      return res.status(404).json({ error: 'Transferência de material não encontrada.' });
+    }
+    const transfer = tRows[0];
+    if (transfer.STATUS_TRANSFERENCIAS_MATERIAIS !== 'Pendente') {
+      return res.status(400).json({ error: 'Esta transferência já foi recebida ou cancelada.' });
+    }
+
+    let vaultCode = 'Cofre Materiais';
+    if (destinationVaultSpaceId) {
+      const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [destinationVaultSpaceId]);
+      if (vRows && vRows.length > 0 && vRows[0].CODIGO_COFRES) {
+        vaultCode = vRows[0].CODIGO_COFRES;
+      }
+    }
+
+    const obsFinal = observation
+      ? `${transfer.OBSERVACAO_TRANSFERENCIAS_MATERIAIS ? transfer.OBSERVACAO_TRANSFERENCIAS_MATERIAIS + ' | ' : ''}Recibo: ${observation}`
+      : transfer.OBSERVACAO_TRANSFERENCIAS_MATERIAIS;
+
+    await pool.query(
+      `UPDATE TRANSFERENCIAS_MATERIAIS SET
+        STATUS_TRANSFERENCIAS_MATERIAIS = 'Recebido',
+        DESTINO_COFRE_ID_TRANSFERENCIAS_MATERIAIS = ?,
+        DESTINO_COFRE_CODIGO_TRANSFERENCIAS_MATERIAIS = ?,
+        OBSERVACAO_TRANSFERENCIAS_MATERIAIS = ?,
+        RECEBIDO_EM_TRANSFERENCIAS_MATERIAIS = NOW(),
+        RECEBIDO_POR_USUARIO_ID_TRANSFERENCIAS_MATERIAIS = ?,
+        RECEBIDO_POR_NOME_TRANSFERENCIAS_MATERIAIS = ?,
+        RECEBIDO_POR_MASP_TRANSFERENCIAS_MATERIAIS = ?,
+        RECEBIDO_POR_PERFIL_TRANSFERENCIAS_MATERIAIS = ?
+       WHERE ID_TRANSFERENCIAS_MATERIAIS = ?`,
+      [
+        destinationVaultSpaceId || null,
+        vaultCode,
+        obsFinal || null,
+        actor?.id || 'sistema',
+        actor?.name || 'Armeiro',
+        actor?.masp || '',
+        actor?.role || 'Armeiro',
+        id
+      ]
+    );
+
+    const qty = Number(transfer.QUANTIDADE_TRANSFERENCIAS_MATERIAIS || 1);
+    const [origRows]: any = await pool.query('SELECT * FROM MATERIAIS WHERE ID_MATERIAIS = ?', [transfer.MATERIAL_ID_TRANSFERENCIAS_MATERIAIS]);
+    const origMat = origRows?.[0];
+
+    const [destMatRows]: any = await pool.query(
+      `SELECT * FROM MATERIAIS WHERE UNIDADE_ID_MATERIAIS = ? AND LOWER(TRIM(NOME_MATERIAIS)) = LOWER(TRIM(?)) AND (? IS NULL OR NUMERO_SERIE_MATERIAIS = ?)`,
+      [
+        transfer.DESTINO_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS,
+        transfer.NOME_MATERIAL_TRANSFERENCIAS_MATERIAIS,
+        transfer.NUMERO_SERIE_TRANSFERENCIAS_MATERIAIS || null,
+        transfer.NUMERO_SERIE_TRANSFERENCIAS_MATERIAIS || null
+      ]
+    );
+
+    if (destMatRows && destMatRows.length > 0) {
+      const dm = destMatRows[0];
+      await pool.query(
+        `UPDATE MATERIAIS SET
+          QUANTIDADE_MATERIAIS = QUANTIDADE_MATERIAIS + ?,
+          QUANTIDADE_DISPONIVEL_MATERIAIS = QUANTIDADE_DISPONIVEL_MATERIAIS + ?,
+          LOCAL_GUARDA_MATERIAIS = ?,
+          COFRE_ID_MATERIAIS = COALESCE(?, COFRE_ID_MATERIAIS),
+          DATA_ATUALIZACAO_MATERIAIS = NOW()
+         WHERE ID_MATERIAIS = ?`,
+        [qty, qty, vaultCode, destinationVaultSpaceId || null, dm.ID_MATERIAIS]
+      );
+    } else {
+      const newMatId = `mat-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      await pool.query(
+        `INSERT INTO MATERIAIS (
+          ID_MATERIAIS, TIPO_MATERIAL_ID_MATERIAIS, TIPO_MATERIAL_NOME_MATERIAIS, NOME_MATERIAIS,
+          QUANTIDADE_MATERIAIS, QUANTIDADE_DISPONIVEL_MATERIAIS, QUANTIDADE_EM_USO_MATERIAIS, QUANTIDADE_CONSUMIDA_MATERIAIS,
+          DEPARTAMENTO_ID_MATERIAIS, DEPARTAMENTO_NOME_MATERIAIS, UNIDADE_ID_MATERIAIS, UNIDADE_NOME_MATERIAIS,
+          VALIDADE_MATERIAIS, LOCAL_GUARDA_MATERIAIS, COFRE_ID_MATERIAIS, PASSIVO_DEPOSITO_POLICIAIS, NUMERO_SERIE_MATERIAIS, OBSERVACOES_MATERIAIS,
+          CRIADO_POR_USUARIO_ID_MATERIAIS, CRIADO_POR_NOME_MATERIAIS, DATA_CRIACAO_MATERIAIS, DATA_ATUALIZACAO_MATERIAIS
+        ) VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+        [
+          newMatId,
+          origMat?.TIPO_MATERIAL_ID_MATERIAIS || 'tipo-geral',
+          transfer.TIPO_NOME_TRANSFERENCIAS_MATERIAIS || origMat?.TIPO_MATERIAL_NOME_MATERIAIS || 'Geral',
+          transfer.NOME_MATERIAL_TRANSFERENCIAS_MATERIAIS,
+          qty,
+          qty,
+          transfer.DESTINO_DEPARTAMENTO_ID_TRANSFERENCIAS_MATERIAIS,
+          transfer.DESTINO_DEPARTAMENTO_NOME_TRANSFERENCIAS_MATERIAIS || null,
+          transfer.DESTINO_UNIDADE_ID_TRANSFERENCIAS_MATERIAIS,
+          transfer.DESTINO_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS || null,
+          origMat?.VALIDADE_MATERIAIS || null,
+          vaultCode,
+          destinationVaultSpaceId || null,
+          origMat?.PASSIVO_DEPOSITO_POLICIAIS ?? 1,
+          transfer.NUMERO_SERIE_TRANSFERENCIAS_MATERIAIS || null,
+          `Recebido via Transferência ${transfer.NUMERO_PROTOCOLO_TRANSFERENCIAS_MATERIAIS || id} da unidade ${transfer.ORIGEM_UNIDADE_NOME_TRANSFERENCIAS_MATERIAIS || ''}`,
+          actor?.id || null,
+          actor?.name || null
+        ]
+      );
+    }
+
+    await insertAuditLog(
+      'Materiais',
+      'Recebimento de Transferência de Material',
+      `Recebida transferência (${transfer.NUMERO_PROTOCOLO_TRANSFERENCIAS_MATERIAIS || id}): ${qty}x "${transfer.NOME_MATERIAL_TRANSFERENCIAS_MATERIAIS}" no cofre ${vaultCode}.`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error receiving material transfer:', err);
     return res.status(500).json({ error: err.message });
   }
 });

@@ -26,6 +26,7 @@ import { PublicCertificateValidator } from './components/ValidadorPublicoCertifi
 import { ModuloVeterinario } from './components/ModuloVeterinario';
 import { ModuloCautelaArmas } from './components/ModuloCautelaArmas';
 import { ModuloCautelaMunicoes } from './components/ModuloCautelaMunicoes';
+import { ModuloCautelaMateriais } from './components/ModuloCautelaMateriais';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb, Dog } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 import { usePreloader } from './context/PreloaderContext';
@@ -34,6 +35,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'meu-perfil': 'Meu Perfil',
   'cautela-armas': 'Cautela de Armas',
   'cautela-municoes': 'Cautela de Munições',
+  'cautela-materiais': 'Cautela de Materiais',
   'explosivos': 'Módulo de Explosivos',
   'armas': 'Módulo de Armas',
   'municoes': 'Módulo de Munições',
@@ -266,6 +268,28 @@ export default function App() {
   }, [effectiveUser, isArmeiroUser, isGeralUser]);
   const pendingAmmoCautelasCount = Math.max(0, rawPendingAmmoCautelasCount - (acknowledgedModuleAlerts['cautela-municoes'] || 0));
 
+  const rawPendingMaterialCautelasCount = useMemo(() => {
+    const list = storage.getCautelasMateriais();
+    if (isGeralUser) {
+      return list.filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE').length;
+    }
+    if (isArmeiroUser && effectiveUser) {
+      const deptUnits = new Set(
+        storage.getAllUnits()
+          .filter(u => u.departmentId === effectiveUser.departmentId)
+          .map(u => u.id)
+      );
+      return list.filter(c =>
+        (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
+        (effectiveUser.managementScope === 'department'
+          ? (c.departamentoId === effectiveUser.departmentId || (c.unidadeId ? deptUnits.has(c.unidadeId) : false))
+          : c.unidadeId === effectiveUser.unitId)
+      ).length;
+    }
+    return 0;
+  }, [effectiveUser, isArmeiroUser, isGeralUser]);
+  const pendingMaterialCautelasCount = Math.max(0, rawPendingMaterialCautelasCount - (acknowledgedModuleAlerts['cautela-materiais'] || 0));
+
   const rawReadyReceiptsCount = useMemo(() => {
     if (!effectiveUser) return 0;
     const userMaspClean = (effectiveUser.masp || '').replace(/\D/g, '');
@@ -291,11 +315,12 @@ export default function App() {
       const next = { ...prev };
       if ((next['cautela-armas'] || 0) > rawPendingWeaponCautelasCount) next['cautela-armas'] = rawPendingWeaponCautelasCount;
       if ((next['cautela-municoes'] || 0) > rawPendingAmmoCautelasCount) next['cautela-municoes'] = rawPendingAmmoCautelasCount;
+      if ((next['cautela-materiais'] || 0) > rawPendingMaterialCautelasCount) next['cautela-materiais'] = rawPendingMaterialCautelasCount;
       if ((next['movimentacoes'] || 0) > rawPendingMovementsCount) next['movimentacoes'] = rawPendingMovementsCount;
       if ((next['meu-perfil'] || 0) > rawReadyReceiptsCount) next['meu-perfil'] = rawReadyReceiptsCount;
       return next;
     });
-  }, [rawPendingWeaponCautelasCount, rawPendingAmmoCautelasCount, rawPendingMovementsCount, rawReadyReceiptsCount]);
+  }, [rawPendingWeaponCautelasCount, rawPendingAmmoCautelasCount, rawPendingMaterialCautelasCount, rawPendingMovementsCount, rawReadyReceiptsCount]);
 
   const handleSelectModule = (mod: ModuleType) => {
     // Ao clicar no módulo, limpa a notificação/alerta daquele módulo imediatamente
@@ -303,6 +328,7 @@ export default function App() {
       let currentVal = 0;
       if (mod === 'cautela-armas') currentVal = rawPendingWeaponCautelasCount;
       else if (mod === 'cautela-municoes') currentVal = rawPendingAmmoCautelasCount;
+      else if (mod === 'cautela-materiais') currentVal = rawPendingMaterialCautelasCount;
       else if (mod === 'movimentacoes') currentVal = rawPendingMovementsCount;
       else if (mod === 'meu-perfil') currentVal = rawReadyReceiptsCount;
       return { ...prev, [mod]: currentVal };
@@ -427,6 +453,7 @@ export default function App() {
           pendingMovementsCount={pendingMovementsCount}
           pendingWeaponCautelasCount={pendingWeaponCautelasCount}
           pendingAmmoCautelasCount={pendingAmmoCautelasCount}
+          pendingMaterialCautelasCount={pendingMaterialCautelasCount}
           readyReceiptsCount={readyReceiptsCount}
           isOpenMobile={isMobileMenuOpen}
           onCloseMobile={() => setIsMobileMenuOpen(false)}
@@ -436,7 +463,7 @@ export default function App() {
         <main className="flex-1 p-3 sm:p-6 pb-24 md:pb-6 overflow-y-auto max-w-[1700px] mx-auto w-full min-w-0 min-h-0 space-y-4 sm:space-y-6">
           
           {/* Dashboard Summary Cards (Oculto nos módulos especificados a pedido) */}
-          {!['explosivos', 'meu-perfil', 'cautela-armas', 'cautela-municoes', 'armas', 'municoes', 'movimentacoes'].includes(activeModule) && (
+          {!['explosivos', 'meu-perfil', 'cautela-armas', 'cautela-municoes', 'cautela-materiais', 'armas', 'municoes', 'movimentacoes', 'unidade', 'usuarios', 'cofre', 'materiais'].includes(activeModule) && (
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 sm:gap-4 print:hidden">
               <div className="glass-card hover:border-amber-500/40 rounded-2xl p-3.5 sm:p-4 flex items-center space-x-3.5 transition-all">
                 <div className="p-2 sm:p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20 shrink-0">
@@ -520,6 +547,16 @@ export default function App() {
               weapons={weapons}
               ammoStocks={ammoStocks}
               calibers={calibers}
+              vaultSpaces={vaultSpaces}
+              units={units}
+              departments={departments}
+              onRefresh={refreshData}
+            />
+          )}
+
+          {activeModule === 'cautela-materiais' && effectiveUser && (
+            <ModuloCautelaMateriais
+              currentUser={effectiveUser}
               vaultSpaces={vaultSpaces}
               units={units}
               departments={departments}
@@ -611,6 +648,7 @@ export default function App() {
               departments={departments}
               units={units}
               allUsers={allUsers}
+              vaultSpaces={vaultSpaces}
               onRefresh={refreshData}
             />
           )}
@@ -725,6 +763,7 @@ export default function App() {
           pendingMovementsCount={pendingMovementsCount}
           pendingWeaponCautelasCount={pendingWeaponCautelasCount}
           pendingAmmoCautelasCount={pendingAmmoCautelasCount}
+          pendingMaterialCautelasCount={pendingMaterialCautelasCount}
         />
       )}
 
