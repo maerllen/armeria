@@ -305,7 +305,8 @@ export default function App() {
     };
     const armasAutorizadas = storage.getCautelasArmas().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
     const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
-    return armasAutorizadas + municoesAutorizadas;
+    const materiaisAutorizadas = storage.getCautelasMateriais().filter(c => isUserMatch(c.usuarioInternoId, c.usuarioInternoMasp, c.usuarioInternoNome) && (c.status === 'AUTORIZADA' || c.status === 'Em Uso')).length;
+    return armasAutorizadas + municoesAutorizadas + materiaisAutorizadas;
   }, [effectiveUser]);
   const readyReceiptsCount = Math.max(0, rawReadyReceiptsCount - (acknowledgedModuleAlerts['meu-perfil'] || 0));
 

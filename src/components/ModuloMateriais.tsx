@@ -165,12 +165,27 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const [materiaisList, setMateriaisList] = useState<Material[]>(() => storage.getMateriais(currentUser));
   const [cautelasList, setCautelasList] = useState<CautelaMaterial[]>(() => storage.getCautelasMateriais(currentUser));
   const [transfersList, setTransfersList] = useState<MaterialTransfer[]>(() => storage.getMaterialTransfers(currentUser));
-  const [vaultsList, setVaultsList] = useState<VaultSpace[]>(() =>
-    (vaultSpacesProp && vaultSpacesProp.length > 0) ? vaultSpacesProp : storage.getVaultSpaces(currentUser)
-  );
+  const vaultsListInitial = (vaultSpacesProp && vaultSpacesProp.length > 0) ? vaultSpacesProp : storage.getVaultSpaces(currentUser);
+  const [vaultsList, setVaultsList] = useState<VaultSpace[]>(vaultsListInitial);
   const [receiveTransferTarget, setReceiveTransferTarget] = useState<MaterialTransfer | null>(null);
   const [receiveVaultId, setReceiveVaultId] = useState('');
   const [receiveObs, setReceiveObs] = useState('');
+
+  // Full lookup lists so Armeiros/Admins can transfer materials to other departments or other units in their department
+  const allDepartmentsList = useMemo(() => {
+    const full = storage.getAllDepartments();
+    return full.length > 0 ? full : departments;
+  }, [departments, materiaisList, transfersList]);
+
+  const allUnitsList = useMemo(() => {
+    const full = storage.getAllUnits();
+    return full.length > 0 ? full : units;
+  }, [units, materiaisList, transfersList]);
+
+  const allUsersLookupList = useMemo(() => {
+    const full = storage.getAllUsersForLookup();
+    return full.length > 0 ? full : allUsers;
+  }, [allUsers, materiaisList, transfersList]);
 
   const materiais = materiaisList;
   const cautelas = cautelasList;
@@ -548,15 +563,15 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
   const handleOpenTransfer = (mat: Material) => {
     setTransferMaterialTarget(mat);
     setTransferQtd(1);
-    const otherUnitSameDept = units.find(
+    const otherUnitSameDept = allUnitsList.find(
       u => u.departmentId === mat.departamentoId && u.id !== mat.unidadeId
     );
-    const fallbackDept = departments.find(d => d.id !== mat.departamentoId) || departments[0];
+    const fallbackDept = allDepartmentsList.find(d => d.id !== mat.departamentoId) || allDepartmentsList[0];
     const defaultDeptId = otherUnitSameDept ? mat.departamentoId : (fallbackDept?.id || mat.departamentoId || '');
     const defaultUnitId = otherUnitSameDept
       ? otherUnitSameDept.id
-      : (units.find(u => u.departmentId === defaultDeptId && u.id !== mat.unidadeId)?.id ||
-         units.find(u => u.departmentId === defaultDeptId)?.id ||
+      : (allUnitsList.find(u => u.departmentId === defaultDeptId && u.id !== mat.unidadeId)?.id ||
+         allUnitsList.find(u => u.departmentId === defaultDeptId)?.id ||
          '');
     setTransferDestDeptId(defaultDeptId);
     setTransferDestUnitId(defaultUnitId);
@@ -604,21 +619,27 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       setErrorMessage('Selecione o departamento e a unidade de destino.');
       return;
     }
+    if (transferDestUnitId === transferMaterialTarget.unidadeId) {
+      setErrorMessage('Selecione uma unidade de destino diferente da unidade de origem.');
+      return;
+    }
 
     setIsSubmitting(true);
     setErrorMessage(null);
     setSuccessMessage(null);
     try {
-      const destDept = departments.find(d => d.id === transferDestDeptId);
-      const destUnit = units.find(u => u.id === transferDestUnitId);
-      const destArmorer = allUsers.find(u => u.id === transferDestArmorerId);
-      const transp = allUsers.find(u => u.id === transferTransporterId) || destArmorer || currentUser;
+      const destDept = allDepartmentsList.find(d => d.id === transferDestDeptId);
+      const destUnit = allUnitsList.find(u => u.id === transferDestUnitId);
+      const originDept = allDepartmentsList.find(d => d.id === transferMaterialTarget.departamentoId);
+      const originUnit = allUnitsList.find(u => u.id === transferMaterialTarget.unidadeId);
+      const destArmorer = allUsersLookupList.find(u => u.id === transferDestArmorerId);
+      const transp = allUsersLookupList.find(u => u.id === transferTransporterId) || destArmorer || currentUser;
 
       await storage.transferMaterial({
         originDepartmentId: transferMaterialTarget.departamentoId || currentUser?.departmentId,
-        originDepartmentName: departments.find(d => d.id === transferMaterialTarget.departamentoId)?.name || currentUser?.departmentName,
+        originDepartmentName: originDept?.name || transferMaterialTarget.departamentoNome || currentUser?.departmentName,
         originUnitId: transferMaterialTarget.unidadeId || currentUser?.unitId,
-        originUnitName: units.find(u => u.id === transferMaterialTarget.unidadeId)?.name || currentUser?.unitName,
+        originUnitName: originUnit?.name || transferMaterialTarget.unidadeNome || currentUser?.unitName,
         destinationDepartmentId: transferDestDeptId,
         destinationDepartmentName: destDept?.name || 'Departamento Destino',
         destinationUnitId: transferDestUnitId,
@@ -1252,6 +1273,26 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   </button>
                 </div>
               </div>
+
+              {selectedTransferCandidateMaterial && (
+                <div className="p-3 bg-slate-950/70 border border-sky-500/30 rounded-xl flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <span className="font-bold text-slate-100">{selectedTransferCandidateMaterial.nome}</span>
+                    <span className="text-slate-400">Tipo: <strong className="text-slate-200">{selectedTransferCandidateMaterial.tipoMaterialNome}</strong></span>
+                    <span className="text-slate-400">Cofre: <strong className="font-mono text-emerald-300">{selectedTransferCandidateMaterial.localGuarda}</strong></span>
+                    <span className="text-slate-400">Unidade: <strong className="text-slate-200">{selectedTransferCandidateMaterial.unidadeNome || selectedTransferCandidateMaterial.unidadeId}</strong></span>
+                  </div>
+                  <div className="font-mono text-[11px]">
+                    Disp.: <strong className={selectedTransferCandidateMaterial.quantidadeDisponivel > 0 ? 'text-emerald-400' : 'text-rose-400'}>
+                      {selectedTransferCandidateMaterial.quantidadeDisponivel} un
+                    </strong>{' '}
+                    / Total: <strong className="text-slate-200">{selectedTransferCandidateMaterial.quantidade} un</strong>
+                    {selectedTransferCandidateMaterial.quantidadeDisponivel <= 0 && (
+                      <span className="ml-2 text-rose-400">(Sem saldo disponível para transferência)</span>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -2429,15 +2470,19 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   <select
                     value={transferDestDeptId}
                     onChange={(e) => {
-                      setTransferDestDeptId(e.target.value);
-                      const uList = units.filter(u => u.departmentId === e.target.value);
+                      const nextDeptId = e.target.value;
+                      setTransferDestDeptId(nextDeptId);
+                      const uList = allUnitsList.filter(
+                        u => u.departmentId === nextDeptId && u.id !== transferMaterialTarget.unidadeId
+                      );
                       setTransferDestUnitId(uList[0]?.id || '');
+                      setTransferDestArmorerId('');
                     }}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                     required
                   >
                     <option value="">Selecione...</option>
-                    {departments.map(d => (
+                    {allDepartmentsList.map(d => (
                       <option key={d.id} value={d.id}>{d.name}</option>
                     ))}
                   </select>
@@ -2449,13 +2494,20 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   </label>
                   <select
                     value={transferDestUnitId}
-                    onChange={(e) => setTransferDestUnitId(e.target.value)}
+                    onChange={(e) => {
+                      setTransferDestUnitId(e.target.value);
+                      setTransferDestArmorerId('');
+                    }}
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                     required
                   >
                     <option value="">Selecione...</option>
-                    {units
-                      .filter(u => !transferDestDeptId || u.departmentId === transferDestDeptId)
+                    {allUnitsList
+                      .filter(
+                        u =>
+                          (!transferDestDeptId || u.departmentId === transferDestDeptId) &&
+                          u.id !== transferMaterialTarget.unidadeId
+                      )
                       .map(u => (
                         <option key={u.id} value={u.id}>{u.name}</option>
                       ))}
@@ -2477,7 +2529,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Selecione o armeiro...</option>
-                    {allUsers
+                    {allUsersLookupList
                       .filter(u => !transferDestUnitId || u.unitId === transferDestUnitId)
                       .map(u => (
                         <option key={u.id} value={u.id}>
@@ -2497,7 +2549,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                     className="w-full px-3 py-2 bg-slate-950 border border-slate-700 rounded-xl text-slate-100 focus:outline-none focus:border-sky-500"
                   >
                     <option value="">Selecione o transportador...</option>
-                    {allUsers.map(u => (
+                    {allUsersLookupList.map(u => (
                       <option key={u.id} value={u.id}>
                         {u.name} (MASP: {u.masp}) - {u.unitName || u.role}
                       </option>
@@ -2668,6 +2720,24 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                                   Total: {mat.quantidade} | Disp: <span className="text-emerald-400">{mat.quantidadeDisponivel}</span> | Em Uso: <span className="text-amber-400">{mat.quantidadeEmUso}</span> | Cons.: <span className="text-purple-400">{mat.quantidadeConsumida}</span>
                                 </span>
                               </div>
+                              <div>
+                                <span className="text-slate-500">Cadastrado por:</span>{' '}
+                                <span className="text-slate-200">{mat.criadoPorNome || 'Sistema'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-500">Data de Cadastro:</span>{' '}
+                                <span className="font-mono text-slate-300">
+                                  {mat.createdAt ? new Date(mat.createdAt).toLocaleDateString('pt-BR') : '-'}
+                                </span>
+                              </div>
+                              {mat.updatedAt && (
+                                <div>
+                                  <span className="text-slate-500">Atualizado em:</span>{' '}
+                                  <span className="font-mono text-slate-300">
+                                    {new Date(mat.updatedAt).toLocaleDateString('pt-BR')}
+                                  </span>
+                                </div>
+                              )}
                             </div>
 
                             {mat.observacoes && (
