@@ -7912,12 +7912,14 @@ apiRouter.post('/cautelas-materiais', async (req: Request, res: Response) => {
   }
 });
 
-// Armeiro autoriza solicitação pendente e deduz estoque do material
+// Armeiro autoriza solicitação pendente, especifica material exato e quantidade, e deduz estoque do cofre
 apiRouter.put('/cautelas-materiais/:id/autorizar', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
     const { id } = req.params;
     const {
+      materialId,
+      quantidade,
       seraDevolvida,
       notes,
       armorerId,
@@ -7934,24 +7936,40 @@ apiRouter.put('/cautelas-materiais/:id/autorizar', async (req: Request, res: Res
       return res.status(400).json({ error: `Esta solicitação já foi processada (${caut.STATUS_CAUTELAS_MATERIAIS}).` });
     }
 
-    const qty = Number(caut.QUANTIDADE_CAUTELAS_MATERIAIS || 1);
-    const [matRows]: any = await pool.query('SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, QUANTIDADE_DISPONIVEL_MATERIAIS as disp, COFRE_ID_MATERIAIS as vaultId FROM MATERIAIS WHERE ID_MATERIAIS = ?', [caut.MATERIAL_ID_CAUTELAS_MATERIAIS]);
+    const targetMaterialId = materialId || caut.MATERIAL_ID_CAUTELAS_MATERIAIS;
+    const parsedQty =
+      quantidade !== undefined && quantidade !== null && String(quantidade).trim() !== ''
+        ? parseInt(String(quantidade), 10)
+        : Number(caut.QUANTIDADE_CAUTELAS_MATERIAIS || 1);
+    const qty = Math.max(1, isNaN(parsedQty) ? 1 : parsedQty);
+
+    const [matRows]: any = await pool.query(
+      'SELECT ID_MATERIAIS as id, NOME_MATERIAIS as nome, TIPO_MATERIAL_NOME_MATERIAIS as tipo_material_nome, QUANTIDADE_DISPONIVEL_MATERIAIS as disp, COFRE_ID_MATERIAIS as vaultId, PASSIVO_DEPOSITO_POLICIAIS as passivo_deposito_policiais FROM MATERIAIS WHERE ID_MATERIAIS = ?',
+      [targetMaterialId]
+    );
     if (!matRows || matRows.length === 0) {
-      return res.status(404).json({ error: 'Material vinculado não encontrado no estoque.' });
+      return res.status(404).json({ error: 'Material especificado não encontrado no estoque.' });
     }
     const mat = matRows[0];
+    if (mat.passivo_deposito_policiais === 0) {
+      return res.status(400).json({ error: 'O material selecionado não está habilitado como passivo de depósito para policiais.' });
+    }
     if (mat.disp < qty) {
-      return res.status(400).json({ error: `Saldo insuficiente no estoque para pagamento (${mat.disp} disponíveis para ${qty} solicitados).` });
+      return res.status(400).json({ error: `Saldo insuficiente no estoque para pagamento (${mat.disp} disponíveis para ${qty} definido(s)).` });
     }
 
     const seraDevFlag = seraDevolvida === false ? 0 : 1;
 
     await pool.query(
       `UPDATE CAUTELAS_MATERIAIS SET
+        MATERIAL_ID_CAUTELAS_MATERIAIS = ?,
+        MATERIAL_NOME_CAUTELAS_MATERIAIS = ?,
+        TIPO_MATERIAL_NOME_CAUTELAS_MATERIAIS = ?,
+        QUANTIDADE_CAUTELAS_MATERIAIS = ?,
         STATUS_CAUTELAS_MATERIAIS = 'AUTORIZADA',
         SERA_DEVOLVIDA_CAUTELAS_MATERIAIS = ?,
         OBSERVACOES_CAUTELAS_MATERIAIS = COALESCE(?, OBSERVACOES_CAUTELAS_MATERIAIS),
-        COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS = COALESCE(COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS, ?),
+        COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS = ?,
         DATA_AUTORIZACAO_CAUTELAS_MATERIAIS = NOW(),
         RESPONSAVEL_ENTREGA_ID_CAUTELAS_MATERIAIS = ?,
         RESPONSAVEL_ENTREGA_NOME_CAUTELAS_MATERIAIS = ?,
@@ -7959,9 +7977,13 @@ apiRouter.put('/cautelas-materiais/:id/autorizar', async (req: Request, res: Res
         DATA_ATUALIZACAO_CAUTELAS_MATERIAIS = NOW()
        WHERE ID_CAUTELAS_MATERIAIS = ?`,
       [
+        mat.id,
+        mat.nome,
+        mat.tipo_material_nome || caut.TIPO_MATERIAL_NOME_CAUTELAS_MATERIAIS || null,
+        qty,
         seraDevFlag,
         notes ? String(notes).trim() : null,
-        mat.vaultId || null,
+        mat.vaultId || caut.COFRE_ORIGEM_ID_CAUTELAS_MATERIAIS || null,
         armorerId || 'sistema',
         armorerName || 'Armeiro',
         armorerMasp || null,

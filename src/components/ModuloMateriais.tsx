@@ -86,6 +86,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     cofreLocal: true,
     deptUnidade: true,
     estoqueDetalhado: true,
+    situacaoAcautelado: true,
     passivoDeposito: true,
     validade: true,
     auditoriaCadastro: true,
@@ -301,8 +302,41 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     return datePt;
   };
 
+  const activeCautelasByMaterialId = useMemo(() => {
+    const map = new Map<string, CautelaMaterial[]>();
+    const activeStatuses = new Set(['AUTORIZADA', 'Em Uso', 'DEVOLUCAO_PENDENTE']);
+    for (const c of cautelasList || []) {
+      if (!activeStatuses.has(c.status)) continue;
+      const list = map.get(c.materialId) || [];
+      list.push(c);
+      map.set(c.materialId, list);
+    }
+    return map;
+  }, [cautelasList]);
+
   const filteredAllMateriais = useMemo(() => {
-    return filteredMateriais.filter(m => {
+    const search = (searchTerm || '').trim().toLowerCase();
+    return (materiaisList || []).filter(m => {
+      if (!m) return false;
+      const activeForMat = activeCautelasByMaterialId.get(m.id) || [];
+      const matchSearch =
+        !search ||
+        (m.nome || '').toLowerCase().includes(search) ||
+        (m.tipoMaterialNome || '').toLowerCase().includes(search) ||
+        (m.localGuarda && m.localGuarda.toLowerCase().includes(search)) ||
+        (m.numeroSerie && m.numeroSerie.toLowerCase().includes(search)) ||
+        (m.unidadeNome && m.unidadeNome.toLowerCase().includes(search)) ||
+        activeForMat.some(c =>
+          (c.usuarioInternoNome || '').toLowerCase().includes(search) ||
+          (c.usuarioInternoMasp || '').toLowerCase().includes(search) ||
+          (c.usuarioExternoNome || '').toLowerCase().includes(search) ||
+          (c.protocolo || '').toLowerCase().includes(search)
+        );
+      if (!matchSearch) return false;
+      if (selectedTypeFilter && m.tipoMaterialId !== selectedTypeFilter) return false;
+      if (selectedDeptFilter && m.departamentoId !== selectedDeptFilter) return false;
+      if (selectedUnitFilter && m.unidadeId !== selectedUnitFilter) return false;
+
       if (selectedVaultFilter === '__LEGACY__') {
         if (getVaultForMaterial(m)) return false;
       } else if (selectedVaultFilter) {
@@ -316,14 +350,31 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
       if (selectedDepositFilter === 'NAO' && m.passivoDepositoPoliciais !== false) return false;
 
       if (selectedStockStatusFilter === 'disponivel' && Number(m.quantidadeDisponivel || 0) <= 0) return false;
-      if (selectedStockStatusFilter === 'em_uso' && Number(m.quantidadeEmUso || 0) <= 0) return false;
+      if (
+        selectedStockStatusFilter === 'em_uso' &&
+        Number(m.quantidadeEmUso || 0) <= 0 &&
+        activeForMat.length === 0
+      ) {
+        return false;
+      }
       if (selectedStockStatusFilter === 'consumido' && Number(m.quantidadeConsumida || 0) <= 0) return false;
       if (selectedStockStatusFilter === 'vencido' && getValidityStatusKey(m.validade) !== 'vencido') return false;
       if (selectedStockStatusFilter === 'vencendo' && getValidityStatusKey(m.validade) !== 'vencendo') return false;
 
       return true;
     });
-  }, [filteredMateriais, selectedVaultFilter, selectedDepositFilter, selectedStockStatusFilter, materialVaults]);
+  }, [
+    materiaisList,
+    searchTerm,
+    selectedTypeFilter,
+    selectedDeptFilter,
+    selectedUnitFilter,
+    selectedVaultFilter,
+    selectedDepositFilter,
+    selectedStockStatusFilter,
+    materialVaults,
+    activeCautelasByMaterialId
+  ]);
 
   const escapeHtml = (value?: string | number | null): string => {
     if (value === undefined || value === null) return '';
@@ -617,6 +668,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
               ${printFields.cofreLocal ? '<th>Cofre / Local</th>' : ''}
               ${printFields.deptUnidade ? '<th>Depto / Unidade</th>' : ''}
               ${printFields.estoqueDetalhado ? '<th>Estoque (Tot / Disp / Uso / Cons)</th>' : ''}
+              ${printFields.situacaoAcautelado ? '<th>Acautelamento / Dados do Policial</th>' : ''}
               ${printFields.passivoDeposito ? '<th>Cautelável</th>' : ''}
               ${printFields.validade ? '<th>Validade</th>' : ''}
               ${printFields.auditoriaCadastro ? '<th>Cadastro</th>' : ''}
@@ -627,6 +679,26 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
             ${itemsToPrint.map((mat, idx) => {
               const tipoObj = tiposMateriais.find(t => t.id === mat.tipoMaterialId);
               const vaultObj = getVaultForMaterial(mat);
+              const activeForMat = activeCautelasByMaterialId.get(mat.id) || [];
+              const isAcautelado = activeForMat.length > 0 || Number(mat.quantidadeEmUso || 0) > 0;
+              const borrowerHtml = activeForMat.length > 0
+                ? activeForMat.map(c => {
+                    const nome = c.tipoDestinatario === 'interno'
+                      ? (c.usuarioInternoNome || 'Policial')
+                      : (c.usuarioExternoNome || 'Externo');
+                    const doc = c.tipoDestinatario === 'interno'
+                      ? `MASP: ${formatMasp(c.usuarioInternoMasp || '') || 'N/I'}`
+                      : `Doc: ${c.usuarioExternoDocumento || 'N/I'}`;
+                    const cargo = c.tipoDestinatario === 'interno'
+                      ? (c.usuarioInternoCargo || 'Policial Civil')
+                      : (c.usuarioExternoOrgao || 'Órgão Externo');
+                    const dataStr = c.dataRetirada ? new Date(c.dataRetirada).toLocaleDateString('pt-BR') : '-';
+                    return `<div style="margin-bottom:3px;"><strong style="color:#b45309;">ACAUTELADO (${c.quantidade}x)</strong><br/>${escapeHtml(nome)} (${escapeHtml(doc)})<br/><span style="color:#475569;font-size:8px;">${escapeHtml(cargo)} • Prot: ${escapeHtml(c.protocolo || c.id)} • ${dataStr}</span></div>`;
+                  }).join('')
+                : (isAcautelado
+                    ? `<strong style="color:#b45309;">ACAUTELADO (${mat.quantidadeEmUso} un. em uso)</strong>`
+                    : '<span style="color:#047857;font-weight:700;">NO COFRE</span>');
+
               return `
                 <tr>
                   <td class="mono" style="text-align:center;">${idx + 1}</td>
@@ -636,6 +708,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   ${printFields.cofreLocal ? `<td><strong class="mono">${escapeHtml(mat.localGuarda || vaultObj?.code || '-')}</strong>${vaultObj?.descricaoCurta ? `<br/><span style="color:#475569;font-size:8px;">${escapeHtml(vaultObj.descricaoCurta)}</span>` : ''}</td>` : ''}
                   ${printFields.deptUnidade ? `<td>${escapeHtml(mat.unidadeNome || mat.unidadeId)}<br/><span style="color:#475569;font-size:8px;">${escapeHtml(mat.departamentoNome || mat.departamentoId)}</span></td>` : ''}
                   ${printFields.estoqueDetalhado ? `<td class="mono"><strong>Tot: ${mat.quantidade}</strong><br/>D:${mat.quantidadeDisponivel} | U:${mat.quantidadeEmUso} | C:${mat.quantidadeConsumida}</td>` : ''}
+                  ${printFields.situacaoAcautelado ? `<td>${borrowerHtml}</td>` : ''}
                   ${printFields.passivoDeposito ? `<td style="text-align:center;font-weight:700;">${mat.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}</td>` : ''}
                   ${printFields.validade ? `<td>${escapeHtml(getValidityText(mat.validade))}</td>` : ''}
                   ${printFields.auditoriaCadastro ? `<td style="font-size:8px;">${escapeHtml(mat.criadoPorNome || 'Sistema')}<br/><span class="mono">${mat.createdAt ? new Date(mat.createdAt).toLocaleDateString('pt-BR') : '-'}</span></td>` : ''}
@@ -1778,6 +1851,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                         cofreLocal: true,
                         deptUnidade: true,
                         estoqueDetalhado: true,
+                        situacaoAcautelado: true,
                         passivoDeposito: true,
                         validade: true,
                         auditoriaCadastro: true,
@@ -1797,6 +1871,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                         cofreLocal: true,
                         deptUnidade: false,
                         estoqueDetalhado: true,
+                        situacaoAcautelado: true,
                         passivoDeposito: false,
                         validade: false,
                         auditoriaCadastro: false,
@@ -1817,6 +1892,7 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                   { key: 'cofreLocal', label: 'Cofre / Local de Guarda' },
                   { key: 'deptUnidade', label: 'Depto e Unidade' },
                   { key: 'estoqueDetalhado', label: 'Estoque Detalhado' },
+                  { key: 'situacaoAcautelado', label: 'Acautelado / Policial' },
                   { key: 'passivoDeposito', label: 'Passivo de Depósito' },
                   { key: 'validade', label: 'Validade' },
                   { key: 'auditoriaCadastro', label: 'Cadastro / Data' },
@@ -1910,12 +1986,18 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                 const tipoObj = tiposMateriais.find(t => t.id === mat.tipoMaterialId);
                 const vaultObj = getVaultForMaterial(mat);
                 const isSelectedForPrint = selectedPrintIds.includes(mat.id);
+                const activeCautelas = activeCautelasByMaterialId.get(mat.id) || [];
+                const isAcautelado = activeCautelas.length > 0 || Number(mat.quantidadeEmUso || 0) > 0;
 
                 return (
                   <div
                     key={mat.id}
                     className={`bg-slate-900/70 rounded-2xl border p-4 transition ${
-                      isSelectedForPrint ? 'border-amber-500/60 bg-amber-500/5' : 'border-slate-800 hover:border-slate-700'
+                      isSelectedForPrint
+                        ? 'border-amber-500/60 bg-amber-500/5'
+                        : isAcautelado
+                        ? 'border-orange-500/40 hover:border-orange-400/60'
+                        : 'border-slate-800 hover:border-slate-700'
                     }`}
                   >
                     <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
@@ -1937,6 +2019,16 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                         <div className="space-y-2 flex-1 min-w-0">
                           <div className="flex flex-wrap items-center gap-2">
                             <h3 className="text-base font-black text-slate-100">{mat.nome}</h3>
+                            {isAcautelado ? (
+                              <span className="text-[11px] font-black uppercase px-2.5 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-500/50 flex items-center gap-1">
+                                <UserCheck className="w-3.5 h-3.5" />
+                                <span>ACAUTELADO ({mat.quantidadeEmUso || activeCautelas.reduce((acc, c) => acc + Number(c.quantidade || 0), 0)} un.)</span>
+                              </span>
+                            ) : Number(mat.quantidadeDisponivel || 0) > 0 ? (
+                              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                NO COFRE ({mat.quantidadeDisponivel} disp.)
+                              </span>
+                            ) : null}
                             <span className="text-[11px] font-bold px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
                               {mat.tipoMaterialNome || tipoObj?.nome || 'Material'}
                             </span>
@@ -2007,6 +2099,68 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
                               </span>
                             </div>
                           </div>
+
+                          {isAcautelado && (
+                            <div className="bg-orange-950/25 border border-orange-500/40 rounded-xl p-3 space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black uppercase tracking-wider text-orange-300 flex items-center gap-1.5">
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  <span>Material Acautelado — Dados do(s) Policial(is)</span>
+                                </span>
+                              </div>
+                              {activeCautelas.length > 0 ? (
+                                <div className="space-y-1.5">
+                                  {activeCautelas.map(c => (
+                                    <div
+                                      key={c.id}
+                                      className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-slate-950/70 border border-orange-500/20 rounded-lg px-3 py-2 text-xs"
+                                    >
+                                      <div className="space-y-0.5">
+                                        <div className="flex flex-wrap items-center gap-2">
+                                          <strong className="text-slate-100">
+                                            {c.tipoDestinatario === 'interno'
+                                              ? (c.usuarioInternoNome || 'Policial')
+                                              : (c.usuarioExternoNome || 'Destinatário Externo')}
+                                          </strong>
+                                          <span className="text-[11px] font-mono text-amber-300">
+                                            {c.tipoDestinatario === 'interno'
+                                              ? `MASP: ${formatMasp(c.usuarioInternoMasp || '') || 'N/I'}`
+                                              : `Doc: ${c.usuarioExternoDocumento || 'N/I'}`}
+                                          </span>
+                                          <span className="text-[11px] text-slate-400">
+                                            • {c.tipoDestinatario === 'interno'
+                                              ? (c.usuarioInternoCargo || 'Policial Civil')
+                                              : (c.usuarioExternoOrgao || 'Órgão Externo')}
+                                          </span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-400 flex flex-wrap gap-x-3 gap-y-0.5">
+                                          <span>Qtd: <strong className="text-orange-300">{c.quantidade} un.</strong></span>
+                                          {c.protocolo && (
+                                            <span className="font-mono">Prot.: <strong className="text-slate-300">{c.protocolo}</strong></span>
+                                          )}
+                                          <span>Retirada: <strong className="text-slate-300">{new Date(c.dataRetirada).toLocaleString('pt-BR')}</strong></span>
+                                          <span>Finalidade: <strong className="text-slate-300">{c.finalidade}</strong></span>
+                                        </div>
+                                      </div>
+
+                                      <button
+                                        type="button"
+                                        onClick={() => setReceiptCautela(c)}
+                                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 text-[11px] font-bold flex items-center gap-1 shrink-0 self-start sm:self-center transition"
+                                      >
+                                        <FileText className="w-3.5 h-3.5" />
+                                        <span>Recibo</span>
+                                      </button>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-orange-200/80">
+                                  Consta(m) <strong className="font-mono">{mat.quantidadeEmUso} un.</strong> acautelada(s) fora do cofre.
+                                </p>
+                              )}
+                            </div>
+                          )}
 
                           {mat.observacoes && (
                             <p className="text-xs text-slate-400 italic">

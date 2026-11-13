@@ -2815,7 +2815,7 @@ class StorageService {
 
   public async authorizeCautelaMaterial(
     id: string,
-    params?: { seraDevolvida?: boolean; notes?: string }
+    params?: { materialId?: string; quantidade?: number; seraDevolvida?: boolean; notes?: string }
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const actor = this.state.currentUser;
@@ -2823,6 +2823,8 @@ class StorageService {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          materialId: params?.materialId,
+          quantidade: params?.quantidade,
           seraDevolvida: params?.seraDevolvida,
           notes: params?.notes,
           armorerId: actor?.id || 'sistema',

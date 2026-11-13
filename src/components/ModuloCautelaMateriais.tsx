@@ -212,6 +212,8 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
 
   // Modal de Autorização (Armeiro)
   const [authorizeModalItem, setAuthorizeModalItem] = useState<CautelaMaterial | null>(null);
+  const [authMaterialId, setAuthMaterialId] = useState('');
+  const [authQuantity, setAuthQuantity] = useState<number>(1);
   const [authSeraDevolvida, setAuthSeraDevolvida] = useState(true);
   const [authNotes, setAuthNotes] = useState('');
 
@@ -239,10 +241,19 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
     setRefreshTick(t => t + 1);
   };
 
+  const allScopedMaterials = useMemo(
+    () => storage.getMateriais(currentUser),
+    [currentUser, vaultSpaces, refreshTick]
+  );
+
+  const materialsById = useMemo(
+    () => new Map<string, Material>(allScopedMaterials.map(m => [m.id, m])),
+    [allScopedMaterials]
+  );
+
   // Materiais elegíveis para cautelas: APENAS passivoDepositoPoliciais !== false
   const eligibleMaterials = useMemo(() => {
-    const raw = storage.getMateriais(currentUser);
-    return raw.filter(m => {
+    return allScopedMaterials.filter(m => {
       if (m.passivoDepositoPoliciais === false) return false;
       if (Number(m.quantidadeDisponivel || 0) <= 0) return false;
       if (isGeral) return true;
@@ -254,34 +265,79 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
       }
       return !m.unidadeId || m.unidadeId === currentUser.unitId;
     });
-  }, [currentUser, isGeral, hasDeptWideScope, isPolicial, deptUnitIds, vaultSpaces, refreshTick]);
+  }, [allScopedMaterials, currentUser, isGeral, hasDeptWideScope, isPolicial, deptUnitIds]);
+
+  // Para solicitações (Policial ou não-direta), exibe apenas um item por Nome (omitindo repetidos e detalhes técnicos)
+  const isSolicitationMode = isPolicial || !isDirectAuthorize;
+
+  const dedupedMaterialsByName = useMemo(() => {
+    const seen = new Set<string>();
+    const unique: Material[] = [];
+    const sorted = [...eligibleMaterials].sort((a, b) =>
+      (a.nome || '').localeCompare(b.nome || '', 'pt-BR')
+    );
+    for (const m of sorted) {
+      const key = (m.nome || '').trim().toLowerCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      unique.push(m);
+    }
+    return unique;
+  }, [eligibleMaterials]);
 
   const filteredMaterialsForSelect = useMemo(() => {
     const term = materialSearchTerm.trim().toLowerCase();
+    if (isSolicitationMode) {
+      if (!term) return dedupedMaterialsByName;
+      return dedupedMaterialsByName.filter(m =>
+        (m.nome || '').toLowerCase().includes(term)
+      );
+    }
     if (!term) return eligibleMaterials;
     return eligibleMaterials.filter(m =>
       (m.nome || '').toLowerCase().includes(term) ||
       (m.tipoMaterialNome || '').toLowerCase().includes(term) ||
       (m.numeroSerie || '').toLowerCase().includes(term)
     );
-  }, [eligibleMaterials, materialSearchTerm]);
+  }, [eligibleMaterials, dedupedMaterialsByName, isSolicitationMode, materialSearchTerm]);
 
   const selectedMaterialObj = useMemo(
     () => eligibleMaterials.find(m => m.id === selectedMaterialId) || null,
     [eligibleMaterials, selectedMaterialId]
   );
 
+  // Opções para o Armeiro especificar o material exato no modal de Confirmação de Pagamento
+  const authMaterialGroups = useMemo(() => {
+    if (!authorizeModalItem) {
+      return { sameName: [] as Material[], others: [] as Material[] };
+    }
+    const reqName = (authorizeModalItem.materialNome || '').trim().toLowerCase();
+    const sameName: Material[] = [];
+    const others: Material[] = [];
+    for (const m of eligibleMaterials) {
+      if ((m.nome || '').trim().toLowerCase() === reqName) {
+        sameName.push(m);
+      } else {
+        others.push(m);
+      }
+    }
+    return { sameName, others };
+  }, [authorizeModalItem, eligibleMaterials]);
+
+  const selectedAuthMaterial = useMemo(
+    () => eligibleMaterials.find(m => m.id === authMaterialId) || null,
+    [eligibleMaterials, authMaterialId]
+  );
+
   // Todas as cautelas de materiais visíveis para o usuário logado (apenas de materiais passíveis de depósito ou já registradas)
   const allCautelas = useMemo(() => {
     const list = storage.getCautelasMateriais(currentUser);
-    const allMats = storage.getMateriais(currentUser);
-    const matMap = new Map<string, Material>(allMats.map(m => [m.id, m]));
     return list.filter(c => {
-      const mat = matMap.get(c.materialId);
+      const mat = materialsById.get(c.materialId);
       if (mat && mat.passivoDepositoPoliciais === false) return false;
       return true;
     });
-  }, [currentUser, vaultSpaces, refreshTick]);
+  }, [currentUser, materialsById, refreshTick]);
 
   // Cofres destinados exclusivamente à guarda de MATERIAIS
   const scopedMaterialVaults = useMemo(() => {
@@ -495,18 +551,22 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
       showToast('error', 'Selecione o material desejado.');
       return;
     }
-    if (reqQuantity <= 0) {
-      showToast('error', 'Informe uma quantidade válida maior que zero.');
-      return;
-    }
-    if (reqQuantity > selectedMaterialObj.quantidadeDisponivel) {
-      showToast(
-        'error',
-        isPolicial
-          ? 'Quantidade solicitada indisponível em estoque no momento.'
-          : `Quantidade solicitada (${reqQuantity}) excede o disponível (${selectedMaterialObj.quantidadeDisponivel}).`
-      );
-      return;
+
+    const directAuth = canAuthorize && isDirectAuthorize;
+    const effectiveQuantity = directAuth ? reqQuantity : 1;
+
+    if (directAuth) {
+      if (reqQuantity <= 0) {
+        showToast('error', 'Informe uma quantidade válida maior que zero.');
+        return;
+      }
+      if (reqQuantity > selectedMaterialObj.quantidadeDisponivel) {
+        showToast(
+          'error',
+          `Quantidade solicitada (${reqQuantity}) excede o disponível (${selectedMaterialObj.quantidadeDisponivel}).`
+        );
+        return;
+      }
     }
     if (!reqFinalidade.trim()) {
       showToast('error', 'Informe a finalidade / motivo da cautela.');
@@ -517,14 +577,12 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
       ? unitUsers.find(u => u.id === selectedRequesterId) || currentUser
       : currentUser;
 
-    const directAuth = canAuthorize && isDirectAuthorize;
-
     setLoading(true);
     const res = await storage.requestCautelaMaterial({
       materialId: selectedMaterialObj.id,
       materialNome: selectedMaterialObj.nome,
       tipoMaterialNome: selectedMaterialObj.tipoMaterialNome,
-      quantidade: reqQuantity,
+      quantidade: effectiveQuantity,
       tipoDestinatario: 'interno',
       usuarioInternoId: targetUser.id,
       usuarioInternoNome: targetUser.name,
@@ -563,7 +621,21 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
   };
 
   const openAuthorizeModal = (item: CautelaMaterial) => {
+    const reqName = (item.materialNome || '').trim().toLowerCase();
+    const exactMatch = eligibleMaterials.find(
+      m => m.id === item.materialId && Number(m.quantidadeDisponivel || 0) > 0
+    );
+    const nameMatch = eligibleMaterials.find(
+      m => (m.nome || '').trim().toLowerCase() === reqName && Number(m.quantidadeDisponivel || 0) > 0
+    );
+    const defaultMat = exactMatch || nameMatch || eligibleMaterials[0] || null;
+
     setAuthorizeModalItem(item);
+    setAuthMaterialId(defaultMat?.id || '');
+    const initialQty = defaultMat
+      ? Math.min(Number(defaultMat.quantidadeDisponivel || 1), Math.max(1, Number(item.quantidade || 1)))
+      : Math.max(1, Number(item.quantidade || 1));
+    setAuthQuantity(initialQty);
     setAuthSeraDevolvida(item.seraDevolvida !== false);
     setAuthNotes(item.observacoes || '');
   };
@@ -572,15 +644,33 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
     e.preventDefault();
     if (!authorizeModalItem) return;
 
+    if (!authMaterialId || !selectedAuthMaterial) {
+      showToast('error', 'Selecione o material exato no estoque para realizar o pagamento.');
+      return;
+    }
+    if (authQuantity <= 0) {
+      showToast('error', 'Informe uma quantidade válida maior que zero.');
+      return;
+    }
+    if (authQuantity > selectedAuthMaterial.quantidadeDisponivel) {
+      showToast(
+        'error',
+        `Quantidade definida (${authQuantity}) excede o disponível no cofre (${selectedAuthMaterial.quantidadeDisponivel}).`
+      );
+      return;
+    }
+
     setLoading(true);
     const res = await storage.authorizeCautelaMaterial(authorizeModalItem.id, {
+      materialId: selectedAuthMaterial.id,
+      quantidade: authQuantity,
       seraDevolvida: authSeraDevolvida,
       notes: authNotes.trim() || undefined
     });
     setLoading(false);
 
     if (res.success) {
-      showToast('success', 'Pagamento de material autorizado e deduzido do estoque disponível!');
+      showToast('success', 'Pagamento de material confirmado! Item baixado do cofre e acautelado ao policial.');
       setAuthorizeModalItem(null);
       await triggerRefresh();
     } else {
@@ -683,6 +773,33 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
       ? allUsers.find(u => u.id === c.responsavelRecebimentoId)
       : undefined;
 
+    const matObj = materialsById.get(c.materialId);
+    const tipoObj = matObj?.tipoMaterialId
+      ? storage.getTiposMateriais().find(t => t.id === matObj.tipoMaterialId)
+      : undefined;
+    const originVaultId = c.vaultSpaceId || matObj?.vaultSpaceId;
+    const originVaultObj = originVaultId
+      ? (vaultSpaces.find(v => v.id === originVaultId) || storage.getVaultSpaces(currentUser).find(v => v.id === originVaultId))
+      : undefined;
+    const destVaultObj = c.destinationVaultSpaceId
+      ? (vaultSpaces.find(v => v.id === c.destinationVaultSpaceId) || storage.getVaultSpaces(currentUser).find(v => v.id === c.destinationVaultSpaceId))
+      : undefined;
+
+    const originVaultText = originVaultObj
+      ? `${originVaultObj.code}${originVaultObj.descricaoCurta ? ` — ${originVaultObj.descricaoCurta}` : ''}`
+      : (matObj?.localGuarda || 'Cofre de Materiais da Unidade');
+    const destVaultText = destVaultObj
+      ? `${destVaultObj.code}${destVaultObj.descricaoCurta ? ` — ${destVaultObj.descricaoCurta}` : ''}`
+      : '';
+
+    const validadeText = matObj?.validade
+      ? new Date(matObj.validade).toLocaleDateString('pt-BR')
+      : 'Não perecível / Indeterminada';
+
+    const categoriaLabel = tipoObj
+      ? `${tipoObj.categoria || 'Geral'} (${tipoObj.ehConsumivel ? 'Consumível' : 'Permanente / Durável'})`
+      : 'Material Operacional';
+
     const isFinished = isReturnedStatus(c.status) || isConsumedStatus(c.status);
     const isConsumo = c.seraDevolvida === false || isConsumedStatus(c.status);
 
@@ -736,18 +853,27 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
         </div>
 
         <div class="section">
-          <div class="section-title">Dados da Cautela e Material</div>
+          <div class="section-title">Dados Completos do Material Acautelado</div>
           <div class="grid">
             <div class="field"><span class="label">Protocolo:</span> ${c.protocolo || c.id}</div>
             <div class="field"><span class="label">Status:</span> ${c.status}</div>
-            <div class="field"><span class="label">Material:</span> ${c.materialNome}</div>
-            <div class="field"><span class="label">Tipo:</span> ${c.tipoMaterialNome || 'Material Operacional'}</div>
-            <div class="field"><span class="label">Quantidade Retirada:</span> ${c.quantidade} un.</div>
-            <div class="field"><span class="label">Modalidade:</span> ${c.seraDevolvida === false ? 'Consumo' : 'Passivo de Devolução'}</div>
-            <div class="field"><span class="label">Data de Retirada:</span> ${new Date(c.dataRetirada).toLocaleString('pt-BR')}</div>
+            <div class="field"><span class="label">Material:</span> ${matObj?.nome || c.materialNome}</div>
+            <div class="field"><span class="label">Tipo:</span> ${matObj?.tipoMaterialNome || c.tipoMaterialNome || 'Material Operacional'}</div>
+            <div class="field"><span class="label">Categoria / Natureza:</span> ${categoriaLabel}</div>
+            <div class="field"><span class="label">Nº de Série / Patrimônio:</span> ${matObj?.numeroSerie || 'Não informado'}</div>
+            <div class="field"><span class="label">Cofre de Origem / Local:</span> ${originVaultText}</div>
+            <div class="field"><span class="label">Validade do Material:</span> ${validadeText}</div>
+            <div class="field"><span class="label">Quantidade Retirada:</span> <strong>${c.quantidade} un.</strong></div>
+            <div class="field"><span class="label">Modalidade:</span> ${c.seraDevolvida === false ? 'Consumo (Sem devolução obrigatória)' : 'Passivo de Devolução'}</div>
+            <div class="field"><span class="label">Unidade / Depto:</span> ${unitObj?.name || matObj?.unidadeNome || '-'} • ${deptObj?.name || matObj?.departamentoNome || '-'}</div>
+            <div class="field"><span class="label">Data de Solicitação/Retirada:</span> ${new Date(c.dataRetirada).toLocaleString('pt-BR')}</div>
+            ${c.authorizedAt ? `<div class="field"><span class="label">Data de Autorização/Pagamento:</span> ${new Date(c.authorizedAt).toLocaleString('pt-BR')}</div>` : ''}
             ${c.dataPrevistaDevolucao ? `<div class="field"><span class="label">Devolução Prevista:</span> ${c.dataPrevistaDevolucao}</div>` : ''}
             ${c.dataDevolucao ? `<div class="field"><span class="label">Data de Devolução/Baixa:</span> ${new Date(c.dataDevolucao).toLocaleString('pt-BR')}</div>` : ''}
             ${c.returnedQuantity !== undefined ? `<div class="field"><span class="label">Qtd. Devolvida:</span> ${c.returnedQuantity} de ${c.quantidade} un.</div>` : ''}
+            ${destVaultText ? `<div class="field"><span class="label">Cofre de Retorno:</span> ${destVaultText}</div>` : ''}
+            ${matObj?.observacoes ? `<div class="field" style="grid-column: span 2;"><span class="label">Especificações / Observações do Material:</span> ${matObj.observacoes}</div>` : ''}
+            ${c.observacoes ? `<div class="field" style="grid-column: span 2;"><span class="label">Observações da Cautela:</span> ${c.observacoes}</div>` : ''}
           </div>
         </div>
 
@@ -765,8 +891,8 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
         <div class="declaration">
           ${
             isFinished
-              ? `Certifico o encerramento da cautela referente ao material <strong>${c.materialNome}</strong> (${c.quantidade} un.), com devolução de <strong>${c.returnedQuantity ?? c.quantidade} un.</strong> e registro no controle de paiol.`
-              : `Declaro ter recebido o material <strong>${c.quantidade}x ${c.materialNome}</strong> para uso estrito na atividade policial informada, comprometendo-me por sua guarda, conservação e devolução quando aplicável.`
+              ? `Certifico o encerramento da cautela referente ao material <strong>${matObj?.nome || c.materialNome}</strong>${matObj?.numeroSerie ? ` (Pat./Série: <strong>${matObj.numeroSerie}</strong>)` : ''} (${c.quantidade} un.), com devolução de <strong>${c.returnedQuantity ?? c.quantidade} un.</strong> e registro no controle de paiol.`
+              : `Declaro ter recebido o material <strong>${c.quantidade}x ${matObj?.nome || c.materialNome}</strong>${matObj?.numeroSerie ? ` (Pat./Série: <strong>${matObj.numeroSerie}</strong>)` : ''}, retirado do cofre <strong>${originVaultText}</strong>, para uso estrito na atividade policial informada, comprometendo-me por sua guarda, conservação e devolução quando aplicável.`
           }
         </div>
 
@@ -900,10 +1026,28 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
               </div>
               <div>
                 <h3 className="text-base sm:text-lg font-bold text-slate-100">
-                  {c.quantidade}x {c.materialNome}
+                  {c.status === 'PENDENTE'
+                    ? `${c.materialNome}`
+                    : `${c.quantidade}x ${c.materialNome}`}
                 </h3>
                 <p className="text-xs text-slate-400">
-                  Tipo: <strong className="text-slate-200">{c.tipoMaterialNome || 'Material Operacional'}</strong>
+                  {c.status === 'PENDENTE' ? (
+                    <span className="text-amber-300 font-semibold">
+                      Item exato e quantidade a definir pelo Armeiro da unidade
+                    </span>
+                  ) : (
+                    <>
+                      Tipo: <strong className="text-slate-200">{c.tipoMaterialNome || 'Material Operacional'}</strong>
+                      {materialsById.get(c.materialId)?.numeroSerie && (
+                        <>
+                          {' '}• Pat./Série:{' '}
+                          <strong className="text-slate-200 font-mono">
+                            {materialsById.get(c.materialId)?.numeroSerie}
+                          </strong>
+                        </>
+                      )}
+                    </>
+                  )}
                   {c.dataPrevistaDevolucao && (
                     <>
                       {' '}• Devolução Prevista: <strong className="text-amber-300">{c.dataPrevistaDevolucao}</strong>
@@ -1375,7 +1519,11 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
                   type="text"
                   value={materialSearchTerm}
                   onChange={e => setMaterialSearchTerm(e.target.value)}
-                  placeholder="Filtrar por nome do material, categoria/tipo ou patrimônio/série..."
+                  placeholder={
+                    isSolicitationMode
+                      ? 'Filtrar pelo nome do material...'
+                      : 'Filtrar por nome do material, categoria/tipo ou patrimônio/série...'
+                  }
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-4 py-2 text-xs text-slate-100 focus:border-amber-500 focus:outline-none"
                 />
               </div>
@@ -1392,16 +1540,25 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
                 className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
               >
                 <option value="">-- Escolha o Material --</option>
-                {filteredMaterialsForSelect.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.nome} • {m.tipoMaterialNome}
-                    {m.numeroSerie ? ` (Pat./Série: ${m.numeroSerie})` : ''}
-                    {!isPolicial
-                      ? ` — Disp.: ${m.quantidadeDisponivel} un. (Cofre: ${getVaultLabel(m.vaultSpaceId)})`
-                      : ''}
-                  </option>
-                ))}
+                {filteredMaterialsForSelect.map(m =>
+                  isSolicitationMode ? (
+                    <option key={m.id} value={m.id}>
+                      {m.nome}
+                    </option>
+                  ) : (
+                    <option key={m.id} value={m.id}>
+                      {m.nome} • {m.tipoMaterialNome}
+                      {m.numeroSerie ? ` (Pat./Série: ${m.numeroSerie})` : ''}
+                      {` — Disp.: ${m.quantidadeDisponivel} un. (Cofre: ${getVaultLabel(m.vaultSpaceId)})`}
+                    </option>
+                  )
+                )}
               </select>
+              {isSolicitationMode && eligibleMaterials.length > 0 && (
+                <p className="text-[11px] text-amber-300/90 mt-1.5">
+                  O material exato (patrimônio/série, cofre) e a quantidade serão especificados pelo Armeiro da unidade ao confirmar o pagamento.
+                </p>
+              )}
               {eligibleMaterials.length === 0 && (
                 <p className="text-[11px] text-rose-400 mt-1">
                   Nenhum material elegível para cautela disponível na unidade no momento.
@@ -1411,20 +1568,32 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
-                Quantidade *
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={!isPolicial && selectedMaterialObj ? selectedMaterialObj.quantidadeDisponivel : undefined}
-                value={reqQuantity}
-                onChange={e => setReqQuantity(Math.max(1, parseInt(e.target.value || '1', 10)))}
-                required
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
-              />
-            </div>
+            {canAuthorize && isDirectAuthorize ? (
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                  Quantidade *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={selectedMaterialObj ? selectedMaterialObj.quantidadeDisponivel : undefined}
+                  value={reqQuantity}
+                  onChange={e => setReqQuantity(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            ) : (
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                  Quantidade
+                </label>
+                <div className="w-full bg-slate-950/60 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-amber-300 font-medium flex items-center gap-2">
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
+                  <span>Será definida pelo Armeiro da unidade no pagamento</span>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
@@ -1793,7 +1962,7 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
         <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
           <form
             onSubmit={handleConfirmAuthorize}
-            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg space-y-4 shadow-2xl my-auto"
+            className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl space-y-4 shadow-2xl my-auto max-h-[92vh] overflow-y-auto"
           >
             <div className="flex items-center space-x-2 text-emerald-400 border-b border-slate-800 pb-3">
               <CheckCircle2 className="w-5 h-5" />
@@ -1810,9 +1979,9 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
                 </strong>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Material:</span>
+                <span className="text-slate-400">Nome Solicitado:</span>
                 <strong className="text-amber-400">
-                  {authorizeModalItem.quantidade}x {authorizeModalItem.materialNome}
+                  {authorizeModalItem.materialNome}
                 </strong>
               </div>
               <div className="flex justify-between">
@@ -1824,32 +1993,122 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
-                Regime de Devolução
+              <label className="block text-xs font-bold text-amber-400 uppercase mb-1.5">
+                Especificar Material Exato no Estoque (Série / Cofre) *
               </label>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setAuthSeraDevolvida(true)}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
-                    authSeraDevolvida
-                      ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  Passivo de Devolução
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setAuthSeraDevolvida(false)}
-                  className={`py-2 px-3 rounded-xl text-xs font-bold border transition ${
-                    !authSeraDevolvida
-                      ? 'bg-orange-500/20 border-orange-500 text-orange-300'
-                      : 'bg-slate-950 border-slate-800 text-slate-400'
-                  }`}
-                >
-                  Material de Consumo
-                </button>
+              <select
+                value={authMaterialId}
+                onChange={e => {
+                  const nextId = e.target.value;
+                  setAuthMaterialId(nextId);
+                  const nextMat = eligibleMaterials.find(m => m.id === nextId);
+                  if (nextMat && authQuantity > nextMat.quantidadeDisponivel) {
+                    setAuthQuantity(Math.max(1, Number(nextMat.quantidadeDisponivel || 1)));
+                  }
+                }}
+                required
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+              >
+                <option value="">-- Selecione o Material Exato do Cofre --</option>
+                {authMaterialGroups.sameName.length > 0 && (
+                  <optgroup label={`Correspondentes a "${authorizeModalItem.materialNome}"`}>
+                    {authMaterialGroups.sameName.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.nome} • {m.tipoMaterialNome}
+                        {m.numeroSerie ? ` • Pat./Série: ${m.numeroSerie}` : ''}
+                        {` — Disp.: ${m.quantidadeDisponivel} un. (Cofre: ${getVaultLabel(m.vaultSpaceId)})`}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {authMaterialGroups.others.length > 0 && (
+                  <optgroup label="Outros materiais elegíveis disponíveis na unidade">
+                    {authMaterialGroups.others.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.nome} • {m.tipoMaterialNome}
+                        {m.numeroSerie ? ` • Pat./Série: ${m.numeroSerie}` : ''}
+                        {` — Disp.: ${m.quantidadeDisponivel} un. (Cofre: ${getVaultLabel(m.vaultSpaceId)})`}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+              {eligibleMaterials.length === 0 && (
+                <p className="text-[11px] text-rose-400 mt-1">
+                  Não há saldo disponível de materiais elegíveis nesta unidade no momento.
+                </p>
+              )}
+            </div>
+
+            {selectedAuthMaterial && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-[11px]">
+                <div>
+                  <span className="text-slate-500 block uppercase text-[10px]">Cofre de Saída</span>
+                  <strong className="text-cyan-400 font-mono">
+                    {getVaultLabel(selectedAuthMaterial.vaultSpaceId)}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block uppercase text-[10px]">Patrimônio / Série</span>
+                  <strong className="text-slate-200 font-mono">
+                    {selectedAuthMaterial.numeroSerie || 'Sem Nº Série'}
+                  </strong>
+                </div>
+                <div>
+                  <span className="text-slate-500 block uppercase text-[10px]">Saldo Disponível</span>
+                  <strong className="text-emerald-400 font-mono">
+                    {selectedAuthMaterial.quantidadeDisponivel} un.
+                  </strong>
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                  Quantidade a Entregar *
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={selectedAuthMaterial?.quantidadeDisponivel || 1}
+                  value={authQuantity}
+                  onChange={e =>
+                    setAuthQuantity(Math.max(1, parseInt(e.target.value || '1', 10)))
+                  }
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                  Regime de Devolução
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAuthSeraDevolvida(true)}
+                    className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border transition ${
+                      authSeraDevolvida
+                        ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    Devolução
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAuthSeraDevolvida(false)}
+                    className={`py-2 px-2.5 rounded-xl text-[11px] font-bold border transition ${
+                      !authSeraDevolvida
+                        ? 'bg-orange-500/20 border-orange-500 text-orange-300'
+                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                    }`}
+                  >
+                    Consumo
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1876,8 +2135,8 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
               </button>
               <button
                 type="submit"
-                disabled={loading}
-                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition"
+                disabled={loading || !selectedAuthMaterial}
+                className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-xs font-bold transition disabled:opacity-50"
               >
                 {loading ? 'Confirmando...' : 'Confirmar Pagamento'}
               </button>
@@ -2095,7 +2354,9 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
               <div>
                 <span className="text-slate-500 block">Material / Quantidade</span>
                 <strong className="text-amber-400">
-                  {detailItem.quantidade}x {detailItem.materialNome}
+                  {detailItem.status === 'PENDENTE'
+                    ? `${detailItem.materialNome} (Qtd. a definir pelo Armeiro)`
+                    : `${detailItem.quantidade}x ${detailItem.materialNome}`}
                 </strong>
               </div>
               <div>
@@ -2115,10 +2376,18 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
                 <span className="text-slate-500 block">Tipo de Material</span>
                 <strong className="text-slate-200">{detailItem.tipoMaterialNome || 'Operacional'}</strong>
               </div>
+              {detailItem.status !== 'PENDENTE' && materialsById.get(detailItem.materialId)?.numeroSerie && (
+                <div>
+                  <span className="text-slate-500 block">Patrimônio / Nº Série</span>
+                  <strong className="text-slate-200 font-mono">
+                    {materialsById.get(detailItem.materialId)?.numeroSerie}
+                  </strong>
+                </div>
+              )}
               {!isPolicial && (
                 <div>
                   <span className="text-slate-500 block">Cofre</span>
-                  <strong className="text-cyan-400">{getVaultLabel(detailItem.vaultSpaceId)}</strong>
+                  <strong className="text-cyan-400">{getVaultLabel(detailItem.vaultSpaceId || materialsById.get(detailItem.materialId)?.vaultSpaceId)}</strong>
                 </div>
               )}
               <div>
