@@ -221,6 +221,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   
   // Stock Form State
   const [stockCaliberId, setStockCaliberId] = useState('');
+  const [stockCaliberName, setStockCaliberName] = useState('');
   const [stockVaultId, setStockVaultId] = useState('');
   const [stockQuantity, setStockQuantity] = useState<number>(0);
   const [stockFabricante, setStockFabricante] = useState('');
@@ -414,19 +415,114 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     return filteredStocks.reduce((sum, s) => sum + s.quantity, 0);
   }, [filteredStocks]);
 
+  // --- Cascading helpers for Stock Add / Edit Modal (Calibre único -> Tipo vinculado -> Peso vinculado) ---
+
+  const uniqueCaliberNames = useMemo(() => {
+    const seen = new Set<string>();
+    const names: string[] = [];
+    calibers.forEach(c => {
+      const name = (c.name || '').trim();
+      if (name && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        names.push(name);
+      }
+    });
+    return names.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [calibers]);
+
+  const getTiposForCaliberName = (calName: string): string[] => {
+    const target = (calName || '').trim().toLowerCase();
+    if (!target) return [];
+    const seen = new Set<string>();
+    const list: string[] = [];
+    calibers.forEach(c => {
+      if ((c.name || '').trim().toLowerCase() === target) {
+        const t = (c.tipo || '').trim();
+        if (t && !seen.has(t.toLowerCase())) {
+          seen.add(t.toLowerCase());
+          list.push(t);
+        }
+      }
+    });
+    return list.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  };
+
+  const getPesosForCaliberAndTipo = (calName: string, tipo?: string): string[] => {
+    const norm = (s?: string | null) => (s || '').trim().toLowerCase();
+    const targetCal = norm(calName);
+    const targetTipo = norm(tipo);
+    if (!targetCal) return [];
+
+    const matchingCalRows = calibers.filter(c => norm(c.name) === targetCal);
+    const matchingByTipo = targetTipo
+      ? matchingCalRows.filter(c => norm(c.tipo) === targetTipo && Boolean((c.peso || '').trim()))
+      : [];
+    const sourceRows = matchingByTipo.length > 0 ? matchingByTipo : matchingCalRows;
+
+    const seen = new Set<string>();
+    const list: string[] = [];
+    sourceRows.forEach(c => {
+      const p = (c.peso || '').trim();
+      if (p && !seen.has(p.toLowerCase())) {
+        seen.add(p.toLowerCase());
+        list.push(p);
+      }
+    });
+    return list.sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  };
+
+  const findMatchingCaliberRecord = (calName: string, tipo?: string, peso?: string): Caliber | undefined => {
+    const norm = (s?: string | null) => (s || '').trim().toLowerCase();
+    const targetName = norm(calName);
+    if (!targetName) return undefined;
+    const candidates = calibers.filter(c => norm(c.name) === targetName);
+    if (candidates.length === 0) return undefined;
+    const targetTipo = norm(tipo);
+    const targetPeso = norm(peso);
+    return (
+      candidates.find(c => norm(c.tipo) === targetTipo && norm(c.peso) === targetPeso) ||
+      candidates.find(c => norm(c.tipo) === targetTipo) ||
+      candidates.find(c => norm(c.peso) === targetPeso) ||
+      candidates[0]
+    );
+  };
+
+  const availableStockTipos = useMemo(() => {
+    const list = getTiposForCaliberName(stockCaliberName);
+    if (stockTipo && !list.some(t => t.toLowerCase() === stockTipo.trim().toLowerCase())) {
+      list.push(stockTipo.trim());
+    }
+    return list;
+  }, [calibers, stockCaliberName, stockTipo]);
+
+  const availableStockPesos = useMemo(() => {
+    const list = getPesosForCaliberAndTipo(stockCaliberName, stockTipo);
+    if (stockPeso && !list.some(p => p.toLowerCase() === stockPeso.trim().toLowerCase())) {
+      list.push(stockPeso.trim());
+    }
+    return list;
+  }, [calibers, stockCaliberName, stockTipo, stockPeso]);
+
   // --- Handlers: Stock CRUD & Internal Transfer ---
 
   const handleOpenAddStock = (preselectedVaultId?: string) => {
     setErrorMsg('');
     setSuccessMsg('');
     setEditingStock(null);
-    const firstCal = calibers[0];
-    setStockCaliberId(firstCal?.id || '');
+    const firstName = uniqueCaliberNames[0] || calibers[0]?.name || '';
+    const initialTipos = getTiposForCaliberName(firstName);
+    const firstTipo = initialTipos[0] || '';
+    const initialPesos = getPesosForCaliberAndTipo(firstName, firstTipo);
+    const firstPeso = initialPesos[0] || '';
+    const matchedCal = findMatchingCaliberRecord(firstName, firstTipo, firstPeso) || calibers[0];
+
+    setStockCaliberName(firstName);
+    setStockCaliberId(matchedCal?.id || '');
     setStockVaultId(preselectedVaultId || candidateAmmoVaults[0]?.id || '');
     setStockQuantity(100);
-    setStockFabricante(firstCal?.fabricante || 'CBC');
-    setStockTipo(firstCal?.tipo || 'Treino');
-    setStockPeso(firstCal?.peso || '124 gr');
+    setStockFabricante(matchedCal?.fabricante || 'CBC');
+    setStockTipo(firstTipo);
+    setStockPeso(firstPeso);
     setStockLote('');
     setStockAno(new Date().getFullYear());
     setStockDestinacao('Treinamento');
@@ -441,12 +537,19 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     setEditingStock(stock);
+    const calObj = calibers.find(c => c.id === stock.caliberId);
+    const rawName = (calObj?.name || '').trim();
+    const matchedName = uniqueCaliberNames.find(n => n.toLowerCase() === rawName.toLowerCase()) || rawName;
+    const resolvedTipo = (stock.tipoMunicao || calObj?.tipo || '').trim();
+    const resolvedPeso = (stock.pesoMunicao || calObj?.peso || '').trim();
+
+    setStockCaliberName(matchedName);
     setStockCaliberId(stock.caliberId);
     setStockVaultId(stock.vaultSpaceId);
     setStockQuantity(stock.quantity);
     setStockFabricante(stock.fabricante || '');
-    setStockTipo(stock.tipoMunicao || '');
-    setStockPeso(stock.pesoMunicao || '');
+    setStockTipo(resolvedTipo);
+    setStockPeso(resolvedPeso);
     setStockLote(stock.loteMunicao || '');
     setStockAno(stock.anoFabricacao || new Date().getFullYear());
     setStockDestinacao(stock.destinacao || 'Treinamento');
@@ -462,11 +565,14 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
 
+    const resolvedCalId =
+      findMatchingCaliberRecord(stockCaliberName, stockTipo, stockPeso)?.id || stockCaliberId;
+
     if (!stockVaultId) {
       setErrorMsg('Selecione um cofre de munições válido.');
       return;
     }
-    if (!stockCaliberId) {
+    if (!resolvedCalId) {
       setErrorMsg('Selecione o calibre da munição.');
       return;
     }
@@ -482,7 +588,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
           editingStock.id,
           {
             quantity: Number(stockQuantity),
-            caliberId: stockCaliberId,
+            caliberId: resolvedCalId,
             fabricante: stockFabricante,
             tipoMunicao: stockTipo,
             pesoMunicao: stockPeso,
@@ -507,7 +613,7 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
         // Adding new stock via movement Entrada
         await storage.addAmmoMovement({
           type: 'Entrada',
-          caliberId: stockCaliberId,
+          caliberId: resolvedCalId,
           quantity: Number(stockQuantity),
           vaultSpaceId: stockVaultId,
           recipientOrReason: 'Abastecimento Inicial / Cadastro de Estoque',
@@ -1744,32 +1850,38 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   </select>
                 </div>
 
-                {/* Calibre */}
+                {/* Calibre (somente nomes únicos cadastrados) */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Calibre *
                   </label>
                   <select
-                    value={stockCaliberId}
+                    value={stockCaliberName}
                     onChange={e => {
-                      const nextId = e.target.value;
-                      setStockCaliberId(nextId);
-                      if (!editingStock) {
-                        const chosen = calibers.find(c => c.id === nextId);
-                        if (chosen) {
-                          if (chosen.fabricante) setStockFabricante(chosen.fabricante);
-                          if (chosen.tipo) setStockTipo(chosen.tipo);
-                          if (chosen.peso) setStockPeso(chosen.peso);
-                        }
+                      const nextCalName = e.target.value;
+                      setStockCaliberName(nextCalName);
+                      const newTipos = getTiposForCaliberName(nextCalName);
+                      const nextTipo = newTipos[0] || '';
+                      setStockTipo(nextTipo);
+                      const newPesos = getPesosForCaliberAndTipo(nextCalName, nextTipo);
+                      const nextPeso = newPesos[0] || '';
+                      setStockPeso(nextPeso);
+                      const chosen = findMatchingCaliberRecord(nextCalName, nextTipo, nextPeso);
+                      setStockCaliberId(chosen?.id || '');
+                      if (!editingStock && chosen?.fabricante) {
+                        setStockFabricante(chosen.fabricante);
                       }
                     }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                   >
-                    {calibers.map(cal => (
-                      <option key={cal.id} value={cal.id}>
-                        {formatCaliberDisplay(cal)}
+                    {uniqueCaliberNames.map(calName => (
+                      <option key={calName} value={calName}>
+                        {calName}
                       </option>
                     ))}
+                    {stockCaliberName && !uniqueCaliberNames.some(n => n.toLowerCase() === stockCaliberName.trim().toLowerCase()) && (
+                      <option value={stockCaliberName}>{stockCaliberName}</option>
+                    )}
                   </select>
                 </div>
 
@@ -1802,32 +1914,66 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   />
                 </div>
 
-                {/* Tipo de Munição */}
+                {/* Tipo de Munição (somente tipos vinculados ao calibre selecionado) */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Tipo de Munição
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={stockTipo}
-                    onChange={e => setStockTipo(e.target.value)}
-                    placeholder="Ex: Treino, Operacional, Expansiva"
+                    onChange={e => {
+                      const nextTipo = e.target.value;
+                      setStockTipo(nextTipo);
+                      const newPesos = getPesosForCaliberAndTipo(stockCaliberName, nextTipo);
+                      const keptPeso = newPesos.find(p => p.toLowerCase() === stockPeso.trim().toLowerCase());
+                      const nextPeso = keptPeso || newPesos[0] || '';
+                      setStockPeso(nextPeso);
+                      const chosen = findMatchingCaliberRecord(stockCaliberName, nextTipo, nextPeso);
+                      if (chosen) {
+                        setStockCaliberId(chosen.id);
+                      }
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  />
+                  >
+                    {availableStockTipos.length === 0 ? (
+                      <option value="">-- Nenhum tipo cadastrado para este calibre --</option>
+                    ) : (
+                      availableStockTipos.map(tipoOpt => (
+                        <option key={tipoOpt} value={tipoOpt}>
+                          {tipoOpt}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </div>
 
-                {/* Peso do Projétil */}
+                {/* Peso do Projétil (somente pesos vinculados ao calibre/tipo selecionado) */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Peso do Projétil
                   </label>
-                  <input
-                    type="text"
+                  <select
                     value={stockPeso}
-                    onChange={e => setStockPeso(e.target.value)}
-                    placeholder="Ex: 115 gr, 124 gr, 147 gr"
+                    onChange={e => {
+                      const nextPeso = e.target.value;
+                      setStockPeso(nextPeso);
+                      const chosen = findMatchingCaliberRecord(stockCaliberName, stockTipo, nextPeso);
+                      if (chosen) {
+                        setStockCaliberId(chosen.id);
+                      }
+                    }}
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                  />
+                  >
+                    {availableStockPesos.length === 0 ? (
+                      <option value="">-- Nenhum peso cadastrado para este calibre --</option>
+                    ) : (
+                      availableStockPesos.map(pesoOpt => (
+                        <option key={pesoOpt} value={pesoOpt}>
+                          {pesoOpt}
+                        </option>
+                      ))
+                    )}
+                  </select>
                 </div>
 
                 {/* Lote */}
