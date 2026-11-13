@@ -182,7 +182,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'veterinario',
-      label: 'Material veterinário.',
+      label: 'CANIL',
       icon: Dog,
       visible: allowedModules.includes('veterinario')
     },

@@ -8,7 +8,9 @@ import {
   Caliber,
   Weapon,
   VaultSpace,
-  getSystemLogo
+  getSystemLogo,
+  getAllowedModulesForUser,
+  isUserExplosivista
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
@@ -24,7 +26,11 @@ import {
   Flame,
   Building2,
   X,
-  CheckCircle2
+  CheckCircle2,
+  Dog,
+  Building,
+  Pill,
+  Syringe
 } from 'lucide-react';
 import { printDocumentInPage } from '../utils/printHelper';
 
@@ -40,7 +46,7 @@ interface ReportModuleProps {
   vaultSpaces?: VaultSpace[];
 }
 
-type ReportTab = 'TODOS' | 'COFRES' | 'ARMAS' | 'MUNICIONAL' | 'MATERIAIS' | 'EXPLOSIVOS';
+type ReportTab = 'TODOS' | 'COFRES' | 'ARMAS' | 'MUNICIONAL' | 'MATERIAIS' | 'EXPLOSIVOS' | 'CANIL';
 
 interface SectionSelection {
   cofres: boolean;
@@ -48,6 +54,7 @@ interface SectionSelection {
   municoes: boolean;
   materiais: boolean;
   explosivos: boolean;
+  canil: boolean;
 }
 
 const DEFAULT_SECTIONS: SectionSelection = {
@@ -55,7 +62,8 @@ const DEFAULT_SECTIONS: SectionSelection = {
   armas: true,
   municoes: true,
   materiais: true,
-  explosivos: true
+  explosivos: true,
+  canil: true
 };
 
 export const ReportModule: React.FC<ReportModuleProps> = ({
@@ -71,15 +79,30 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
+  const isExplosivistaRole =
+    effectiveRole === 'Explosivista' ||
+    (effectiveRole === 'Policial' && isUserExplosivista(currentUser));
+  const allowedModules = useMemo(() => getAllowedModulesForUser(currentUser), [currentUser]);
+  const hasCanilAccess = allowedModules.includes('veterinario');
+  const isCanilOnly =
+    hasCanilAccess &&
+    !isGeral &&
+    !isExplosivistaRole &&
+    effectiveRole !== 'Armeiro' &&
+    effectiveRole !== 'Administrador';
   const isDeptScoped =
     !isGeral &&
     (effectiveRole === 'Administrador' ||
       ((effectiveRole === 'Armeiro' || effectiveRole === 'Explosivista') &&
-        currentUser.managementScope !== 'unit'));
+        currentUser.managementScope === 'department'));
   const isUnitOnly = !isGeral && !isDeptScoped;
 
   const [dataVersion, setDataVersion] = useState(0);
-  const [activeTab, setActiveTab] = useState<ReportTab>('TODOS');
+  const [activeTab, setActiveTab] = useState<ReportTab>(() => {
+    if (isCanilOnly) return 'CANIL';
+    if (isExplosivistaRole) return 'COFRES';
+    return 'TODOS';
+  });
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -175,6 +198,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const allMovsExplosivos = useMemo(() => storage.getMovimentacoesExplosivos(currentUser), [currentUser, dataVersion]);
   const allExplosivoTransfers = useMemo(() => storage.getExplosivoTransfers(currentUser), [currentUser, dataVersion]);
 
+  const allCanisFisicos = useMemo(() => storage.getCanisFisicos(), [dataVersion]);
+  const allCachorros = useMemo(() => storage.getCachorros(), [dataVersion]);
+  const allProdutosVet = useMemo(() => storage.getProdutosVeterinarios(), [dataVersion]);
+  const allMovsVet = useMemo(() => storage.getMovimentacoesVeterinarias(), [dataVersion]);
+
   // Allowed Departments and Units for Dropdowns
   const allowedDepartments = useMemo(() => {
     if (isGeral) return allDepartments;
@@ -196,11 +224,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
   const visibleVaultsForDropdown = useMemo(() => {
     return allVaults.filter(v => {
+      if (isExplosivistaRole && v.type !== 'EXPLOSIVOS') return false;
       if (selectedDept !== 'ALL' && v.departmentId !== selectedDept) return false;
       if (selectedUnit !== 'ALL' && v.unitId !== selectedUnit) return false;
       return true;
     });
-  }, [allVaults, selectedDept, selectedUnit]);
+  }, [allVaults, selectedDept, selectedUnit, isExplosivistaRole]);
 
   const getVaultById = (vaultId?: string | null) =>
     vaultId ? allVaults.find(v => v.id === vaultId) : undefined;
@@ -307,6 +336,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
     // 1. COFRES DA UNIDADE
     const cofresRaw = allVaults.filter(v => {
+      if (isExplosivistaRole && v.type !== 'EXPLOSIVOS') return false;
       if (!isAllowedDeptUnit(v.departmentId, v.unitId, v.id)) return false;
       if (applyScreenFilters && selectedVaultSpace !== 'ALL' && v.id !== selectedVaultSpace) return false;
       return true;
@@ -831,6 +861,66 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
     const explosivoHistorico = explosivoHistoricoRaw.sort((a, b) => b.sortTime - a.sortTime);
 
+    // 6. CANIL (CANIS FÍSICOS, CÃES K9, FARMÁCIA VETERINÁRIA E HISTÓRICO DE APLICAÇÕES)
+    const matchesCanilScope = (rawDeptId?: string | null, rawUnitId?: string | null): boolean => {
+      if (!rawDeptId && !rawUnitId) {
+        return unitFilterId === 'ALL' || isUnitOnly;
+      }
+      return isAllowedDeptUnit(rawDeptId, rawUnitId, null);
+    };
+
+    const canisFisicos = allCanisFisicos
+      .filter(k => matchesCanilScope(k.departmentId, k.unitId))
+      .map(k => ({
+        ...k,
+        dogsCount: allCachorros.filter(c => c.canilFisicoId === k.id).length,
+        unitName: getUnitName(k.unitId)
+      }));
+
+    const cachorrosCanil = allCachorros
+      .filter(d => {
+        if (!matchesCanilScope(d.departmentId, d.unitId)) return false;
+        if (!matchesUser(d.usuarioInternoId)) return false;
+        if (applyScreenFilters && recipientScope === 'SISTEMA' && d.tipoVinculo !== 'SISTEMA') return false;
+        if (applyScreenFilters && recipientScope === 'FORA_DO_SISTEMA' && d.tipoVinculo !== 'EXTERNO') return false;
+        return true;
+      })
+      .map(d => {
+        const kennel = allCanisFisicos.find(k => k.id === d.canilFisicoId);
+        return {
+          ...d,
+          canilNome: kennel ? `${kennel.nome}${kennel.identificacao ? ` (${kennel.identificacao})` : ''}` : d.canilFisicoNome || 'Não alocado',
+          unitName: getUnitName(d.unitId)
+        };
+      });
+
+    const produtosCanil = allProdutosVet
+      .filter(p => matchesCanilScope(p.departmentId, p.unitId))
+      .map(p => ({
+        ...p,
+        unitName: getUnitName(p.unitId)
+      }));
+
+    const canilTotalValorEstoque = produtosCanil.reduce(
+      (acc, p) => acc + Number(p.quantidadeEstoque || 0) * Number(p.valorUnitario || 0),
+      0
+    );
+
+    const movimentacoesCanil = allMovsVet
+      .filter(m => {
+        if (!matchesCanilScope(m.departmentId, m.unitId)) return false;
+        if (!matchesDateRange(m.dataHora || m.createdAt)) return false;
+        if (!matchesUser(m.responsavelAplicacaoId)) return false;
+        if (!matchesReason(m.motivo || m.tipoMovimentacao)) return false;
+        return true;
+      })
+      .map(m => ({
+        ...m,
+        sortTime: new Date((m.dataHora || m.createdAt || '').replace(' ', 'T')).getTime() || 0,
+        unitName: getUnitName(m.unitId)
+      }))
+      .sort((a, b) => b.sortTime - a.sortTime);
+
     return {
       cofres,
       armas,
@@ -840,7 +930,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       materiais,
       materialHistorico,
       explosivos,
-      explosivoHistorico
+      explosivoHistorico,
+      canisFisicos,
+      cachorrosCanil,
+      produtosCanil,
+      movimentacoesCanil,
+      canilTotalValorEstoque
     };
   };
 
@@ -872,9 +967,47 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       allMaterialTransfers,
       allExplosivos,
       allMovsExplosivos,
-      allExplosivoTransfers
+      allExplosivoTransfers,
+      allCanisFisicos,
+      allCachorros,
+      allProdutosVet,
+      allMovsVet,
+      isExplosivistaRole,
+      hasCanilAccess,
+      isUnitOnly
     ]
   );
+
+  const getDefaultSectionsForRole = (): SectionSelection => {
+    if (isCanilOnly) {
+      return {
+        cofres: false,
+        armas: false,
+        municoes: false,
+        materiais: false,
+        explosivos: false,
+        canil: true
+      };
+    }
+    if (isExplosivistaRole) {
+      return {
+        cofres: true,
+        armas: false,
+        municoes: false,
+        materiais: false,
+        explosivos: true,
+        canil: false
+      };
+    }
+    return {
+      cofres: true,
+      armas: true,
+      municoes: true,
+      materiais: true,
+      explosivos: true,
+      canil: hasCanilAccess
+    };
+  };
 
   // Open shared modal for Print OR CSV
   const openActionModal = (mode: 'PRINT' | 'CSV') => {
@@ -885,13 +1018,34 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       setModalUnitId(selectedUnit || 'ALL');
     }
     setModalScopeMode('FULL_UNIT');
-    setModalSections({
-      cofres: activeTab === 'TODOS' || activeTab === 'COFRES',
-      armas: activeTab === 'TODOS' || activeTab === 'ARMAS',
-      municoes: activeTab === 'TODOS' || activeTab === 'MUNICIONAL',
-      materiais: activeTab === 'TODOS' || activeTab === 'MATERIAIS',
-      explosivos: activeTab === 'TODOS' || activeTab === 'EXPLOSIVOS'
-    });
+    if (isCanilOnly) {
+      setModalSections({
+        cofres: false,
+        armas: false,
+        municoes: false,
+        materiais: false,
+        explosivos: false,
+        canil: true
+      });
+    } else if (isExplosivistaRole) {
+      setModalSections({
+        cofres: activeTab === 'COFRES',
+        armas: false,
+        municoes: false,
+        materiais: false,
+        explosivos: activeTab === 'EXPLOSIVOS',
+        canil: false
+      });
+    } else {
+      setModalSections({
+        cofres: activeTab === 'TODOS' || activeTab === 'COFRES',
+        armas: activeTab === 'TODOS' || activeTab === 'ARMAS',
+        municoes: activeTab === 'TODOS' || activeTab === 'MUNICIONAL',
+        materiais: activeTab === 'TODOS' || activeTab === 'MATERIAIS',
+        explosivos: activeTab === 'TODOS' || activeTab === 'EXPLOSIVOS',
+        canil: hasCanilAccess && (activeTab === 'TODOS' || activeTab === 'CANIL')
+      });
+    }
   };
 
   const escapeCsvCell = (val: unknown): string => {
@@ -930,35 +1084,65 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       ['ABRANGÊNCIA', applyScreenFilters ? 'Com Filtros da Tela' : 'Relatório Completo da Unidade']
     ];
 
-    if (sections.cofres) {
-      rows.push([], ['=== 1. COFRES DA UNIDADE ===']);
-      rows.push([
-        'Código do Cofre',
-        'Tipo',
-        'Descrição Curta',
-        'Unidade',
-        'Departamento',
-        'Armas',
-        'Munições (un)',
-        'Materiais (un)',
-        'Explosivos'
-      ]);
-      data.cofres.forEach(v => {
+    const safeSections: SectionSelection = {
+      cofres: Boolean(sections.cofres && !isCanilOnly),
+      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly),
+      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly),
+      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly),
+      explosivos: Boolean(sections.explosivos && !isCanilOnly),
+      canil: Boolean(sections.canil && hasCanilAccess)
+    };
+
+    if (safeSections.cofres) {
+      rows.push([], [isExplosivistaRole ? '=== 1. COFRES DE EXPLOSIVOS DA UNIDADE ===' : '=== 1. COFRES DA UNIDADE ===']);
+      if (isExplosivistaRole) {
         rows.push([
-          v.code,
-          v.type,
-          v.descricaoCurta || '-',
-          v.unitName,
-          v.deptName,
-          String(v.armasCount),
-          String(v.municoesCount),
-          String(v.materiaisCount),
-          String(v.explosivosCount)
+          'Código do Cofre',
+          'Tipo',
+          'Descrição Curta',
+          'Unidade',
+          'Departamento',
+          'Explosivos'
         ]);
-      });
+        data.cofres.forEach(v => {
+          rows.push([
+            v.code,
+            v.type,
+            v.descricaoCurta || '-',
+            v.unitName,
+            v.deptName,
+            String(v.explosivosCount)
+          ]);
+        });
+      } else {
+        rows.push([
+          'Código do Cofre',
+          'Tipo',
+          'Descrição Curta',
+          'Unidade',
+          'Departamento',
+          'Armas',
+          'Munições (un)',
+          'Materiais (un)',
+          'Explosivos'
+        ]);
+        data.cofres.forEach(v => {
+          rows.push([
+            v.code,
+            v.type,
+            v.descricaoCurta || '-',
+            v.unitName,
+            v.deptName,
+            String(v.armasCount),
+            String(v.municoesCount),
+            String(v.materiaisCount),
+            String(v.explosivosCount)
+          ]);
+        });
+      }
     }
 
-    if (sections.armas) {
+    if (safeSections.armas) {
       rows.push([], ['=== 2A. ARMAS DA UNIDADE (ACERVO ATUAL) ===']);
       rows.push([
         'Tipo',
@@ -1019,7 +1203,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       });
     }
 
-    if (sections.municoes) {
+    if (safeSections.municoes) {
       rows.push([], ['=== 3A. MUNIÇÕES DA UNIDADE (ESTOQUE ATUAL) ===']);
       rows.push([
         'Calibre',
@@ -1083,7 +1267,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       });
     }
 
-    if (sections.materiais) {
+    if (safeSections.materiais) {
       rows.push([], ['=== 4A. MATERIAIS DA UNIDADE (INVENTÁRIO ATUAL) ===']);
       rows.push([
         'Material',
@@ -1147,7 +1331,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       });
     }
 
-    if (sections.explosivos) {
+    if (safeSections.explosivos) {
       rows.push([], ['=== 5A. EXPLOSIVOS DA UNIDADE (ACERVO ATUAL) ===']);
       rows.push([
         'Nome',
@@ -1209,6 +1393,82 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       });
     }
 
+    if (safeSections.canil) {
+      rows.push([], ['=== 6A. CANIL - CANIS FÍSICOS E BAIAS ===']);
+      rows.push(['Nome do Canil', 'Identificação', 'Capacidade', 'Cães Alocados', 'Localização', 'Unidade', 'Status']);
+      data.canisFisicos.forEach(k => {
+        rows.push([
+          k.nome,
+          k.identificacao || '-',
+          String(k.capacidade || 0),
+          String(k.dogsCount),
+          k.localizacao || '-',
+          k.unitName,
+          k.status
+        ]);
+      });
+
+      rows.push([], ['=== 6B. CANIL - CÃES POLICIAIS K9 ===']);
+      rows.push(['Nome', 'Raça', 'Sexo', 'Microchip', 'Especialidade', 'Baia / Canil', 'Condutor / Responsável', 'Vínculo', 'Unidade', 'Status']);
+      data.cachorrosCanil.forEach(d => {
+        const condutor =
+          d.tipoVinculo === 'SISTEMA'
+            ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+            : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`;
+        rows.push([
+          d.nome,
+          d.raca,
+          d.sexo,
+          d.microchip || '-',
+          d.especialidade || '-',
+          d.canilNome,
+          condutor,
+          d.tipoVinculo === 'SISTEMA' ? 'No Sistema' : 'Externo',
+          d.unitName,
+          d.status
+        ]);
+      });
+
+      rows.push([], ['=== 6C. CANIL - FARMÁCIA, MEDICAMENTOS E RAÇÕES ===']);
+      rows.push(['Produto', 'Tipo', 'Categoria / Forma', 'Fabricante', 'Lote', 'Validade', 'Estoque Atual', 'Estoque Mínimo', 'Unidade Medida', 'Valor Unit. (R$)', 'Local de Guarda', 'Unidade']);
+      data.produtosCanil.forEach(p => {
+        rows.push([
+          p.nome,
+          p.tipo,
+          [p.categoria, p.formaFarmaceutica].filter(Boolean).join(' / ') || '-',
+          p.fabricante || '-',
+          p.lote || '-',
+          p.temValidade && p.dataValidade ? new Date(p.dataValidade).toLocaleDateString('pt-BR') : 'Sem validade',
+          String(p.quantidadeEstoque),
+          String(p.quantidadeMinima),
+          p.unidadeMedida,
+          Number(p.valorUnitario || 0).toFixed(2),
+          p.localGuarda || '-',
+          p.unitName
+        ]);
+      });
+
+      rows.push([], ['=== 6D. CANIL - HISTÓRICO DE APLICAÇÕES E MOVIMENTAÇÕES ===']);
+      rows.push(['Data/Hora', 'Tipo Movimentação', 'Produto', 'Quantidade', 'Cão K9', 'Microchip', 'Dosagem / Frequência', 'Condutor', 'Aplicador / Responsável', 'Motivo', 'Valor Total (R$)', 'Observações', 'Unidade']);
+      data.movimentacoesCanil.forEach(m => {
+        rows.push([
+          m.dataHora ? formatTimestamp(m.dataHora) : '-',
+          m.tipoMovimentacao,
+          m.produtoNome,
+          `${m.quantidade} ${m.unidadeMedida}`,
+          m.cachorroNome || '-',
+          m.cachorroMicrochip || '-',
+          [m.dosagemAplicada, m.frequenciaAdministrada].filter(Boolean).join(' • ') || '-',
+          m.condutorNome || '-',
+          `${m.responsavelAplicacaoNome || '-'}${m.responsavelAplicacaoMasp ? ` (MASP: ${m.responsavelAplicacaoMasp})` : ''}`,
+          m.motivo || '-',
+          Number(m.valorTotalItem || 0).toFixed(2),
+          m.observacoes || '-',
+          m.unitName
+        ]);
+      });
+    }
+
     const csvText = '\uFEFF' + rows.map(row => row.map(escapeCsvCell).join(';')).join('\r\n');
     const blob = new Blob([csvText], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -1256,6 +1516,47 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     const renderEmpty = (msg: string) =>
       `<div class="empty-box">${escapeHtml(msg)}</div>`;
 
+    const safeSections: SectionSelection = {
+      cofres: Boolean(sections.cofres && !isCanilOnly),
+      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly),
+      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly),
+      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly),
+      explosivos: Boolean(sections.explosivos && !isCanilOnly),
+      canil: Boolean(sections.canil && hasCanilAccess)
+    };
+
+    const summaryCardsHtml = (() => {
+      if (isCanilOnly) {
+        return `
+          <div class="summary-bar">
+            <div class="sum-card"><label>Canis / Baias</label><span>${data.canisFisicos.length}</span></div>
+            <div class="sum-card"><label>Cães K9</label><span>${data.cachorrosCanil.length}</span></div>
+            <div class="sum-card"><label>Itens Farmácia</label><span>${data.produtosCanil.length}</span></div>
+            <div class="sum-card"><label>Aplicações / Mov.</label><span>${data.movimentacoesCanil.length}</span></div>
+            <div class="sum-card"><label>Valor em Estoque</label><span>R$ ${data.canilTotalValorEstoque.toFixed(2)}</span></div>
+          </div>
+        `;
+      }
+      if (isExplosivistaRole) {
+        return `
+          <div class="summary-bar" style="grid-template-columns: repeat(2, 1fr);">
+            <div class="sum-card"><label>Cofres de Explosivos</label><span>${data.cofres.length}</span></div>
+            <div class="sum-card"><label>Explosivos / Movimentações</label><span>${data.explosivos.length} / ${data.explosivoHistorico.length}</span></div>
+          </div>
+        `;
+      }
+      return `
+        <div class="summary-bar" style="grid-template-columns: repeat(${hasCanilAccess ? 6 : 5}, 1fr);">
+          <div class="sum-card"><label>Cofres da Unidade</label><span>${data.cofres.length}</span></div>
+          <div class="sum-card"><label>Armas / Movim.</label><span>${data.armas.length} / ${data.armaHistorico.length}</span></div>
+          <div class="sum-card"><label>Munições (un) / Mov.</label><span>${data.municoesEstoque.reduce((a, s) => a + Number(s.quantity || 0), 0)} / ${data.municaoHistorico.length}</span></div>
+          <div class="sum-card"><label>Materiais / Mov.</label><span>${data.materiais.length} / ${data.materialHistorico.length}</span></div>
+          <div class="sum-card"><label>Explosivos / Mov.</label><span>${data.explosivos.length} / ${data.explosivoHistorico.length}</span></div>
+          ${hasCanilAccess ? `<div class="sum-card"><label>Canil (Cães / Mov.)</label><span>${data.cachorrosCanil.length} / ${data.movimentacoesCanil.length}</span></div>` : ''}
+        </div>
+      `;
+    })();
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
@@ -1295,7 +1596,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             <img src="${escapeHtml(logoSrc)}" alt="Brasão PCMG" class="logo" />
             <div>
               <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
-              <div class="subtitle">RELATÓRIO OPERACIONAL COMPLETO • ${escapeHtml(unitTitle)}</div>
+              <div class="subtitle">${
+                isCanilOnly
+                  ? `RELATÓRIO DO CANIL K9 • ${escapeHtml(unitTitle)}`
+                  : isExplosivistaRole
+                  ? `RELATÓRIO DE COFRES DE EXPLOSIVOS E EXPLOSIVOS • ${escapeHtml(unitTitle)}`
+                  : `RELATÓRIO OPERACIONAL COMPLETO • ${escapeHtml(unitTitle)}`
+              }</div>
             </div>
           </div>
           <div class="meta">
@@ -1305,17 +1612,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         </div>
 
-        <div class="summary-bar">
-          <div class="sum-card"><label>Cofres da Unidade</label><span>${data.cofres.length}</span></div>
-          <div class="sum-card"><label>Armas / Movim.</label><span>${data.armas.length} / ${data.armaHistorico.length}</span></div>
-          <div class="sum-card"><label>Munições (un) / Mov.</label><span>${data.municoesEstoque.reduce((a, s) => a + Number(s.quantity || 0), 0)} / ${data.municaoHistorico.length}</span></div>
-          <div class="sum-card"><label>Materiais / Mov.</label><span>${data.materiais.length} / ${data.materialHistorico.length}</span></div>
-          <div class="sum-card"><label>Explosivos / Mov.</label><span>${data.explosivos.length} / ${data.explosivoHistorico.length}</span></div>
-        </div>
+        ${summaryCardsHtml}
 
-        ${sections.cofres ? `
+        ${safeSections.cofres ? `
           <div class="section-block">
-            <div class="sec-title">1. COFRES DA UNIDADE (${data.cofres.length})</div>
+            <div class="sec-title">1. ${isExplosivistaRole ? 'COFRES DE EXPLOSIVOS DA UNIDADE' : 'COFRES DA UNIDADE'} (${data.cofres.length})</div>
             ${data.cofres.length === 0 ? renderEmpty('Nenhum cofre encontrado para o escopo selecionado.') : `
               <table>
                 <thead>
@@ -1325,9 +1626,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                     <th>Descrição Curta</th>
                     <th>Unidade</th>
                     <th>Departamento</th>
-                    <th>Armas</th>
-                    <th>Munições</th>
-                    <th>Materiais</th>
+                    ${!isExplosivistaRole ? '<th>Armas</th><th>Munições</th><th>Materiais</th>' : ''}
                     <th>Explosivos</th>
                   </tr>
                 </thead>
@@ -1339,9 +1638,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                       <td>${escapeHtml(v.descricaoCurta || '-')}</td>
                       <td>${escapeHtml(v.unitName)}</td>
                       <td>${escapeHtml(v.deptName)}</td>
-                      <td class="mono">${v.armasCount}</td>
-                      <td class="mono">${v.municoesCount} un</td>
-                      <td class="mono">${v.materiaisCount} un</td>
+                      ${!isExplosivistaRole ? `
+                        <td class="mono">${v.armasCount}</td>
+                        <td class="mono">${v.municoesCount} un</td>
+                        <td class="mono">${v.materiaisCount} un</td>
+                      ` : ''}
                       <td class="mono">${v.explosivosCount}</td>
                     </tr>
                   `).join('')}
@@ -1351,7 +1652,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         ` : ''}
 
-        ${sections.armas ? `
+        ${safeSections.armas ? `
           <div class="section-block">
             <div class="sec-title">2. ARMAS DA UNIDADE E HISTÓRICO COMPLETO DE MOVIMENTAÇÃO</div>
             <div class="sub-title">2A. Acervo de Armamento da Unidade (${data.armas.length})</div>
@@ -1427,7 +1728,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         ` : ''}
 
-        ${sections.municoes ? `
+        ${safeSections.municoes ? `
           <div class="section-block">
             <div class="sec-title">3. MUNIÇÕES DA UNIDADE E HISTÓRICO COMPLETO DE MOVIMENTAÇÃO</div>
             <div class="sub-title">3A. Estoque Atual de Munições (${data.municoesEstoque.length} lotes)</div>
@@ -1500,7 +1801,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         ` : ''}
 
-        ${sections.materiais ? `
+        ${safeSections.materiais ? `
           <div class="section-block">
             <div class="sec-title">4. MATERIAIS DA UNIDADE E HISTÓRICO COMPLETO DE MOVIMENTAÇÕES</div>
             <div class="sub-title">4A. Inventário de Materiais (${data.materiais.length})</div>
@@ -1573,7 +1874,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         ` : ''}
 
-        ${sections.explosivos ? `
+        ${safeSections.explosivos ? `
           <div class="section-block">
             <div class="sec-title">5. EXPLOSIVOS DA UNIDADE E HISTÓRICO COMPLETO DE MOVIMENTAÇÕES</div>
             <div class="sub-title">5A. Acervo de Explosivos (${data.explosivos.length})</div>
@@ -1648,6 +1949,141 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         ` : ''}
 
+        ${safeSections.canil ? `
+          <div class="section-block">
+            <div class="sec-title">6. CANIL K9 (CANIS FÍSICOS, CÃES, FARMÁCIA E APLICAÇÕES)</div>
+            <div class="sub-title">6A. Canis Físicos & Baias (${data.canisFisicos.length})</div>
+            ${data.canisFisicos.length === 0 ? renderEmpty('Nenhum canil físico encontrado.') : `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Identificação</th>
+                    <th>Ocupação / Capacidade</th>
+                    <th>Localização</th>
+                    <th>Unidade</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.canisFisicos.map(k => `
+                    <tr>
+                      <td><strong>${escapeHtml(k.nome)}</strong></td>
+                      <td class="mono">${escapeHtml(k.identificacao || '-')}</td>
+                      <td class="mono">${k.dogsCount} / ${k.capacidade}</td>
+                      <td>${escapeHtml(k.localizacao || '-')}</td>
+                      <td>${escapeHtml(k.unitName)}</td>
+                      <td><strong>${escapeHtml(k.status)}</strong></td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+
+            <div class="sub-title">6B. Cães Policiais K9 (${data.cachorrosCanil.length})</div>
+            ${data.cachorrosCanil.length === 0 ? renderEmpty('Nenhum cão K9 encontrado.') : `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nome</th>
+                    <th>Raça / Sexo</th>
+                    <th>Microchip</th>
+                    <th>Especialidade</th>
+                    <th>Baia / Canil</th>
+                    <th>Condutor / Responsável</th>
+                    <th>Unidade</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.cachorrosCanil.map(d => {
+                    const condutor =
+                      d.tipoVinculo === 'SISTEMA'
+                        ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+                        : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`;
+                    return `
+                      <tr>
+                        <td><strong>${escapeHtml(d.nome)}</strong></td>
+                        <td>${escapeHtml(d.raca)} (${escapeHtml(d.sexo)})</td>
+                        <td class="mono">${escapeHtml(d.microchip || '-')}</td>
+                        <td>${escapeHtml(d.especialidade || '-')}</td>
+                        <td>${escapeHtml(d.canilNome)}</td>
+                        <td>${escapeHtml(condutor)}</td>
+                        <td>${escapeHtml(d.unitName)}</td>
+                        <td><strong>${escapeHtml(d.status)}</strong></td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            `}
+
+            <div class="sub-title">6C. Farmácia Veterinária, Medicamentos & Rações (${data.produtosCanil.length})</div>
+            ${data.produtosCanil.length === 0 ? renderEmpty('Nenhum produto veterinário encontrado.') : `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Produto</th>
+                    <th>Tipo / Forma</th>
+                    <th>Fabricante / Lote</th>
+                    <th>Validade</th>
+                    <th>Estoque (Atual / Mín.)</th>
+                    <th>Valor Unit.</th>
+                    <th>Local de Guarda</th>
+                    <th>Unidade</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.produtosCanil.map(p => `
+                    <tr>
+                      <td><strong>${escapeHtml(p.nome)}</strong></td>
+                      <td>${escapeHtml(p.tipo)}${p.formaFarmaceutica ? ` / ${escapeHtml(p.formaFarmaceutica)}` : ''}</td>
+                      <td>${escapeHtml(p.fabricante || '-')} ${p.lote ? `(Lote: ${escapeHtml(p.lote)})` : ''}</td>
+                      <td>${p.temValidade && p.dataValidade ? new Date(p.dataValidade).toLocaleDateString('pt-BR') : 'Sem validade'}</td>
+                      <td class="mono"><strong>${p.quantidadeEstoque} ${escapeHtml(p.unidadeMedida)}</strong> (Mín: ${p.quantidadeMinima})</td>
+                      <td class="mono">R$ ${Number(p.valorUnitario || 0).toFixed(2)}</td>
+                      <td>${escapeHtml(p.localGuarda || '-')}</td>
+                      <td>${escapeHtml(p.unitName)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+
+            <div class="sub-title">6D. Histórico de Aplicações & Movimentações Veterinárias (${data.movimentacoesCanil.length})</div>
+            ${data.movimentacoesCanil.length === 0 ? renderEmpty('Nenhuma movimentação veterinária registrada.') : `
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data/Hora</th>
+                    <th>Tipo</th>
+                    <th>Produto</th>
+                    <th>Qtd</th>
+                    <th>Cão K9</th>
+                    <th>Dosagem / Frequência</th>
+                    <th>Aplicador / Condutor</th>
+                    <th>Motivo / Obs.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.movimentacoesCanil.map(m => `
+                    <tr>
+                      <td class="mono">${escapeHtml(m.dataHora ? formatTimestamp(m.dataHora) : '-')}</td>
+                      <td>${escapeHtml(m.tipoMovimentacao)}</td>
+                      <td><strong>${escapeHtml(m.produtoNome)}</strong></td>
+                      <td class="mono">${m.quantidade} ${escapeHtml(m.unidadeMedida)}</td>
+                      <td>${escapeHtml(m.cachorroNome || '-')}${m.cachorroMicrochip ? ` (${escapeHtml(m.cachorroMicrochip)})` : ''}</td>
+                      <td>${escapeHtml([m.dosagemAplicada, m.frequenciaAdministrada].filter(Boolean).join(' • ') || '-')}</td>
+                      <td>${escapeHtml(m.responsavelAplicacaoNome || '-')}${m.condutorNome ? `<br/><span style="color:#475569;">Cond: ${escapeHtml(m.condutorNome)}</span>` : ''}</td>
+                      <td>${escapeHtml(m.motivo || '-')}${m.observacoes ? ` — ${escapeHtml(m.observacoes)}` : ''}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        ` : ''}
+
         <div class="signatures">
           <div class="sig-line">
             ${escapeHtml(currentUser.name)} (MASP: ${escapeHtml(currentUser.masp)})<br/>
@@ -1676,14 +2112,77 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     setActionModalMode(null);
   };
 
-  const tabsConfig: { id: ReportTab; label: string; icon: React.ReactNode; badge?: string }[] = [
-    { id: 'TODOS', label: 'Relatório Geral (Completo)', icon: <FileText className="w-4 h-4" /> },
-    { id: 'COFRES', label: `Cofres (${screenData.cofres.length})`, icon: <Vault className="w-4 h-4" /> },
-    { id: 'ARMAS', label: `Armas (${screenData.armas.length} / ${screenData.armaHistorico.length})`, icon: <Crosshair className="w-4 h-4" /> },
-    { id: 'MUNICIONAL', label: `Munições (${screenData.municoesEstoque.length} / ${screenData.municaoHistorico.length})`, icon: <Disc className="w-4 h-4" /> },
-    { id: 'MATERIAIS', label: `Materiais (${screenData.materiais.length} / ${screenData.materialHistorico.length})`, icon: <Package className="w-4 h-4" /> },
-    { id: 'EXPLOSIVOS', label: `Explosivos (${screenData.explosivos.length} / ${screenData.explosivoHistorico.length})`, icon: <Flame className="w-4 h-4" /> }
-  ];
+  const tabsConfig = useMemo(() => {
+    const allTabs: { id: ReportTab; label: string; icon: React.ReactNode; visible: boolean }[] = [
+      {
+        id: 'TODOS',
+        label: 'Relatório Geral (Completo)',
+        icon: <FileText className="w-4 h-4" />,
+        visible: !isExplosivistaRole && !isCanilOnly
+      },
+      {
+        id: 'COFRES',
+        label: isExplosivistaRole
+          ? `Cofres de Explosivos (${screenData.cofres.length})`
+          : `Cofres (${screenData.cofres.length})`,
+        icon: <Vault className="w-4 h-4" />,
+        visible: !isCanilOnly
+      },
+      {
+        id: 'ARMAS',
+        label: `Armas (${screenData.armas.length} / ${screenData.armaHistorico.length})`,
+        icon: <Crosshair className="w-4 h-4" />,
+        visible: !isExplosivistaRole && !isCanilOnly
+      },
+      {
+        id: 'MUNICIONAL',
+        label: `Munições (${screenData.municoesEstoque.length} / ${screenData.municaoHistorico.length})`,
+        icon: <Disc className="w-4 h-4" />,
+        visible: !isExplosivistaRole && !isCanilOnly
+      },
+      {
+        id: 'MATERIAIS',
+        label: `Materiais (${screenData.materiais.length} / ${screenData.materialHistorico.length})`,
+        icon: <Package className="w-4 h-4" />,
+        visible: !isExplosivistaRole && !isCanilOnly
+      },
+      {
+        id: 'EXPLOSIVOS',
+        label: `Explosivos (${screenData.explosivos.length} / ${screenData.explosivoHistorico.length})`,
+        icon: <Flame className="w-4 h-4" />,
+        visible: !isCanilOnly
+      },
+      {
+        id: 'CANIL',
+        label: `Canil (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
+        icon: <Dog className="w-4 h-4" />,
+        visible: hasCanilAccess
+      }
+    ];
+    return allTabs.filter(t => t.visible);
+  }, [
+    isExplosivistaRole,
+    isCanilOnly,
+    hasCanilAccess,
+    screenData.cofres.length,
+    screenData.armas.length,
+    screenData.armaHistorico.length,
+    screenData.municoesEstoque.length,
+    screenData.municaoHistorico.length,
+    screenData.materiais.length,
+    screenData.materialHistorico.length,
+    screenData.explosivos.length,
+    screenData.explosivoHistorico.length,
+    screenData.cachorrosCanil.length,
+    screenData.movimentacoesCanil.length
+  ]);
+
+  useEffect(() => {
+    const allowedIds = tabsConfig.map(t => t.id);
+    if (allowedIds.length > 0 && !allowedIds.includes(activeTab)) {
+      setActiveTab(allowedIds[0]);
+    }
+  }, [tabsConfig, activeTab]);
 
   return (
     <div className="space-y-6">
@@ -1696,7 +2195,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           <div>
             <h1 className="text-xl font-bold text-slate-100">Relatórios Gerenciais e Operacionais</h1>
             <p className="text-xs text-slate-400">
-              Cofres, armas, munições, materiais, explosivos e histórico completo de movimentações por unidade
+              {isCanilOnly
+                ? 'Canis físicos, cães K9, farmácia veterinária, rações e histórico completo de aplicações do Canil'
+                : isExplosivistaRole
+                ? 'Cofres de explosivos, acervo de explosivos e histórico completo de movimentações por unidade'
+                : 'Cofres, armas, munições, materiais, explosivos e histórico completo de movimentações por unidade'}
             </p>
           </div>
         </div>
@@ -1793,19 +2296,25 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
 
           {/* Vault Space Filter */}
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Cofre / Espaço</label>
-            <select
-              value={selectedVaultSpace}
-              onChange={(e) => setSelectedVaultSpace(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
-            >
-              <option value="ALL">Todos os Espaços do Cofre</option>
-              {visibleVaultsForDropdown.map(v => (
-                <option key={v.id} value={v.id}>{v.code} ({v.type})</option>
-              ))}
-            </select>
-          </div>
+          {!isCanilOnly && (
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">
+                {isExplosivistaRole ? 'Cofre de Explosivos' : 'Cofre / Espaço'}
+              </label>
+              <select
+                value={selectedVaultSpace}
+                onChange={(e) => setSelectedVaultSpace(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
+              >
+                <option value="ALL">
+                  {isExplosivistaRole ? 'Todos os Cofres de Explosivos' : 'Todos os Espaços do Cofre'}
+                </option>
+                {visibleVaultsForDropdown.map(v => (
+                  <option key={v.id} value={v.id}>{v.code} ({v.type})</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Start Date */}
           <div>
@@ -1830,19 +2339,21 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
 
           {/* Caliber Filter */}
-          <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Calibre</label>
-            <select
-              value={selectedCaliber}
-              onChange={(e) => setSelectedCaliber(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
-            >
-              <option value="ALL">Todos os Calibres</option>
-              {calibers.map(c => (
-                <option key={c.id} value={c.name}>{c.name}</option>
-              ))}
-            </select>
-          </div>
+          {!isCanilOnly && !isExplosivistaRole && (
+            <div>
+              <label className="block text-slate-400 mb-1 font-semibold">Calibre</label>
+              <select
+                value={selectedCaliber}
+                onChange={(e) => setSelectedCaliber(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono"
+              >
+                <option value="ALL">Todos os Calibres</option>
+                {calibers.map(c => (
+                  <option key={c.id} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {/* Destinatário Scope Filter */}
           <div>
@@ -1923,7 +2434,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
               POLÍCIA CIVIL • ESTADO DE MINAS GERAIS
             </h2>
             <p className="text-xs text-amber-400 font-semibold font-mono">
-              RELATÓRIO INTEGRADO: COFRES, ARMAS, MUNIÇÕES, MATERIAIS, EXPLOSIVOS E HISTÓRICO DE MOVIMENTAÇÕES
+              {isCanilOnly
+                ? 'RELATÓRIO INTEGRADO DO CANIL: CANIS FÍSICOS, CÃES K9, FARMÁCIA E HISTÓRICO DE APLICAÇÕES'
+                : isExplosivistaRole
+                ? 'RELATÓRIO INTEGRADO: COFRES DE EXPLOSIVOS, EXPLOSIVOS E HISTÓRICO DE MOVIMENTAÇÕES'
+                : 'RELATÓRIO INTEGRADO: COFRES, ARMAS, MUNIÇÕES, MATERIAIS, EXPLOSIVOS E HISTÓRICO DE MOVIMENTAÇÕES'}
             </p>
           </div>
           <div className="text-left sm:text-right text-xs text-slate-400 font-mono">
@@ -1936,11 +2451,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
 
         {/* SECTION 1: COFRES */}
-        {(activeTab === 'COFRES' || activeTab === 'TODOS') && (
+        {!isCanilOnly && (activeTab === 'COFRES' || activeTab === 'TODOS') && (
           <div className="space-y-3">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Vault className="w-4 h-4" />
-              <span>1. Cofres da Unidade ({screenData.cofres.length})</span>
+              <span>
+                1. {isExplosivistaRole ? 'Cofres de Explosivos da Unidade' : 'Cofres da Unidade'} ({screenData.cofres.length})
+              </span>
             </h3>
             <div className="overflow-x-auto border border-slate-800 rounded-xl">
               <table className="w-full text-left text-xs text-slate-300">
@@ -1951,16 +2468,20 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                     <th className="py-2.5 px-3">Descrição Curta</th>
                     <th className="py-2.5 px-3">Unidade</th>
                     <th className="py-2.5 px-3">Departamento</th>
-                    <th className="py-2.5 px-3 text-center">Armas</th>
-                    <th className="py-2.5 px-3 text-center">Munições</th>
-                    <th className="py-2.5 px-3 text-center">Materiais</th>
+                    {!isExplosivistaRole && (
+                      <>
+                        <th className="py-2.5 px-3 text-center">Armas</th>
+                        <th className="py-2.5 px-3 text-center">Munições</th>
+                        <th className="py-2.5 px-3 text-center">Materiais</th>
+                      </>
+                    )}
                     <th className="py-2.5 px-3 text-center">Explosivos</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-800">
                   {screenData.cofres.length === 0 ? (
                     <tr>
-                      <td colSpan={9} className="py-4 text-center text-slate-500 italic">
+                      <td colSpan={isExplosivistaRole ? 6 : 9} className="py-4 text-center text-slate-500 italic">
                         Nenhum cofre encontrado com os filtros selecionados.
                       </td>
                     </tr>
@@ -1972,9 +2493,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                         <td className="py-2.5 px-3 text-slate-400">{v.descricaoCurta || '-'}</td>
                         <td className="py-2.5 px-3">{v.unitName}</td>
                         <td className="py-2.5 px-3">{v.deptName}</td>
-                        <td className="py-2.5 px-3 text-center font-mono">{v.armasCount}</td>
-                        <td className="py-2.5 px-3 text-center font-mono">{v.municoesCount} un</td>
-                        <td className="py-2.5 px-3 text-center font-mono">{v.materiaisCount} un</td>
+                        {!isExplosivistaRole && (
+                          <>
+                            <td className="py-2.5 px-3 text-center font-mono">{v.armasCount}</td>
+                            <td className="py-2.5 px-3 text-center font-mono">{v.municoesCount} un</td>
+                            <td className="py-2.5 px-3 text-center font-mono">{v.materiaisCount} un</td>
+                          </>
+                        )}
                         <td className="py-2.5 px-3 text-center font-mono">{v.explosivosCount}</td>
                       </tr>
                     ))
@@ -1986,7 +2511,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         )}
 
         {/* SECTION 2: ARMAS + HISTÓRICO */}
-        {(activeTab === 'ARMAS' || activeTab === 'TODOS') && (
+        {!isExplosivistaRole && !isCanilOnly && (activeTab === 'ARMAS' || activeTab === 'TODOS') && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Crosshair className="w-4 h-4" />
@@ -2079,7 +2604,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         )}
 
         {/* SECTION 3: MUNIÇÕES + HISTÓRICO */}
-        {(activeTab === 'MUNICIONAL' || activeTab === 'TODOS') && (
+        {!isExplosivistaRole && !isCanilOnly && (activeTab === 'MUNICIONAL' || activeTab === 'TODOS') && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Disc className="w-4 h-4" />
@@ -2177,7 +2702,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         )}
 
         {/* SECTION 4: MATERIAIS + HISTÓRICO */}
-        {(activeTab === 'MATERIAIS' || activeTab === 'TODOS') && (
+        {!isExplosivistaRole && !isCanilOnly && (activeTab === 'MATERIAIS' || activeTab === 'TODOS') && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Package className="w-4 h-4" />
@@ -2272,7 +2797,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         )}
 
         {/* SECTION 5: EXPLOSIVOS + HISTÓRICO */}
-        {(activeTab === 'EXPLOSIVOS' || activeTab === 'TODOS') && (
+        {!isCanilOnly && (activeTab === 'EXPLOSIVOS' || activeTab === 'TODOS') && (
           <div className="space-y-4 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Flame className="w-4 h-4" />
@@ -2361,6 +2886,230 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           </div>
         )}
 
+        {/* SECTION 6: CANIL */}
+        {hasCanilAccess && (activeTab === 'CANIL' || activeTab === 'TODOS') && (
+          <div className="space-y-5 pt-4 border-t border-slate-800">
+            <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+              <Dog className="w-4 h-4" />
+              <span>6. Canil K9 — Canis Físicos ({screenData.canisFisicos.length}), Cães ({screenData.cachorrosCanil.length}), Farmácia ({screenData.produtosCanil.length}) e Aplicações ({screenData.movimentacoesCanil.length})</span>
+            </h3>
+
+            {/* Resumo Canil */}
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-xs font-mono">
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase font-sans block">Canis / Baias</span>
+                <strong className="text-base text-slate-100">{screenData.canisFisicos.length}</strong>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase font-sans block">Cães K9</span>
+                <strong className="text-base text-amber-400">{screenData.cachorrosCanil.length}</strong>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase font-sans block">Itens Farmácia / Ração</span>
+                <strong className="text-base text-cyan-400">{screenData.produtosCanil.length}</strong>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase font-sans block">Aplicações / Mov.</span>
+                <strong className="text-base text-emerald-400">{screenData.movimentacoesCanil.length}</strong>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] text-slate-400 uppercase font-sans block">Valor em Estoque</span>
+                <strong className="text-base text-purple-400">R$ {screenData.canilTotalValorEstoque.toFixed(2)}</strong>
+              </div>
+            </div>
+
+            {/* 6A. Canis Físicos */}
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <div className="bg-slate-950/70 px-3 py-2 text-[11px] font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800 flex items-center space-x-1.5">
+                <Building className="w-3.5 h-3.5 text-amber-400" />
+                <span>6A. Canis Físicos & Baias ({screenData.canisFisicos.length})</span>
+              </div>
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-2 px-3">Nome</th>
+                    <th className="py-2 px-3">Identificação</th>
+                    <th className="py-2 px-3">Ocupação</th>
+                    <th className="py-2 px-3">Localização</th>
+                    <th className="py-2 px-3">Unidade</th>
+                    <th className="py-2 px-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {screenData.canisFisicos.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-4 text-center text-slate-500 italic">
+                        Nenhum canil físico encontrado no escopo selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    screenData.canisFisicos.map(k => (
+                      <tr key={k.id} className="hover:bg-slate-800/40">
+                        <td className="py-2 px-3 font-bold text-slate-100">{k.nome}</td>
+                        <td className="py-2 px-3 font-mono text-amber-400">{k.identificacao || '-'}</td>
+                        <td className="py-2 px-3 font-mono">{k.dogsCount} / {k.capacidade}</td>
+                        <td className="py-2 px-3 text-slate-400">{k.localizacao || '-'}</td>
+                        <td className="py-2 px-3">{k.unitName}</td>
+                        <td className="py-2 px-3 font-bold">{k.status}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 6B. Cães K9 */}
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <div className="bg-slate-950/70 px-3 py-2 text-[11px] font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800 flex items-center space-x-1.5">
+                <Dog className="w-3.5 h-3.5 text-amber-400" />
+                <span>6B. Cães Policiais K9 ({screenData.cachorrosCanil.length})</span>
+              </div>
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-2 px-3">Nome</th>
+                    <th className="py-2 px-3">Raça / Sexo</th>
+                    <th className="py-2 px-3">Microchip</th>
+                    <th className="py-2 px-3">Especialidade</th>
+                    <th className="py-2 px-3">Baia / Canil</th>
+                    <th className="py-2 px-3">Condutor / Responsável</th>
+                    <th className="py-2 px-3">Unidade</th>
+                    <th className="py-2 px-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {screenData.cachorrosCanil.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-center text-slate-500 italic">
+                        Nenhum cão K9 encontrado no escopo selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    screenData.cachorrosCanil.map(d => (
+                      <tr key={d.id} className="hover:bg-slate-800/40">
+                        <td className="py-2 px-3 font-bold text-slate-100">{d.nome}</td>
+                        <td className="py-2 px-3">{d.raca} ({d.sexo})</td>
+                        <td className="py-2 px-3 font-mono text-amber-400">{d.microchip || '-'}</td>
+                        <td className="py-2 px-3">{d.especialidade || '-'}</td>
+                        <td className="py-2 px-3">{d.canilNome}</td>
+                        <td className="py-2 px-3">
+                          {d.tipoVinculo === 'SISTEMA'
+                            ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+                            : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`}
+                        </td>
+                        <td className="py-2 px-3">{d.unitName}</td>
+                        <td className="py-2 px-3 font-bold">{d.status}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 6C. Farmácia Veterinária & Rações */}
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <div className="bg-slate-950/70 px-3 py-2 text-[11px] font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800 flex items-center space-x-1.5">
+                <Pill className="w-3.5 h-3.5 text-emerald-400" />
+                <span>6C. Farmácia Veterinária, Medicamentos & Rações ({screenData.produtosCanil.length})</span>
+              </div>
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-2 px-3">Produto</th>
+                    <th className="py-2 px-3">Tipo / Forma</th>
+                    <th className="py-2 px-3">Fabricante / Lote</th>
+                    <th className="py-2 px-3">Validade</th>
+                    <th className="py-2 px-3">Estoque (Atual / Mín.)</th>
+                    <th className="py-2 px-3">Valor Unit.</th>
+                    <th className="py-2 px-3">Local de Guarda</th>
+                    <th className="py-2 px-3">Unidade</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {screenData.produtosCanil.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-center text-slate-500 italic">
+                        Nenhum produto veterinário encontrado no escopo selecionado.
+                      </td>
+                    </tr>
+                  ) : (
+                    screenData.produtosCanil.map(p => (
+                      <tr key={p.id} className="hover:bg-slate-800/40">
+                        <td className="py-2 px-3 font-bold text-slate-100">{p.nome}</td>
+                        <td className="py-2 px-3">{p.tipo}{p.formaFarmaceutica ? ` • ${p.formaFarmaceutica}` : ''}</td>
+                        <td className="py-2 px-3">{p.fabricante || '-'} {p.lote ? `(Lote: ${p.lote})` : ''}</td>
+                        <td className="py-2 px-3 font-mono">{p.temValidade && p.dataValidade ? new Date(p.dataValidade).toLocaleDateString('pt-BR') : 'Sem validade'}</td>
+                        <td className="py-2 px-3 font-mono">
+                          <strong className={p.quantidadeEstoque <= p.quantidadeMinima ? 'text-red-400' : 'text-emerald-400'}>
+                            {p.quantidadeEstoque} {p.unidadeMedida}
+                          </strong>{' '}
+                          <span className="text-slate-500">(Mín: {p.quantidadeMinima})</span>
+                        </td>
+                        <td className="py-2 px-3 font-mono">R$ {Number(p.valorUnitario || 0).toFixed(2)}</td>
+                        <td className="py-2 px-3">{p.localGuarda || '-'}</td>
+                        <td className="py-2 px-3">{p.unitName}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* 6D. Histórico de Aplicações & Movimentações */}
+            <div className="overflow-x-auto border border-slate-800 rounded-xl">
+              <div className="bg-slate-950/70 px-3 py-2 text-[11px] font-bold text-slate-300 uppercase tracking-wider border-b border-slate-800 flex items-center space-x-1.5">
+                <Syringe className="w-3.5 h-3.5 text-cyan-400" />
+                <span>6D. Histórico de Aplicações & Movimentações Veterinárias ({screenData.movimentacoesCanil.length})</span>
+              </div>
+              <table className="w-full text-left text-xs text-slate-300">
+                <thead className="bg-slate-800/80 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-700">
+                  <tr>
+                    <th className="py-2 px-3">Data/Hora</th>
+                    <th className="py-2 px-3">Tipo</th>
+                    <th className="py-2 px-3">Produto</th>
+                    <th className="py-2 px-3">Quantidade</th>
+                    <th className="py-2 px-3">Cão K9</th>
+                    <th className="py-2 px-3">Dosagem / Frequência</th>
+                    <th className="py-2 px-3">Aplicador / Condutor</th>
+                    <th className="py-2 px-3">Motivo / Obs.</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800">
+                  {screenData.movimentacoesCanil.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="py-4 text-center text-slate-500 italic">
+                        Nenhuma movimentação veterinária registrada.
+                      </td>
+                    </tr>
+                  ) : (
+                    screenData.movimentacoesCanil.map(m => (
+                      <tr key={m.id} className="hover:bg-slate-800/40">
+                        <td className="py-2 px-3 font-mono text-[11px] text-slate-400">{m.dataHora ? formatTimestamp(m.dataHora) : '-'}</td>
+                        <td className="py-2 px-3 font-semibold text-sky-300">{m.tipoMovimentacao}</td>
+                        <td className="py-2 px-3 font-bold text-slate-100">{m.produtoNome}</td>
+                        <td className="py-2 px-3 font-mono">{m.quantidade} {m.unidadeMedida}</td>
+                        <td className="py-2 px-3">
+                          <span className="block font-semibold text-amber-300">{m.cachorroNome || '-'}</span>
+                          {m.cachorroMicrochip && <span className="text-[10px] font-mono text-slate-400">{m.cachorroMicrochip}</span>}
+                        </td>
+                        <td className="py-2 px-3">{[m.dosagemAplicada, m.frequenciaAdministrada].filter(Boolean).join(' • ') || '-'}</td>
+                        <td className="py-2 px-3">
+                          <span className="block">{m.responsavelAplicacaoNome || '-'}</span>
+                          {m.condutorNome && <span className="text-[10px] text-slate-400">Cond: {m.condutorNome}</span>}
+                        </td>
+                        <td className="py-2 px-3 max-w-xs">
+                          <span className="block font-medium text-slate-200">{m.motivo || '-'}</span>
+                          {m.observacoes && <span className="text-[10px] text-slate-400 block">{m.observacoes}</span>}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
         <div className="pt-4 border-t border-slate-800 text-xs text-slate-500 flex justify-between font-mono">
           <span>Relatório gerado em conformidade com o Nível de Acesso: <strong>{effectiveRole}</strong></span>
           <span>Armeria PCMG v2.0</span>
@@ -2438,7 +3187,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                     type="button"
                     onClick={() => {
                       setModalScopeMode('FULL_UNIT');
-                      setModalSections(DEFAULT_SECTIONS);
+                      setModalSections(getDefaultSectionsForRole());
                     }}
                     className={`p-3 rounded-xl border text-left transition ${
                       modalScopeMode === 'FULL_UNIT'
@@ -2477,45 +3226,76 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                   </label>
                   <button
                     type="button"
-                    onClick={() => setModalSections(DEFAULT_SECTIONS)}
+                    onClick={() => setModalSections(getDefaultSectionsForRole())}
                     className="text-[11px] text-amber-400 hover:underline font-semibold"
                   >
-                    Selecionar Todos (5)
+                    Selecionar Todos
                   </button>
                 </div>
                 <div className="space-y-1.5 text-xs">
                   {[
-                    { key: 'cofres', label: '1. Cofres da unidade' },
-                    { key: 'armas', label: '2. Armas da unidade + todo histórico de movimentação' },
-                    { key: 'municoes', label: '3. Munições da unidade + todo histórico de movimentação' },
-                    { key: 'materiais', label: '4. Materiais da unidade + todo histórico de movimentações' },
-                    { key: 'explosivos', label: '5. Explosivos da unidade + todo histórico de movimentações' }
-                  ].map(item => {
-                    const checked = modalSections[item.key as keyof SectionSelection];
-                    return (
-                      <label
-                        key={item.key}
-                        className={`flex items-center space-x-2.5 p-2 rounded-xl border cursor-pointer transition ${
-                          checked
-                            ? 'bg-emerald-500/10 border-emerald-500/30 text-slate-100'
-                            : 'bg-slate-950 border-slate-800 text-slate-400'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={(e) =>
-                            setModalSections(prev => ({
-                              ...prev,
-                              [item.key]: e.target.checked
-                            }))
-                          }
-                          className="w-4 h-4 rounded text-amber-500 bg-slate-950 border-slate-700"
-                        />
-                        <span>{item.label}</span>
-                      </label>
-                    );
-                  })}
+                    {
+                      key: 'cofres',
+                      label: isExplosivistaRole ? '1. Cofres de Explosivos da unidade' : '1. Cofres da unidade',
+                      visible: !isCanilOnly
+                    },
+                    {
+                      key: 'armas',
+                      label: '2. Armas da unidade + todo histórico de movimentação',
+                      visible: !isExplosivistaRole && !isCanilOnly
+                    },
+                    {
+                      key: 'municoes',
+                      label: '3. Munições da unidade + todo histórico de movimentação',
+                      visible: !isExplosivistaRole && !isCanilOnly
+                    },
+                    {
+                      key: 'materiais',
+                      label: '4. Materiais da unidade + todo histórico de movimentações',
+                      visible: !isExplosivistaRole && !isCanilOnly
+                    },
+                    {
+                      key: 'explosivos',
+                      label: isExplosivistaRole
+                        ? '2. Explosivos da unidade + todo histórico de movimentações'
+                        : '5. Explosivos da unidade + todo histórico de movimentações',
+                      visible: !isCanilOnly
+                    },
+                    {
+                      key: 'canil',
+                      label: isCanilOnly
+                        ? '1. Canil K9 (Canis físicos, Cães, Farmácia e Aplicações)'
+                        : '6. Canil K9 (Canis físicos, Cães, Farmácia e Aplicações)',
+                      visible: hasCanilAccess
+                    }
+                  ]
+                    .filter(item => item.visible)
+                    .map(item => {
+                      const checked = modalSections[item.key as keyof SectionSelection];
+                      return (
+                        <label
+                          key={item.key}
+                          className={`flex items-center space-x-2.5 p-2 rounded-xl border cursor-pointer transition ${
+                            checked
+                              ? 'bg-emerald-500/10 border-emerald-500/30 text-slate-100'
+                              : 'bg-slate-950 border-slate-800 text-slate-400'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setModalSections(prev => ({
+                                ...prev,
+                                [item.key]: e.target.checked
+                              }))
+                            }
+                            className="w-4 h-4 rounded text-amber-500 bg-slate-950 border-slate-700"
+                          />
+                          <span>{item.label}</span>
+                        </label>
+                      );
+                    })}
                 </div>
               </div>
 

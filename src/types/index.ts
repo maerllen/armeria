@@ -1364,7 +1364,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   if (role === 'operador_canino') {
     return [
       'meu-perfil',
-      'veterinario'
+      'veterinario',
+      'relatorio'
     ];
   }
 
@@ -1378,6 +1379,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     ];
     if (isUserExplosivista(user)) {
       policeModules.push('explosivos');
+      policeModules.push('relatorio');
     }
     return policeModules;
   }

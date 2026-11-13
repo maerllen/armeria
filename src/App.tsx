@@ -50,7 +50,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'gerencia-cursos': 'Gerência de Cursos',
   'calendario': 'Calendário de Aulas',
   'certificados': 'Verificação de Certificados',
-  'veterinario': 'Material veterinário.',
+  'veterinario': 'CANIL',
   'relatorio': 'Relatórios e Consultas',
   'manual': 'Manual do Sistema'
 };

@@ -646,7 +646,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               </div>
               <div>
                 <h1 className="text-2xl font-black text-slate-100 tracking-wide font-mono flex items-center space-x-2">
-                  <span>MATERIAL VETERINÁRIO & CANIL K9</span>
+                  <span>CANIL</span>
                   <span className="text-xs bg-amber-500 text-slate-950 font-sans font-bold px-2 py-0.5 rounded-full uppercase">
                     POLÍCIA CIVIL
                   </span>
