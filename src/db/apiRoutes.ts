@@ -1395,7 +1395,16 @@ apiRouter.get('/calibers', async (req: Request, res: Response) => {
 apiRouter.post('/calibers', async (req: Request, res: Response) => {
   try {
     const { name, fabricante, tipo, peso, actor } = req.body;
+    if (actor) {
+      const actorRole = actor.activeRole || actor.role;
+      if (actorRole !== 'Geral') {
+        return res.status(403).json({ error: 'Apenas usuários com perfil Geral podem cadastrar calibres.' });
+      }
+    }
     const cleanName = (name || '').trim();
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Informe o nome do calibre.' });
+    }
     const cleanFab = (fabricante || '').trim() || null;
     const cleanTipo = (tipo || '').trim() || null;
     const cleanPeso = (peso || '').trim() || null;
@@ -1410,7 +1419,7 @@ apiRouter.post('/calibers', async (req: Request, res: Response) => {
       [cleanName, cleanFab, cleanFab, cleanTipo, cleanTipo, cleanPeso, cleanPeso]
     );
     if (existing && existing.length > 0) {
-      return res.status(400).json({ error: 'Esta especificação exata de munição (mesmo calibre, fabricante, tipo e peso) já está cadastrada.' });
+      return res.status(400).json({ error: 'Esta especificação exata de calibre (mesmo nome, fabricante, tipo e peso) já está cadastrada.' });
     }
 
     const id = `cal-${Date.now()}`;
@@ -1423,7 +1432,7 @@ apiRouter.post('/calibers', async (req: Request, res: Response) => {
       await pool.query('INSERT INTO CALIBRES (ID_CALIBRES, NOME_CALIBRES, DATA_CRIACAO_CALIBRES) VALUES (?, ?, NOW())', [id, cleanName]);
     }
 
-    await insertAuditLog('Munições', 'Criar', `Cadastrada munição/calibre: ${cleanFab ? `[${cleanFab}] ` : ''}${cleanName}${cleanTipo ? ` (${cleanTipo})` : ''}`, actor, req.ip);
+    await insertAuditLog('Munições', 'Criar', `Cadastrada munição/calibre: ${cleanFab ? `[${cleanFab}] ` : ''}${cleanName}${cleanTipo ? ` (${cleanTipo})` : ''}${cleanPeso ? ` ${cleanPeso}` : ''}`, actor, req.ip);
     return res.json({ id, name: cleanName, fabricante: cleanFab, tipo: cleanTipo, peso: cleanPeso, createdAt: new Date().toISOString() });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1434,11 +1443,39 @@ apiRouter.put('/calibers/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { name, fabricante, tipo, peso, actor } = req.body;
+    if (actor) {
+      const actorRole = actor.activeRole || actor.role;
+      if (actorRole !== 'Geral') {
+        return res.status(403).json({ error: 'Apenas usuários com perfil Geral podem editar calibres.' });
+      }
+    }
     const cleanName = (name || '').trim();
+    if (!cleanName) {
+      return res.status(400).json({ error: 'Informe o nome do calibre.' });
+    }
     const cleanFab = (fabricante || '').trim() || null;
     const cleanTipo = (tipo || '').trim() || null;
     const cleanPeso = (peso || '').trim() || null;
     const pool = getPool();
+
+    const [calRows]: any = await pool.query('SELECT ID_CALIBRES as id, NOME_CALIBRES as name FROM CALIBRES WHERE ID_CALIBRES = ?', [id]);
+    if (!calRows || calRows.length === 0) {
+      return res.status(404).json({ error: 'Calibre não encontrado.' });
+    }
+    const oldName = (calRows[0].name || '').trim();
+
+    const [dupRows]: any = await pool.query(
+      `SELECT ID_CALIBRES as id FROM CALIBRES 
+       WHERE ID_CALIBRES <> ?
+         AND LOWER(NOME_CALIBRES) = LOWER(?) 
+         AND (LOWER(COALESCE(FABRICANTE_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND FABRICANTE_CALIBRES IS NULL))
+         AND (LOWER(COALESCE(TIPO_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND TIPO_CALIBRES IS NULL))
+         AND (LOWER(COALESCE(PESO_CALIBRES, '')) = LOWER(COALESCE(?, '')) OR (? IS NULL AND PESO_CALIBRES IS NULL))`,
+      [id, cleanName, cleanFab, cleanFab, cleanTipo, cleanTipo, cleanPeso, cleanPeso]
+    );
+    if (dupRows && dupRows.length > 0) {
+      return res.status(400).json({ error: 'Já existe outro calibre cadastrado com o mesmo nome, fabricante, tipo e peso.' });
+    }
 
     try {
       await pool.query(
@@ -1449,7 +1486,17 @@ apiRouter.put('/calibers/:id', async (req: Request, res: Response) => {
       await pool.query('UPDATE CALIBRES SET NOME_CALIBRES = ? WHERE ID_CALIBRES = ?', [cleanName, id]);
     }
 
-    await insertAuditLog('Munições', 'Editar', `Atualizado cadastro de munição: ${cleanName}`, actor, req.ip);
+    if (oldName && oldName.toLowerCase() !== cleanName.toLowerCase()) {
+      const [remainingOld]: any = await pool.query(
+        'SELECT COUNT(*) as cnt FROM CALIBRES WHERE LOWER(NOME_CALIBRES) = LOWER(?)',
+        [oldName]
+      );
+      if (!remainingOld || Number(remainingOld[0]?.cnt || 0) === 0) {
+        await pool.query('UPDATE ARMAS SET CALIBRE_ARMAS = ? WHERE LOWER(CALIBRE_ARMAS) = LOWER(?)', [cleanName, oldName]);
+      }
+    }
+
+    await insertAuditLog('Munições', 'Editar', `Atualizado cadastro de calibre: ${cleanName}${cleanTipo ? ` (${cleanTipo})` : ''}${cleanPeso ? ` ${cleanPeso}` : ''}`, actor, req.ip);
     return res.json({ success: true, id, name: cleanName, fabricante: cleanFab, tipo: cleanTipo, peso: cleanPeso });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -1460,6 +1507,12 @@ apiRouter.delete('/calibers/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const actor = req.body.actor;
+    if (actor) {
+      const actorRole = actor.activeRole || actor.role;
+      if (actorRole !== 'Geral') {
+        return res.status(403).json({ error: 'Apenas usuários com perfil Geral podem excluir calibres.' });
+      }
+    }
     const pool = getPool();
 
     const [calRows]: any = await pool.query('SELECT ID_CALIBRES as id, NOME_CALIBRES as name FROM CALIBRES WHERE ID_CALIBRES = ?', [id]);
@@ -1468,11 +1521,18 @@ apiRouter.delete('/calibers/:id', async (req: Request, res: Response) => {
     }
 
     const caliberName = calRows[0].name;
+    const [otherSameName]: any = await pool.query(
+      'SELECT COUNT(*) as cnt FROM CALIBRES WHERE LOWER(NOME_CALIBRES) = LOWER(?) AND ID_CALIBRES <> ?',
+      [caliberName, id]
+    );
     const [weaps]: any = await pool.query('SELECT COUNT(*) as cnt FROM ARMAS WHERE LOWER(CALIBRE_ARMAS) = LOWER(?)', [caliberName]);
     const [stocks]: any = await pool.query('SELECT COUNT(*) as cnt FROM ESTOQUE_MUNICOES WHERE CALIBRE_ID_ESTOQUE_MUNICOES = ? AND QUANTIDADE_ESTOQUE_MUNICOES > 0', [id]);
 
-    if (weaps[0].cnt > 0 || stocks[0].cnt > 0) {
-      return res.status(400).json({ error: `Não é possível excluir o calibre "${caliberName}" pois há armas ou munições em estoque vinculadas a ele.` });
+    if (stocks[0].cnt > 0) {
+      return res.status(400).json({ error: `Não é possível excluir este calibre "${caliberName}" pois existem munições em estoque vinculadas a ele.` });
+    }
+    if (otherSameName[0].cnt === 0 && weaps[0].cnt > 0) {
+      return res.status(400).json({ error: `Não é possível excluir o último registro do calibre "${caliberName}" pois há armas cadastradas utilizando este calibre.` });
     }
 
     await pool.query('DELETE FROM CALIBRES WHERE ID_CALIBRES = ?', [id]);

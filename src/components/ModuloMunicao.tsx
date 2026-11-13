@@ -250,13 +250,57 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     message: ''
   });
 
-  // Caliber Modal State
+  // Caliber Administration & Modal State (Geral only)
+  const [showCaliberAdmin, setShowCaliberAdmin] = useState(false);
+  const [caliberSearchTerm, setCaliberSearchTerm] = useState('');
+  const [caliberNameFilter, setCaliberNameFilter] = useState('ALL');
+  const [isSavingCaliber, setIsSavingCaliber] = useState(false);
   const [showCaliberModal, setShowCaliberModal] = useState(false);
   const [editingCaliber, setEditingCaliber] = useState<Caliber | null>(null);
   const [calName, setCalName] = useState('');
   const [calFabricante, setCalFabricante] = useState('');
   const [calTipo, setCalTipo] = useState('');
   const [calPeso, setCalPeso] = useState('');
+
+  const uniqueAdminCaliberNames = useMemo(() => {
+    const map = new Map<string, string>();
+    calibers.forEach(c => {
+      const n = (c.name || '').trim();
+      if (n && !map.has(n.toLowerCase())) map.set(n.toLowerCase(), n);
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [calibers]);
+
+  const uniqueAdminCaliberTipos = useMemo(() => {
+    const map = new Map<string, string>();
+    calibers.forEach(c => {
+      const t = (c.tipo || '').trim();
+      if (t && !map.has(t.toLowerCase())) map.set(t.toLowerCase(), t);
+    });
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [calibers]);
+
+  const filteredAdminCalibers = useMemo(() => {
+    const q = caliberSearchTerm.trim().toLowerCase();
+    return calibers
+      .filter(c => {
+        if (caliberNameFilter !== 'ALL' && (c.name || '').trim().toLowerCase() !== caliberNameFilter.toLowerCase()) {
+          return false;
+        }
+        if (q) {
+          const hay = `${c.name || ''} ${c.tipo || ''} ${c.peso || ''} ${c.fabricante || ''}`.toLowerCase();
+          if (!hay.includes(q)) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => {
+        const cmpName = (a.name || '').localeCompare(b.name || '', 'pt-BR');
+        if (cmpName !== 0) return cmpName;
+        const cmpTipo = (a.tipo || '').localeCompare(b.tipo || '', 'pt-BR');
+        if (cmpTipo !== 0) return cmpTipo;
+        return (a.peso || '').localeCompare(b.peso || '', 'pt-BR');
+      });
+  }, [calibers, caliberNameFilter, caliberSearchTerm]);
 
   // Movement Modal State
   const [showMovementModal, setShowMovementModal] = useState(false);
@@ -657,44 +701,53 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
     }
   };
 
-  // --- Handlers: Caliber Management ---
+  // --- Handlers: Caliber Management (Geral only) ---
 
   const handleOpenAddCaliber = () => {
+    if (!isGeral) return;
+    setErrorMsg('');
     setEditingCaliber(null);
     setCalName('');
-    setCalFabricante('CBC');
-    setCalTipo('Operacional');
-    setCalPeso('124 gr');
+    setCalFabricante('');
+    setCalTipo('');
+    setCalPeso('');
     setShowCaliberModal(true);
   };
 
   const handleOpenEditCaliber = (cal: Caliber) => {
+    if (!isGeral) return;
+    setErrorMsg('');
     setEditingCaliber(cal);
-    setCalName(cal.name);
-    setCalFabricante(cal.fabricante || 'CBC');
-    setCalTipo(cal.tipo || 'Operacional');
+    setCalName(cal.name || '');
+    setCalFabricante(cal.fabricante || '');
+    setCalTipo(cal.tipo || '');
     setCalPeso(cal.peso || '');
     setShowCaliberModal(true);
   };
 
   const handleSaveCaliber = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isGeral) return;
     if (!calName.trim()) {
-      setErrorMsg('Informe o nome/descrição do calibre.');
+      setErrorMsg('Informe o nome do calibre.');
       return;
     }
+    setIsSavingCaliber(true);
+    setErrorMsg('');
     try {
       if (editingCaliber) {
-        await storage.updateCaliber(editingCaliber.id, calName.trim(), calFabricante, calTipo, calPeso);
-        setSuccessMsg('Calibre atualizado com sucesso.');
+        await storage.updateCaliber(editingCaliber.id, calName.trim(), calFabricante.trim(), calTipo.trim(), calPeso.trim());
+        setSuccessMsg('Calibre atualizado com sucesso! As alterações já estão disponíveis em todo o sistema.');
       } else {
-        await storage.addCaliber(calName.trim(), calFabricante, calTipo, calPeso);
-        setSuccessMsg('Calibre cadastrado com sucesso.');
+        await storage.addCaliber(calName.trim(), calFabricante.trim(), calTipo.trim(), calPeso.trim());
+        setSuccessMsg('Calibre cadastrado com sucesso! Já está disponível para uso em todo o sistema.');
       }
       setShowCaliberModal(false);
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao salvar calibre.');
+    } finally {
+      setIsSavingCaliber(false);
     }
   };
 
@@ -1190,15 +1243,239 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
             <span>Imprimir Relatório</span>
           </button>
 
-          <button
-            onClick={handleOpenAddCaliber}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl border border-slate-800 transition"
-            title="Catálogo de Calibres"
-          >
-            <Layers className="w-4 h-4" />
-          </button>
+          {isGeral && (
+            <button
+              type="button"
+              onClick={() => setShowCaliberAdmin(prev => !prev)}
+              className={`px-3.5 py-2 font-bold text-xs rounded-xl transition flex items-center space-x-1.5 border ${
+                showCaliberAdmin
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20'
+                  : 'bg-slate-900 hover:bg-slate-800 text-amber-300 border-amber-500/30 hover:border-amber-500/60'
+              }`}
+              title="Administração de Calibres (Perfil Geral)"
+            >
+              <Layers className="w-4 h-4" />
+              <span>Administração de Calibres</span>
+              <span className={`px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                showCaliberAdmin ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-950/70 text-amber-400'
+              }`}>
+                {calibers.length}
+              </span>
+            </button>
+          )}
         </div>
       </div>
+
+      {isGeral && showCaliberAdmin ? (
+        <div className="space-y-4 animate-in fade-in">
+          {/* Header do Módulo de Administração de Calibres */}
+          <div className="bg-slate-900 border border-amber-500/30 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-amber-500/10 text-amber-400 rounded-xl border border-amber-500/20">
+                <Layers className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <h2 className="text-base sm:text-lg font-black text-slate-100">
+                    Administração de Calibres
+                  </h2>
+                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    Perfil Geral
+                  </span>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Cadastre, edite, altere e exclua calibres (Nome, Tipo e Peso). As alterações ficam disponíveis em todo o sistema.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCaliberAdmin(false)}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition flex items-center space-x-1.5"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Voltar ao Estoque</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleOpenAddCaliber}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-1.5 shadow-lg shadow-amber-500/20"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Calibre</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Resumo */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+              <span className="text-[11px] font-bold uppercase text-slate-400 block">Total de Calibres Cadastrados</span>
+              <span className="text-2xl font-black text-amber-400 font-mono mt-1 block">{calibers.length}</span>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+              <span className="text-[11px] font-bold uppercase text-slate-400 block">Nomes de Calibre Distintos</span>
+              <span className="text-2xl font-black text-slate-100 font-mono mt-1 block">{uniqueAdminCaliberNames.length}</span>
+            </div>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
+              <span className="text-[11px] font-bold uppercase text-slate-400 block">Tipos Cadastrados</span>
+              <span className="text-2xl font-black text-sky-400 font-mono mt-1 block">{uniqueAdminCaliberTipos.length}</span>
+            </div>
+          </div>
+
+          {/* Filtros e Pesquisa */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={caliberSearchTerm}
+                onChange={e => setCaliberSearchTerm(e.target.value)}
+                placeholder="Pesquisar por nome do calibre, tipo, peso ou fabricante..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-10 pr-9 py-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+              {caliberSearchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setCaliberSearchTerm('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            <div className="sm:w-64">
+              <select
+                value={caliberNameFilter}
+                onChange={e => setCaliberNameFilter(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+              >
+                <option value="ALL">Todos os Nomes de Calibre</option>
+                {uniqueAdminCaliberNames.map(n => (
+                  <option key={n} value={n}>{n}</option>
+                ))}
+              </select>
+            </div>
+
+            {(caliberSearchTerm || caliberNameFilter !== 'ALL') && (
+              <button
+                type="button"
+                onClick={() => {
+                  setCaliberSearchTerm('');
+                  setCaliberNameFilter('ALL');
+                }}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-400 font-bold text-xs rounded-xl border border-slate-700 transition flex items-center justify-center space-x-1"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Limpar</span>
+              </button>
+            )}
+          </div>
+
+          {/* Tabela de Calibres Cadastrados */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+            {filteredAdminCalibers.length === 0 ? (
+              <div className="p-10 text-center space-y-2">
+                <Layers className="w-10 h-10 text-slate-600 mx-auto" />
+                <p className="text-sm font-bold text-slate-300">Nenhum calibre encontrado</p>
+                <p className="text-xs text-slate-500">
+                  Ajuste os filtros de busca ou clique em "Novo Calibre" para cadastrar.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
+                    <tr>
+                      <th className="py-3 px-4">Nome do Calibre</th>
+                      <th className="py-3 px-4">Tipo do Calibre</th>
+                      <th className="py-3 px-4">Peso do Calibre</th>
+                      <th className="py-3 px-4">Fabricante Padrão</th>
+                      <th className="py-3 px-4 text-center">Lotes em Estoque</th>
+                      <th className="py-3 px-4 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60">
+                    {filteredAdminCalibers.map(cal => {
+                      const linkedStocksCount = stocks.filter(s => s.caliberId === cal.id && Number(s.quantity || 0) > 0).length;
+                      return (
+                        <tr key={cal.id} className="hover:bg-slate-800/40 transition">
+                          <td className="py-3 px-4 font-mono font-bold text-amber-400 text-sm">
+                            {cal.name}
+                          </td>
+                          <td className="py-3 px-4">
+                            {cal.tipo ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-sky-500/10 text-sky-300 border border-sky-500/20 font-semibold">
+                                {cal.tipo}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic">Não informado</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-mono">
+                            {cal.peso ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-semibold">
+                                {cal.peso}
+                              </span>
+                            ) : (
+                              <span className="text-slate-500 italic">Não informado</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-slate-300">
+                            {cal.fabricante || <span className="text-slate-500">-</span>}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono text-slate-300">
+                            {linkedStocksCount > 0 ? (
+                              <span className="px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                                {linkedStocksCount} lote(s)
+                              </span>
+                            ) : (
+                              <span className="text-slate-500">0</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <div className="inline-flex items-center space-x-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenEditCaliber(cal)}
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-amber-500/20 text-slate-200 hover:text-amber-300 rounded-lg border border-slate-700 hover:border-amber-500/40 transition inline-flex items-center space-x-1 font-semibold"
+                                title="Editar calibre"
+                              >
+                                <Edit2 className="w-3.5 h-3.5" />
+                                <span>Editar</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteConfirmState({
+                                    isOpen: true,
+                                    type: 'caliber',
+                                    id: cal.id,
+                                    message: `Deseja realmente excluir o calibre "${formatCaliberDisplay(cal)}"?`
+                                  })
+                                }
+                                className="px-2.5 py-1.5 bg-slate-800 hover:bg-red-500/20 text-slate-300 hover:text-red-300 rounded-lg border border-slate-700 hover:border-red-500/40 transition inline-flex items-center space-x-1 font-semibold"
+                                title="Excluir calibre"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                                <span>Excluir</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <>
 
       {/* STEP 1: Department Selection Grid / Selector */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">
@@ -1798,6 +2075,8 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
 
         </div>
       ) : null}
+        </>
+      )}
 
       {/* ============================================================== */}
       {/* MODAL: CADASTRAR / EDITAR / TRANSFERIR ESTOQUE DE MUNIÇÃO      */}
@@ -2630,9 +2909,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       )}
 
       {/* ============================================================== */}
-      {/* MODAL: CADASTRAR / EDITAR CALIBRE                              */}
+      {/* MODAL: CADASTRAR / EDITAR CALIBRE (PERFIL GERAL)               */}
       {/* ============================================================== */}
-      {showCaliberModal && (
+      {isGeral && showCaliberModal && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-[999] overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-5 animate-in fade-in zoom-in-95 my-auto">
             
@@ -2643,14 +2922,15 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-100">
-                    {editingCaliber ? 'Editar Calibre' : 'Novo Calibre de Munição'}
+                    {editingCaliber ? 'Editar Calibre' : 'Novo Calibre'}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Catálogo de especificações bélicas
+                    Catálogo global utilizado em todo o sistema
                   </p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowCaliberModal(false)}
                 className="text-slate-400 hover:text-slate-200 p-1"
               >
@@ -2668,14 +2948,40 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                   required
                   value={calName}
                   onChange={e => setCalName(e.target.value)}
-                  placeholder="Ex: 5,56x45mm, 9x19mm, .40 S&W (apenas o nome do calibre)"
+                  placeholder="Ex: 5,56x45mm, 9mm, 7,62x51mm, .40 S&W"
                   className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Fabricante Padrão
+                  Tipo do Calibre
+                </label>
+                <input
+                  type="text"
+                  value={calTipo}
+                  onChange={e => setCalTipo(e.target.value)}
+                  placeholder="Ex: ETOG, EXPO, EXPP, OTM, Treina, Operacional"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Peso do Calibre
+                </label>
+                <input
+                  type="text"
+                  value={calPeso}
+                  onChange={e => setCalPeso(e.target.value)}
+                  placeholder="Ex: 124gr, 115gr, 77gr, 55gr"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Fabricante Padrão (Opcional)
                 </label>
                 <input
                   type="text"
@@ -2686,35 +2992,10 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Tipo de Projétil / Munição
-                </label>
-                <input
-                  type="text"
-                  value={calTipo}
-                  onChange={e => setCalTipo(e.target.value)}
-                  placeholder="Ex: Treino, Operacional, Expansivo"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Peso Típico
-                </label>
-                <input
-                  type="text"
-                  value={calPeso}
-                  onChange={e => setCalPeso(e.target.value)}
-                  placeholder="Ex: 124 gr, 115 gr, 55 gr"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
-                />
-              </div>
-
               <div className="flex items-center justify-end space-x-3 pt-3 border-t border-slate-800">
                 <button
                   type="button"
+                  disabled={isSavingCaliber}
                   onClick={() => setShowCaliberModal(false)}
                   className="px-4 py-2.5 rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs transition"
                 >
@@ -2722,10 +3003,11 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center space-x-1.5 shadow"
+                  disabled={isSavingCaliber}
+                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition flex items-center space-x-1.5 shadow"
                 >
                   <Check className="w-4 h-4" />
-                  <span>Salvar Calibre</span>
+                  <span>{isSavingCaliber ? 'Salvando...' : editingCaliber ? 'Salvar Alterações' : 'Cadastrar Calibre'}</span>
                 </button>
               </div>
             </form>
