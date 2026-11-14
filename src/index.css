@@ -420,6 +420,33 @@ input, select, textarea, button {
   background-color: #e2e8f0 !important;
 }
 
+/* Estados de hover em botões neutros no tema claro (navegadores desktop) */
+.theme-light .hover\:bg-slate-950:hover,
+.theme-light .hover\:bg-slate-900:hover,
+.theme-light .hover\:bg-slate-900\/60:hover,
+.theme-light .hover\:bg-slate-900\/50:hover,
+.theme-light .hover\:bg-slate-900\/40:hover,
+.theme-light .hover\:bg-slate-900\/30:hover {
+  background-color: #f1f5f9 !important;
+}
+
+.theme-light .hover\:bg-slate-800:hover,
+.theme-light .hover\:bg-slate-800\/90:hover,
+.theme-light .hover\:bg-slate-800\/80:hover,
+.theme-light .hover\:bg-slate-800\/60:hover,
+.theme-light .hover\:bg-slate-800\/50:hover,
+.theme-light .hover\:bg-slate-800\/40:hover,
+.theme-light .hover\:bg-slate-800\/30:hover,
+.theme-light .hover\:bg-slate-700\/80:hover,
+.theme-light .hover\:bg-slate-700\/60:hover {
+  background-color: #e2e8f0 !important;
+}
+
+.theme-light .hover\:bg-slate-700:hover,
+.theme-light .hover\:bg-slate-600:hover {
+  background-color: #cbd5e1 !important;
+}
+
 /* Badges, cards e alertas temáticos no tema claro */
 .theme-light .bg-amber-950,
 .theme-light .bg-amber-950\/90,
@@ -704,47 +731,102 @@ input, select, textarea, button {
   color: #4c1d95 !important;
 }
 
-/* Texto branco em fundo claro deve ser escuro; mantém branco APENAS sobre superfícies sólidas escuras/saturadas */
-.theme-light .text-white {
+/* Texto branco em fundo claro deve ser escuro; mantém branco sobre superfícies escuras, pretas ou saturadas */
+.theme-light .text-white,
+.theme-light .hover\:text-white:hover {
   color: #0f172a !important;
 }
 
+/* Superfícies pretas ou escuras próximas do preto (botões, badges, marcadores, neutros escuros) */
 .theme-light :is(
-  .bg-amber-600, .bg-amber-700,
-  .bg-blue-500, .bg-blue-600, .bg-blue-700,
-  .bg-sky-500, .bg-sky-600, .bg-sky-700,
-  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
-  .bg-emerald-500, .bg-emerald-600, .bg-emerald-700,
-  .bg-green-500, .bg-green-600, .bg-green-700,
-  .bg-teal-500, .bg-teal-600, .bg-teal-700,
-  .bg-red-500, .bg-red-600, .bg-red-700,
-  .bg-rose-500, .bg-rose-600, .bg-rose-700,
-  .bg-purple-500, .bg-purple-600, .bg-purple-700,
-  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
-  .bg-orange-500, .bg-orange-600, .bg-orange-700
-):not(:disabled) {
+  .bg-black:not(.fixed),
+  .bg-slate-600, .bg-slate-500,
+  .bg-gray-600, .bg-gray-700, .bg-gray-800, .bg-gray-900, .bg-gray-950,
+  .bg-zinc-600, .bg-zinc-700, .bg-zinc-800, .bg-zinc-900, .bg-zinc-950,
+  .bg-neutral-600, .bg-neutral-700, .bg-neutral-800, .bg-neutral-900, .bg-neutral-950,
+  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950
+) {
   color: #ffffff !important;
 }
 
 .theme-light :is(
-  .bg-amber-600, .bg-amber-700,
-  .bg-blue-500, .bg-blue-600, .bg-blue-700,
-  .bg-sky-500, .bg-sky-600, .bg-sky-700,
-  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700,
-  .bg-emerald-500, .bg-emerald-600, .bg-emerald-700,
-  .bg-green-500, .bg-green-600, .bg-green-700,
-  .bg-teal-500, .bg-teal-600, .bg-teal-700,
-  .bg-red-500, .bg-red-600, .bg-red-700,
-  .bg-rose-500, .bg-rose-600, .bg-rose-700,
-  .bg-purple-500, .bg-purple-600, .bg-purple-700,
-  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700,
-  .bg-orange-500, .bg-orange-600, .bg-orange-700
-):not(:disabled) :is(.text-white, .text-slate-100, .text-slate-200, .text-emerald-100, .text-emerald-200, .text-sky-200, .text-cyan-100, .text-cyan-200, .text-amber-100, .text-amber-200, .text-red-100, .text-red-200, .text-purple-100, .text-purple-200, .text-indigo-200, svg) {
+  .bg-black:not(.fixed),
+  .bg-slate-600, .bg-slate-500,
+  .bg-gray-600, .bg-gray-700, .bg-gray-800, .bg-gray-900, .bg-gray-950,
+  .bg-zinc-600, .bg-zinc-700, .bg-zinc-800, .bg-zinc-900, .bg-zinc-950,
+  .bg-neutral-600, .bg-neutral-700, .bg-neutral-800, .bg-neutral-900, .bg-neutral-950,
+  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950
+) :is(span, strong, p, div, svg, .text-white, .text-black, .text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400, .text-slate-300, .text-slate-200, .text-slate-100):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-slate-100):not(.bg-slate-200) {
   color: #ffffff !important;
 }
 
-.theme-light :is(.bg-amber-500, .bg-amber-400):not(:disabled),
-.theme-light :is(.bg-amber-500, .bg-amber-400):not(:disabled) :is(.text-white, .text-slate-950, .text-slate-900) {
+/* Botões e badges de cores sólidas escuras/saturadas devem manter escrita clara (inclusive desabilitados e em hover) */
+.theme-light :is(
+  .bg-amber-600, .bg-amber-700, .bg-amber-800,
+  .bg-blue-500, .bg-blue-600, .bg-blue-700, .bg-blue-800,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700, .bg-sky-800,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700, .bg-cyan-800,
+  .bg-emerald-500, .bg-emerald-600, .bg-emerald-700, .bg-emerald-800,
+  .bg-green-500, .bg-green-600, .bg-green-700, .bg-green-800,
+  .bg-teal-500, .bg-teal-600, .bg-teal-700, .bg-teal-800,
+  .bg-red-500, .bg-red-600, .bg-red-700, .bg-red-800,
+  .bg-rose-500, .bg-rose-600, .bg-rose-700, .bg-rose-800,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700, .bg-purple-800,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700, .bg-indigo-800,
+  .bg-orange-500, .bg-orange-600, .bg-orange-700, .bg-orange-800,
+  .hover\:bg-blue-500:hover, .hover\:bg-sky-400:hover, .hover\:bg-sky-500:hover,
+  .hover\:bg-cyan-400:hover, .hover\:bg-cyan-500:hover, .hover\:bg-cyan-600:hover,
+  .hover\:bg-emerald-400:hover, .hover\:bg-emerald-500:hover,
+  .hover\:bg-teal-400:hover, .hover\:bg-red-500:hover, .hover\:bg-red-700:hover, .hover\:bg-red-800:hover,
+  .hover\:bg-rose-500:hover, .hover\:bg-purple-400:hover, .hover\:bg-purple-500:hover, .hover\:bg-indigo-500:hover
+) {
+  color: #ffffff !important;
+}
+
+.theme-light .bg-amber-600:hover {
+  background-color: #92400e !important;
+  color: #ffffff !important;
+}
+
+.theme-light .hover\:bg-red-800:hover {
+  background-color: #b91c1c !important;
+  color: #ffffff !important;
+}
+
+.theme-light .hover\:bg-red-700:hover {
+  background-color: #991b1b !important;
+  color: #ffffff !important;
+}
+
+.theme-light :is(
+  .bg-amber-600, .bg-amber-700, .bg-amber-800,
+  .bg-blue-500, .bg-blue-600, .bg-blue-700, .bg-blue-800,
+  .bg-sky-500, .bg-sky-600, .bg-sky-700, .bg-sky-800,
+  .bg-cyan-500, .bg-cyan-600, .bg-cyan-700, .bg-cyan-800,
+  .bg-emerald-500, .bg-emerald-600, .bg-emerald-700, .bg-emerald-800,
+  .bg-green-500, .bg-green-600, .bg-green-700, .bg-green-800,
+  .bg-teal-500, .bg-teal-600, .bg-teal-700, .bg-teal-800,
+  .bg-red-500, .bg-red-600, .bg-red-700, .bg-red-800,
+  .bg-rose-500, .bg-rose-600, .bg-rose-700, .bg-rose-800,
+  .bg-purple-500, .bg-purple-600, .bg-purple-700, .bg-purple-800,
+  .bg-indigo-500, .bg-indigo-600, .bg-indigo-700, .bg-indigo-800,
+  .bg-orange-500, .bg-orange-600, .bg-orange-700, .bg-orange-800,
+  .hover\:bg-blue-500:hover, .hover\:bg-sky-400:hover, .hover\:bg-sky-500:hover,
+  .hover\:bg-cyan-400:hover, .hover\:bg-cyan-500:hover, .hover\:bg-cyan-600:hover,
+  .hover\:bg-emerald-400:hover, .hover\:bg-emerald-500:hover,
+  .hover\:bg-teal-400:hover, .hover\:bg-red-500:hover, .hover\:bg-red-700:hover, .hover\:bg-red-800:hover,
+  .hover\:bg-rose-500:hover, .hover\:bg-purple-400:hover, .hover\:bg-purple-500:hover, .hover\:bg-indigo-500:hover
+) :is(.text-white, .text-black, .text-slate-950, .text-slate-900, .text-slate-800, .text-slate-100, .text-slate-200, .text-emerald-100, .text-emerald-200, .text-emerald-300, .text-sky-200, .text-sky-300, .text-cyan-100, .text-cyan-200, .text-amber-100, .text-amber-200, .text-red-100, .text-red-200, .text-purple-100, .text-purple-200, .text-indigo-200, span, strong, svg):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-slate-100):not(.bg-slate-200) {
+  color: #ffffff !important;
+}
+
+/* Mantém contraste escuro dentro de badges claros aninhados em botões coloridos */
+.theme-light :is(.bg-slate-900\/30, .bg-slate-950\/30, .bg-slate-950\/20) {
+  color: #020617 !important;
+}
+
+.theme-light :is(.bg-amber-500, .bg-amber-400),
+.theme-light :is(.bg-amber-500, .bg-amber-400) :is(.text-white, .text-slate-950, .text-slate-900, span, svg):not([class*="bg-slate-9"]) {
   color: #020617 !important;
 }
 
