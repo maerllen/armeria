@@ -1940,40 +1940,6 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
           {/* Campos de Seleção de Munição: POLICIAL (sem ver cofre nem saldo) vs ARMEIRO */}
           {isPolicial ? (
             <div className="space-y-4">
-              {eligibleActiveWeaponCautelas.length > 0 && (
-                <div className="bg-indigo-950/30 border border-indigo-500/40 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-                      <Link2 className="w-4 h-4 text-indigo-400" />
-                      Vincular a Cautela de Arma Ativa sem Munição (Opcional)
-                    </label>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                      {eligibleActiveWeaponCautelas.length} elegível(is)
-                    </span>
-                  </div>
-                  <select
-                    value={selectedLinkedWeaponCautelaId}
-                    onChange={e => setSelectedLinkedWeaponCautelaId(e.target.value)}
-                    className="w-full bg-slate-950 border border-indigo-500/40 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-indigo-400 focus:outline-none"
-                  >
-                    <option value="">-- Não vincular a arma (Cautela Avulsa de Munição) --</option>
-                    {eligibleActiveWeaponCautelas.map(w => (
-                      <option key={w.id} value={w.id}>
-                        {w.weaponModel} • Nº Série: {w.weaponSerialNumber} • Calibre: {w.weaponCaliber}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedLinkedWeapon && (
-                    <p className="text-[11px] text-indigo-200/90 flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                      <span>
-                        A munição será vinculada à arma <strong>{selectedLinkedWeapon.weaponModel}</strong> (Nº {selectedLinkedWeapon.weaponSerialNumber} — calibre {selectedLinkedWeapon.weaponCaliber}). O calibre foi filtrado para compatibilidade.
-                      </span>
-                    </p>
-                  )}
-                </div>
-              )}
-
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
@@ -2107,40 +2073,6 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                       </option>
                     ))}
                   </select>
-                </div>
-              )}
-
-              {eligibleActiveWeaponCautelas.length > 0 && (
-                <div className="md:col-span-2 bg-indigo-950/30 border border-indigo-500/40 rounded-xl p-4 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-xs font-bold text-indigo-300 uppercase flex items-center gap-1.5">
-                      <Link2 className="w-4 h-4 text-indigo-400" />
-                      Vincular a Cautela de Arma Ativa sem Munição (Opcional)
-                    </label>
-                    <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                      {eligibleActiveWeaponCautelas.length} elegível(is)
-                    </span>
-                  </div>
-                  <select
-                    value={selectedLinkedWeaponCautelaId}
-                    onChange={e => setSelectedLinkedWeaponCautelaId(e.target.value)}
-                    className="w-full bg-slate-950 border border-indigo-500/40 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-indigo-400 focus:outline-none"
-                  >
-                    <option value="">-- Não vincular a arma (Cautela Avulsa de Munição) --</option>
-                    {eligibleActiveWeaponCautelas.map(w => (
-                      <option key={w.id} value={w.id}>
-                        {w.weaponModel} • Nº Série: {w.weaponSerialNumber} • Calibre: {w.weaponCaliber}
-                      </option>
-                    ))}
-                  </select>
-                  {selectedLinkedWeapon && (
-                    <p className="text-[11px] text-indigo-200/90 flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
-                      <span>
-                        A munição será vinculada à arma <strong>{selectedLinkedWeapon.weaponModel}</strong> (Nº {selectedLinkedWeapon.weaponSerialNumber} — calibre {selectedLinkedWeapon.weaponCaliber}). Lotes exibidos abaixo foram filtrados pelo calibre compatível.
-                      </span>
-                    </p>
-                  )}
                 </div>
               )}
 
