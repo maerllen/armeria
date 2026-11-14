@@ -7,7 +7,7 @@ import {
   Shield, Crosshair, Disc, AlertCircle, Check, Clock, Search, 
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
   ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2,
-  ArrowUpRight, ArrowDownLeft, History
+  ArrowUpRight, ArrowDownLeft, History, Plus
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { TopLayerAlert } from './TopLayerAlert';
@@ -22,6 +22,7 @@ interface ModuloCautelaArmasProps {
   departments: Department[];
   preselectedWeaponId?: string | null;
   onClearPreselectedWeapon?: () => void;
+  onStartLinkedAmmoCautela?: (cautela: CautelaArma) => void;
   onRefresh: () => void | Promise<void>;
 }
 
@@ -35,6 +36,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   departments,
   preselectedWeaponId,
   onClearPreselectedWeapon,
+  onStartLinkedAmmoCautela,
   onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
@@ -9213,17 +9215,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         <Disc className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                                         <span>Munições Associadas: <strong className="text-slate-300">Nenhuma munição vinculada</strong> (Apenas arma e carregadores)</span>
                                       </span>
-                                      <div className="flex items-center gap-2 self-end sm:self-center">
+                                      <div className="flex items-center gap-2.5 self-end sm:self-center">
                                         <span className="text-[11px] font-mono text-slate-500">0 un.</span>
                                         {!isDevPendente && cautela.status === 'AUTORIZADA' && (
                                           <button
                                             type="button"
-                                            onClick={() => handleOpenLinkAmmoModal(cautela)}
-                                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
-                                            title="Solicitar ou vincular munição a qualquer momento para esta cautela de arma ativa"
+                                            onClick={() =>
+                                              onStartLinkedAmmoCautela
+                                                ? onStartLinkedAmmoCautela(cautela)
+                                                : handleOpenLinkAmmoModal(cautela)
+                                            }
+                                            className="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-sm shrink-0"
+                                            title="Solicitar cautela de munições vinculada a esta arma"
+                                            aria-label="Solicitar cautela de munições vinculada a esta arma"
                                           >
-                                            <Disc className="w-3.5 h-3.5" />
-                                            <span>{canAuthorize ? 'Vincular / Acautelar Munição' : 'Solicitar Munição para esta Arma'}</span>
+                                            <Disc className="w-4 h-4" />
+                                            <Plus className="w-3 h-3 absolute -top-1 -right-1 bg-emerald-600 text-white rounded-full p-0.5 border border-white/80" />
                                           </button>
                                         )}
                                       </div>

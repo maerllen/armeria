@@ -62,8 +62,24 @@ async function startServer() {
   // Vite middleware for development vs static serve for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
+    });
+    app.get('/@vite/client', async (_req, res, next) => {
+      try {
+        const result = await vite.transformRequest('/@vite/client');
+        if (result?.code) {
+          const safeCode = result.code.replace(
+            'await wsTransport.connect(handlers);',
+            'return;'
+          );
+          res.status(200).setHeader('Content-Type', 'application/javascript; charset=utf-8').send(safeCode);
+          return;
+        }
+      } catch {
+        // Fallback to default Vite middleware
+      }
+      next();
     });
     app.use(vite.middlewares);
   } else {

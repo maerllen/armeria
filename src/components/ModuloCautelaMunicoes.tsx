@@ -45,6 +45,8 @@ interface ModuloCautelaMunicoesProps {
   vaultSpaces: VaultSpace[];
   units: Unit[];
   departments: Department[];
+  preselectedLinkedWeaponCautelaId?: string | null;
+  onClearPreselectedLinkedWeaponCautela?: () => void;
   onRefresh: () => void | Promise<void>;
 }
 
@@ -58,6 +60,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   vaultSpaces,
   units,
   departments,
+  preselectedLinkedWeaponCautelaId,
+  onClearPreselectedLinkedWeaponCautela,
   onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
@@ -223,7 +227,9 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   );
 
   // Estados de abas e filtros
-  const [activeTab, setActiveTab] = useState<ActiveAmmoTab>('MINHAS');
+  const [activeTab, setActiveTab] = useState<ActiveAmmoTab>(
+    preselectedLinkedWeaponCautelaId ? 'NOVA' : 'MINHAS'
+  );
   const [pendingSubFilter, setPendingSubFilter] = useState<'TODAS' | 'AGUARDANDO_PAGAMENTO' | 'AGUARDANDO_DEVOLUCAO'>('TODAS');
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'TODOS' | 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA'>('TODOS');
@@ -243,7 +249,9 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   const [selectedRequesterId, setSelectedRequesterId] = useState(currentUser.id);
   const [requesterSearchTerm, setRequesterSearchTerm] = useState('');
   const [isDirectAuthorize, setIsDirectAuthorize] = useState(canAuthorize);
-  const [selectedLinkedWeaponCautelaId, setSelectedLinkedWeaponCautelaId] = useState('');
+  const [selectedLinkedWeaponCautelaId, setSelectedLinkedWeaponCautelaId] = useState(
+    preselectedLinkedWeaponCautelaId || ''
+  );
 
   // Modal de Autorização de Pagamento (Armeiro)
   const [authorizeModalItem, setAuthorizeModalItem] = useState<CautelaMunicao | null>(null);
@@ -406,11 +414,39 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     return eligibleActiveWeaponCautelas.find(w => w.id === selectedLinkedWeaponCautelaId) || null;
   }, [eligibleActiveWeaponCautelas, selectedLinkedWeaponCautelaId]);
 
+  // Sincroniza pré-seleção vinda do módulo Cautela de Armas
   useEffect(() => {
-    if (selectedLinkedWeaponCautelaId && !selectedLinkedWeapon) {
+    if (!preselectedLinkedWeaponCautelaId) return;
+    const allWeaponsCautelas = storage.getCautelasArmas();
+    const targetWeapon = allWeaponsCautelas.find(w => w.id === preselectedLinkedWeaponCautelaId);
+    if (targetWeapon && !isPolicial && canAuthorize) {
+      const targetDigits = cleanDigits(targetWeapon.requesterMasp);
+      const matchedOwner = unitUsers.find(
+        u =>
+          u.id === targetWeapon.requesterId ||
+          (targetDigits && cleanDigits(u.masp) === targetDigits)
+      );
+      if (matchedOwner) {
+        setSelectedRequesterId(matchedOwner.id);
+      }
+    }
+    setSelectedLinkedWeaponCautelaId(preselectedLinkedWeaponCautelaId);
+    setActiveTab('NOVA');
+    onClearPreselectedLinkedWeaponCautela?.();
+  }, [
+    preselectedLinkedWeaponCautelaId,
+    isPolicial,
+    canAuthorize,
+    unitUsers,
+    cleanDigits,
+    onClearPreselectedLinkedWeaponCautela
+  ]);
+
+  useEffect(() => {
+    if (!preselectedLinkedWeaponCautelaId && selectedLinkedWeaponCautelaId && !selectedLinkedWeapon) {
       setSelectedLinkedWeaponCautelaId('');
     }
-  }, [selectedLinkedWeaponCautelaId, selectedLinkedWeapon]);
+  }, [preselectedLinkedWeaponCautelaId, selectedLinkedWeaponCautelaId, selectedLinkedWeapon]);
 
   // Resolve nome do calibre a partir de um registro de estoque
   const getStockCaliberName = useCallback(
@@ -1802,7 +1838,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
           onSubmit={handleCreateRequest}
           className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 space-y-5 shadow-xl"
         >
-          <div className="border-b border-slate-800 pb-3 flex items-center justify-between">
+          <div className="border-b border-slate-800 pb-3 flex items-center justify-between gap-3">
             <div>
               <h3 className="text-base font-bold text-slate-100">
                 {isPolicial
@@ -1817,7 +1853,34 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   : 'Selecione o lote do cofre para retirada e o policial destinatário.'}
               </p>
             </div>
+            {selectedLinkedWeapon && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
+                <Link2 className="w-3.5 h-3.5" />
+                <span>Vinculada a Arma Ativa</span>
+              </span>
+            )}
           </div>
+
+          {selectedLinkedWeapon && (
+            <div className="bg-indigo-950/35 border border-indigo-500/40 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-start sm:items-center gap-2 text-indigo-200">
+                <Shield className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5 sm:mt-0" />
+                <div>
+                  <span className="font-bold text-indigo-300">Solicitação vinculada ao armamento: </span>
+                  <strong className="text-slate-100">
+                    {selectedLinkedWeapon.weaponModel} • Nº {selectedLinkedWeapon.weaponSerialNumber} ({selectedLinkedWeapon.weaponCaliber})
+                  </strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedLinkedWeaponCautelaId('')}
+                className="text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline self-end sm:self-center shrink-0"
+              >
+                Desvincular
+              </button>
+            </div>
+          )}
 
           {/* Seletor de modalidade (Passiva de Devolução x Consumo) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

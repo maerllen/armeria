@@ -81,6 +81,7 @@ export default function App() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [preselectedCautelaWeaponId, setPreselectedCautelaWeaponId] = useState<string | null>(null);
+  const [preselectedAmmoLinkedWeaponCautelaId, setPreselectedAmmoLinkedWeaponCautelaId] = useState<string | null>(null);
 
   const [loginError, setLoginError] = useState('');
 
@@ -540,6 +541,15 @@ export default function App() {
               departments={departments}
               preselectedWeaponId={preselectedCautelaWeaponId}
               onClearPreselectedWeapon={() => setPreselectedCautelaWeaponId(null)}
+              onStartLinkedAmmoCautela={
+                getAllowedModulesForUser(effectiveUser).includes('cautela-municoes')
+                  ? (cautela) => {
+                      setPreselectedAmmoLinkedWeaponCautelaId(cautela.id);
+                      setActiveModule('cautela-municoes');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  : undefined
+              }
               onRefresh={refreshData}
             />
           )}
@@ -553,6 +563,8 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               units={units}
               departments={departments}
+              preselectedLinkedWeaponCautelaId={preselectedAmmoLinkedWeaponCautelaId}
+              onClearPreselectedLinkedWeaponCautela={() => setPreselectedAmmoLinkedWeaponCautelaId(null)}
               onRefresh={refreshData}
             />
           )}
