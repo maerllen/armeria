@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, Movement, Weapon, VaultSpace, Course, WeaponTransfer, AmmoTransfer, ExplosivoTransfer, MaterialTransfer, VaultSpaceType } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   ArrowRightLeft,
   CheckCircle,
@@ -555,19 +556,8 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
         </div>
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
-          <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* ========================================================================= */}
       {/* PAINEL GERAL DE RECEBIMENTO DE TRANSFERÊNCIAS DE OUTRAS UNIDADES */}

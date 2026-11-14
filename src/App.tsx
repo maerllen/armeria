@@ -361,7 +361,7 @@ export default function App() {
   // Se a aplicação ainda estiver inicializando os dados pela primeira vez, exibe preloader completo
   if (!isAppReady) {
     return (
-      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden font-sans">
+      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-x-clip font-sans">
         <div className="text-center max-w-sm w-full space-y-6">
           <div className="relative w-28 h-28 mx-auto flex items-center justify-center">
             <div className="absolute inset-0 rounded-full border-2 border-dashed border-amber-500/40 border-t-amber-400 animate-spin-slow" />
@@ -416,7 +416,7 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+      <div className="min-h-[100dvh] bg-slate-950 text-slate-100 flex flex-col items-center justify-center p-4 relative overflow-x-clip">
         <LoginModal
           onLoginSuccess={handleLoginSubmit}
           onLocalFallbackLogin={handleLocalFallbackLogin}
@@ -442,7 +442,7 @@ export default function App() {
         unitName={userUnit?.name}
       />
 
-      <div className="flex-1 flex min-h-0 min-w-0 overflow-hidden relative">
+      <div className="flex-1 flex min-h-0 min-w-0 overflow-x-clip relative">
         
         {/* Sidebar Navigation (Desktop & Mobile Drawer) */}
         <Sidebar

@@ -77,12 +77,14 @@ class ErrorBoundary extends Component<Props, State> {
 
 import { ThemeProvider } from './context/ThemeContext';
 import { PreloaderProvider } from './context/PreloaderContext';
+import { GlobalAlertHost } from './components/TopLayerAlert';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <ThemeProvider>
         <PreloaderProvider>
+          <GlobalAlertHost />
           <App />
         </PreloaderProvider>
       </ThemeProvider>

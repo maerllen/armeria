@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   GraduationCap,
   Box,
@@ -549,19 +550,9 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
         </div>
       </div>
 
-      {/* Global Feedback Notifications */}
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center space-x-2 animate-in fade-in">
-          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-500/40 text-red-300 px-4 py-3 rounded-2xl text-xs font-semibold flex items-center space-x-2 animate-in fade-in">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      {/* Global Feedback Notifications na primeira camada */}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* ========================================================================= */}
       {/* SUB-TAB 1: CURSOS DE HABILITAÇÃO                                          */}
@@ -976,12 +967,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               </button>
             </div>
 
-            {qualModalError && (
-              <div className="bg-red-950/80 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{qualModalError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="error" message={qualModalError} onClose={() => setQualModalError('')} />
 
             <form onSubmit={handleSaveQualCourse} className="space-y-4 text-xs">
               <div>
@@ -1148,12 +1134,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               </button>
             </div>
 
-            {boxModalError && (
-              <div className="bg-red-950/80 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{boxModalError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="error" message={boxModalError} onClose={() => setBoxModalError('')} />
 
             <form onSubmit={handleSaveBox} className="space-y-4 text-xs">
               <div>
@@ -1267,12 +1248,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               </button>
             </div>
 
-            {replaceError && (
-              <div className="bg-red-950/80 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{replaceError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="error" message={replaceError} onClose={() => setReplaceError('')} />
 
             <form onSubmit={handleSaveWeaponReplacement} className="space-y-4 text-xs">
               <div>
@@ -1370,12 +1346,7 @@ export const CourseManagementModule: React.FC<CourseManagementModuleProps> = ({
               </button>
             </div>
 
-            {planModalError && (
-              <div className="bg-red-950/80 border border-red-500/40 text-red-300 p-3 rounded-xl text-xs flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{planModalError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="error" message={planModalError} onClose={() => setPlanModalError('')} />
 
             <form onSubmit={handleSavePlan} className="space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

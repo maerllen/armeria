@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { User, CourseClass, AcademyCourse } from '../types';
 import { storage } from '../services/storage';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Smartphone,
   Lock,
@@ -558,12 +559,7 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
 
           {/* Form */}
           <form onSubmit={handleMobileLogin} className="space-y-4">
-            {authError && (
-              <div className="p-3 bg-rose-950/80 border border-rose-800/80 rounded-xl text-rose-300 text-xs flex items-start space-x-2">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-400" />
-                <span>{authError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="error" message={authError} onClose={() => setAuthError('')} />
 
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -622,13 +618,13 @@ export const MobileClassModule: React.FC<MobileClassModuleProps> = ({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-24 max-w-md mx-auto relative shadow-2xl border-x border-slate-900">
       
-      {/* Toast Feedback */}
+      {/* Toast Feedback na primeira camada */}
       {feedbackMsg && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 px-4 py-2.5 rounded-2xl text-xs font-bold shadow-2xl flex items-center space-x-2 transition-all ${
-          feedbackMsg.type === 'success' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-600 text-white'
-        }`}>
-          <span>{feedbackMsg.text}</span>
-        </div>
+        <TopLayerAlert
+          type={feedbackMsg.type === 'success' ? 'success' : 'error'}
+          message={feedbackMsg.text}
+          onClose={() => setFeedbackMsg(null)}
+        />
       )}
 
       {/* TOP HEADER - MOBILE COMPACT */}

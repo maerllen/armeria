@@ -4,6 +4,7 @@ import { storage } from '../services/storage';
 import { stampPdfWithQrCode, printPdfFromBase64, generateQrCodeDataUrl } from '../utils/certificateStamper';
 import { buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   FileCheck,
   QrCode,
@@ -374,30 +375,13 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
         </div>
       </div>
 
-      {/* Global Feedback Banner */}
+      {/* Global Feedback Banner na primeira camada */}
       {feedbackMessage && (
-        <div
-          className={`p-4 rounded-2xl text-xs flex items-center justify-between border animate-in fade-in duration-150 ${
-            feedbackMessage.type === 'success'
-              ? 'bg-emerald-950/80 border-emerald-500/40 text-emerald-300'
-              : 'bg-rose-950/80 border-rose-500/40 text-rose-300'
-          }`}
-        >
-          <div className="flex items-center space-x-2.5">
-            {feedbackMessage.type === 'success' ? (
-              <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0" />
-            )}
-            <span className="font-medium">{feedbackMessage.text}</span>
-          </div>
-          <button
-            onClick={() => setFeedbackMessage(null)}
-            className="text-slate-400 hover:text-white text-xs px-2 py-1 rounded"
-          >
-            Fechar
-          </button>
-        </div>
+        <TopLayerAlert
+          type={feedbackMessage.type === 'success' ? 'success' : 'error'}
+          message={feedbackMessage.text}
+          onClose={() => setFeedbackMessage(null)}
+        />
       )}
 
       {/* TAB 1: EMITIR / CARIMBAR CERTIFICADO COM QR CODE */}
@@ -709,16 +693,13 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
             </form>
           </div>
 
-          {/* Validation Error */}
-          {validationError && (
-            <div className="p-4 bg-rose-950/50 border border-rose-500/40 rounded-2xl text-rose-200 text-xs flex items-start space-x-3">
-              <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold text-rose-300">Certificado Não Encontrado</p>
-                <p className="text-slate-300 mt-0.5">{validationError}</p>
-              </div>
-            </div>
-          )}
+          {/* Validation Error na primeira camada */}
+          <TopLayerAlert
+            type="error"
+            title="Certificado Não Encontrado"
+            message={validationError}
+            onClose={() => setValidationError(null)}
+          />
 
           {/* Validated Certificate Screen */}
           {validatedCert && (

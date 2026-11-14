@@ -30,6 +30,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ModuloCautelaMateriaisProps {
   currentUser: User;
@@ -1370,20 +1371,13 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
         </div>
       </div>
 
-      {/* Feedback Toast */}
+      {/* Feedback Toast na primeira camada */}
       {feedbackMsg && (
-        <div
-          className={`p-4 rounded-xl border text-xs sm:text-sm font-medium flex items-center justify-between ${
-            feedbackMsg.type === 'success'
-              ? 'bg-emerald-950/70 border-emerald-500/40 text-emerald-200'
-              : 'bg-rose-950/70 border-rose-500/40 text-rose-200'
-          }`}
-        >
-          <span>{feedbackMsg.text}</span>
-          <button onClick={() => setFeedbackMsg(null)} className="text-xs underline ml-4">
-            Fechar
-          </button>
-        </div>
+        <TopLayerAlert
+          type={feedbackMsg.type === 'success' ? 'success' : 'error'}
+          message={feedbackMsg.text}
+          onClose={() => setFeedbackMsg(null)}
+        />
       )}
 
       {/* =================================================================== */}

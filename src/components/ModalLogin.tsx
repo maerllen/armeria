@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { cleanMasp, formatMasp } from '../utils/masks';
 import { Shield, Lock, User, AlertCircle, Database, Server, ChevronDown, ChevronUp, CheckCircle, ExternalLink, Loader2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface LoginModalProps {
   onLoginSuccess: (maspDigits: string, passwordDigits: string, chosenRole?: string) => void;
@@ -92,13 +93,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess, onLocalF
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
           {(error || localError) && (
             <div className="space-y-3">
-              <div className="bg-red-950/90 border border-red-800 text-red-200 text-xs p-3.5 rounded-xl flex items-start space-x-2.5 shadow-sm">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-semibold text-red-300">Falha na Autenticação / Conexão</p>
-                  <p className="leading-relaxed">{error || localError}</p>
-                </div>
-              </div>
+              <TopLayerAlert
+                type="error"
+                title="Falha na Autenticação / Conexão"
+                message={error || localError}
+                onClose={localError ? () => setLocalError('') : undefined}
+              />
 
               {isDbError && (
                 <div className="bg-slate-950/90 border border-amber-500/30 rounded-xl p-3 text-xs space-y-2">

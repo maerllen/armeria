@@ -3,6 +3,7 @@ import { AmmoTransfer, User, AmmoTransferItem } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   ArrowRightLeft,
   Search,
@@ -443,20 +444,7 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
         {/* Content */}
         <div className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
           
-          {successMessage && (
-            <div className="p-3.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-xs text-emerald-300 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{successMessage}</span>
-              </div>
-              <button
-                onClick={() => setSuccessMessage(null)}
-                className="text-slate-400 hover:text-white text-xs"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-          )}
+          <TopLayerAlert type="success" message={successMessage} onClose={() => setSuccessMessage(null)} />
 
           {/* Unit Isolation Info Banner or Selector */}
           {isLockedToSingleUnit ? (
@@ -763,11 +751,7 @@ export const ModalHistoricoTransferenciasMunicao: React.FC<TransferAmmoHistoryMo
                 </div>
               </div>
 
-              {undoError && (
-                <div className="p-3 bg-rose-500/20 border border-rose-500/40 rounded-xl text-rose-200 text-xs">
-                  {undoError}
-                </div>
-              )}
+              <TopLayerAlert type="error" message={undoError} onClose={() => setUndoError('')} />
 
               <p className="text-slate-200">
                 Tem certeza de que deseja desfazer esta transferência? As munições retornarão imediatamente ao estoque da unidade de origem ({transferToUndo.originUnitName}).

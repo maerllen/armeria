@@ -3,6 +3,7 @@ import { User, Weapon, WeaponMaintenance, VaultSpace } from '../types';
 import { storage } from '../services/storage';
 import { CheckCircle2, X, Calendar, UserCheck, Wrench, Building, AlertCircle, RotateCcw, ShieldCheck, Shield } from 'lucide-react';
 import { formatTimestamp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ModalReceberManutencaoProps {
   weapon: Weapon;
@@ -136,12 +137,7 @@ export const ModalReceberManutencao: React.FC<ModalReceberManutencaoProps> = ({
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-xs flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
+        <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
         {loading ? (
           <div className="p-8 text-center text-xs text-slate-400">

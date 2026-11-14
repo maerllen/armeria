@@ -3,6 +3,7 @@ import { User, Weapon, Department, Unit, VaultSpace, formatCaliberDisplay } from
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
+import { showTopAlert } from './TopLayerAlert';
 import {
   Printer,
   X,
@@ -250,7 +251,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
     }
 
     if (weaponsToPrint.length === 0) {
-      alert('Nenhuma arma selecionada ou disponível para impressão com os critérios atuais.');
+      showTopAlert('Nenhuma arma selecionada ou disponível para impressão com os critérios atuais.', 'warning');
       return;
     }
 

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { AmmunitionStock, Caliber, Department, Unit, VaultSpace, User, AmmoTransfer, AmmoTransferItem, formatCaliberDisplay } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   ArrowRightLeft,
   Building2,
@@ -431,12 +432,7 @@ export const ModalTransferirMunicao: React.FC<TransferAmmoModalProps> = ({
 
         {/* Form Container */}
         <form onSubmit={handlePreSubmit} className="flex-1 overflow-y-auto p-6 space-y-6">
-          {error && (
-            <div className="p-3.5 bg-red-950/60 border border-red-800/80 rounded-xl text-red-300 text-xs flex items-center space-x-2.5 animate-shake">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+          <TopLayerAlert type="error" message={error} onClose={() => setError('')} />
 
           {/* Section: Unidade de Origem e Destino */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

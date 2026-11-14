@@ -3,6 +3,7 @@ import { User, Department, Unit, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../t
 import { storage } from '../services/storage';
 import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface UnitModuleProps {
   currentUser: User;
@@ -258,19 +259,8 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         )}
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* Departments & Units List Accordion */}
       <div className="space-y-4">

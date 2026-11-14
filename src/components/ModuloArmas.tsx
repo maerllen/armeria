@@ -14,6 +14,7 @@ import { ModalManutencaoArma } from './ModalManutencaoArma';
 import { ModalReceberManutencao } from './ModalReceberManutencao';
 import { ModalHistoricoManutencoes } from './ModalHistoricoManutencoes';
 import { ModalCadastrarArmeria } from './ModalCadastrarArmeria';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface WeaponModuleProps {
   currentUser: User;
@@ -815,19 +816,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         </div>
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* Pending Incoming Transfers Alert Banner */}
       {pendingTransfers.length > 0 && (
@@ -1901,19 +1891,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               )}
             </h3>
 
-            {modalSuccess && (
-              <div className="mb-4 bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-                <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{modalSuccess}</span>
-              </div>
-            )}
-
-            {modalError && (
-              <div className="mb-4 bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{modalError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="success" message={modalSuccess} onClose={() => setModalSuccess('')} />
+            <TopLayerAlert type="error" message={modalError} onClose={() => setModalError('')} />
 
             <form onSubmit={(e) => handleSaveWeapon(e, false)} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

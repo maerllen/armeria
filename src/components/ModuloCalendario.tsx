@@ -4,6 +4,7 @@ import * as pdfjsLib from 'pdfjs-dist';
 import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem, CourseClass } from '../types';
 import { storage } from '../services/storage';
 import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Calendar,
   Clock,
@@ -1378,22 +1379,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
   return (
     <div className="space-y-6">
-      {/* Toast Feedback */}
+      {/* Toast Feedback na primeira camada */}
       {feedback && (
-        <div
-          className={`fixed top-4 right-4 z-50 p-4 rounded-xl border shadow-2xl flex items-center space-x-3 transition-all animate-bounce ${
-            feedback.type === 'success'
-              ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/50'
-              : 'bg-rose-950/90 text-rose-300 border-rose-500/50'
-          }`}
-        >
-          {feedback.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 text-rose-400 shrink-0" />
-          )}
-          <span className="text-xs font-semibold">{feedback.message}</span>
-        </div>
+        <TopLayerAlert
+          type={feedback.type === 'success' ? 'success' : 'error'}
+          message={feedback.message}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {/* HEADER BAR (Hidden on Print) */}
@@ -1821,7 +1813,7 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                   {weeksToRender.map((week) => (
                     <div key={`${week.weekNum}-${week.days[0]?.dateStr}`} className="semana-bloco">
                       {/* Week Header */}
-                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans bg-slate-100 border border-black print:border-black print:border" style={{ borderWidth: '1px' }}>
+                      <div className="text-center font-black text-[11px] uppercase text-black py-0.5 mb-1 font-sans bg-white border border-black print:border-black print:border" style={{ borderWidth: '1px', backgroundColor: '#f1f5f9', color: '#000000' }}>
                         SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
                       </div>
 

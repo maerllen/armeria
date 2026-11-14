@@ -21,6 +21,7 @@ import jsPDF from 'jspdf';
 import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename, escapeHtmlText, printWithWindowTitle } from '../utils/printHelper';
 import { storage } from '../services/storage';
 import html2canvas from 'html2canvas';
+import { showTopAlert } from './TopLayerAlert';
 
 import bannerImg from '../assets/images/manual_banner_1784916894069.jpg';
 import flowImg from '../assets/images/manual_flow_1784916908441.jpg';
@@ -69,7 +70,7 @@ export const ManualModule: React.FC = () => {
       pdf.save(buildStandardDocumentFilename('Manual Operacional (Manual do Sistema)', 'Armaria PCMG', loggedUserName, 'pdf'));
     } catch (error) {
       console.error('Erro ao gerar PDF do manual:', error);
-      alert('Ocorreu um erro ao gerar o arquivo PDF. Você também pode utilizar a opção de Impressão.');
+      showTopAlert('Ocorreu um erro ao gerar o arquivo PDF. Você também pode utilizar a opção de Impressão.', 'error');
     } finally {
       setIsGeneratingPdf(false);
     }

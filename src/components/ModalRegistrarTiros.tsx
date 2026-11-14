@@ -3,6 +3,7 @@ import { User, Weapon, WeaponShotRecord } from '../types';
 import { storage } from '../services/storage';
 import { Crosshair, Plus, History, X, Check, Calendar, UserCheck, FileText, AlertCircle } from 'lucide-react';
 import { formatTimestamp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ModalRegistrarTirosProps {
   weapon: Weapon;
@@ -142,12 +143,7 @@ export const ModalRegistrarTiros: React.FC<ModalRegistrarTirosProps> = ({
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-xs flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
+        <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
         {activeTab === 'register' ? (
           <form onSubmit={handleSubmit} className="space-y-4">

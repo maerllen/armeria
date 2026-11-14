@@ -21,6 +21,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
+import { TopLayerAlert, showTopAlert } from './TopLayerAlert';
 import {
   GraduationCap,
   Plus,
@@ -520,18 +521,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleSaveCourse = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!courseName.trim()) {
-      alert('Informe o nome do curso.');
+      showTopAlert('Informe o nome do curso.', 'warning');
       return;
     }
     if (!courseCode.trim()) {
-      alert('Informe o código do curso.');
+      showTopAlert('Informe o código do curso.', 'warning');
       return;
     }
 
     let finalDates: string[] = [];
     if (courseType === 'Formação') {
       if (!courseStartDate || !courseEndDate) {
-        alert('Informe a data de início e a data final do curso de Formação.');
+        showTopAlert('Informe a data de início e a data final do curso de Formação.', 'warning');
         return;
       }
       finalDates = [courseStartDate, courseEndDate];
@@ -539,7 +540,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       // Ensino Continuado
       finalDates = [...courseDates].sort();
       if (finalDates.length === 0) {
-        alert('Selecione pelo menos uma data no calendário para o curso de Ensino Continuado.');
+        showTopAlert('Selecione pelo menos uma data no calendário para o curso de Ensino Continuado.', 'warning');
         return;
       }
     }
@@ -633,7 +634,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     e.preventDefault();
     if (!replaceBox || !oldWeaponId || !newWeaponId) return;
     if (!replaceReason.trim()) {
-      alert('Informe o motivo da substituição.');
+      showTopAlert('Informe o motivo da substituição.', 'warning');
       return;
     }
     const oldW = weapons.find(w => w.id === oldWeaponId);
@@ -1119,7 +1120,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleSaveClass = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!classCourseId) {
-      alert('Selecione um curso.');
+      showTopAlert('Selecione um curso.', 'warning');
       return;
     }
     const selectedCourse = academyCourses.find(c => c.id === classCourseId);
@@ -1139,7 +1140,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     );
 
     if (isDuplicate) {
-      alert(`Não é possível salvar duas turmas com o mesmo número (${formattedNum}) para a carreira "${classCareer}" neste mesmo curso.`);
+      showTopAlert(`Não é possível salvar duas turmas com o mesmo número (${formattedNum}) para a carreira "${classCareer}" neste mesmo curso.`, 'warning');
       return;
     }
 
@@ -1258,7 +1259,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleSavePlan = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!planName.trim()) {
-      alert('Informe o nome do plano de aula.');
+      showTopAlert('Informe o nome do plano de aula.', 'warning');
       return;
     }
 
@@ -1360,7 +1361,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleExecuteSaida = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!movClassId) {
-      alert('Selecione a Turma da Aula.');
+      showTopAlert('Selecione a Turma da Aula.', 'warning');
       return;
     }
 
@@ -1375,7 +1376,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       teacherName = tUser ? tUser.name : (selectedClass.teacherName || 'Professor');
     } else {
       if (!movTeacherNameOutside.trim()) {
-        alert('Informe o nome do responsável fora do sistema.');
+        showTopAlert('Informe o nome do responsável fora do sistema.', 'warning');
         return;
       }
       teacherName = movTeacherNameOutside.trim() + ' (Fora do Sistema)';
@@ -1891,26 +1892,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
       </div>
 
-      {/* Messages */}
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>{successMsg}</span>
-          </div>
-          <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-200">×</button>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 text-red-400" />
-            <span>{errorMsg}</span>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="text-red-400 hover:text-red-200">×</button>
-        </div>
-      )}
+      {/* Messages na primeira camada */}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* ========================================================================= */}
       {/* TAB 1: MOVIMENTAÇÕES DE AULA (MAPA DE AULA - SAÍDA E DEVOLUÇÃO)           */}
@@ -2086,7 +2070,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   onClick={() => {
                     const mobileUrl = `${window.location.origin}/?mode=mobile-class`;
                     navigator.clipboard.writeText(mobileUrl);
-                    alert(`Link de acesso exclusivo para Celular copiado com sucesso!\n\n${mobileUrl}\n\nEnvie aos instrutores no estande.`);
+                    showTopAlert(`Link de acesso exclusivo para Celular copiado com sucesso!\n\n${mobileUrl}\n\nEnvie aos instrutores no estande.`, 'success');
                   }}
                   className="bg-indigo-950/80 hover:bg-indigo-900 border border-indigo-700/80 text-indigo-300 font-bold text-xs px-3.5 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
                   title="Copiar link de acesso direto do celular para instrutores no estande"
@@ -4813,19 +4797,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               Cadastre e gerencie cursos de habilitação operacional com nome livre, seleção de tipos de armas, modelos de armamento e quantidade de tiros por aluno.
             </p>
 
-            {qualModalSuccess && (
-              <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{qualModalSuccess}</span>
-              </div>
-            )}
-
-            {qualModalError && (
-              <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-                <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{qualModalError}</span>
-              </div>
-            )}
+            <TopLayerAlert type="success" message={qualModalSuccess} onClose={() => setQualModalSuccess('')} />
+            <TopLayerAlert type="error" message={qualModalError} onClose={() => setQualModalError('')} />
 
             <form onSubmit={handleSaveQualCourse} className="bg-slate-950/80 p-4 rounded-xl border border-slate-800 space-y-4">
               <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider">

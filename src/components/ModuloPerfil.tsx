@@ -4,6 +4,7 @@ import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone
 import { storage } from '../services/storage';
 import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, CheckCircle2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ProfileModuleProps {
   currentUser?: User | null;
@@ -239,19 +240,8 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
         </div>
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <AlertTriangle className="w-4 h-4 text-red-400" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* Grid Details */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

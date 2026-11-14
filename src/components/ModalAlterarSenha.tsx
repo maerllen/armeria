@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User } from '../types';
 import { storage } from '../services/storage';
 import { KeyRound, Lock, AlertCircle, CheckCircle2, ShieldAlert, LogOut } from 'lucide-react';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ChangePasswordModalProps {
   user: User;
@@ -89,12 +90,11 @@ export const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
         )}
 
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          {(externalError || localError) && (
-            <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-              <span>{externalError || localError}</span>
-            </div>
-          )}
+          <TopLayerAlert
+            type="error"
+            message={externalError || localError}
+            onClose={localError ? () => setLocalError('') : undefined}
+          />
 
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">

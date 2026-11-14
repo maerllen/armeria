@@ -6,6 +6,7 @@ import { storage } from '../services/storage';
 import { buildStandardDocumentFilename } from '../utils/printHelper';
 import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ParsedExcelUserRow {
   rowIndex: number;
@@ -892,19 +893,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
         </div>
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* ETAPA 1: APENAS AS UNIDADES (ANTES DE ESCOLHER A UNIDADE) */}
       {!selectedUnitId ? (
@@ -2287,12 +2277,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </p>
                 </div>
 
-                {excelModalError && (
-                  <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3 rounded-xl flex items-center space-x-2">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{excelModalError}</span>
-                  </div>
-                )}
+                <TopLayerAlert type="error" message={excelModalError} onClose={() => setExcelModalError('')} />
 
                 {/* Parsed Rows Preview */}
                 {excelRows.length > 0 && (

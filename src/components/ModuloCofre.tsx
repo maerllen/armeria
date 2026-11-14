@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface VaultModuleProps {
   currentUser: User;
@@ -1315,19 +1316,8 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
         )}
       </div>
 
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
-          <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-3.5 rounded-xl flex items-center space-x-2">
-          <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-          <span>{errorMsg}</span>
-        </div>
-      )}
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* Filter and Search Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
@@ -1939,18 +1929,6 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
 
               {/* Modal Content Details */}
               <div className="space-y-4 overflow-y-auto pr-1 flex-1">
-                {errorMsg && (
-                  <div className="bg-red-950/60 border border-red-800 text-red-200 text-xs px-3.5 py-2.5 rounded-xl flex items-center space-x-2">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                    <span>{errorMsg}</span>
-                  </div>
-                )}
-                {successMsg && (
-                  <div className="bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs px-3.5 py-2.5 rounded-xl flex items-center space-x-2">
-                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                    <span>{successMsg}</span>
-                  </div>
-                )}
                 {isArmas ? (
                   <>
                     <div className="flex items-center justify-between">

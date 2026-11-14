@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { Weapon, Department, Unit, VaultSpace, User, WeaponTransfer, WeaponTransferItem } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   ArrowRightLeft,
   Building2,
@@ -362,12 +363,7 @@ export const TransferWeaponModal: React.FC<TransferWeaponModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handlePreSubmit} className="p-6 space-y-6">
-          {error && (
-            <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{error}</span>
-            </div>
-          )}
+          <TopLayerAlert type="error" message={error} onClose={() => setError('')} />
 
           {/* Section 1: Origin and Destination Units */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

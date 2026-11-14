@@ -17,6 +17,7 @@ import { storage } from '../services/storage';
 import { formatTimestamp, formatDisplayDate } from '../utils/masks';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Bomb,
   Plus,
@@ -1340,30 +1341,9 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
         </div>
       </div>
 
-      {/* Messages */}
-      {errorMsg && (
-        <div className="p-3 bg-red-500/10 border border-red-500/30 text-red-300 rounded-xl text-xs flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="text-red-400 hover:text-red-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {successMsg && (
-        <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl text-xs flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>{successMsg}</span>
-          </div>
-          <button onClick={() => setSuccessMsg('')} className="text-emerald-400 hover:text-emerald-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      {/* Messages na primeira camada */}
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
 
       {/* KPI Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

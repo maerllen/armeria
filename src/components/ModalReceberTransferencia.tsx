@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { WeaponTransfer, VaultSpace, User } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Inbox,
   ShieldCheck,
@@ -101,12 +102,7 @@ export const ReceiveTransferModal: React.FC<ReceiveTransferModalProps> = ({
 
         {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          {error && (
-            <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-xl flex items-start gap-3 text-red-400 text-xs">
-              <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
-              <span>{error}</span>
-            </div>
-          )}
+          <TopLayerAlert type="error" message={error} onClose={() => setError('')} />
 
           {/* Transfer Info Card */}
           <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-4 space-y-3 text-xs">

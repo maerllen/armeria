@@ -10,6 +10,7 @@ import {
   ArrowUpRight, ArrowDownLeft, History
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ModuloCautelaArmasProps {
   currentUser: User;
@@ -6868,63 +6869,47 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </div>
       </div>
 
-      {/* Mensagens de Sucesso e Erro */}
-      {successMsg && (
-        <div className="bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs p-4 rounded-xl flex items-center justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center space-x-2">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>{successMsg}</span>
-            </div>
-            {lastDirectCautelaArma && (
-              <button
-                type="button"
-                onClick={() => handlePrintTermo(lastDirectCautelaArma)}
-                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 shadow"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Imprimir Recibo / Termo Imediato</span>
-              </button>
-            )}
-            {lastReceivedReturnInfo && (
-              <button
-                type="button"
-                onClick={() =>
-                  handlePrintReciboDevolucao(
-                    lastReceivedReturnInfo.cautela,
-                    lastReceivedReturnInfo.overrides
-                  )
-                }
-                className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 shadow"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Reimprimir Recibo da Arma e da Munição</span>
-              </button>
-            )}
-          </div>
-          <button
-            onClick={() => {
-              setSuccessMsg('');
-              setLastReceivedReturnInfo(null);
-            }}
-            className="text-emerald-400 hover:text-emerald-200"
-          >
-            <XCircle className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {errorMsg && (
-        <div className="bg-red-950/80 border border-red-800 text-red-200 text-xs p-4 rounded-xl flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="text-red-400 hover:text-red-200">
-            <XCircle className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      {/* Mensagens de Sucesso e Erro na primeira camada */}
+      <TopLayerAlert
+        type="success"
+        message={successMsg}
+        onClose={() => {
+          setSuccessMsg('');
+          setLastReceivedReturnInfo(null);
+        }}
+        actions={
+          (lastDirectCautelaArma || lastReceivedReturnInfo) ? (
+            <>
+              {lastDirectCautelaArma && (
+                <button
+                  type="button"
+                  onClick={() => handlePrintTermo(lastDirectCautelaArma)}
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 shadow"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Imprimir Recibo / Termo Imediato</span>
+                </button>
+              )}
+              {lastReceivedReturnInfo && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handlePrintReciboDevolucao(
+                      lastReceivedReturnInfo.cautela,
+                      lastReceivedReturnInfo.overrides
+                    )
+                  }
+                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 shadow"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Reimprimir Recibo da Arma e da Munição</span>
+                </button>
+              )}
+            </>
+          ) : undefined
+        }
+      />
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
       {/* Alerta de Cautela Recusada / Informação ao Policial */}
       {isPolicial && unreadRefusedCautelas.length > 0 && (

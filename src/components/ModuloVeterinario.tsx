@@ -17,6 +17,7 @@ import {
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Dog,
   HeartPulse,
@@ -685,20 +686,9 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           </div>
         </div>
 
-        {/* Global Notifications */}
-        {successMsg && (
-          <div className="mt-4 bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs p-3.5 rounded-xl flex items-center space-x-2 shadow-md animate-fadeIn">
-            <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
-            <span className="font-semibold">{successMsg}</span>
-          </div>
-        )}
-
-        {errorMsg && (
-          <div className="mt-4 bg-red-950/80 border border-red-500/50 text-red-300 text-xs p-3.5 rounded-xl flex items-center space-x-2 shadow-md animate-fadeIn">
-            <AlertTriangle className="w-4 h-4 shrink-0 text-red-400" />
-            <span className="font-semibold">{errorMsg}</span>
-          </div>
-        )}
+        {/* Global Notifications na primeira camada */}
+        <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
+        <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
 
         {/* Statistics Bar */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-6 pt-5 border-t border-slate-800/80 text-xs font-mono">

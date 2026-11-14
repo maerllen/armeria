@@ -10,6 +10,7 @@ import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { ModalTransferirMunicao } from './ModalTransferirMunicao';
 import { ModalHistoricoTransferenciasMunicao } from './ModalHistoricoTransferenciasMunicao';
 import { AmmunitionReceiptModal } from './ModalReciboMunicao';
+import { TopLayerAlert } from './TopLayerAlert';
 import { 
   Disc, Plus, Search, Building, Vault, ArrowRightLeft, Printer, 
   Trash2, Edit2, History, RotateCcw, AlertTriangle, Check, X, 
@@ -1154,30 +1155,9 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
   return (
     <div className="space-y-6">
       
-      {/* Alert Messages */}
-      {errorMsg && (
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl flex items-center justify-between text-red-400 text-sm animate-in fade-in">
-          <div className="flex items-center space-x-3">
-            <AlertTriangle className="w-5 h-5 shrink-0" />
-            <span>{errorMsg}</span>
-          </div>
-          <button onClick={() => setErrorMsg('')} className="p-1 hover:text-red-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {successMsg && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-between text-emerald-400 text-sm animate-in fade-in">
-          <div className="flex items-center space-x-3">
-            <Check className="w-5 h-5 shrink-0" />
-            <span>{successMsg}</span>
-          </div>
-          <button onClick={() => setSuccessMsg('')} className="p-1 hover:text-emerald-200">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      {/* Alert Messages na primeira camada */}
+      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
+      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
 
       {/* Main Top Header - Classic layout matching ModuloArmas */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2">

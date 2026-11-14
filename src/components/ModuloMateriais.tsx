@@ -12,6 +12,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { printDocumentInPage, buildStandardDocumentTitle } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Package,
   Plus,
@@ -1409,25 +1410,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
         </div>
       </div>
 
-      {/* Notifications */}
-      {successMessage && (
-        <div className="p-4 bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 rounded-xl flex items-center space-x-3 text-sm animate-fade-in">
-          <CheckCircle2 className="w-5 h-5 shrink-0" />
-          <span>{successMessage}</span>
-        </div>
-      )}
-
-      {errorMessage && (
-        <div className="p-4 bg-rose-500/10 border border-rose-500/30 text-rose-300 rounded-xl flex items-center justify-between text-sm animate-fade-in">
-          <div className="flex items-center space-x-3">
-            <AlertTriangle className="w-5 h-5 shrink-0" />
-            <span>{errorMessage}</span>
-          </div>
-          <button onClick={() => setErrorMessage(null)} className="text-rose-400 hover:text-white">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      {/* Notifications na primeira camada */}
+      <TopLayerAlert type="success" message={successMessage} onClose={() => setSuccessMessage(null)} />
+      <TopLayerAlert type="error" message={errorMessage} onClose={() => setErrorMessage(null)} />
 
       {/* Quick Stats Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">

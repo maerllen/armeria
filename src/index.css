@@ -207,10 +207,19 @@ html.theme-light body {
   background-size: 24px 24px, 24px 24px;
 }
 
-/* Ensure all elements fit within viewport and tables scroll gracefully */
-html, body {
-  overflow-x: hidden;
+/* Ensure all elements fit within viewport and scroll uses the unified screen scrollbar */
+html {
+  overflow-x: clip;
+  overflow-y: auto;
   max-width: 100vw;
+  scrollbar-gutter: stable;
+  scrollbar-width: auto;
+}
+
+body {
+  overflow-x: clip;
+  max-width: 100vw;
+  min-height: 100vh;
 }
 
 table {
@@ -224,27 +233,53 @@ input, select, textarea, button {
 
 /* Modals and panels scroll smoothly on any resolution without requiring browser zoom-out */
 .modal-body-scroll {
-  max-height: calc(88vh - 80px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
+  max-height: none;
+  overflow-y: visible;
+  overscroll-behavior: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* Garante que qualquer modal/div flutuante abra afastada do topo, nunca corte a parte superior e permita rolar sobre a div */
+/* Garante que qualquer modal/div flutuante abra afastada do topo, nunca corte a parte superior, role no scroll e use a barra de rolagem da tela */
 @media screen {
-  .fixed.inset-0.flex.items-center.justify-center:not([aria-label="Processando comando"]) {
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]),
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) {
     align-items: flex-start !important;
     overflow-y: auto !important;
     overflow-x: hidden !important;
     padding-top: clamp(3rem, 7vh, 5rem) !important;
     padding-bottom: clamp(2.5rem, 6vh, 4rem) !important;
-    overscroll-behavior: contain;
+    overscroll-behavior: auto !important;
     -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    scrollbar-width: auto;
+    scrollbar-gutter: stable;
   }
 
-  .fixed.inset-0.flex.items-center.justify-center:not([aria-label="Processando comando"]) > * {
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > *,
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * {
     margin-top: auto !important;
     margin-bottom: auto !important;
     max-height: none !important;
+  }
+
+  /* Evita que caixas internas prendam a rolagem quando a div for maior que a tela */
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > * [class*="max-h-[5"][class*="vh]"],
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > * [class*="max-h-[6"][class*="vh]"],
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > * [class*="max-h-[7"][class*="vh]"],
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > * [class*="max-h-[8"][class*="vh]"],
+  .fixed.inset-0.flex.justify-center:not([aria-label="Processando comando"]) > * [class*="max-h-[9"][class*="vh]"],
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * [class*="max-h-[5"][class*="vh]"],
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * [class*="max-h-[6"][class*="vh]"],
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * [class*="max-h-[7"][class*="vh]"],
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * [class*="max-h-[8"][class*="vh]"],
+  .fixed.inset-0.flex.items-center:not([aria-label="Processando comando"]) > * [class*="max-h-[9"][class*="vh]"] {
+    max-height: none !important;
+  }
+
+  .overflow-y-auto,
+  .overflow-auto {
+    overscroll-behavior: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 
@@ -461,9 +496,19 @@ input, select, textarea, button {
   background-color: #e2e8f0 !important;
 }
 
-.theme-light .hover\:bg-slate-700:hover,
-.theme-light .hover\:bg-slate-600:hover {
+.theme-light .hover\:bg-slate-700:hover {
   background-color: #cbd5e1 !important;
+}
+
+.theme-light .hover\:bg-slate-600:hover:not(.bg-slate-600):not(.bg-slate-500):not(.bg-slate-400) {
+  background-color: #cbd5e1 !important;
+}
+
+.theme-light .bg-slate-600:hover,
+.theme-light .bg-slate-500:hover,
+.theme-light .bg-slate-400:hover {
+  background-color: #1e293b !important;
+  color: #ffffff !important;
 }
 
 /* Badges, cards e alertas temáticos no tema claro */
@@ -756,26 +801,44 @@ input, select, textarea, button {
   color: #0f172a !important;
 }
 
-/* Superfícies pretas ou escuras próximas do preto (botões, badges, marcadores, neutros escuros) */
+/* Superfícies pretas ou escuras próximas do #1e293b (botões, badges, marcadores, neutros escuros) em desktop e mobile */
 .theme-light :is(
-  .bg-black:not(.fixed),
-  .bg-slate-600, .bg-slate-500,
+  .bg-black:not(.fixed), .hover\:bg-black:hover:not(.fixed),
+  .bg-slate-600, .bg-slate-500, .bg-slate-400, .bg-slate-300, .bg-slate-200, .bg-slate-100, .bg-slate-50,
+  .hover\:bg-slate-600:hover, .hover\:bg-slate-500:hover, .hover\:bg-slate-400:hover, .hover\:bg-slate-300:hover, .hover\:bg-slate-200:hover, .hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover,
   .bg-gray-600, .bg-gray-700, .bg-gray-800, .bg-gray-900, .bg-gray-950,
+  .hover\:bg-gray-700:hover, .hover\:bg-gray-800:hover, .hover\:bg-gray-900:hover,
   .bg-zinc-600, .bg-zinc-700, .bg-zinc-800, .bg-zinc-900, .bg-zinc-950,
   .bg-neutral-600, .bg-neutral-700, .bg-neutral-800, .bg-neutral-900, .bg-neutral-950,
-  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950
-) {
+  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950,
+  [class*="bg-[#1e293b"], [class*="bg-[#0f172a"], [class*="bg-[#334155"],
+  [class*="bg-[#1f2937"], [class*="bg-[#111827"], [class*="bg-[#020617"],
+  [class*="bg-[#090d16"], [class*="bg-[#000"],
+  [style*="#1e293b" i], [style*="#0f172a" i], [style*="#334155" i],
+  [style*="rgb(30, 41, 59"], [style*="rgb(15, 23, 42"],
+  [class*="from-slate-600"], [class*="from-slate-500"], [class*="from-slate-400"],
+  [class*="from-gray-800"], [class*="from-gray-900"]
+):not(.top-layer-alert) {
   color: #ffffff !important;
 }
 
 .theme-light :is(
-  .bg-black:not(.fixed),
-  .bg-slate-600, .bg-slate-500,
+  .bg-black:not(.fixed), .hover\:bg-black:hover:not(.fixed),
+  .bg-slate-600, .bg-slate-500, .bg-slate-400, .bg-slate-300, .bg-slate-200, .bg-slate-100, .bg-slate-50,
+  .hover\:bg-slate-600:hover, .hover\:bg-slate-500:hover, .hover\:bg-slate-400:hover, .hover\:bg-slate-300:hover, .hover\:bg-slate-200:hover, .hover\:bg-slate-100:hover, .hover\:bg-slate-50:hover,
   .bg-gray-600, .bg-gray-700, .bg-gray-800, .bg-gray-900, .bg-gray-950,
+  .hover\:bg-gray-700:hover, .hover\:bg-gray-800:hover, .hover\:bg-gray-900:hover,
   .bg-zinc-600, .bg-zinc-700, .bg-zinc-800, .bg-zinc-900, .bg-zinc-950,
   .bg-neutral-600, .bg-neutral-700, .bg-neutral-800, .bg-neutral-900, .bg-neutral-950,
-  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950
-) :is(span, strong, p, div, svg, .text-white, .text-black, .text-slate-950, .text-slate-900, .text-slate-800, .text-slate-700, .text-slate-600, .text-slate-500, .text-slate-400, .text-slate-300, .text-slate-200, .text-slate-100):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-slate-100):not(.bg-slate-200) {
+  .bg-stone-600, .bg-stone-700, .bg-stone-800, .bg-stone-900, .bg-stone-950,
+  [class*="bg-[#1e293b"], [class*="bg-[#0f172a"], [class*="bg-[#334155"],
+  [class*="bg-[#1f2937"], [class*="bg-[#111827"], [class*="bg-[#020617"],
+  [class*="bg-[#090d16"], [class*="bg-[#000"],
+  [style*="#1e293b" i], [style*="#0f172a" i], [style*="#334155" i],
+  [style*="rgb(30, 41, 59"], [style*="rgb(15, 23, 42"],
+  [class*="from-slate-600"], [class*="from-slate-500"], [class*="from-slate-400"],
+  [class*="from-gray-800"], [class*="from-gray-900"]
+):not(.top-layer-alert) :is(span, strong, b, p, div, label, small, h1, h2, h3, h4, h5, h6, a, li, td, th, svg, [class*="text-"]):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-amber-500):not(.bg-amber-400) {
   color: #ffffff !important;
 }
 
@@ -860,41 +923,129 @@ input, select, textarea, button {
   border-color: #cbd5e1 !important;
 }
 
-/* Scrollbars */
+/* Alertas na primeira camada do layout (máxima visibilidade em ambos os temas) */
+.top-layer-alert {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.top-layer-alert-success {
+  background-color: #064e3b !important;
+  border-color: #34d399 !important;
+  color: #ffffff !important;
+  box-shadow: 0 20px 45px rgba(6, 78, 59, 0.45), 0 0 0 3px rgba(16, 185, 129, 0.28) !important;
+}
+
+.top-layer-alert-success .top-layer-alert-icon {
+  background-color: rgba(16, 185, 129, 0.25) !important;
+  color: #a7f3d0 !important;
+}
+
+.top-layer-alert-error {
+  background-color: #7f1d1d !important;
+  border-color: #f87171 !important;
+  color: #ffffff !important;
+  box-shadow: 0 20px 45px rgba(127, 29, 29, 0.48), 0 0 0 3px rgba(239, 68, 68, 0.3) !important;
+}
+
+.top-layer-alert-error .top-layer-alert-icon {
+  background-color: rgba(239, 68, 68, 0.25) !important;
+  color: #fecaca !important;
+}
+
+.top-layer-alert-warning {
+  background-color: #78350f !important;
+  border-color: #fbbf24 !important;
+  color: #ffffff !important;
+  box-shadow: 0 20px 45px rgba(120, 53, 15, 0.45), 0 0 0 3px rgba(245, 158, 11, 0.3) !important;
+}
+
+.top-layer-alert-warning .top-layer-alert-icon {
+  background-color: rgba(245, 158, 11, 0.25) !important;
+  color: #fde68a !important;
+}
+
+.top-layer-alert-info {
+  background-color: #0c4a6e !important;
+  border-color: #38bdf8 !important;
+  color: #ffffff !important;
+  box-shadow: 0 20px 45px rgba(12, 74, 110, 0.45), 0 0 0 3px rgba(14, 165, 233, 0.28) !important;
+}
+
+.top-layer-alert-info .top-layer-alert-icon {
+  background-color: rgba(14, 165, 233, 0.25) !important;
+  color: #bae6fd !important;
+}
+
+.top-layer-alert .top-layer-alert-close {
+  color: #ffffff !important;
+  background-color: rgba(255, 255, 255, 0.14) !important;
+}
+
+.top-layer-alert .top-layer-alert-close:hover {
+  background-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.theme-light .top-layer-alert-success,
+.theme-light .top-layer-alert-error,
+.theme-light .top-layer-alert-warning,
+.theme-light .top-layer-alert-info {
+  color: #ffffff !important;
+}
+
+.theme-light .top-layer-alert-success :is(div, span, p, strong),
+.theme-light .top-layer-alert-error :is(div, span, p, strong),
+.theme-light .top-layer-alert-warning :is(div, span, p, strong),
+.theme-light .top-layer-alert-info :is(div, span, p, strong) {
+  color: #ffffff !important;
+}
+
+/* Scrollbars visíveis na tela e em divs com rolagem */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #0f172a;
+}
+
+.theme-light * {
+  scrollbar-color: #64748b #e2e8f0;
+}
+
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(2, 6, 23, 0.6);
+  background: rgba(15, 23, 42, 0.85);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(51, 65, 85, 0.8);
-  border-radius: 4px;
+  background: rgba(100, 116, 139, 0.85);
+  border-radius: 6px;
+  border: 2px solid rgba(15, 23, 42, 0.85);
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(245, 158, 11, 0.5);
+  background: rgba(245, 158, 11, 0.75);
 }
 
 .theme-light ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 .theme-light ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #e2e8f0;
 }
 
 .theme-light ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 4px;
+  background: #64748b;
+  border-radius: 6px;
+  border: 2px solid #e2e8f0;
 }
 
 .theme-light ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #475569;
 }
 
 /* Animations */

@@ -3,6 +3,7 @@ import { Certificado } from '../types';
 import { storage } from '../services/storage';
 import { printPdfFromBase64 } from '../utils/certificateStamper';
 import { buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -202,16 +203,13 @@ export const PublicCertificateValidator: React.FC<PublicCertificateValidatorProp
           </form>
         </section>
 
-        {/* Error Notification */}
-        {error && (
-          <div className="p-4 bg-rose-950/50 border border-rose-500/40 rounded-2xl text-rose-200 text-xs flex items-start space-x-3 animate-in fade-in duration-200">
-            <AlertTriangle className="w-5 h-5 text-rose-400 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold text-rose-300">Certificado Não Encontrado ou Inválido</p>
-              <p className="text-slate-300 mt-0.5">{error}</p>
-            </div>
-          </div>
-        )}
+        {/* Error Notification na primeira camada */}
+        <TopLayerAlert
+          type="error"
+          title="Certificado Não Encontrado ou Inválido"
+          message={error}
+          onClose={() => setError(null)}
+        />
 
         {/* Successful Validation Section */}
         {certificate && (

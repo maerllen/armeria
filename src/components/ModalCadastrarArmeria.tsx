@@ -17,6 +17,7 @@ import {
   Layers
 } from 'lucide-react';
 import { formatTimestamp } from '../utils/masks';
+import { TopLayerAlert } from './TopLayerAlert';
 
 interface ModalCadastrarArmeriaProps {
   currentUser: User;
@@ -297,19 +298,8 @@ export const ModalCadastrarArmeria: React.FC<ModalCadastrarArmeriaProps> = ({
           </button>
         </div>
 
-        {errorMsg && (
-          <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-red-200 text-xs flex items-center space-x-2">
-            <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-            <span>{errorMsg}</span>
-          </div>
-        )}
-
-        {successMsg && (
-          <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-emerald-200 text-xs flex items-center space-x-2">
-            <Check className="w-4 h-4 shrink-0 text-emerald-400" />
-            <span>{successMsg}</span>
-          </div>
-        )}
+        <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
+        <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
 
         {activeTab === 'form' ? (
           <form onSubmit={handleSubmit} className="space-y-3.5">
