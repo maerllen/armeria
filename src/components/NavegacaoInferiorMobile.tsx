@@ -1,6 +1,6 @@
 import React from 'react';
 import { ModuleType, User as UserType, getAllowedModulesForUser } from '../types';
-import { User, Crosshair, ArrowRightLeft, Smartphone, Menu, Bomb, Disc, Package } from 'lucide-react';
+import { User, Crosshair, ArrowRightLeft, Smartphone, Menu, Bomb, Disc, Package, BookOpen } from 'lucide-react';
 
 interface MobileBottomNavProps {
   currentUser?: UserType | null;
@@ -74,6 +74,11 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
       id: 'iniciar-aula-mobile',
       label: 'Aula',
       icon: Smartphone
+    },
+    {
+      id: 'manual',
+      label: 'Manual',
+      icon: BookOpen
     }
   ];
 

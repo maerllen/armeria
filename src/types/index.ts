@@ -1345,7 +1345,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'calendario',
       'certificados',
       'veterinario',
-      'relatorio'
+      'relatorio',
+      'manual'
     ];
   }
 
@@ -1364,7 +1365,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'cofre',
       'movimentacoes',
       'materiais',
-      'relatorio'
+      'relatorio',
+      'manual'
     ];
   }
 
@@ -1382,7 +1384,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'usuarios',
       'cofre',
       'materiais',
-      'relatorio'
+      'relatorio',
+      'manual'
     ];
   }
 
@@ -1397,7 +1400,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'materiais',
       'unidade',
       'cofre',
-      'relatorio'
+      'relatorio',
+      'manual'
     ];
   }
 
@@ -1406,7 +1410,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     return [
       'meu-perfil',
       'veterinario',
-      'relatorio'
+      'relatorio',
+      'manual'
     ];
   }
 
@@ -1416,7 +1421,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
-      'cautela-materiais'
+      'cautela-materiais',
+      'manual'
     ];
     if (isUserExplosivista(user)) {
       policeModules.push('explosivos');
@@ -1430,7 +1436,8 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     'meu-perfil',
     'cautela-armas',
     'cautela-municoes',
-    'cautela-materiais'
+    'cautela-materiais',
+    'manual'
   ];
 };
 

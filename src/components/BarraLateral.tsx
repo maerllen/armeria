@@ -191,6 +191,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Relatórios',
       icon: FileText,
       visible: allowedModules.includes('relatorio')
+    },
+    {
+      id: 'manual',
+      label: 'Manual do Policial',
+      icon: BookOpen,
+      visible: allowedModules.includes('manual')
     }
   ];
 
