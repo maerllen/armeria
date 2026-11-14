@@ -284,6 +284,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     records: WeaponCustodyMovement[];
   } | null>(null);
   const [weaponHistoryLoading, setWeaponHistoryLoading] = useState(false);
+
+  // Solicitação / Vínculo posterior de munição para Cautela de Arma Ativa sem munições vinculadas
+  const [linkingAmmoCautela, setLinkingAmmoCautela] = useState<CautelaArma | null>(null);
+  const [linkAmmoTipo, setLinkAmmoTipo] = useState('');
+  const [linkAmmoPeso, setLinkAmmoPeso] = useState('');
+  const [linkAmmoStockId, setLinkAmmoStockId] = useState('');
+  const [linkAmmoQty, setLinkAmmoQty] = useState<number>(30);
+  const [linkAmmoDestinacao, setLinkAmmoDestinacao] = useState<string>('Operacional / Defesa');
+  const [linkAmmoSeraDevolvida, setLinkAmmoSeraDevolvida] = useState<boolean>(true);
+  const [linkAmmoDirectAuth, setLinkAmmoDirectAuth] = useState<boolean>(canAuthorize);
+  const [linkAmmoReason, setLinkAmmoReason] = useState('');
+  const [linkAmmoSubmitting, setLinkAmmoSubmitting] = useState(false);
   const [reason, setReason] = useState('');
   const [magazineQuantity, setMagazineQuantity] = useState<number>(2);
   const [requestAmmoTogether, setRequestAmmoTogether] = useState(true);
@@ -2192,22 +2204,77 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   }, [authorizingCautela, availableAmmoForAuthorizingWeapon, authStockId]);
 
+  const getPendingLinkedAmmoRequest = useCallback((cautela: CautelaArma) => {
+    if (cautela.status !== 'AUTORIZADA') return null;
+    const list = storage.getCautelasMunicoes() || [];
+    return (
+      list.find(
+        m =>
+          m.status === 'PENDENTE' &&
+          (m.linkedWeaponCautelaId === cautela.id || (m as any).cautelaArmaId === cautela.id)
+      ) || null
+    );
+  }, []);
+
   const getLinkedAmmoForCautela = (cautela: CautelaArma) => {
     const list = storage.getCautelasMunicoes() || [];
     const cleanLinkedAmmoId = cautela.linkedAmmoCautelaId
       ? String(cautela.linkedAmmoCautelaId).replace(/^caut-mun-/, '')
       : '';
-    // 1. Match direto pelo vínculo explícito da cautela de munições
-    const exact = list.find(m =>
-      (cautela.linkedAmmoCautelaId && (
-        m.id === cautela.linkedAmmoCautelaId ||
-        m.id === cleanLinkedAmmoId ||
-        m.id === `caut-mun-${cleanLinkedAmmoId}`
-      )) ||
-      (m as any).cautelaArmaId === cautela.id ||
-      m.linkedWeaponCautelaId === cautela.id
-    );
-    if (exact) return exact;
+
+    const matchesIdOrWeapon = (m: any) =>
+      (cautela.linkedAmmoCautelaId &&
+        (m.id === cautela.linkedAmmoCautelaId ||
+          m.id === cleanLinkedAmmoId ||
+          m.id === `caut-mun-${cleanLinkedAmmoId}`)) ||
+      m.cautelaArmaId === cautela.id ||
+      m.linkedWeaponCautelaId === cautela.id;
+
+    const candidates = list.filter(matchesIdOrWeapon);
+    if (candidates.length > 0) {
+      if (cautela.status === 'AUTORIZADA') {
+        // Para cautela ativa, apenas munição já autorizada ou em processo de devolução conta como vinculada ativa
+        const activeMatch = candidates.find(
+          m => m.status === 'AUTORIZADA' || (m.status as string) === 'DEVOLUCAO_PENDENTE'
+        );
+        if (activeMatch) return activeMatch;
+        // Se existe apenas solicitação PENDENTE, RECUSADA ou já DEVOLVIDA/CONSUMIDA, não trata como munição ativa vinculada
+        return null;
+      }
+
+      if (cautela.status === 'DEVOLUCAO_PENDENTE') {
+        const activeOrClosed =
+          candidates.find(
+            m => m.status === 'AUTORIZADA' || (m.status as string) === 'DEVOLUCAO_PENDENTE'
+          ) ||
+          candidates.find(
+            m =>
+              cautela.linkedAmmoCautelaId &&
+              (m.id === cautela.linkedAmmoCautelaId ||
+                m.id === cleanLinkedAmmoId ||
+                m.id === `caut-mun-${cleanLinkedAmmoId}`) &&
+              m.status !== 'RECUSADA' &&
+              m.status !== 'PENDENTE'
+          );
+        if (activeOrClosed) return activeOrClosed;
+      }
+
+      if (cautela.status === 'PENDENTE') {
+        const nonRefused = candidates.find(m => m.status !== 'RECUSADA');
+        if (nonRefused) return nonRefused;
+      }
+
+      const historical =
+        candidates.find(
+          m =>
+            cautela.linkedAmmoCautelaId &&
+            (m.id === cautela.linkedAmmoCautelaId ||
+              m.id === cleanLinkedAmmoId ||
+              m.id === `caut-mun-${cleanLinkedAmmoId}`) &&
+            m.status !== 'RECUSADA'
+        ) || candidates.find(m => m.status !== 'RECUSADA');
+      if (historical) return historical;
+    }
 
     // 2. Fallback exclusivo para registros sintéticos sincronizados de arma ('caut-active-'):
     // nunca vincula munições avulsas a registros reais de cautela de arma autorizados sem munição
@@ -2217,17 +2284,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       (cautela.status === 'AUTORIZADA' || cautela.status === 'DEVOLUCAO_PENDENTE')
     ) {
       const cDigits = cleanDigits(cautela.requesterMasp);
-      return list.find(m => {
-        const isActiveMun = m.status === 'AUTORIZADA' || (m.status as string) === 'DEVOLUCAO_PENDENTE';
-        if (!isActiveMun) return false;
-        const sameWeapon =
-          (m.linkedWeaponSerialNumber && cautela.weaponSerialNumber && m.linkedWeaponSerialNumber === cautela.weaponSerialNumber) ||
-          ((m as any).weaponId && cautela.weaponId && (m as any).weaponId === cautela.weaponId);
-        if (!sameWeapon) return false;
-        const mDigits = cleanDigits(m.requesterMasp);
-        if (cDigits && mDigits && cDigits !== mDigits) return false;
-        return true;
-      }) || null;
+      return (
+        list.find(m => {
+          const isActiveMun =
+            m.status === 'AUTORIZADA' || (m.status as string) === 'DEVOLUCAO_PENDENTE';
+          if (!isActiveMun) return false;
+          const sameWeapon =
+            (m.linkedWeaponSerialNumber &&
+              cautela.weaponSerialNumber &&
+              m.linkedWeaponSerialNumber === cautela.weaponSerialNumber) ||
+            ((m as any).weaponId && cautela.weaponId && (m as any).weaponId === cautela.weaponId);
+          if (!sameWeapon) return false;
+          const mDigits = cleanDigits(m.requesterMasp);
+          if (cDigits && mDigits && cDigits !== mDigits) return false;
+          return true;
+        }) || null
+      );
     }
 
     return null;
@@ -2236,9 +2308,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   // Resgata de forma consolidada os dados da munição e da cautela de munições vinculada (caso exista)
   const getRescuedAmmoDetails = (cautela: CautelaArma) => {
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
-    const linkedCautelaId = linkedAmmo?.id || cautela.linkedAmmoCautelaId || null;
-    const quantity = Number(linkedAmmo?.quantity ?? cautela.ammoQuantity ?? 0);
-    const hasAmmo = Boolean(linkedCautelaId || quantity > 0);
+    const list = storage.getCautelasMunicoes() || [];
+    const directLinkedRecord = cautela.linkedAmmoCautelaId
+      ? list.find(m => m.id === cautela.linkedAmmoCautelaId)
+      : undefined;
+    const isActiveWeaponWithClosedOrPendingDirect =
+      cautela.status === 'AUTORIZADA' &&
+      directLinkedRecord &&
+      directLinkedRecord.status !== 'AUTORIZADA' &&
+      (directLinkedRecord.status as string) !== 'DEVOLUCAO_PENDENTE';
+
+    const linkedCautelaId =
+      linkedAmmo?.id || (!isActiveWeaponWithClosedOrPendingDirect ? cautela.linkedAmmoCautelaId || null : null);
+    const quantity = isActiveWeaponWithClosedOrPendingDirect
+      ? 0
+      : Number(linkedAmmo?.quantity ?? (linkedAmmo || cautela.status !== 'AUTORIZADA' ? cautela.ammoQuantity : cautela.ammoQuantity) ?? 0);
+    const hasAmmo = Boolean(linkedAmmo || (!isActiveWeaponWithClosedOrPendingDirect && (linkedCautelaId || quantity > 0)));
     const seraDevolvida = linkedAmmo && linkedAmmo.seraDevolvida !== undefined
       ? Boolean(linkedAmmo.seraDevolvida)
       : cautela.ammoSeraDevolvida !== undefined
@@ -2365,6 +2450,296 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       setWeaponHistoryModalData(prev => (prev ? { ...prev, records } : null));
     } finally {
       setWeaponHistoryLoading(false);
+    }
+  };
+
+  // Solicitação / Vinculação de Munição para Cautela de Arma Ativa sem munições vinculadas
+  const linkAmmoAvailableStocks = useMemo(() => {
+    if (!linkingAmmoCautela) return [];
+    const normPlain = (s?: string) =>
+      (s || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    const wObj = weapons.find(
+      w =>
+        w.id === linkingAmmoCautela.weaponId ||
+        (w.serialNumber && w.serialNumber === linkingAmmoCautela.weaponSerialNumber)
+    );
+    const targetUnitId = linkingAmmoCautela.unitId || wObj?.unitId || currentUser.unitId;
+    const rawCal = linkingAmmoCautela.weaponCaliber || wObj?.caliber || '';
+    const selCal = normPlain(rawCal);
+
+    return ammoStocks.filter(st => {
+      if (Number(st.quantity || 0) <= 0) return false;
+      const stVault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+      const stUnitId = st.unitId || stVault?.unitId || '';
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? stUnitId === targetUnitId || (hasDeptWideScope && st.departmentId === currentUser.departmentId)
+          : hasDeptWideScope
+            ? st.departmentId === currentUser.departmentId || (stUnitId ? deptUnitIds.has(stUnitId) : false)
+            : stUnitId === currentUser.unitId;
+      if (!matchUnit) return false;
+
+      const cal = calibers.find(c => c.id === st.caliberId || normPlain(c.name) === normPlain(st.caliberId));
+      const calName = normPlain(cal?.name || (st as any).caliberName || st.caliberId || '');
+      if (!selCal) return true;
+      return (
+        calName === selCal ||
+        Boolean(calName && (calName.includes(selCal) || selCal.includes(calName))) ||
+        st.caliberId === rawCal
+      );
+    });
+  }, [linkingAmmoCautela, weapons, ammoStocks, vaultSpaces, calibers, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
+
+  const linkAmmoAvailableTipos = useMemo(() => {
+    if (!linkingAmmoCautela) return [];
+    const map = new Map<string, string>();
+    linkAmmoAvailableStocks.forEach(s => {
+      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+      const tipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim() || 'Operacional';
+      const key = tipo.toLowerCase();
+      if (!map.has(key)) map.set(key, tipo);
+    });
+    if (map.size === 0) {
+      const wObj = weapons.find(
+        w => w.id === linkingAmmoCautela.weaponId || w.serialNumber === linkingAmmoCautela.weaponSerialNumber
+      );
+      getAvailableUnitAmmoSpecsForWeapon(
+        wObj || ({ caliber: linkingAmmoCautela.weaponCaliber } as Weapon)
+      ).forEach(sp => {
+        const key = sp.tipo.trim().toLowerCase();
+        if (key && !map.has(key)) map.set(key, sp.tipo.trim());
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [linkingAmmoCautela, linkAmmoAvailableStocks, calibers, weapons, getAvailableUnitAmmoSpecsForWeapon]);
+
+  const linkAmmoAvailablePesos = useMemo(() => {
+    if (!linkingAmmoCautela || !linkAmmoTipo) return [];
+    const targetTipo = linkAmmoTipo.trim().toLowerCase();
+    const map = new Map<string, string>();
+    linkAmmoAvailableStocks.forEach(s => {
+      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+      const tipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim() || 'Operacional';
+      if (tipo.toLowerCase() === targetTipo) {
+        const peso = (s.pesoMunicao || cal?.peso || '').trim() || 'Padrão';
+        const key = peso.toLowerCase();
+        if (!map.has(key)) map.set(key, peso);
+      }
+    });
+    if (map.size === 0) {
+      const wObj = weapons.find(
+        w => w.id === linkingAmmoCautela.weaponId || w.serialNumber === linkingAmmoCautela.weaponSerialNumber
+      );
+      getAvailableUnitAmmoSpecsForWeapon(
+        wObj || ({ caliber: linkingAmmoCautela.weaponCaliber } as Weapon)
+      ).forEach(sp => {
+        if (sp.tipo.trim().toLowerCase() === targetTipo && sp.peso.trim()) {
+          const key = sp.peso.trim().toLowerCase();
+          if (!map.has(key)) map.set(key, sp.peso.trim());
+        }
+      });
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [linkingAmmoCautela, linkAmmoTipo, linkAmmoAvailableStocks, calibers, weapons, getAvailableUnitAmmoSpecsForWeapon]);
+
+  useEffect(() => {
+    if (!linkingAmmoCautela) return;
+    if (linkAmmoAvailableTipos.length === 0) {
+      if (linkAmmoTipo !== '') setLinkAmmoTipo('');
+    } else if (!linkAmmoAvailableTipos.includes(linkAmmoTipo)) {
+      setLinkAmmoTipo(linkAmmoAvailableTipos[0]);
+    }
+  }, [linkingAmmoCautela, linkAmmoAvailableTipos, linkAmmoTipo]);
+
+  useEffect(() => {
+    if (!linkingAmmoCautela || !linkAmmoTipo) {
+      if (linkAmmoPeso !== '') setLinkAmmoPeso('');
+      return;
+    }
+    if (linkAmmoAvailablePesos.length === 0) {
+      if (linkAmmoPeso !== '') setLinkAmmoPeso('');
+    } else if (!linkAmmoAvailablePesos.includes(linkAmmoPeso)) {
+      setLinkAmmoPeso(linkAmmoAvailablePesos[0]);
+    }
+  }, [linkingAmmoCautela, linkAmmoTipo, linkAmmoAvailablePesos, linkAmmoPeso]);
+
+  useEffect(() => {
+    if (!linkingAmmoCautela) return;
+    if (linkAmmoAvailableStocks.length > 0) {
+      if (!linkAmmoAvailableStocks.some(s => s.id === linkAmmoStockId)) {
+        setLinkAmmoStockId(linkAmmoAvailableStocks[0].id);
+      }
+    } else if (linkAmmoStockId !== '') {
+      setLinkAmmoStockId('');
+    }
+  }, [linkingAmmoCautela, linkAmmoAvailableStocks, linkAmmoStockId]);
+
+  const handleOpenLinkAmmoModal = (cautela: CautelaArma) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setLinkingAmmoCautela(cautela);
+    setLinkAmmoTipo('');
+    setLinkAmmoPeso('');
+    setLinkAmmoStockId('');
+    setLinkAmmoQty(30);
+    setLinkAmmoDestinacao('Operacional / Defesa');
+    setLinkAmmoSeraDevolvida(true);
+    setLinkAmmoDirectAuth(canAuthorize);
+    setLinkAmmoReason(
+      `Uso em serviço operacional com armamento ${cautela.weaponModel} (Nº ${cautela.weaponSerialNumber})`
+    );
+  };
+
+  const handleSubmitLinkAmmo = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!linkingAmmoCautela) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (linkAmmoQty <= 0) {
+      setErrorMsg('Informe uma quantidade válida de munições maior que zero.');
+      return;
+    }
+
+    if (linkAmmoDestinacao === 'Treinamento') {
+      const trimmedReason = linkAmmoReason.trim();
+      if (!trimmedReason || trimmedReason.length < 4) {
+        setErrorMsg('Ao escolher Destinação como Treinamento, informe qual treinamento será realizado em Motivo/Justificativa.');
+        return;
+      }
+    } else if (!linkAmmoReason.trim()) {
+      setErrorMsg('Informe o motivo / justificativa para a cautela de munições.');
+      return;
+    }
+
+    const wObj = weapons.find(
+      w => w.id === linkingAmmoCautela.weaponId || w.serialNumber === linkingAmmoCautela.weaponSerialNumber
+    );
+    const resolvedWeaponCaliber = linkingAmmoCautela.weaponCaliber || wObj?.caliber || '';
+    const isDirect = canAuthorize && linkAmmoDirectAuth;
+
+    if (isDirect) {
+      const stock = linkAmmoAvailableStocks.find(s => s.id === linkAmmoStockId);
+      if (!stock) {
+        setErrorMsg('Selecione o cofre e lote de munição compatível com o calibre do armamento.');
+        return;
+      }
+      if (linkAmmoQty > stock.quantity) {
+        setErrorMsg(`Quantidade informada (${linkAmmoQty}) excede o saldo do lote selecionado (${stock.quantity} un.).`);
+        return;
+      }
+
+      const calObj = calibers.find(c => c.id === stock.caliberId || c.name === stock.caliberId);
+      const calName = (calObj?.name || (stock as any).caliberName || resolvedWeaponCaliber || stock.caliberId || '').trim();
+
+      setLinkAmmoSubmitting(true);
+      const res = await storage.requestCautelaMunicao({
+        stockId: stock.id,
+        caliberId: stock.caliberId,
+        caliberName: calName,
+        quantity: linkAmmoQty,
+        fabricante: stock.fabricante,
+        tipoMunicao: stock.tipoMunicao || 'Operacional',
+        pesoMunicao: stock.pesoMunicao,
+        loteMunicao: stock.loteMunicao || 'Padrão',
+        anoFabricacao: stock.anoFabricacao,
+        destinacao: linkAmmoDestinacao || stock.destinacao,
+        vaultSpaceId: stock.vaultSpaceId,
+        departmentId: stock.departmentId || linkingAmmoCautela.departmentId || currentUser.departmentId,
+        unitId: stock.unitId || linkingAmmoCautela.unitId || currentUser.unitId,
+        linkedWeaponCautelaId: linkingAmmoCautela.id,
+        weaponId: linkingAmmoCautela.weaponId,
+        linkedWeaponSerialNumber: linkingAmmoCautela.weaponSerialNumber,
+        requesterId: linkingAmmoCautela.requesterId,
+        requesterName: linkingAmmoCautela.requesterName,
+        requesterMasp: linkingAmmoCautela.requesterMasp,
+        requesterCargo: linkingAmmoCautela.requesterCargo,
+        reason: linkAmmoReason.trim(),
+        seraDevolvida: linkAmmoSeraDevolvida,
+        directAuthorized: true,
+        armorerId: currentUser.id,
+        armorerName: currentUser.name,
+        armorerMasp: currentUser.masp,
+        actor: currentUser
+      });
+      setLinkAmmoSubmitting(false);
+
+      if (res.success) {
+        setSuccessMsg(
+          `Munição vinculada com sucesso à cautela ativa da arma ${linkingAmmoCautela.weaponModel} (Nº ${linkingAmmoCautela.weaponSerialNumber})!`
+        );
+        setLinkingAmmoCautela(null);
+        await onRefresh();
+        setLocalSyncTick(t => t + 1);
+      } else {
+        setErrorMsg(res.error || 'Erro ao vincular munição à cautela de arma.');
+      }
+      return;
+    }
+
+    // Fluxo Policial (ou Armeiro gerando solicitação pendente): envia solicitação vinculada aguardando confirmação do Armeiro
+    if (!linkAmmoTipo) {
+      setErrorMsg('Não há especificações de munição disponíveis para o calibre desta arma na unidade no momento.');
+      return;
+    }
+
+    const pesoClean = linkAmmoPeso === 'Padrão' ? '' : linkAmmoPeso;
+    const matchedStock = linkAmmoAvailableStocks.find(s => {
+      const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+      const sTipo = (s.tipoMunicao || cal?.tipo || 'Operacional').trim().toLowerCase();
+      const sPeso = (s.pesoMunicao || cal?.peso || '').trim().toLowerCase();
+      return (
+        sTipo === linkAmmoTipo.trim().toLowerCase() &&
+        (!pesoClean || sPeso === pesoClean.trim().toLowerCase())
+      );
+    }) || linkAmmoAvailableStocks[0];
+
+    const matchedCalObj = calibers.find(
+      c =>
+        c.id === matchedStock?.caliberId ||
+        c.name.trim().toLowerCase() === resolvedWeaponCaliber.trim().toLowerCase()
+    );
+
+    setLinkAmmoSubmitting(true);
+    const res = await storage.requestCautelaMunicao({
+      caliberId: matchedStock?.caliberId || matchedCalObj?.id || resolvedWeaponCaliber,
+      caliberName: matchedCalObj?.name || resolvedWeaponCaliber || 'Padrão',
+      quantity: linkAmmoQty,
+      tipoMunicao: linkAmmoTipo || 'Operacional',
+      pesoMunicao: pesoClean || null,
+      destinacao: linkAmmoDestinacao,
+      departmentId: linkingAmmoCautela.departmentId || currentUser.departmentId,
+      unitId: linkingAmmoCautela.unitId || currentUser.unitId,
+      linkedWeaponCautelaId: linkingAmmoCautela.id,
+      weaponId: linkingAmmoCautela.weaponId,
+      linkedWeaponSerialNumber: linkingAmmoCautela.weaponSerialNumber,
+      requesterId: linkingAmmoCautela.requesterId || currentUser.id,
+      requesterName: linkingAmmoCautela.requesterName || currentUser.name,
+      requesterMasp: linkingAmmoCautela.requesterMasp || currentUser.masp,
+      requesterCargo: linkingAmmoCautela.requesterCargo || currentUser.cargo,
+      reason: linkAmmoReason.trim(),
+      seraDevolvida: linkAmmoSeraDevolvida,
+      directAuthorized: false,
+      actor: currentUser
+    });
+    setLinkAmmoSubmitting(false);
+
+    if (res.success) {
+      setSuccessMsg(
+        `Solicitação de munição enviada para análise do Armeiro e vinculada à arma ativa ${linkingAmmoCautela.weaponModel} (Nº ${linkingAmmoCautela.weaponSerialNumber})!`
+      );
+      setLinkingAmmoCautela(null);
+      await onRefresh();
+      setLocalSyncTick(t => t + 1);
+    } else {
+      setErrorMsg(res.error || 'Erro ao enviar solicitação de munição vinculada à arma.');
     }
   };
 
@@ -8557,6 +8932,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                 : 'Cofre de Origem';
 
                               const ammoDetails = getRescuedAmmoDetails(cautela);
+                              const pendingLinkedAmmo = getPendingLinkedAmmoRequest(cautela);
                               const armorerInfo = getResolvedArmorer(cautela);
                               const requesterInfo = getResolvedRequester(cautela);
 
@@ -8810,13 +9186,47 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         </div>
                                       </div>
                                     </div>
+                                  ) : pendingLinkedAmmo ? (
+                                    <div className="p-3 bg-amber-950/25 border border-amber-600/50 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                      <div className="flex items-start sm:items-center space-x-2 text-amber-200">
+                                        <Clock className="w-4 h-4 text-amber-400 animate-pulse shrink-0 mt-0.5 sm:mt-0" />
+                                        <div>
+                                          <span className="font-bold text-amber-300 block sm:inline">
+                                            Solicitação de Munição Vinculada em Análise:
+                                          </span>{' '}
+                                          <span className="font-mono font-bold text-amber-100">
+                                            {pendingLinkedAmmo.quantity} un. ({pendingLinkedAmmo.caliberName} • {pendingLinkedAmmo.tipoMunicao || 'Operacional'}
+                                            {pendingLinkedAmmo.pesoMunicao ? ` • ${pendingLinkedAmmo.pesoMunicao}` : ''})
+                                          </span>
+                                          <span className="block text-[11px] text-amber-300/80">
+                                            Aguardando autorização e separação pelo Armeiro no módulo Cautela de Munições.
+                                          </span>
+                                        </div>
+                                      </div>
+                                      <span className="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40 self-start sm:self-center shrink-0">
+                                        Aguardando Armeiro
+                                      </span>
+                                    </div>
                                   ) : (
-                                    <div className="p-2.5 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-xs flex items-center justify-between text-slate-400">
+                                    <div className="p-2.5 bg-slate-950/50 border border-dashed border-slate-800 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-slate-400">
                                       <span className="flex items-center space-x-1.5">
-                                        <Disc className="w-3.5 h-3.5 text-slate-600" />
+                                        <Disc className="w-3.5 h-3.5 text-slate-600 shrink-0" />
                                         <span>Munições Associadas: <strong className="text-slate-300">Nenhuma munição vinculada</strong> (Apenas arma e carregadores)</span>
                                       </span>
-                                      <span className="text-[11px] font-mono text-slate-500">0 un.</span>
+                                      <div className="flex items-center gap-2 self-end sm:self-center">
+                                        <span className="text-[11px] font-mono text-slate-500">0 un.</span>
+                                        {!isDevPendente && cautela.status === 'AUTORIZADA' && (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleOpenLinkAmmoModal(cautela)}
+                                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm"
+                                            title="Solicitar ou vincular munição a qualquer momento para esta cautela de arma ativa"
+                                          >
+                                            <Disc className="w-3.5 h-3.5" />
+                                            <span>{canAuthorize ? 'Vincular / Acautelar Munição' : 'Solicitar Munição para esta Arma'}</span>
+                                          </button>
+                                        )}
+                                      </div>
                                     </div>
                                   )}
 
@@ -11995,6 +12405,257 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             </div>
           </div>
         )}
+
+        {/* Modal: Solicitar / Vincular Munição a Cautela de Arma Ativa */}
+        {linkingAmmoCautela && (() => {
+          const reqInfo = getResolvedRequester(linkingAmmoCautela);
+          const isDirect = canAuthorize && linkAmmoDirectAuth;
+          return (
+            <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-start justify-center p-4 pt-10 sm:pt-14 z-[60] overflow-y-auto">
+              <form
+                onSubmit={handleSubmitLinkAmmo}
+                className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 w-full max-w-xl shadow-2xl space-y-4 my-auto mb-8"
+              >
+                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                  <div className="flex items-center space-x-2.5">
+                    <div className="p-2 bg-amber-500/15 border border-amber-500/30 rounded-xl text-amber-400">
+                      <Disc className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-100">
+                        {isDirect ? 'Vincular / Acautelar Munição à Arma Ativa' : 'Solicitar Munição para Arma Ativa'}
+                      </h3>
+                      <p className="text-xs font-mono text-amber-400 font-bold">
+                        {linkingAmmoCautela.weaponModel} • Nº {linkingAmmoCautela.weaponSerialNumber} ({linkingAmmoCautela.weaponCaliber || 'Calibre'})
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setLinkingAmmoCautela(null)}
+                    className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs space-y-1">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Policial Detentor da Arma:</span>
+                    <strong className="text-slate-100">{reqInfo.name} (MASP: {reqInfo.masp})</strong>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">Calibre Compatível:</span>
+                    <strong className="text-amber-300 font-mono">{linkingAmmoCautela.weaponCaliber || 'Padrão'}</strong>
+                  </div>
+                </div>
+
+                {canAuthorize && (
+                  <label className="flex items-center space-x-2 text-xs text-slate-300 cursor-pointer bg-slate-950/70 p-3 rounded-xl border border-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={linkAmmoDirectAuth}
+                      onChange={e => setLinkAmmoDirectAuth(e.target.checked)}
+                      className="rounded border-slate-700 text-amber-500 focus:ring-amber-500"
+                    />
+                    <span className="font-semibold">
+                      Confirmar entrega imediata, vincular à arma e subtrair do cofre agora
+                    </span>
+                  </label>
+                )}
+
+                {/* Modalidade (Passiva de Devolução x Consumo) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setLinkAmmoSeraDevolvida(true)}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      linkAmmoSeraDevolvida
+                        ? 'bg-emerald-950/35 border-emerald-500/60 ring-1 ring-emerald-500/40'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-slate-100">Passiva de Devolução</div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Poderá ser devolvida com a arma ou separadamente ao cofre.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLinkAmmoSeraDevolvida(false)}
+                    className={`p-3 rounded-xl border text-left transition ${
+                      !linkAmmoSeraDevolvida
+                        ? 'bg-orange-950/35 border-orange-500/60 ring-1 ring-orange-500/40'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="text-xs font-bold text-slate-100">Retirada Permanente / Consumo</div>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Destinada a uso definitivo (treinamento / instrução).
+                    </p>
+                  </button>
+                </div>
+
+                {isDirect ? (
+                  <div>
+                    <label className="block text-xs font-bold text-amber-400 uppercase mb-1.5">
+                      Cofre e Lote Disponível no Calibre da Arma *
+                    </label>
+                    <select
+                      value={linkAmmoStockId}
+                      onChange={e => setLinkAmmoStockId(e.target.value)}
+                      required
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="">-- Selecione o Lote / Cofre de Munições --</option>
+                      {linkAmmoAvailableStocks.map(s => {
+                        const v = vaultSpaces.find(sp => sp.id === s.vaultSpaceId);
+                        const cal = calibers.find(c => c.id === s.caliberId || c.name === s.caliberId);
+                        const calName = cal?.name || (s as any).caliberName || linkingAmmoCautela.weaponCaliber || s.caliberId;
+                        return (
+                          <option key={s.id} value={s.id}>
+                            Cofre: {v?.code || 'Paiol'} • {calName} ({s.tipoMunicao || 'Operacional'}
+                            {s.pesoMunicao ? ` • ${s.pesoMunicao}` : ''}) • Lote: {s.loteMunicao || 'Padrão'} — Saldo: {s.quantity} un.
+                          </option>
+                        );
+                      })}
+                    </select>
+                    {linkAmmoAvailableStocks.length === 0 && (
+                      <p className="text-[11px] text-rose-400 mt-1">
+                        Não há estoque disponível no calibre {linkingAmmoCautela.weaponCaliber} para entrega imediata.
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                        Tipo Disponível *
+                      </label>
+                      <select
+                        value={linkAmmoTipo}
+                        onChange={e => {
+                          setLinkAmmoTipo(e.target.value);
+                          setLinkAmmoPeso('');
+                        }}
+                        required
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="">-- Escolha o Tipo --</option>
+                        {linkAmmoAvailableTipos.map(t => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                        Peso Disponível {linkAmmoAvailablePesos.length > 0 ? '*' : ''}
+                      </label>
+                      <select
+                        value={linkAmmoPeso}
+                        onChange={e => setLinkAmmoPeso(e.target.value)}
+                        disabled={!linkAmmoTipo || linkAmmoAvailablePesos.length === 0}
+                        required={linkAmmoAvailablePesos.length > 0}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                      >
+                        <option value="">{linkAmmoAvailablePesos.length > 0 ? '-- Escolha o Peso --' : 'Padrão'}</option>
+                        {linkAmmoAvailablePesos.map(p => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {linkAmmoAvailableTipos.length === 0 && (
+                      <p className="sm:col-span-2 text-[11px] text-rose-400">
+                        Não há munições disponíveis na unidade para o calibre {linkingAmmoCautela.weaponCaliber} no momento.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                      Quantidade de Munições *
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={linkAmmoQty}
+                      onChange={e => setLinkAmmoQty(Math.max(1, parseInt(e.target.value || '1', 10)))}
+                      required
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 font-mono font-bold focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                      Destinação *
+                    </label>
+                    <select
+                      value={linkAmmoDestinacao}
+                      onChange={e => {
+                        const v = e.target.value;
+                        setLinkAmmoDestinacao(v);
+                        if (v === 'Treinamento') setLinkAmmoSeraDevolvida(false);
+                      }}
+                      required
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="Operacional / Defesa">Operacional / Defesa</option>
+                      <option value="Treinamento">Treinamento</option>
+                      <option value="Curso Policial / Instrução">Curso Policial / Instrução</option>
+                      <option value="Missão Especial">Missão Especial</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                    Motivo / Justificativa *
+                  </label>
+                  <input
+                    type="text"
+                    value={linkAmmoReason}
+                    onChange={e => setLinkAmmoReason(e.target.value)}
+                    required
+                    placeholder="Informe o motivo do pedido ou treinamento..."
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs sm:text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setLinkingAmmoCautela(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-xl"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={
+                      linkAmmoSubmitting ||
+                      (isDirect ? linkAmmoAvailableStocks.length === 0 : linkAmmoAvailableTipos.length === 0)
+                    }
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>
+                      {linkAmmoSubmitting
+                        ? 'Processando...'
+                        : isDirect
+                          ? 'Vincular e Entregar Munição'
+                          : 'Enviar Solicitação Vinculada'}
+                    </span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          );
+        })()}
       </div>
   );
 };

@@ -10637,7 +10637,15 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
       LEFT JOIN ARMAS arm_ref ON arm_ref.ID_ARMAS = a.ARMA_ID_ACAUTELAR_ARMAS
       LEFT JOIN ACAUTELAR_MUNICOES m ON (
         (a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS IS NOT NULL AND m.ID_ACAUTELAR_MUNICOES = a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS)
-        OR (a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS IS NULL AND m.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = a.ID_ACAUTELAR_ARMAS)
+        OR (
+          a.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS IS NULL
+          AND m.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = a.ID_ACAUTELAR_ARMAS
+          AND (
+            m.STATUS_ACAUTELAR_MUNICOES IN ('AUTORIZADA', 'DEVOLUCAO_PENDENTE')
+            OR (a.STATUS_ACAUTELAR_ARMAS = 'PENDENTE' AND m.STATUS_ACAUTELAR_MUNICOES = 'PENDENTE')
+            OR (a.STATUS_ACAUTELAR_ARMAS IN ('DEVOLVIDA', 'RECUSADA') AND m.STATUS_ACAUTELAR_MUNICOES IN ('DEVOLVIDA', 'CONSUMIDA'))
+          )
+        )
       )
       WHERE 1=1
     `;
@@ -13366,6 +13374,10 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
       vaultSpaceId,
       departmentId,
       unitId,
+      linkedWeaponCautelaId,
+      cautelaArmaId,
+      weaponId,
+      linkedWeaponSerialNumber,
       requesterId,
       requesterName,
       requesterMasp,
@@ -13392,6 +13404,45 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
     const initialStatus = isDirect ? 'AUTORIZADA' : 'PENDENTE';
     const isWillReturn = seraDevolvida !== undefined ? (seraDevolvida ? 1 : 0) : 1;
 
+    // Caso esteja vinculando a uma cautela de arma ativa
+    const rawLinkedWeaponCautelaId = linkedWeaponCautelaId || cautelaArmaId || null;
+    let linkedWeaponCautela: any = null;
+    if (rawLinkedWeaponCautelaId) {
+      linkedWeaponCautela = await findCautelaArmaRecord(pool, String(rawLinkedWeaponCautelaId), {
+        weaponId,
+        weaponSerialNumber: linkedWeaponSerialNumber
+      });
+      if (!linkedWeaponCautela) {
+        return res.status(404).json({ error: 'Cautela de armamento ativa selecionada para vínculo não foi encontrada.' });
+      }
+      const wStatus = String(linkedWeaponCautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase();
+      if (wStatus !== 'AUTORIZADA') {
+        return res.status(400).json({ error: 'Somente cautelas de armamento ativas (Autorizadas) podem receber vínculo de munição.' });
+      }
+
+      const [existingLinkedMunRows]: any = await pool.query(
+        `SELECT ID_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES
+         FROM ACAUTELAR_MUNICOES
+         WHERE (CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = ? OR (? IS NOT NULL AND ID_ACAUTELAR_MUNICOES = ?))
+           AND STATUS_ACAUTELAR_MUNICOES IN ('PENDENTE', 'AUTORIZADA', 'DEVOLUCAO_PENDENTE')
+         LIMIT 1`,
+        [
+          linkedWeaponCautela.ID_ACAUTELAR_ARMAS,
+          linkedWeaponCautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS || null,
+          linkedWeaponCautela.CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS || null
+        ]
+      );
+      if (existingLinkedMunRows && existingLinkedMunRows.length > 0) {
+        const existingSt = existingLinkedMunRows[0].STATUS_ACAUTELAR_MUNICOES;
+        return res.status(400).json({
+          error:
+            existingSt === 'PENDENTE'
+              ? 'Esta cautela de arma já possui uma solicitação de munição vinculada aguardando análise do Armeiro.'
+              : 'Esta cautela de arma já possui munições ativas vinculadas.'
+        });
+      }
+    }
+
     let effectiveVaultId = vaultSpaceId || null;
     let resolvedStock: any = null;
     if (isDirect && stockId) {
@@ -13402,6 +13453,11 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
           effectiveVaultId = resolvedStock.COFRE_ID_ESTOQUE_MUNICOES || effectiveVaultId;
         }
       } catch (_) {}
+      if (resolvedStock && Number(resolvedStock.QUANTIDADE_ESTOQUE_MUNICOES || 0) < qty) {
+        return res.status(400).json({
+          error: `Saldo insuficiente no lote selecionado (${Number(resolvedStock.QUANTIDADE_ESTOQUE_MUNICOES || 0)} un. disponíveis para ${qty} un.).`
+        });
+      }
     }
 
     const finalFab = resolvedStock?.FABRICANTE_MUNICAO || resolvedStock?.FABRICANTE_ESTOQUE_MUNICOES || fabricante || null;
@@ -13410,44 +13466,137 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
     const finalLote = resolvedStock?.LOTE_MUNICAO || resolvedStock?.LOTE_ESTOQUE_MUNICOES || loteMunicao || (isDirect ? 'Padrão' : null);
     const finalAno = resolvedStock?.ANO_FABRICACAO_MUNICAO || resolvedStock?.ANO_FABRICACAO_ESTOQUE_MUNICOES || anoFabricacao || null;
     const finalDest = destinacao || resolvedStock?.DESTINACAO_MUNICAO || resolvedStock?.DESTINACAO_ESTOQUE_MUNICOES || null;
+    const effectiveDeptId = departmentId || resolvedStock?.DEPARTAMENTO_ID_ESTOQUE_MUNICOES || linkedWeaponCautela?.DEPARTAMENTO_ID_ACAUTELAR_ARMAS || null;
+    const effectiveUnitId = unitId || resolvedStock?.UNIDADE_ID_ESTOQUE_MUNICOES || linkedWeaponCautela?.UNIDADE_ID_ACAUTELAR_ARMAS || null;
+    const effectiveLinkedWeaponCautelaId = linkedWeaponCautela?.ID_ACAUTELAR_ARMAS || null;
+    const effectiveWeaponId = weaponId || linkedWeaponCautela?.ARMA_ID_ACAUTELAR_ARMAS || null;
+    const effectiveWeaponSerial = linkedWeaponSerialNumber || linkedWeaponCautela?.NUMERO_SERIE_ACAUTELAR_ARMAS || null;
 
-    await pool.query(`
-      INSERT INTO ACAUTELAR_MUNICOES (
-        ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
-        QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
-        FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES, PESO_MUNICAO_ACAUTELAR_MUNICOES, ANO_FABRICACAO_ACAUTELAR_MUNICOES, DESTINACAO_ACAUTELAR_MUNICOES,
-        COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
-        REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
-        REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
-        DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
-        ARMEIRO_ID_ACAUTELAR_MUNICOES, ARMEIRO_NOME_ACAUTELAR_MUNICOES, ARMEIRO_MASP_ACAUTELAR_MUNICOES, DATA_AUTORIZACAO_ACAUTELAR_MUNICOES,
-        DATA_CRIACAO_ACAUTELAR_MUNICOES
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, NOW())
-    `, [
-      id,
-      caliberId || resolvedStock?.CALIBRE_ID_ESTOQUE_MUNICOES || null,
-      caliberName,
-      qty,
-      finalTipo,
-      finalLote,
-      finalFab,
-      finalPeso,
-      finalAno,
-      finalDest,
-      effectiveVaultId,
-      departmentId || null,
-      unitId || null,
-      requesterId,
-      requesterName,
-      requesterMasp,
-      requesterCargo || null,
-      reason || (isWillReturn ? 'Uso em serviço policial operacional' : 'Baixa Definitiva (Não retornará ao cofre)'),
-      initialStatus,
-      isWillReturn,
-      isDirect && armorer ? armorer.id : null,
-      isDirect && armorer ? armorer.name : null,
-      isDirect && armorer ? armorer.masp : null
-    ]);
+    const baseReason = (reason || (isWillReturn ? 'Uso em serviço policial operacional' : 'Baixa Definitiva (Não retornará ao cofre)')).trim();
+    const finalReason = linkedWeaponCautela && !baseReason.includes(String(linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS || ''))
+      ? `${baseReason} — Vinculada à arma ${linkedWeaponCautela.MODELO_ACAUTELAR_ARMAS || ''} Nº ${linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS || ''}`.trim()
+      : baseReason;
+
+    try {
+      await pool.query(`
+        INSERT INTO ACAUTELAR_MUNICOES (
+          ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
+          QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+          FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES, PESO_MUNICAO_ACAUTELAR_MUNICOES, ANO_FABRICACAO_ACAUTELAR_MUNICOES, DESTINACAO_ACAUTELAR_MUNICOES,
+          COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
+          CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES, ARMA_ID_ACAUTELAR_MUNICOES, NUMERO_SERIE_ARMA_ACAUTELAR_MUNICOES,
+          REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
+          REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
+          DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+          ARMEIRO_ID_ACAUTELAR_MUNICOES, ARMEIRO_NOME_ACAUTELAR_MUNICOES, ARMEIRO_MASP_ACAUTELAR_MUNICOES, DATA_AUTORIZACAO_ACAUTELAR_MUNICOES,
+          DATA_CRIACAO_ACAUTELAR_MUNICOES
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, NOW())
+      `, [
+        id,
+        caliberId || resolvedStock?.CALIBRE_ID_ESTOQUE_MUNICOES || null,
+        caliberName,
+        qty,
+        finalTipo,
+        finalLote,
+        finalFab,
+        finalPeso,
+        finalAno,
+        finalDest,
+        effectiveVaultId,
+        effectiveDeptId,
+        effectiveUnitId,
+        effectiveLinkedWeaponCautelaId,
+        effectiveWeaponId,
+        effectiveWeaponSerial,
+        requesterId,
+        requesterName,
+        requesterMasp,
+        requesterCargo || null,
+        finalReason,
+        initialStatus,
+        isWillReturn,
+        isDirect && armorer ? armorer.id : null,
+        isDirect && armorer ? armorer.name : null,
+        isDirect && armorer ? armorer.masp : null
+      ]);
+    } catch (_colErr) {
+      await pool.query(`
+        INSERT INTO ACAUTELAR_MUNICOES (
+          ID_ACAUTELAR_MUNICOES, CALIBRE_ID_ACAUTELAR_MUNICOES, CALIBRE_NOME_ACAUTELAR_MUNICOES,
+          QUANTIDADE_SOLICITADA_ACAUTELAR_MUNICOES, TIPO_MUNICAO_ACAUTELAR_MUNICOES, LOTE_MUNICAO_ACAUTELAR_MUNICOES,
+          FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES, PESO_MUNICAO_ACAUTELAR_MUNICOES, ANO_FABRICACAO_ACAUTELAR_MUNICOES, DESTINACAO_ACAUTELAR_MUNICOES,
+          COFRE_ID_ACAUTELAR_MUNICOES, DEPARTAMENTO_ID_ACAUTELAR_MUNICOES, UNIDADE_ID_ACAUTELAR_MUNICOES,
+          CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES,
+          REQUERENTE_ID_ACAUTELAR_MUNICOES, REQUERENTE_NOME_ACAUTELAR_MUNICOES,
+          REQUERENTE_MASP_ACAUTELAR_MUNICOES, REQUERENTE_CARGO_ACAUTELAR_MUNICOES, MOTIVO_USO_ACAUTELAR_MUNICOES,
+          DATA_SOLICITACAO_ACAUTELAR_MUNICOES, STATUS_ACAUTELAR_MUNICOES, SERA_DEVOLVIDA_ACAUTELAR_MUNICOES,
+          ARMEIRO_ID_ACAUTELAR_MUNICOES, ARMEIRO_NOME_ACAUTELAR_MUNICOES, ARMEIRO_MASP_ACAUTELAR_MUNICOES, DATA_AUTORIZACAO_ACAUTELAR_MUNICOES,
+          DATA_CRIACAO_ACAUTELAR_MUNICOES
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, NOW())
+      `, [
+        id,
+        caliberId || resolvedStock?.CALIBRE_ID_ESTOQUE_MUNICOES || null,
+        caliberName,
+        qty,
+        finalTipo,
+        finalLote,
+        finalFab,
+        finalPeso,
+        finalAno,
+        finalDest,
+        effectiveVaultId,
+        effectiveDeptId,
+        effectiveUnitId,
+        effectiveLinkedWeaponCautelaId,
+        requesterId,
+        requesterName,
+        requesterMasp,
+        requesterCargo || null,
+        finalReason,
+        initialStatus,
+        isWillReturn,
+        isDirect && armorer ? armorer.id : null,
+        isDirect && armorer ? armorer.name : null,
+        isDirect && armorer ? armorer.masp : null
+      ]);
+    }
+
+    // Se autorizada diretamente e vinculada a uma cautela de arma ativa, sincroniza ACAUTELAR_ARMAS
+    if (isDirect && linkedWeaponCautela) {
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS SET
+             CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ?,
+             MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_CALIBRE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_TIPO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_PESO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_LOTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS = ?,
+             DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [
+            id,
+            qty,
+            caliberName,
+            finalFab || 'CBC',
+            finalTipo || 'Operacional',
+            finalPeso || null,
+            finalLote || 'Lote Unidade',
+            finalDest || 'Defesa',
+            isWillReturn,
+            linkedWeaponCautela.ID_ACAUTELAR_ARMAS
+          ]
+        );
+      } catch (_wLinkErr) {
+        await pool.query(
+          'UPDATE ACAUTELAR_ARMAS SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ? WHERE ID_ACAUTELAR_ARMAS = ?',
+          [id, linkedWeaponCautela.ID_ACAUTELAR_ARMAS]
+        );
+      }
+    }
 
     // Se autorizada diretamente pelo Armeiro, subtrai imediatamente do cofre referido e registra movimentação
     if (isDirect && (stockId || effectiveVaultId)) {
@@ -13479,8 +13628,8 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
           OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
          VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
         [
-          movId, caliberId || resolvedStock?.CALIBRE_ID_ESTOQUE_MUNICOES || 'padrao', qty, departmentId || null, unitId || null, effectiveVaultId || 'COFRE_PADRAO',
-          `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp}) [${isWillReturn ? 'Com Retorno' : 'Baixa Definitiva'}]`,
+          movId, caliberId || resolvedStock?.CALIBRE_ID_ESTOQUE_MUNICOES || 'padrao', qty, effectiveDeptId, effectiveUnitId, effectiveVaultId || 'COFRE_PADRAO',
+          `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp})${linkedWeaponCautela ? ` [Vinculada à arma ${linkedWeaponCautela.MODELO_ACAUTELAR_ARMAS} Nº ${linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS}]` : ''} [${isWillReturn ? 'Com Retorno' : 'Baixa Definitiva'}]`,
           finalFab, finalTipo, finalPeso, finalLote, finalAno, finalDest,
           requesterId, requesterName, requesterMasp,
           `Cautela direta autorizada pelo armeiro ${armorer?.name || ''}`,
@@ -13492,7 +13641,7 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
     await insertAuditLog(
       'Munições',
       isDirect ? 'Acautelamento Direto' : 'Solicitar',
-      `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela de'} ${qty} munições calibre ${caliberName} [${finalTipo || 'Operacional'}${finalPeso ? ` - ${finalPeso}` : ''}] para ${requesterName}${isWillReturn ? '' : ' (Baixa Definitiva)'}`,
+      `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela de'} ${qty} munições calibre ${caliberName} [${finalTipo || 'Operacional'}${finalPeso ? ` - ${finalPeso}` : ''}] para ${requesterName}${linkedWeaponCautela ? ` vinculada à arma ativa ${linkedWeaponCautela.MODELO_ACAUTELAR_ARMAS} (Nº ${linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS})` : ''}${isWillReturn ? '' : ' (Baixa Definitiva)'}`,
       armorer || { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
       req.ip
     );
@@ -13506,7 +13655,7 @@ apiRouter.post('/cautelas-municoes', async (req: Request, res: Response) => {
 apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { armorerId, armorerName, armorerMasp, vaultSpaceId, stockId, seraDevolvida, notes, actor } = req.body;
+    const { armorerId, armorerName, armorerMasp, vaultSpaceId, stockId, seraDevolvida, notes, linkedWeaponCautelaId, actor } = req.body;
     const pool = getPool();
 
     const cautela = await findCautelaMunicaoRecord(pool, id, req.body);
@@ -13530,6 +13679,12 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
       }
     }
 
+    if (!wasAlreadyAuthorized && stockDetails && Number(stockDetails.QUANTIDADE_ESTOQUE_MUNICOES || 0) < qty) {
+      return res.status(400).json({
+        error: `Saldo insuficiente no lote selecionado (${Number(stockDetails.QUANTIDADE_ESTOQUE_MUNICOES || 0)} un. disponíveis para ${qty} un.).`
+      });
+    }
+
     const stLote = stockDetails?.LOTE_MUNICAO || stockDetails?.LOTE_ESTOQUE_MUNICOES || null;
     const stFab = stockDetails?.FABRICANTE_MUNICAO || stockDetails?.FABRICANTE_ESTOQUE_MUNICOES || null;
     const stTipo = stockDetails?.TIPO_MUNICAO || stockDetails?.TIPO_ESTOQUE_MUNICOES || null;
@@ -13537,10 +13692,17 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
     const stAno = stockDetails?.ANO_FABRICACAO_MUNICAO || stockDetails?.ANO_FABRICACAO_ESTOQUE_MUNICOES || null;
     const stDest = stockDetails?.DESTINACAO_MUNICAO || stockDetails?.DESTINACAO_ESTOQUE_MUNICOES || null;
 
+    const effectiveLinkedWeaponCautelaId = linkedWeaponCautelaId || cautela.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES || null;
+    let linkedWeaponCautela: any = null;
+    if (effectiveLinkedWeaponCautelaId) {
+      linkedWeaponCautela = await findCautelaArmaRecord(pool, String(effectiveLinkedWeaponCautelaId), req.body);
+    }
+
     // 1. Autoriza na tabela ACAUTELAR_MUNICOES
     await pool.query(`
       UPDATE ACAUTELAR_MUNICOES SET
         STATUS_ACAUTELAR_MUNICOES = 'AUTORIZADA',
+        CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES = COALESCE(?, CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES),
         ARMEIRO_ID_ACAUTELAR_MUNICOES = ?,
         ARMEIRO_NOME_ACAUTELAR_MUNICOES = ?,
         ARMEIRO_MASP_ACAUTELAR_MUNICOES = ?,
@@ -13557,6 +13719,7 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
         DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
       WHERE ID_ACAUTELAR_MUNICOES = ?
     `, [
+      linkedWeaponCautela?.ID_ACAUTELAR_ARMAS || effectiveLinkedWeaponCautelaId,
       armorer.id, armorer.name, armorer.masp,
       effectiveVaultId,
       stLote,
@@ -13569,6 +13732,50 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
       notes || null,
       actualAmmoId
     ]);
+
+    // 1.b Se esta munição é vinculada a uma cautela de arma ativa, atualiza ACAUTELAR_ARMAS com o vínculo e dados da munição
+    if (linkedWeaponCautela && String(linkedWeaponCautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase() === 'AUTORIZADA') {
+      const resolvedFab = stFab || cautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || 'CBC';
+      const resolvedTipo = stTipo || cautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || 'Operacional';
+      const resolvedPeso = stPeso || cautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null;
+      const resolvedLote = stLote || cautela.LOTE_MUNICAO_ACAUTELAR_MUNICOES || 'Lote Unidade';
+      const resolvedDest = stDest || cautela.DESTINACAO_ACAUTELAR_MUNICOES || 'Defesa';
+      const resolvedCalName = cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES || linkedWeaponCautela.CALIBRE_ACAUTELAR_ARMAS || null;
+
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS SET
+             CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ?,
+             MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_CALIBRE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_TIPO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_PESO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_LOTE_ACAUTELAR_ARMAS = ?,
+             MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = ?,
+             MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS = ?,
+             DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [
+            actualAmmoId,
+            qty,
+            resolvedCalName,
+            resolvedFab,
+            resolvedTipo,
+            resolvedPeso,
+            resolvedLote,
+            resolvedDest,
+            seraDev,
+            linkedWeaponCautela.ID_ACAUTELAR_ARMAS
+          ]
+        );
+      } catch (_wSyncErr) {
+        await pool.query(
+          'UPDATE ACAUTELAR_ARMAS SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ? WHERE ID_ACAUTELAR_ARMAS = ?',
+          [actualAmmoId, linkedWeaponCautela.ID_ACAUTELAR_ARMAS]
+        );
+      }
+    }
 
     // 2. Sempre que confirmada pelo armeiro para retirada, subtrai do referido cofre (evitando duplicidade se já autorizada)
     if (!wasAlreadyAuthorized && qty > 0) {
@@ -13607,7 +13814,7 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
           cautela.DEPARTAMENTO_ID_ACAUTELAR_MUNICOES || null,
           cautela.UNIDADE_ID_ACAUTELAR_MUNICOES || null,
           effectiveVaultId || 'COFRE_PADRAO',
-          `Cautela de Munição - Policial ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES} (MASP ${cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES}) - ${seraDev ? 'Irá devolver' : 'Retirada permanente'}`,
+          `Cautela de Munição - Policial ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES} (MASP ${cautela.REQUERENTE_MASP_ACAUTELAR_MUNICOES})${linkedWeaponCautela ? ` [Vinculada à arma ${linkedWeaponCautela.MODELO_ACAUTELAR_ARMAS} Nº ${linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS}]` : ''} - ${seraDev ? 'Irá devolver' : 'Retirada permanente'}`,
           stFab || cautela.FABRICANTE_MUNICAO_ACAUTELAR_MUNICOES || null,
           stTipo || cautela.TIPO_MUNICAO_ACAUTELAR_MUNICOES || null,
           stPeso || cautela.PESO_MUNICAO_ACAUTELAR_MUNICOES || null,
@@ -13627,7 +13834,7 @@ apiRouter.put('/cautelas-municoes/:id/autorizar', async (req: Request, res: Resp
     await insertAuditLog(
       'Munições',
       'Aprovar',
-      `Armeiro ${armorer.name} (MASP ${armorer.masp}) autorizou retirada de ${qty} munições calibre ${cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES} para ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES}`,
+      `Armeiro ${armorer.name} (MASP ${armorer.masp}) autorizou retirada de ${qty} munições calibre ${cautela.CALIBRE_NOME_ACAUTELAR_MUNICOES} para ${cautela.REQUERENTE_NOME_ACAUTELAR_MUNICOES}${linkedWeaponCautela ? ` vinculada à arma ativa ${linkedWeaponCautela.MODELO_ACAUTELAR_ARMAS} (Nº ${linkedWeaponCautela.NUMERO_SERIE_ACAUTELAR_ARMAS})` : ''}`,
       armorer,
       req.ip
     );
@@ -13658,6 +13865,19 @@ apiRouter.put('/cautelas-municoes/:id/recusar', async (req: Request, res: Respon
         DATA_ATUALIZACAO_ACAUTELAR_MUNICOES = NOW()
       WHERE ID_ACAUTELAR_MUNICOES = ?
     `, [armorer.id, armorer.name, armorer.masp, notes || null, actualAmmoId]);
+
+    if (cautela?.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES) {
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS
+           SET CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = NULL,
+               MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = 0
+           WHERE ID_ACAUTELAR_ARMAS = ?
+             AND CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = ?`,
+          [cautela.CAUTELA_ARMA_ID_ACAUTELAR_MUNICOES, actualAmmoId]
+        );
+      } catch (_) {}
+    }
 
     await insertAuditLog(
       'Munições',
@@ -14031,6 +14251,37 @@ apiRouter.put('/cautelas-municoes/:id/devolver', async (req: Request, res: Respo
           armorer.name
         ]
       );
+    }
+
+    // 2.b Se as munições foram devolvidas isoladamente (sem devolver o armamento), libera a cautela de arma ativa para poder receber nova solicitação/vínculo no futuro
+    if (!wantsJointWeaponReturn && linkedWeaponCautela && String(linkedWeaponCautela.STATUS_ACAUTELAR_ARMAS || '').trim().toUpperCase() === 'AUTORIZADA') {
+      try {
+        await pool.query(
+          `UPDATE ACAUTELAR_ARMAS SET
+             CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = 0,
+             MUNICAO_CALIBRE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_FABRICANTE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_TIPO_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_PESO_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_LOTE_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_DESTINACAO_ACAUTELAR_ARMAS = NULL,
+             MUNICAO_SERA_DEVOLVIDA_ACAUTELAR_ARMAS = NULL,
+             DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
+           WHERE ID_ACAUTELAR_ARMAS = ?`,
+          [linkedWeaponCautela.ID_ACAUTELAR_ARMAS]
+        );
+      } catch (_wClrErr) {
+        try {
+          await pool.query(
+            `UPDATE ACAUTELAR_ARMAS SET
+               CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS = NULL,
+               MUNICAO_QUANTIDADE_ACAUTELAR_ARMAS = 0
+             WHERE ID_ACAUTELAR_ARMAS = ?`,
+            [linkedWeaponCautela.ID_ACAUTELAR_ARMAS]
+          );
+        } catch (_) {}
+      }
     }
 
     // 3. Caso a arma vinculada seja devolvida em conjunto, baixa ambas as cautelas, retorna arma ao cofre selecionado e soma tiros em ARMAS.TIROS_DISPARADOS_ARMAS

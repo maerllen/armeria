@@ -4349,10 +4349,11 @@ class StorageService {
 
   public async authorizeCautelaMunicao(
     id: string, 
-    options?: string | { vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; notes?: string }
+    options?: string | { vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; notes?: string; linkedWeaponCautelaId?: string }
   ): Promise<{ success: boolean; error?: string }> {
     const opts = typeof options === 'string' ? { vaultSpaceId: options } : (options || {});
     const target = (this.state.cautelasMunicoes || []).find(c => c.id === id);
+    const linkedWeaponId = opts.linkedWeaponCautelaId || target?.linkedWeaponCautelaId;
     if (target) {
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
@@ -4361,6 +4362,20 @@ class StorageService {
       target.armorerMasp = this.state.currentUser?.masp;
       if (opts.seraDevolvida !== undefined) {
         target.seraDevolvida = opts.seraDevolvida;
+      }
+      if (linkedWeaponId) {
+        const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === linkedWeaponId);
+        if (linkedWeapon && linkedWeapon.status === 'AUTORIZADA') {
+          linkedWeapon.linkedAmmoCautelaId = target.id;
+          linkedWeapon.ammoQuantity = target.quantity;
+          linkedWeapon.ammoCaliberName = target.caliberName;
+          linkedWeapon.ammoFabricante = target.fabricante;
+          linkedWeapon.ammoTipo = target.tipoMunicao;
+          linkedWeapon.ammoPeso = target.pesoMunicao;
+          linkedWeapon.ammoLote = target.loteMunicao;
+          linkedWeapon.ammoDestinacao = target.destinacao;
+          linkedWeapon.ammoSeraDevolvida = target.seraDevolvida;
+        }
       }
     }
 
@@ -4373,6 +4388,7 @@ class StorageService {
           stockId: opts.stockId,
           seraDevolvida: opts.seraDevolvida,
           notes: opts.notes,
+          linkedWeaponCautelaId: linkedWeaponId,
           armorerId: this.state.currentUser?.id,
           armorerName: this.state.currentUser?.name,
           armorerMasp: this.state.currentUser?.masp,
@@ -4396,6 +4412,13 @@ class StorageService {
       target.armorerName = this.state.currentUser?.name;
       target.armorerMasp = this.state.currentUser?.masp;
       target.observations = notes || '';
+      if (target.linkedWeaponCautelaId) {
+        const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === target.linkedWeaponCautelaId);
+        if (linkedWeapon && linkedWeapon.linkedAmmoCautelaId === target.id) {
+          linkedWeapon.linkedAmmoCautelaId = undefined;
+          linkedWeapon.ammoQuantity = 0;
+        }
+      }
     }
 
     try {
@@ -4501,6 +4524,20 @@ class StorageService {
             if (!wasAlreadyDev && returnData.hadShots && Number(returnData.shotsFired || 0) > 0) {
               weap.shotCount = Number(weap.shotCount || 0) + Number(returnData.shotsFired || 0);
             }
+          }
+        } else if (target.linkedWeaponCautelaId) {
+          // Devolução isolada somente das munições: limpa vínculo ativo da arma para permitir nova cautela de munição posteriormente
+          const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === target.linkedWeaponCautelaId);
+          if (linkedWeapon && linkedWeapon.status === 'AUTORIZADA') {
+            linkedWeapon.linkedAmmoCautelaId = undefined;
+            linkedWeapon.ammoQuantity = 0;
+            linkedWeapon.ammoFabricante = undefined;
+            linkedWeapon.ammoTipo = undefined;
+            linkedWeapon.ammoPeso = undefined;
+            linkedWeapon.ammoLote = undefined;
+            linkedWeapon.ammoDestinacao = undefined;
+            linkedWeapon.ammoCaliberName = undefined;
+            linkedWeapon.ammoSeraDevolvida = undefined;
           }
         }
       }
