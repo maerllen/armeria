@@ -258,21 +258,25 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
     desc
   }) => (
     <div
-      className="rounded-xl p-3 space-y-1"
-      style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}
+      className="rounded-xl p-3.5 space-y-1.5 shadow-xs"
+      style={{
+        backgroundColor: '#f8fafc',
+        border: '1.5px solid #94a3b8',
+        borderLeft: '4px solid #d97706'
+      }}
     >
       <div className="flex items-center gap-2">
         <span
-          className="text-[10px] font-mono font-black px-2 py-0.5 rounded"
-          style={{ backgroundColor: '#f59e0b', color: '#020617' }}
+          className="text-[11px] font-mono font-black px-2.5 py-0.5 rounded-md shadow-xs"
+          style={{ backgroundColor: '#d97706', color: '#ffffff' }}
         >
           {num}
         </span>
-        <span className="text-xs font-bold" style={{ color: '#0f172a' }}>
+        <span className="text-[13px] font-black tracking-tight" style={{ color: '#020617' }}>
           {title}
         </span>
       </div>
-      <div className="text-[11px] leading-relaxed" style={{ color: '#334155' }}>
+      <div className="text-[12px] font-medium leading-relaxed" style={{ color: '#0f172a' }}>
         {desc}
       </div>
     </div>
@@ -280,8 +284,8 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
 
   const pageCardStyle: React.CSSProperties = {
     backgroundColor: '#ffffff',
-    color: '#0f172a',
-    border: '1px solid #cbd5e1',
+    color: '#020617',
+    border: '1.5px solid #94a3b8',
     borderRadius: '16px',
     padding: '24px'
   };
@@ -395,30 +399,30 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               </div>
             </div>
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Este manual orienta o policial lotado na unidade <strong>{ctx.unitName}</strong> ({ctx.departmentName}) a operar com segurança e agilidade todas as rotinas do sistema de Armaria: solicitação de cautelas e devoluções de <strong>armas</strong>, <strong>munições</strong> e <strong>materiais</strong>, além do registro de <strong>Saída</strong> e <strong>Entrada (Retorno)</strong> de armamentos acautelados com apontamento de disparos.
             </p>
 
             {/* Dados Reais Carregados do Banco da Unidade COE */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
-              <div className="rounded-xl p-3 space-y-1.5" style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
-                <div className="text-[10px] font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#0f172a' }}>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[12px]">
+              <div className="rounded-xl p-3.5 space-y-1.5" style={{ backgroundColor: '#f8fafc', border: '1.5px solid #94a3b8' }}>
+                <div className="text-[11px] font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#020617' }}>
                   <Users className="w-3.5 h-3.5" style={{ color: '#b45309' }} />
                   Servidores Reais da Unidade {ctx.unitName}
                 </div>
-                <div style={{ color: '#334155' }}>
+                <div className="font-medium space-y-0.5" style={{ color: '#0f172a' }}>
                   <div>• <strong>Policial Exemplo:</strong> {ctx.policial.name} (MASP {ctx.policial.masp})</div>
                   <div>• <strong>Armeiro Autorizador:</strong> {ctx.armeiro.name} (MASP {ctx.armeiro.masp})</div>
                   <div>• <strong>Em Posse (Saída Ativa):</strong> {ctx.armaComPolicial.holderName}</div>
                 </div>
               </div>
 
-              <div className="rounded-xl p-3 space-y-1.5" style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}>
-                <div className="text-[10px] font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#0f172a' }}>
+              <div className="rounded-xl p-3.5 space-y-1.5" style={{ backgroundColor: '#f8fafc', border: '1.5px solid #94a3b8' }}>
+                <div className="text-[11px] font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#020617' }}>
                   <Crosshair className="w-3.5 h-3.5" style={{ color: '#b45309' }} />
                   Acervo Real COE Usado nos Exemplos
                 </div>
-                <div style={{ color: '#334155' }}>
+                <div className="font-medium space-y-0.5" style={{ color: '#0f172a' }}>
                   <div>• <strong>Armas:</strong> {ctx.armasCofre[0].manufacturer} {ctx.armasCofre[0].model} ({ctx.armasCofre[0].serial}), {ctx.armaAcautelada.model} ({ctx.armaAcautelada.serial})</div>
                   <div>• <strong>Munições:</strong> {ctx.municoes[0].caliber} {ctx.municoes[0].manufacturer} {ctx.municoes[0].tipo} {ctx.municoes[0].peso}</div>
                   <div>• <strong>Materiais:</strong> {ctx.materiais[0].name} (Série {ctx.materiais[0].serial})</div>
@@ -439,7 +443,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="2. Como Cautelar Armamento (Solicitar Retirada de Arma)"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Para retirar um armamento do cofre da unidade <strong>{ctx.unitName}</strong>, acesse o menu lateral <strong>Cautela de armas</strong> e siga os quatro passos abaixo:
             </p>
 
@@ -498,7 +502,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="3. Dar Saída, Dar Entrada (Retorno) e Histórico da Arma"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Nas cautelas ativas exibidas na aba <strong>Minhas Cautelas — Ativas em Posse</strong>, o sistema controla quando o armamento está fisicamente com o policial em serviço ou recolhido temporariamente na unidade, além de manter o histórico completo de movimentações:
             </p>
 
@@ -562,7 +566,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="4. Como Devolver Armamento ao Cofre (Encerrar Cautela)"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Para encerrar definitivamente a cautela da arma e devolvê-la ao cofre da unidade <strong>{ctx.unitName}</strong>, utilize o botão <strong>Devolver ao Cofre</strong> no card da cautela ativa em <strong>Minhas Cautelas</strong>:
             </p>
 
@@ -622,7 +626,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="5. Como Cautelar Munições (Módulo Cautela de Munições)"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Para solicitar munições de forma avulsa (sem vínculo imediato com cautela de arma) na unidade <strong>{ctx.unitName}</strong>, acesse o menu <strong>Cautela de munições</strong>:
             </p>
 
@@ -680,7 +684,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="6. Como Devolver Munições (Avulsas ou Vinculadas a Arma)"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Munições marcadas como <strong>Passivas de Devolução</strong> permanecem listadas na aba <strong>Minhas Cautelas de Munições</strong> até o recolhimento completo ao paiol da {ctx.unitName}:
             </p>
 
@@ -736,7 +740,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
               sectionTitle="7. Como Cautelar Materiais (Módulo Cautela de Materiais)"
             />
 
-            <p className="text-xs leading-relaxed" style={{ color: '#1e293b' }}>
+            <p className="text-[13px] font-medium leading-relaxed" style={{ color: '#020617' }}>
               Para solicitar equipamentos operacionais habilitados para depósito policial na unidade <strong>{ctx.unitName}</strong> (como dispositivos <strong>TASER 10</strong>, acessórios e materiais táticos), acesse <strong>Cautela de materiais</strong>:
             </p>
 
@@ -821,48 +825,48 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
 
             {/* Quadro Resumo de Bolso */}
             <div
-              className="rounded-xl p-3.5 space-y-2"
-              style={{ backgroundColor: '#f8fafc', border: '1px solid #cbd5e1' }}
+              className="rounded-xl p-4 space-y-2.5"
+              style={{ backgroundColor: '#f8fafc', border: '1.5px solid #94a3b8' }}
             >
-              <div className="text-[11px] font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#0f172a' }}>
+              <div className="text-xs font-mono font-black uppercase flex items-center gap-1.5" style={{ color: '#020617' }}>
                 <FileText className="w-4 h-4" style={{ color: '#b45309' }} />
                 Quadro-Resumo Rápido — Perfil Policial ({ctx.unitName})
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[10px]">
-                <div className="rounded-lg p-2" style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1' }}>
-                  <div className="font-bold flex items-center gap-1" style={{ color: '#b45309' }}>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-[11px]">
+                <div className="rounded-lg p-2.5" style={{ backgroundColor: '#ffffff', border: '1.5px solid #cbd5e1' }}>
+                  <div className="font-black flex items-center gap-1" style={{ color: '#b45309' }}>
                     <CheckCircle2 className="w-3.5 h-3.5" /> Cautelar
                   </div>
-                  <div style={{ color: '#334155' }}>
+                  <div className="font-medium mt-0.5" style={{ color: '#0f172a' }}>
                     Solicite em <em>Nova Solicitação</em> e aguarde aprovação do Armeiro da {ctx.unitName}.
                   </div>
                 </div>
-                <div className="rounded-lg p-2" style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1' }}>
-                  <div className="font-bold flex items-center gap-1" style={{ color: '#0369a1' }}>
+                <div className="rounded-lg p-2.5" style={{ backgroundColor: '#ffffff', border: '1.5px solid #cbd5e1' }}>
+                  <div className="font-black flex items-center gap-1" style={{ color: '#0369a1' }}>
                     <ArrowUpRight className="w-3.5 h-3.5" /> Dar Saída
                   </div>
-                  <div style={{ color: '#334155' }}>
+                  <div className="font-medium mt-0.5" style={{ color: '#0f172a' }}>
                     Em <em>Minhas Cautelas</em>, clique em <strong>Dar Saída</strong> → status vira <em>Com o Policial</em>.
                   </div>
                 </div>
-                <div className="rounded-lg p-2" style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1' }}>
-                  <div className="font-bold flex items-center gap-1" style={{ color: '#047857' }}>
+                <div className="rounded-lg p-2.5" style={{ backgroundColor: '#ffffff', border: '1.5px solid #cbd5e1' }}>
+                  <div className="font-black flex items-center gap-1" style={{ color: '#047857' }}>
                     <ArrowDownLeft className="w-3.5 h-3.5" /> Dar Entrada
                   </div>
-                  <div style={{ color: '#334155' }}>
+                  <div className="font-medium mt-0.5" style={{ color: '#0f172a' }}>
                     Clique em <strong>Dar Entrada</strong> no retorno e informe os <strong>tiros disparados</strong>.
                   </div>
                 </div>
-                <div className="rounded-lg p-2" style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1' }}>
-                  <div className="font-bold flex items-center gap-1" style={{ color: '#0f172a' }}>
+                <div className="rounded-lg p-2.5" style={{ backgroundColor: '#ffffff', border: '1.5px solid #cbd5e1' }}>
+                  <div className="font-black flex items-center gap-1" style={{ color: '#020617' }}>
                     <RotateCcw className="w-3.5 h-3.5" /> Devolver
                   </div>
-                  <div style={{ color: '#334155' }}>
+                  <div className="font-medium mt-0.5" style={{ color: '#0f172a' }}>
                     Use <strong>Devolver ao Cofre / Solicitar Devolução</strong> e aguarde o recibo do Armeiro.
                   </div>
                 </div>
               </div>
-              <div className="flex items-center gap-2 pt-1 text-[10px]" style={{ color: '#92400e' }}>
+              <div className="flex items-center gap-2 pt-1 text-[11px] font-semibold" style={{ color: '#78350f' }}>
                 <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                 <span>
                   Importante: Todo termo ou recibo emitido pelo sistema traz identificação oficial da carga e assinatura digital/física entre Policial e Armeiro da unidade {ctx.unitName}.

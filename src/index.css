@@ -814,11 +814,12 @@ input, select, textarea, button {
   [class*="bg-[#1e293b"], [class*="bg-[#0f172a"], [class*="bg-[#334155"],
   [class*="bg-[#1f2937"], [class*="bg-[#111827"], [class*="bg-[#020617"],
   [class*="bg-[#090d16"], [class*="bg-[#000"],
-  [style*="#1e293b" i], [style*="#0f172a" i], [style*="#334155" i],
-  [style*="rgb(30, 41, 59"], [style*="rgb(15, 23, 42"],
+  [style*="background-color: #1e293b" i], [style*="background-color: #0f172a" i], [style*="background-color: #334155" i],
+  [style*="background: #1e293b" i], [style*="background: #0f172a" i], [style*="background: #334155" i],
+  [style*="background-color: rgb(30, 41, 59"], [style*="background-color: rgb(15, 23, 42"], [style*="background-color: rgb(51, 65, 85"],
   [class*="from-slate-600"], [class*="from-slate-500"], [class*="from-slate-400"],
   [class*="from-gray-800"], [class*="from-gray-900"]
-):not(.top-layer-alert) {
+):not(.top-layer-alert):not([data-manual-page]) {
   color: #ffffff !important;
 }
 
@@ -834,11 +835,12 @@ input, select, textarea, button {
   [class*="bg-[#1e293b"], [class*="bg-[#0f172a"], [class*="bg-[#334155"],
   [class*="bg-[#1f2937"], [class*="bg-[#111827"], [class*="bg-[#020617"],
   [class*="bg-[#090d16"], [class*="bg-[#000"],
-  [style*="#1e293b" i], [style*="#0f172a" i], [style*="#334155" i],
-  [style*="rgb(30, 41, 59"], [style*="rgb(15, 23, 42"],
+  [style*="background-color: #1e293b" i], [style*="background-color: #0f172a" i], [style*="background-color: #334155" i],
+  [style*="background: #1e293b" i], [style*="background: #0f172a" i], [style*="background: #334155" i],
+  [style*="background-color: rgb(30, 41, 59"], [style*="background-color: rgb(15, 23, 42"], [style*="background-color: rgb(51, 65, 85"],
   [class*="from-slate-600"], [class*="from-slate-500"], [class*="from-slate-400"],
   [class*="from-gray-800"], [class*="from-gray-900"]
-):not(.top-layer-alert) :is(span, strong, b, p, div, label, small, h1, h2, h3, h4, h5, h6, a, li, td, th, svg, [class*="text-"]):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-amber-500):not(.bg-amber-400) {
+):not(.top-layer-alert):not([data-manual-page]) :is(span, strong, b, p, div, label, small, h1, h2, h3, h4, h5, h6, a, li, td, th, svg, [class*="text-"]):not([class*="bg-slate-9"]):not([class*="bg-slate-8"]):not([class*="bg-slate-7"]):not(.bg-white):not(.bg-amber-500):not(.bg-amber-400) {
   color: #ffffff !important;
 }
 

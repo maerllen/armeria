@@ -428,7 +428,7 @@ const SystemAppFrame: React.FC<SystemAppFrameProps> = ({
           </div>
           <span
             className="text-[9px] font-mono px-2 py-0.5 rounded truncate"
-            style={{ backgroundColor: '#131f35', color: '#94a3b8', border: '1px solid #263449' }}
+            style={{ backgroundColor: '#131f35', color: '#cbd5e1', border: '1px solid #263449' }}
           >
             SISTEMA ARMARIA PCMG • {ctx.unitSigla} • Módulo: {activeModuleLabel}
           </span>
@@ -468,7 +468,7 @@ const SystemAppFrame: React.FC<SystemAppFrameProps> = ({
           <div className="text-[10px] font-bold" style={{ color: '#f8fafc' }}>
             {ctx.policial.name}
           </div>
-          <div className="text-[9px] font-mono" style={{ color: '#94a3b8' }}>
+          <div className="text-[9px] font-mono" style={{ color: '#cbd5e1' }}>
             MASP: {ctx.policial.masp} • {ctx.policial.cargo}
           </div>
         </div>
@@ -510,7 +510,7 @@ const SystemAppFrame: React.FC<SystemAppFrameProps> = ({
       {/* Caption Footer */}
       <div
         className="px-3.5 py-1.5 flex items-center justify-between text-[9px] font-mono"
-        style={{ backgroundColor: '#0c1424', borderTop: '1px solid #1c2a3f', color: '#94a3b8' }}
+        style={{ backgroundColor: '#0c1424', borderTop: '1px solid #1c2a3f', color: '#cbd5e1' }}
       >
         <span>Captura Fiel do Sistema • {caption}</span>
         <span style={{ color: '#38bdf8' }}>Unidade: {ctx.unitName}</span>
@@ -546,7 +546,7 @@ export const ScreenPerfilNavegacaoCOE: React.FC<{ ctx: CoeManualContext }> = ({ 
               <div className="text-xs font-black" style={{ color: '#f8fafc' }}>
                 {ctx.policial.name}
               </div>
-              <div className="text-[10px] font-mono" style={{ color: '#94a3b8' }}>
+              <div className="text-[10px] font-mono" style={{ color: '#cbd5e1' }}>
                 MASP: {ctx.policial.masp} • {ctx.policial.cargo} • Lotação: {ctx.unitName}
               </div>
             </div>
@@ -592,7 +592,7 @@ export const ScreenPerfilNavegacaoCOE: React.FC<{ ctx: CoeManualContext }> = ({ 
               <div className="text-[11px] font-bold" style={{ color: '#f8fafc' }}>
                 {card.title}
               </div>
-              <div className="text-[9px] leading-snug" style={{ color: '#94a3b8' }}>
+              <div className="text-[9px] leading-snug" style={{ color: '#cbd5e1' }}>
                 {card.desc}
               </div>
             </div>
@@ -621,13 +621,13 @@ export const ScreenCautelaArmaSolicitarCOE: React.FC<{ ctx: CoeManualContext }> 
         {/* Header + Tabs */}
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2" style={{ borderBottom: '1px solid #1e2d44' }}>
           <div className="flex items-center gap-1.5 flex-wrap">
-            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Cautela de arma em análise
             </span>
-            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Minhas Cautelas
             </span>
-            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2.5 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Meu Histórico
             </span>
           </div>
@@ -672,7 +672,7 @@ export const ScreenCautelaArmaSolicitarCOE: React.FC<{ ctx: CoeManualContext }> 
                 </div>
                 <div
                   className="flex items-center justify-between text-[9px] mt-2 pt-1.5"
-                  style={{ borderTop: '1px solid #1f2e45', color: '#94a3b8' }}
+                  style={{ borderTop: '1px solid #1f2e45', color: '#cbd5e1' }}
                 >
                   <span>Disponível na Unidade ({ctx.unitSigla})</span>
                   <span>{w.magazines} carregadores</span>
@@ -696,13 +696,13 @@ export const ScreenCautelaArmaSolicitarCOE: React.FC<{ ctx: CoeManualContext }> 
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div className="text-[8px] uppercase font-bold mb-0.5" style={{ color: '#94a3b8' }}>
+            <div className="text-[8px] uppercase font-bold mb-0.5" style={{ color: '#cbd5e1' }}>
               Motivo / Finalidade do Uso
             </div>
             <div className="text-[10px] font-bold" style={{ color: '#f8fafc' }}>Operação</div>
           </div>
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div className="text-[8px] uppercase font-bold mb-0.5" style={{ color: '#94a3b8' }}>
+            <div className="text-[8px] uppercase font-bold mb-0.5" style={{ color: '#cbd5e1' }}>
               Calibre / Tipo Desejado
             </div>
             <div className="text-[10px] font-mono font-bold" style={{ color: '#fbbf24' }}>
@@ -754,7 +754,7 @@ export const ScreenCautelaArmaSaidaEntradaCOE: React.FC<{ ctx: CoeManualContext 
                   Acautelada (Ativa)
                 </span>
               </div>
-              <div className="text-[10px] mt-0.5" style={{ color: '#94a3b8' }}>
+              <div className="text-[10px] mt-0.5" style={{ color: '#cbd5e1' }}>
                 Solicitante: <strong style={{ color: '#e2e8f0' }}>{ctx.policial.name}</strong> (MASP: {ctx.policial.masp}) • Autorizado por: {ctx.armeiro.name}
               </div>
             </div>
@@ -779,7 +779,7 @@ export const ScreenCautelaArmaSaidaEntradaCOE: React.FC<{ ctx: CoeManualContext 
               </span>
             </div>
           </div>
-          <div className="text-[9px]" style={{ color: '#94a3b8' }}>
+          <div className="text-[9px]" style={{ color: '#cbd5e1' }}>
             Calibre: <strong style={{ color: '#e2e8f0' }}>{ctx.armaAcautelada.caliber}</strong> • Carregadores:{' '}
             <strong style={{ color: '#e2e8f0' }}>{ctx.armaAcautelada.magazines} un.</strong> • Ao clicar em{' '}
             <strong style={{ color: '#fbbf24' }}>Dar Saída</strong>, o status muda para{' '}
@@ -836,7 +836,7 @@ export const ScreenCautelaArmaSaidaEntradaCOE: React.FC<{ ctx: CoeManualContext 
                 <ArrowDownLeft className="w-3.5 h-3.5" style={{ color: '#34d399' }} />
                 Modal: Dar Entrada no Armamento
               </span>
-              <X className="w-3 h-3" style={{ color: '#94a3b8' }} />
+              <X className="w-3 h-3" style={{ color: '#cbd5e1' }} />
             </div>
             <div className="text-[9px] font-mono font-bold" style={{ color: '#fbbf24' }}>
               {ctx.armaComPolicial.model} • Série: {ctx.armaComPolicial.serial}
@@ -890,7 +890,7 @@ export const ScreenCautelaArmaDevolucaoCOE: React.FC<{ ctx: CoeManualContext }> 
               <div className="text-xs font-bold" style={{ color: '#f8fafc' }}>
                 Devolução de Armamento ao Cofre
               </div>
-              <div className="text-[10px]" style={{ color: '#94a3b8' }}>
+              <div className="text-[10px]" style={{ color: '#cbd5e1' }}>
                 Arma: <strong style={{ color: '#f8fafc' }}>{ctx.armaAcautelada.model}</strong> (Série:{' '}
                 <span className="font-mono" style={{ color: '#fbbf24' }}>{ctx.armaAcautelada.serial}</span>)
               </div>
@@ -905,15 +905,15 @@ export const ScreenCautelaArmaDevolucaoCOE: React.FC<{ ctx: CoeManualContext }> 
 
           <div className="grid grid-cols-3 gap-2 text-[9px]">
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #1f2e45' }}>
-              <div style={{ color: '#94a3b8' }}>Houve Disparos?</div>
+              <div style={{ color: '#cbd5e1' }}>Houve Disparos?</div>
               <div className="font-bold mt-0.5" style={{ color: '#34d399' }}>Não (0 tiros)</div>
             </div>
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #1f2e45' }}>
-              <div style={{ color: '#94a3b8' }}>Funcionamento</div>
+              <div style={{ color: '#cbd5e1' }}>Funcionamento</div>
               <div className="font-bold mt-0.5" style={{ color: '#34d399' }}>Em Condições</div>
             </div>
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #1f2e45' }}>
-              <div style={{ color: '#94a3b8' }}>Carregadores Devolv.</div>
+              <div style={{ color: '#cbd5e1' }}>Carregadores Devolv.</div>
               <div className="font-mono font-bold mt-0.5" style={{ color: '#f8fafc' }}>
                 {ctx.armaAcautelada.magazines} unidades
               </div>
@@ -933,7 +933,7 @@ export const ScreenCautelaArmaDevolucaoCOE: React.FC<{ ctx: CoeManualContext }> 
           </div>
 
           <div className="flex items-center justify-end gap-2 pt-1">
-            <span className="px-2.5 py-1 rounded-lg text-[9px]" style={{ color: '#94a3b8' }}>Cancelar</span>
+            <span className="px-2.5 py-1 rounded-lg text-[9px]" style={{ color: '#cbd5e1' }}>Cancelar</span>
             <span
               className="px-3 py-1.5 rounded-lg text-[10px] font-black"
               style={{ backgroundColor: '#f59e0b', color: '#020617' }}
@@ -991,13 +991,13 @@ export const ScreenCautelaMunicaoSolicitarCOE: React.FC<{ ctx: CoeManualContext 
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2" style={{ borderBottom: '1px solid #1e2d44' }}>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Minhas Cautelas de Munições
             </span>
-            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Cautela de munição em análise
             </span>
-            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Meu Histórico
             </span>
           </div>
@@ -1029,14 +1029,14 @@ export const ScreenCautelaMunicaoSolicitarCOE: React.FC<{ ctx: CoeManualContext 
             className="rounded-xl p-2.5 flex items-start gap-2"
             style={{ backgroundColor: '#0d1526', border: '1px solid #223047' }}
           >
-            <div className="p-1.5 rounded-lg" style={{ backgroundColor: '#1e293b', color: '#94a3b8' }}>
+            <div className="p-1.5 rounded-lg" style={{ backgroundColor: '#1e293b', color: '#cbd5e1' }}>
               <Flame className="w-3.5 h-3.5" />
             </div>
             <div>
               <div className="text-[10px] font-bold uppercase" style={{ color: '#cbd5e1' }}>
                 Munição de Consumo
               </div>
-              <div className="text-[9px]" style={{ color: '#94a3b8' }}>
+              <div className="text-[9px]" style={{ color: '#cbd5e1' }}>
                 Consumo definitivo em instrução/treinamento (sem devolução).
               </div>
             </div>
@@ -1046,19 +1046,19 @@ export const ScreenCautelaMunicaoSolicitarCOE: React.FC<{ ctx: CoeManualContext 
         {/* Campos Reais COE */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[9px]">
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Calibre</div>
+            <div style={{ color: '#cbd5e1' }}>Calibre</div>
             <div className="font-mono font-bold text-[10px] mt-0.5" style={{ color: '#fbbf24' }}>{m.caliber}</div>
           </div>
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Tipo / Peso</div>
+            <div style={{ color: '#cbd5e1' }}>Tipo / Peso</div>
             <div className="font-bold text-[10px] mt-0.5" style={{ color: '#f8fafc' }}>{m.tipo} • {m.peso}</div>
           </div>
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Quantidade Solicitada</div>
+            <div style={{ color: '#cbd5e1' }}>Quantidade Solicitada</div>
             <div className="font-mono font-bold text-[10px] mt-0.5" style={{ color: '#34d399' }}>100 cartuchos</div>
           </div>
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Disponível na COE</div>
+            <div style={{ color: '#cbd5e1' }}>Disponível na COE</div>
             <div className="font-mono font-bold text-[10px] mt-0.5" style={{ color: '#38bdf8' }}>
               {m.quantity.toLocaleString('pt-BR')} un. ({m.vaultCode})
             </div>
@@ -1150,7 +1150,7 @@ export const ScreenCautelaMunicaoDevolverCOE: React.FC<{ ctx: CoeManualContext }
             </div>
             <div
               className="rounded-lg p-2"
-              style={{ backgroundColor: '#090f1d', border: '1px solid #24344d', color: '#94a3b8' }}
+              style={{ backgroundColor: '#090f1d', border: '1px solid #24344d', color: '#cbd5e1' }}
             >
               <div className="font-bold">Com Armamento Vinculado</div>
               <div className="text-[8px]">Devolve arma + munição juntas.</div>
@@ -1159,7 +1159,7 @@ export const ScreenCautelaMunicaoDevolverCOE: React.FC<{ ctx: CoeManualContext }
 
           <div className="grid grid-cols-2 gap-2 text-[9px]">
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #24344d' }}>
-              <div style={{ color: '#94a3b8' }}>Munições Remanescentes *</div>
+              <div style={{ color: '#cbd5e1' }}>Munições Remanescentes *</div>
               <div className="font-mono font-bold text-xs mt-0.5" style={{ color: '#f8fafc' }}>100</div>
             </div>
             <div className="flex items-end justify-end">
@@ -1193,10 +1193,10 @@ export const ScreenCautelaMaterialSolicitarCOE: React.FC<{ ctx: CoeManualContext
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-2" style={{ borderBottom: '1px solid #1e2d44' }}>
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Minhas Cautelas de Materiais
             </span>
-            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#94a3b8', border: '1px solid #1e2d44' }}>
+            <span className="px-2 py-1 rounded-lg text-[9px] font-bold" style={{ backgroundColor: '#0f192d', color: '#cbd5e1', border: '1px solid #1e2d44' }}>
               Cautela de material em análise
             </span>
           </div>
@@ -1221,7 +1221,7 @@ export const ScreenCautelaMaterialSolicitarCOE: React.FC<{ ctx: CoeManualContext
               >
                 <div className="flex items-center justify-between">
                   <span className="text-[11px] font-bold" style={{ color: '#f8fafc' }}>
-                    {mat.name} <span className="text-[9px]" style={{ color: '#94a3b8' }}>({mat.tipo})</span>
+                    {mat.name} <span className="text-[9px]" style={{ color: '#cbd5e1' }}>({mat.tipo})</span>
                   </span>
                   <span
                     className="text-[9px] font-mono px-1.5 py-0.5 rounded"
@@ -1233,7 +1233,7 @@ export const ScreenCautelaMaterialSolicitarCOE: React.FC<{ ctx: CoeManualContext
                 <div className="text-[10px] font-mono font-bold" style={{ color: '#fbbf24' }}>
                   Série: {mat.serial}
                 </div>
-                <div className="text-[9px]" style={{ color: '#94a3b8' }}>
+                <div className="text-[9px]" style={{ color: '#cbd5e1' }}>
                   Local: {mat.local} • {mat.observations}
                 </div>
               </div>
@@ -1243,11 +1243,11 @@ export const ScreenCautelaMaterialSolicitarCOE: React.FC<{ ctx: CoeManualContext
 
         <div className="grid grid-cols-3 gap-2 text-[9px]">
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Modalidade</div>
+            <div style={{ color: '#cbd5e1' }}>Modalidade</div>
             <div className="font-bold mt-0.5" style={{ color: '#34d399' }}>Material Passivo de Devolução</div>
           </div>
           <div className="rounded-lg p-2" style={{ backgroundColor: '#0d1526', border: '1px solid #24344d' }}>
-            <div style={{ color: '#94a3b8' }}>Quantidade / Finalidade</div>
+            <div style={{ color: '#cbd5e1' }}>Quantidade / Finalidade</div>
             <div className="font-bold mt-0.5" style={{ color: '#f8fafc' }}>1 un. • Plantão Operacional</div>
           </div>
           <div className="flex items-center justify-end">
@@ -1291,7 +1291,7 @@ export const ScreenCautelaMaterialDevolverCOE: React.FC<{ ctx: CoeManualContext 
           <div className="text-[9px] font-mono" style={{ color: '#fbbf24' }}>
             Série: {mat.serial}
           </div>
-          <div className="text-[9px]" style={{ color: '#94a3b8' }}>
+          <div className="text-[9px]" style={{ color: '#cbd5e1' }}>
             Local: {mat.local}
             <br />
             {mat.observations}
@@ -1326,11 +1326,11 @@ export const ScreenCautelaMaterialDevolverCOE: React.FC<{ ctx: CoeManualContext 
 
           <div className="grid grid-cols-2 gap-2 text-[9px]">
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #24344d' }}>
-              <div style={{ color: '#94a3b8' }}>Quantidade Devolvida *</div>
+              <div style={{ color: '#cbd5e1' }}>Quantidade Devolvida *</div>
               <div className="font-mono font-bold text-xs mt-0.5" style={{ color: '#f8fafc' }}>1</div>
             </div>
             <div className="rounded-lg p-2" style={{ backgroundColor: '#090f1d', border: '1px solid #24344d' }}>
-              <div style={{ color: '#94a3b8' }}>Condição do Material</div>
+              <div style={{ color: '#cbd5e1' }}>Condição do Material</div>
               <div className="font-bold text-[10px] mt-0.5" style={{ color: '#34d399' }}>
                 Íntegro (Em perfeitas condições)
               </div>
