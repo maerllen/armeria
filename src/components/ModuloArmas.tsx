@@ -22,6 +22,7 @@ interface WeaponModuleProps {
   vaultSpaces: VaultSpace[];
   departments: Department[];
   units: Unit[];
+  onStartCautela?: (weapon: Weapon) => void;
   onRefresh: () => void;
 }
 
@@ -32,6 +33,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   vaultSpaces,
   departments,
   units,
+  onStartCautela,
   onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
@@ -1701,6 +1703,23 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
               
               <div className="flex flex-wrap items-center gap-2">
+                {/* Iniciar Cautela */}
+                {onStartCautela && !isAdmin && selectedWeaponDetail.status === 'No Cofre' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const target = selectedWeaponDetail;
+                      setSelectedWeaponDetail(null);
+                      onStartCautela(target);
+                    }}
+                    className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl transition flex items-center space-x-1.5 shadow"
+                    title="Iniciar solicitação ou autorização de cautela para esta arma"
+                  >
+                    <Shield className="w-4 h-4" />
+                    <span>Iniciar Cautela</span>
+                  </button>
+                )}
+
                 {/* Dar Saída / Dar Entrada */}
                 {canOperateWeaponCustody && (() => {
                   const activeCaut = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');

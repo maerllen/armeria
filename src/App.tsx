@@ -79,6 +79,7 @@ export default function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
+  const [preselectedCautelaWeaponId, setPreselectedCautelaWeaponId] = useState<string | null>(null);
 
   const [loginError, setLoginError] = useState('');
 
@@ -536,6 +537,8 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               units={units}
               departments={departments}
+              preselectedWeaponId={preselectedCautelaWeaponId}
+              onClearPreselectedWeapon={() => setPreselectedCautelaWeaponId(null)}
               onRefresh={refreshData}
             />
           )}
@@ -615,6 +618,15 @@ export default function App() {
               vaultSpaces={vaultSpaces}
               departments={departments}
               units={units}
+              onStartCautela={
+                getAllowedModulesForUser(effectiveUser).includes('cautela-armas')
+                  ? (weapon) => {
+                      setPreselectedCautelaWeaponId(weapon.id);
+                      setActiveModule('cautela-armas');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  : undefined
+              }
               onRefresh={refreshData}
             />
           )}

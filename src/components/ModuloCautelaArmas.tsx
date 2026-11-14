@@ -1,12 +1,13 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import { 
-  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, getSystemLogo, DEFAULT_SYSTEM_LOGO, formatCaliberDisplay 
+  User, Weapon, CautelaArma, AmmunitionStock, Caliber, VaultSpace, Unit, Department, WeaponCustodyMovement, getSystemLogo, DEFAULT_SYSTEM_LOGO, formatCaliberDisplay 
 } from '../types';
 import { storage } from '../services/storage';
 import { 
   Shield, Crosshair, Disc, AlertCircle, Check, Clock, Search, 
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
-  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2
+  ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2,
+  ArrowUpRight, ArrowDownLeft, History
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
@@ -18,6 +19,8 @@ interface ModuloCautelaArmasProps {
   vaultSpaces: VaultSpace[];
   units: Unit[];
   departments: Department[];
+  preselectedWeaponId?: string | null;
+  onClearPreselectedWeapon?: () => void;
   onRefresh: () => void | Promise<void>;
 }
 
@@ -29,6 +32,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   vaultSpaces,
   units,
   departments,
+  preselectedWeaponId,
+  onClearPreselectedWeapon,
   onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
@@ -262,6 +267,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Nova Solicitação de Cautela
   const [selectedWeaponId, setSelectedWeaponId] = useState('');
+
+  // Controle de Dar Saída / Dar Entrada e Histórico de Movimentações da Arma em Cautelas Ativas
+  const [darEntradaWeaponModal, setDarEntradaWeaponModal] = useState<{
+    weaponId: string;
+    weaponLabel: string;
+    currentShotCount: number;
+  } | null>(null);
+  const [darEntradaShotsInput, setDarEntradaShotsInput] = useState('0');
+  const [custodyActionLoading, setCustodyActionLoading] = useState(false);
+  const [weaponHistoryModalData, setWeaponHistoryModalData] = useState<{
+    weaponLabel: string;
+    serialNumber: string;
+    totalShots: number;
+    records: WeaponCustodyMovement[];
+  } | null>(null);
+  const [weaponHistoryLoading, setWeaponHistoryLoading] = useState(false);
   const [reason, setReason] = useState('');
   const [magazineQuantity, setMagazineQuantity] = useState<number>(2);
   const [requestAmmoTogether, setRequestAmmoTogether] = useState(true);
@@ -334,6 +355,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const selectedWeapon = useMemo(() => {
     return weapons.find(w => w.id === selectedWeaponId);
   }, [weapons, selectedWeaponId]);
+
+  // Pre-seleção de arma vinda do Módulo de Armas ("Iniciar Cautela")
+  useEffect(() => {
+    if (!preselectedWeaponId) return;
+    const targetWeap = weapons.find(w => w.id === preselectedWeaponId);
+    setSelectedWeaponId(preselectedWeaponId);
+    if (targetWeap) {
+      setMagazineQuantity(targetWeap.magazineQuantity || 2);
+      if (hasDeptWideScope && targetWeap.unitId) {
+        setNovaCautelaUnitFilter(targetWeap.unitId);
+      }
+    }
+    setActiveTab('NOVA');
+    onClearPreselectedWeapon?.();
+  }, [preselectedWeaponId, weapons, hasDeptWideScope, onClearPreselectedWeapon]);
 
   // Munições disponíveis na unidade correspondentes ao calibre da arma selecionada
   const availableAmmoForSelectedWeapon = useMemo(() => {
@@ -2260,6 +2296,75 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setHasDismissedActiveWarning(true);
     setActiveCautelaWarningModal(null);
     setActiveTab('NOVA');
+  };
+
+  // Dar Saída / Dar Entrada e Histórico da Arma em Cautela Ativa (Minhas Cautelas / Deferidas)
+  const handleDarSaidaActiveCautela = async (cautela: CautelaArma, weaponId: string, requesterName: string, armorerName: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setCustodyActionLoading(true);
+    try {
+      await storage.darSaidaArma(weaponId, {
+        custodyUserName: requesterName,
+        authorizerUserName: armorerName && armorerName !== 'Armeiro da Unidade' ? armorerName : undefined
+      });
+      setSuccessMsg(`Saída registrada: ${cautela.weaponModel} (Nº ${cautela.weaponSerialNumber}) agora está com status "Com o Policial".`);
+      await onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar saída na arma.');
+    } finally {
+      setCustodyActionLoading(false);
+    }
+  };
+
+  const handleOpenDarEntradaActiveCautela = (cautela: CautelaArma, weaponId: string, weaponObj?: Weapon) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDarEntradaShotsInput('0');
+    setDarEntradaWeaponModal({
+      weaponId,
+      weaponLabel: `${weaponObj?.type || cautela.weaponType || ''} ${weaponObj?.manufacturer || ''} ${weaponObj?.model || cautela.weaponModel} • Nº ${cautela.weaponSerialNumber}`.replace(/\s+/g, ' ').trim(),
+      currentShotCount: weaponObj?.shotCount || 0
+    });
+  };
+
+  const handleConfirmDarEntradaActiveCautela = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!darEntradaWeaponModal) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    const shots = Math.max(0, parseInt(darEntradaShotsInput || '0', 10) || 0);
+    setCustodyActionLoading(true);
+    try {
+      const res = await storage.darEntradaArma(darEntradaWeaponModal.weaponId, shots);
+      setSuccessMsg(
+        `Entrada registrada para ${darEntradaWeaponModal.weaponLabel}! Status retornou para "Acautelada"${shots > 0 ? ` com +${shots} tiro(s) acrescentado(s) (Total: ${res.shotCount} tiros)` : ''}.`
+      );
+      setDarEntradaWeaponModal(null);
+      setDarEntradaShotsInput('0');
+      await onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar entrada na arma.');
+    } finally {
+      setCustodyActionLoading(false);
+    }
+  };
+
+  const handleOpenWeaponMovementHistory = async (cautela: CautelaArma, weaponId: string, weaponObj?: Weapon) => {
+    const label = `${weaponObj?.type || cautela.weaponType || ''} ${weaponObj?.manufacturer || ''} ${weaponObj?.model || cautela.weaponModel}`.replace(/\s+/g, ' ').trim();
+    setWeaponHistoryLoading(true);
+    setWeaponHistoryModalData({
+      weaponLabel: label,
+      serialNumber: weaponObj?.serialNumber || cautela.weaponSerialNumber,
+      totalShots: weaponObj?.shotCount || 0,
+      records: storage.getWeaponCustodyHistory(weaponId)
+    });
+    try {
+      const records = await storage.fetchWeaponCustodyHistory(weaponId);
+      setWeaponHistoryModalData(prev => (prev ? { ...prev, records } : null));
+    } finally {
+      setWeaponHistoryLoading(false);
+    }
   };
 
   // Submeter nova solicitação de cautela
@@ -8498,6 +8603,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase border bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse">
                                               Devolução Pendente de Recibo pelo Armeiro
                                             </span>
+                                          ) : weapon?.status === 'Com o Policial' ? (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-sky-500/20 text-sky-300 border-sky-500/40">
+                                              Com o Policial
+                                            </span>
                                           ) : (
                                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-emerald-500/20 text-emerald-300 border-emerald-500/30">
                                               Acautelada (Ativa)
@@ -8531,6 +8640,51 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                             <Lock className="w-3.5 h-3.5 text-slate-600" />
                                             <span>Edição encerrada (15 min)</span>
                                           </span>
+                                        );
+                                      })()}
+
+                                      {/* Dar Saída / Dar Entrada + Histórico das Movimentações da Arma */}
+                                      {(() => {
+                                        const targetWeaponId = weapon?.id || cautela.weaponId;
+                                        if (!targetWeaponId) return null;
+                                        const isComOPolicial = weapon?.status === 'Com o Policial';
+                                        return (
+                                          <>
+                                            {!isDevPendente && (
+                                              isComOPolicial ? (
+                                                <button
+                                                  type="button"
+                                                  disabled={custodyActionLoading}
+                                                  onClick={() => handleOpenDarEntradaActiveCautela(cautela, targetWeaponId, weapon)}
+                                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                                                  title="Registrar entrada da arma no cofre e apontar tiros disparados"
+                                                >
+                                                  <ArrowDownLeft className="w-3.5 h-3.5" />
+                                                  <span>Dar Entrada</span>
+                                                </button>
+                                              ) : (
+                                                <button
+                                                  type="button"
+                                                  disabled={custodyActionLoading}
+                                                  onClick={() => handleDarSaidaActiveCautela(cautela, targetWeaponId, requesterInfo.name, armorerInfo.name)}
+                                                  className="flex items-center space-x-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold transition shadow-sm disabled:opacity-50"
+                                                  title="Registrar saída da arma para o policial"
+                                                >
+                                                  <ArrowUpRight className="w-3.5 h-3.5" />
+                                                  <span>Dar Saída</span>
+                                                </button>
+                                              )
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => handleOpenWeaponMovementHistory(cautela, targetWeaponId, weapon)}
+                                              className="flex items-center space-x-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition"
+                                              title="Visualizar histórico de movimentações (saídas e entradas) desta arma"
+                                            >
+                                              <History className="w-3.5 h-3.5 text-amber-400" />
+                                              <span>Histórico</span>
+                                            </button>
+                                          </>
                                         );
                                       })()}
 
@@ -11716,6 +11870,142 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                     </span>
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Dar Entrada na Arma (Cautela Ativa) */}
+        {darEntradaWeaponModal && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 my-8">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                    <ArrowDownLeft className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100">Dar Entrada no Armamento</h3>
+                    <p className="text-xs font-mono text-amber-400 font-bold">
+                      {darEntradaWeaponModal.weaponLabel}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDarEntradaWeaponModal(null)}
+                  className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmDarEntradaActiveCautela} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                    Quantidade de tiros disparados no retorno
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    value={darEntradaShotsInput}
+                    onChange={(e) => setDarEntradaShotsInput(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-emerald-500"
+                    placeholder="0"
+                    autoFocus
+                  />
+                  <p className="text-[11px] text-slate-400 mt-1.5">
+                    Caso tenham sido realizados disparos, a quantidade será acrescentada automaticamente ao total de tiros do armamento ({darEntradaWeaponModal.currentShotCount} atualmente).
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDarEntradaWeaponModal(null)}
+                    className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={custodyActionLoading}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5 disabled:opacity-50"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>{custodyActionLoading ? 'Salvando...' : 'Confirmar Entrada'}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Modal Histórico das Movimentações da Arma */}
+        {weaponHistoryModalData && (
+          <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-2xl shadow-2xl space-y-4 my-8">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div className="flex items-center space-x-2.5">
+                  <History className="w-5 h-5 text-amber-400" />
+                  <div>
+                    <h3 className="text-base font-bold text-slate-100">Histórico das Movimentações da Arma</h3>
+                    <p className="text-xs font-mono text-amber-400 font-bold">
+                      {weaponHistoryModalData.weaponLabel} • Série: {weaponHistoryModalData.serialNumber} • Total de Tiros: {weaponHistoryModalData.totalShots}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setWeaponHistoryModalData(null)}
+                  className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5 max-h-96 overflow-y-auto pr-1">
+                {weaponHistoryLoading && weaponHistoryModalData.records.length === 0 ? (
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 text-center text-xs text-slate-400">
+                    Carregando movimentações da arma...
+                  </div>
+                ) : weaponHistoryModalData.records.length === 0 ? (
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 text-center text-xs text-slate-500 italic">
+                    Nenhuma saída ou entrada registrada para esta arma até o momento.
+                  </div>
+                ) : (
+                  weaponHistoryModalData.records.map((rec) => (
+                    <div key={rec.id} className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs space-y-1.5">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="font-bold text-slate-100">
+                          {rec.weaponName} <span className="text-amber-400 font-mono">({rec.weaponSerialNumber})</span>
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                          rec.returnDate
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                        }`}>
+                          {rec.returnDate ? 'Retornou ao Cofre' : 'Com o Policial'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-[11px] text-slate-300">
+                        <p>Usuário com a cautela: <strong className="text-slate-100">{rec.custodyUserName}</strong></p>
+                        <p>Autorizou a cautela: <strong className="text-slate-100">{rec.authorizerUserName}</strong></p>
+                        <p>Data de Saída: <span className="font-mono text-amber-300">{new Date(rec.exitDate).toLocaleString('pt-BR')}</span></p>
+                        <p>
+                          Data de Retorno:{' '}
+                          {rec.returnDate ? (
+                            <span className="font-mono text-emerald-300">{new Date(rec.returnDate).toLocaleString('pt-BR')}</span>
+                          ) : (
+                            <span className="italic text-sky-300">Em posse do policial</span>
+                          )}
+                        </p>
+                        <p>Tiros disparados: <strong className="font-mono text-amber-400">{rec.shotsFired || 0}</strong></p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
