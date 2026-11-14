@@ -229,6 +229,25 @@ input, select, textarea, button {
   overscroll-behavior: contain;
 }
 
+/* Garante que qualquer modal/div flutuante abra afastada do topo, nunca corte a parte superior e permita rolar sobre a div */
+@media screen {
+  .fixed.inset-0.flex.items-center.justify-center:not([aria-label="Processando comando"]) {
+    align-items: flex-start !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    padding-top: clamp(3rem, 7vh, 5rem) !important;
+    padding-bottom: clamp(2.5rem, 6vh, 4rem) !important;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .fixed.inset-0.flex.items-center.justify-center:not([aria-label="Processando comando"]) > * {
+    margin-top: auto !important;
+    margin-bottom: auto !important;
+    max-height: none !important;
+  }
+}
+
 /* Custom Tactical Immersive UI Styles */
 .glass {
   background: rgba(15, 23, 42, 0.75);
