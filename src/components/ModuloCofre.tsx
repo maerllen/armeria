@@ -7,7 +7,7 @@ import {
   Shield, Layers, Package, Bomb, History, Flame
 } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface VaultModuleProps {
   currentUser: User;
@@ -821,12 +821,18 @@ export const VaultModule: React.FC<VaultModuleProps> = ({
       }
     }
 
+    const docTitle = buildStandardDocumentTitle(
+      'Inventário do Cofre (Cofres)',
+      `Espaço ${vault.code}`,
+      currentUser.name
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Inventário do Cofre - Espaço ${vault.code}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           body {

@@ -177,6 +177,11 @@ export async function stampPdfWithQrCode(
  * Utility to print a PDF by opening or loading it into a temporary iframe
  */
 export function printPdfFromBase64(base64Data: string, title?: string) {
+  const safeTitle = String(title ?? '')
+    .replace(/[\\/:*?"<>|]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+
   try {
     const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
     const byteCharacters = atob(cleanBase64);
@@ -198,12 +203,39 @@ export function printPdfFromBase64(base64Data: string, title?: string) {
     iframe.style.border = '0';
     iframe.src = blobUrl;
 
+    const previousTitle = typeof document !== 'undefined' ? document.title : '';
+    let restored = false;
+    const cleanup = () => {
+      if (!restored) {
+        restored = true;
+        if (typeof document !== 'undefined') {
+          document.title = previousTitle;
+        }
+      }
+      setTimeout(() => {
+        try {
+          if (iframe.parentNode) {
+            document.body.removeChild(iframe);
+          }
+          URL.revokeObjectURL(blobUrl);
+        } catch {
+          // cleanup ignore
+        }
+      }, 500);
+    };
+
     iframe.onload = () => {
       setTimeout(() => {
         try {
+          if (typeof document !== 'undefined' && safeTitle) {
+            document.title = safeTitle;
+          }
+          iframe.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
+          window.addEventListener('afterprint', cleanup, { once: true });
           iframe.focus();
           iframe.contentWindow?.print();
         } catch {
+          cleanup();
           // Fallback to window open if iframe print fails
           window.open(blobUrl, '_blank');
         }
@@ -212,14 +244,7 @@ export function printPdfFromBase64(base64Data: string, title?: string) {
 
     document.body.appendChild(iframe);
 
-    setTimeout(() => {
-      try {
-        document.body.removeChild(iframe);
-        URL.revokeObjectURL(blobUrl);
-      } catch {
-        // cleanup ignore
-      }
-    }, 60000);
+    setTimeout(cleanup, 60000);
   } catch (err) {
     console.error('Error printing PDF:', err);
     // Fallback direct open
@@ -228,7 +253,7 @@ export function printPdfFromBase64(base64Data: string, title?: string) {
       win.document.write(
         `<iframe src="data:application/pdf;base64,${base64Data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`
       );
-      win.document.title = title || 'Certificado';
+      win.document.title = safeTitle || 'Certificado';
     }
   }
 }

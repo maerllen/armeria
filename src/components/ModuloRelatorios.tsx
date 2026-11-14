@@ -33,7 +33,7 @@ import {
   Pill,
   Syringe
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 
 interface ReportModuleProps {
   currentUser: User;
@@ -1502,7 +1502,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       .replace(/^_|_$/g, '');
     const link = document.createElement('a');
     link.href = url;
-    link.download = `relatorio_${safeUnitSlug || 'unidade'}_${new Date().toISOString().slice(0, 10)}.csv`;
+    link.download = buildStandardDocumentFilename(
+      'Relatório Gerencial (Relatórios)',
+      `${unitLabel || 'Unidade'} (${new Date().toISOString().slice(0, 10)})`,
+      currentUser.name,
+      'csv'
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1581,12 +1586,18 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       `;
     })();
 
+    const reportDocTitle = buildStandardDocumentTitle(
+      'Relatório Geral da Unidade (Relatórios)',
+      unitTitle,
+      currentUser.name
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Relatório Geral da Unidade - ${escapeHtml(unitTitle)}</title>
+        <title>${escapeHtml(reportDocTitle)}</title>
         <style>
           @page { size: A4 landscape; margin: 10mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 12px; font-size: 9.5px; line-height: 1.3; }

@@ -16,6 +16,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
+import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
 import {
   Dog,
   HeartPulse,
@@ -2171,7 +2172,15 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               </span>
               <div className="flex items-center space-x-2">
                 <button
-                  onClick={() => window.print()}
+                  onClick={() =>
+                    printWithWindowTitle(
+                      buildStandardDocumentTitle(
+                        'Termo de Administração Veterinária (Canil K9)',
+                        `${selectedReceiptMov.cachorroNome || 'K9'} #${selectedReceiptMov.id}`,
+                        selectedReceiptMov.responsavelAplicacaoNome || selectedReceiptMov.condutorNome || currentUser?.name || 'Responsável K9'
+                      )
+                    )
+                  }
                   className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs flex items-center space-x-1"
                 >
                   <Printer className="w-3.5 h-3.5" />

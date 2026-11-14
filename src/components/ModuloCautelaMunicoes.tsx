@@ -34,7 +34,7 @@ import {
   Layers,
   Link2
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface ModuloCautelaMunicoesProps {
   currentUser: User;
@@ -1032,12 +1032,22 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     const isPermanent = !c.seraDevolvida;
     const cleanObs = stripInternalTags(c.observations);
 
+    const docTitle = buildStandardDocumentTitle(
+      isReturned
+        ? 'Recibo de Devolução (Cautela de Munições)'
+        : isPermanent
+        ? 'Recibo de Consumo (Cautela de Munições)'
+        : 'Recibo de Cautela (Cautela de Munições)',
+      `${c.caliberName}${c.id ? ` #${c.id}` : ''}`,
+      c.requesterName
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Recibo de Munições - ${c.caliberName}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           * { box-sizing: border-box; }

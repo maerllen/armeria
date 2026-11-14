@@ -2,7 +2,7 @@ import React from 'react';
 import { WeaponTransfer } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { ShieldCheck, Printer, X, FileText, ArrowRight, Building2, CheckCircle2, Clock, Ban, Truck } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface TransferReceiptModalProps {
   transfer: WeaponTransfer;
@@ -36,12 +36,18 @@ export function getTransferReceiptHtml(transfer: WeaponTransfer): string {
     ? 'GUIA DE TRÂNSITO E TRANSFERÊNCIA DE ARMAMENTO'
     : 'TERMO OFICIAL DE TRANSFERÊNCIA DE CARGA BÉLICA';
 
+  const docTitle = buildStandardDocumentTitle(
+    isPending ? 'Guia de Transferência (Movimentações - Armas)' : 'Termo de Transferência (Movimentações - Armas)',
+    transfer.protocolNumber || transfer.id,
+    transfer.receivedByUserName || transfer.transferredByUserName || transfer.receiverOrTransporterName
+  );
+
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8">
-      <title>Recibo de Transferência - ${transfer.protocolNumber || transfer.id} - PCMG</title>
+      <title>${escapeHtmlText(docTitle)}</title>
       <style>
         @page { size: A4 portrait; margin: 12mm; }
         body {

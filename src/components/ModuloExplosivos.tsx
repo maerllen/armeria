@@ -15,7 +15,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatDisplayDate } from '../utils/masks';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import {
   Bomb,
@@ -979,7 +979,20 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       </tr>
     `).join('');
 
+    const inventoryDocTitle = buildStandardDocumentTitle(
+      'Inventário do Paiol (Explosivos)',
+      unitTitle,
+      currentUser.name
+    );
+
     const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${escapeHtmlText(inventoryDocTitle)}</title>
+      </head>
+      <body>
       <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 20px;">
         <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
           <h2 style="margin: 0; font-size: 20px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
@@ -1019,6 +1032,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
           </div>
         </div>
       </div>
+      </body>
+      </html>
     `;
 
     printDocumentInPage(html);
@@ -1038,7 +1053,20 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       </tr>
     `).join('');
 
+    const historyDocTitle = buildStandardDocumentTitle(
+      'Livro de Movimentações (Explosivos)',
+      'Registro Cronológico',
+      currentUser.name
+    );
+
     const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${escapeHtmlText(historyDocTitle)}</title>
+      </head>
+      <body>
       <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 20px;">
         <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
           <h2 style="margin: 0; font-size: 20px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
@@ -1065,6 +1093,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
           </tbody>
         </table>
       </div>
+      </body>
+      </html>
     `;
 
     printDocumentInPage(html);
@@ -1101,7 +1131,20 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       </tr>
     `).join('');
 
+    const itemDocTitle = buildStandardDocumentTitle(
+      'Histórico Individual de Explosivo (Explosivos)',
+      `${item.nome} - Lote ${item.lote}`,
+      currentUser.name
+    );
+
     const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${escapeHtmlText(itemDocTitle)}</title>
+      </head>
+      <body>
       <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 20px;">
         <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
           <h2 style="margin: 0; font-size: 18px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
@@ -1161,6 +1204,8 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
           </div>
         </div>
       </div>
+      </body>
+      </html>
     `;
 
     printDocumentInPage(html);

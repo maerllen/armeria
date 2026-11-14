@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
 import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem, CourseClass } from '../types';
 import { storage } from '../services/storage';
+import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
 import {
   Calendar,
   Clock,
@@ -1337,7 +1338,13 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     setShowPrintModal(false);
 
     setTimeout(() => {
-      window.print();
+      printWithWindowTitle(
+        buildStandardDocumentTitle(
+          'Calendário Letivo (Calendário Acadêmico)',
+          `${selectedDisciplineName || selectedDiscipline || 'ACADEPOL'} (${printYearChoice})`,
+          currentUser?.name || 'ACADEPOL'
+        )
+      );
     }, 250);
   };
 

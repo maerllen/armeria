@@ -2,7 +2,7 @@ import React from 'react';
 import { AmmunitionMovement, VaultSpace, Caliber } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { ShieldCheck, Printer, X, Disc, ArrowUpRight, RotateCcw } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface AmmunitionReceiptModalProps {
   movement: AmmunitionMovement;
@@ -29,12 +29,17 @@ export const AmmunitionReceiptModal: React.FC<AmmunitionReceiptModalProps> = ({
     : movement.recipientOrReason;
 
   const handlePrint = () => {
+    const docTitle = buildStandardDocumentTitle(
+      'Recibo de Munição (Munições)',
+      `${caliber?.name || 'Munição'} #${movement.id}`,
+      movement.responsibleName || movement.recipientOrReason
+    );
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Recibo de Munição - ${caliber?.name || 'Munição'} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }

@@ -5,7 +5,7 @@ import {
   formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { ModalTransferirMunicao } from './ModalTransferirMunicao';
 import { ModalHistoricoTransferenciasMunicao } from './ModalHistoricoTransferenciasMunicao';
@@ -1009,12 +1009,18 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       `;
     }).join('');
 
+    const docTitle = buildStandardDocumentTitle(
+      'Relatório de Cofres de Munições (Munições)',
+      selectedUnitObj?.name || 'Unidade',
+      currentUser.name
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Relatório de Cofres de Munições - ${selectedUnitObj?.name || 'Unidade'}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           body {

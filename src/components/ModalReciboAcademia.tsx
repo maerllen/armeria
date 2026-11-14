@@ -2,7 +2,7 @@ import React from 'react';
 import { CourseMovement, Weapon, VaultSpace } from '../types';
 import { formatTimestamp, formatMasp } from '../utils/masks';
 import { ShieldCheck, Printer, X, FileText, GraduationCap } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface AcademyReceiptModalProps {
   movement: CourseMovement;
@@ -22,12 +22,17 @@ export const AcademyReceiptModal: React.FC<AcademyReceiptModalProps> = ({
   const ammoUsed = (movement.ammoUsed !== undefined) ? movement.ammoUsed : Math.max(0, totalAmmo - ammoReturned);
 
   const handlePrint = () => {
+    const docTitle = buildStandardDocumentTitle(
+      'Mapa de Aula (Academia)',
+      `${movement.turmaCode || movement.className} #${movement.id}`,
+      movement.teacherName || movement.issuedByUserName || 'Professor Responsável'
+    );
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Recibo Mapa de Aula - ${movement.turmaCode || movement.className} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }

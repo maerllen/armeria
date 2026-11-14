@@ -18,7 +18,8 @@ import {
   Award
 } from 'lucide-react';
 import jsPDF from 'jspdf';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename, escapeHtmlText, printWithWindowTitle } from '../utils/printHelper';
+import { storage } from '../services/storage';
 import html2canvas from 'html2canvas';
 
 import bannerImg from '../assets/images/manual_banner_1784916894069.jpg';
@@ -64,7 +65,8 @@ export const ManualModule: React.FC = () => {
         heightLeft -= pdfHeight;
       }
 
-      pdf.save(`Manual_Operacional_Armeria_PC.pdf`);
+      const loggedUserName = storage.getCurrentUser()?.name || 'Operador do Sistema';
+      pdf.save(buildStandardDocumentFilename('Manual Operacional (Manual do Sistema)', 'Armaria PCMG', loggedUserName, 'pdf'));
     } catch (error) {
       console.error('Erro ao gerar PDF do manual:', error);
       alert('Ocorreu um erro ao gerar o arquivo PDF. Você também pode utilizar a opção de Impressão.');
@@ -74,6 +76,12 @@ export const ManualModule: React.FC = () => {
   };
 
   const handlePrint = () => {
+    const loggedUserName = storage.getCurrentUser()?.name || 'Operador do Sistema';
+    const manualDocTitle = buildStandardDocumentTitle(
+      'Manual Operacional (Manual do Sistema)',
+      'Armaria PCMG',
+      loggedUserName
+    );
     if (manualRef.current) {
       const contentHtml = manualRef.current.innerHTML;
       const html = `
@@ -81,7 +89,7 @@ export const ManualModule: React.FC = () => {
         <html lang="pt-BR">
         <head>
           <meta charset="UTF-8">
-          <title>Manual Operacional do Sistema de Armeria - PCMG</title>
+          <title>${escapeHtmlText(manualDocTitle)}</title>
           <style>
             @page { size: A4; margin: 15mm; }
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 11px; line-height: 1.5; }
@@ -104,7 +112,7 @@ export const ManualModule: React.FC = () => {
       `;
       printDocumentInPage(html);
     } else {
-      window.print();
+      printWithWindowTitle(manualDocTitle);
     }
   };
 

@@ -11,7 +11,7 @@ import {
   getSystemLogo
 } from '../types';
 import { storage } from '../services/storage';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle } from '../utils/printHelper';
 import {
   Package,
   Plus,
@@ -451,12 +451,18 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     const totalUso = vaultItems.reduce((acc, m) => acc + Number(m.quantidadeEmUso || 0), 0);
     const totalCons = vaultItems.reduce((acc, m) => acc + Number(m.quantidadeConsumida || 0), 0);
 
+    const vaultDocTitle = buildStandardDocumentTitle(
+      'Relatório de Cofre de Materiais (Materiais)',
+      vaultCode,
+      currentUser?.name || 'Responsável pela Armaria'
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Relatório de Cofre de Materiais - ${escapeHtml(vaultCode)}</title>
+        <title>${escapeHtml(vaultDocTitle)}</title>
         <style>
           @page { size: A4 landscape; margin: 10mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; margin: 0; padding: 14px; font-size: 10.5px; line-height: 1.35; background: #fff; }
@@ -637,12 +643,18 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     const totalUso = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidadeEmUso || 0), 0);
     const totalCons = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidadeConsumida || 0), 0);
 
+    const filteredDocTitle = buildStandardDocumentTitle(
+      'Relatório Filtrado de Materiais (Materiais)',
+      filterUnitObj?.name || filterDeptObj?.name || 'Acervo Geral',
+      currentUser?.name || 'Responsável pela Armaria'
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Relatório Filtrado de Materiais - PCMG</title>
+        <title>${escapeHtml(filteredDocTitle)}</title>
         <style>
           @page { size: A4 landscape; margin: 10mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; margin: 0; padding: 14px; font-size: 10px; line-height: 1.35; background: #fff; }

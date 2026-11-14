@@ -29,7 +29,7 @@ import {
   Vault,
   Calendar
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface ModuloCautelaMateriaisProps {
   currentUser: User;
@@ -803,12 +803,27 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
     const isFinished = isReturnedStatus(c.status) || isConsumedStatus(c.status);
     const isConsumo = c.seraDevolvida === false || isConsumedStatus(c.status);
 
+    const materialSigner =
+      c.usuarioInternoNome ||
+      c.usuarioExternoNome ||
+      (isFinished ? c.responsavelRecebimentoNome : c.responsavelEntregaNome) ||
+      'Solicitante';
+    const docTitle = buildStandardDocumentTitle(
+      isFinished
+        ? 'Termo de Devolução (Cautela de Materiais)'
+        : isConsumo
+        ? 'Recibo de Consumo (Cautela de Materiais)'
+        : 'Recibo de Cautela (Cautela de Materiais)',
+      c.protocolo || c.materialNome,
+      materialSigner
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Recibo de Cautela de Material - ${c.protocolo || c.materialNome}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           * { box-sizing: border-box; }

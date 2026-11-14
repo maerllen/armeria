@@ -2,7 +2,7 @@ import React from 'react';
 import { Movement, Weapon, VaultSpace } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { ShieldCheck, Printer, X, FileText, CheckCircle2 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface MovementReceiptModalProps {
   movement: Movement;
@@ -21,12 +21,17 @@ export const MovementReceiptModal: React.FC<MovementReceiptModalProps> = ({
   const returnVault = vaultSpaces.find(v => v.id === movement.returnVaultSpaceId);
 
   const handlePrint = () => {
+    const docTitle = buildStandardDocumentTitle(
+      'Recibo de Cautela (Movimentação de Armas)',
+      movement.weaponSerialNumber,
+      movement.requesterName
+    );
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Recibo de Cautela - ${movement.weaponSerialNumber} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }

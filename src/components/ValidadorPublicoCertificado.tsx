@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Certificado } from '../types';
 import { storage } from '../services/storage';
 import { printPdfFromBase64 } from '../utils/certificateStamper';
+import { buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 import {
   ShieldCheck,
   CheckCircle2,
@@ -79,7 +80,14 @@ export const PublicCertificateValidator: React.FC<PublicCertificateValidatorProp
   const handlePrint = () => {
     if (!certificate) return;
     const pdfData = certificate.pdfStampedBase64 || certificate.pdfBase64;
-    printPdfFromBase64(pdfData, `Certificado - ${certificate.nomeAluno}`);
+    printPdfFromBase64(
+      pdfData,
+      buildStandardDocumentTitle(
+        'Certificado Validado (Validador Público)',
+        certificate.codigoAutenticacao,
+        certificate.nomeAluno
+      )
+    );
   };
 
   const handleDownload = () => {
@@ -88,7 +96,12 @@ export const PublicCertificateValidator: React.FC<PublicCertificateValidatorProp
     const cleanBase64 = pdfData.includes(',') ? pdfData.split(',')[1] : pdfData;
     const link = document.createElement('a');
     link.href = `data:application/pdf;base64,${cleanBase64}`;
-    link.download = certificate.nomeArquivo || `Certificado_${certificate.codigoAutenticacao}.pdf`;
+    link.download = buildStandardDocumentFilename(
+      'Certificado Validado (Validador Público)',
+      certificate.codigoAutenticacao,
+      certificate.nomeAluno,
+      'pdf'
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { User, Certificado } from '../types';
 import { storage } from '../services/storage';
 import { stampPdfWithQrCode, printPdfFromBase64, generateQrCodeDataUrl } from '../utils/certificateStamper';
+import { buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import {
   FileCheck,
@@ -211,7 +212,14 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
   const handlePrintStamped = () => {
     const dataToPrint = stampedBase64 || originalBase64;
     if (!dataToPrint) return;
-    printPdfFromBase64(dataToPrint, `Certificado - ${studentName}`);
+    printPdfFromBase64(
+      dataToPrint,
+      buildStandardDocumentTitle(
+        'Certificado Validado (Certificados ACADEPOL)',
+        generatedCode || 'ACADEPOL',
+        studentName || currentUser.name
+      )
+    );
   };
 
   const handleDownloadStamped = () => {
@@ -220,7 +228,12 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
     const cleanBase64 = dataToDownload.includes(',') ? dataToDownload.split(',')[1] : dataToDownload;
     const link = document.createElement('a');
     link.href = `data:application/pdf;base64,${cleanBase64}`;
-    link.download = `Certificado_Validado_${generatedCode || 'ACADEPOL'}.pdf`;
+    link.download = buildStandardDocumentFilename(
+      'Certificado Validado (Certificados ACADEPOL)',
+      generatedCode || 'ACADEPOL',
+      studentName || currentUser.name,
+      'pdf'
+    );
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -796,7 +809,16 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
 
                   <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={() => printPdfFromBase64(validatedCert.pdfStampedBase64 || validatedCert.pdfBase64, `Certificado - ${validatedCert.nomeAluno}`)}
+                      onClick={() =>
+                        printPdfFromBase64(
+                          validatedCert.pdfStampedBase64 || validatedCert.pdfBase64,
+                          buildStandardDocumentTitle(
+                            'Certificado Validado (Certificados ACADEPOL)',
+                            validatedCert.codigoAutenticacao,
+                            validatedCert.nomeAluno
+                          )
+                        )
+                      }
                       className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-emerald-600/20 transition flex items-center space-x-2"
                     >
                       <Printer className="w-4 h-4" />
@@ -809,7 +831,12 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
                         const clean = data.includes(',') ? data.split(',')[1] : data;
                         const link = document.createElement('a');
                         link.href = `data:application/pdf;base64,${clean}`;
-                        link.download = validatedCert.nomeArquivo || `Certificado_${validatedCert.codigoAutenticacao}.pdf`;
+                        link.download = buildStandardDocumentFilename(
+                          'Certificado Validado (Certificados ACADEPOL)',
+                          validatedCert.codigoAutenticacao,
+                          validatedCert.nomeAluno,
+                          'pdf'
+                        );
                         document.body.appendChild(link);
                         link.click();
                         document.body.removeChild(link);
@@ -925,7 +952,16 @@ export const CertificateVerificationModule: React.FC<CertificateVerificationModu
                           </button>
 
                           <button
-                            onClick={() => printPdfFromBase64(cert.pdfStampedBase64 || cert.pdfBase64, `Certificado - ${cert.nomeAluno}`)}
+                            onClick={() =>
+                              printPdfFromBase64(
+                                cert.pdfStampedBase64 || cert.pdfBase64,
+                                buildStandardDocumentTitle(
+                                  'Certificado Validado (Certificados ACADEPOL)',
+                                  cert.codigoAutenticacao,
+                                  cert.nomeAluno
+                                )
+                              )
+                            }
                             title="Imprimir Certificado"
                             className="p-1.5 text-slate-300 hover:bg-slate-800 hover:text-white rounded-lg transition"
                           >

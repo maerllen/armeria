@@ -26,7 +26,7 @@ import {
   Flame,
   Package
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { MovementReceiptModal } from './ModalReciboMovimentacao';
 
@@ -340,12 +340,18 @@ export const MovementModule: React.FC<MovementModuleProps> = ({
     const withdrawalVault = vaultSpaces.find(v => v.id === mov.withdrawalVaultSpaceId);
     const returnVault = vaultSpaces.find(v => v.id === mov.returnVaultSpaceId);
 
+    const docTitle = buildStandardDocumentTitle(
+      'Recibo de Cautela (Movimentações)',
+      mov.weaponSerialNumber,
+      mov.requesterName
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Recibo de Cautela - ${mov.weaponSerialNumber} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }
@@ -1374,12 +1380,18 @@ function printOfficialTransferReceipt(
     `;
   }
 
+  const docTitle = buildStandardDocumentTitle(
+    'Termo de Recebimento de Transferência (Movimentações)',
+    trf.protocolNumber || trf.id,
+    currentUser.name
+  );
+
   const html = `
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8">
-      <title>Termo de Recebimento de Transferência - ${trf.protocolNumber || trf.id} - PCMG</title>
+      <title>${escapeHtmlText(docTitle)}</title>
       <style>
         @page { size: A4 portrait; margin: 12mm; }
         body {

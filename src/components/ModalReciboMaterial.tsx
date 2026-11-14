@@ -10,7 +10,7 @@ import {
 import { storage } from '../services/storage';
 import { Printer, X, Shield, AlertTriangle } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface MaterialReceiptModalProps {
   cautela: CautelaMaterial;
@@ -101,12 +101,26 @@ export const MaterialReceiptModal: React.FC<MaterialReceiptModalProps> = ({
     const isFinished = Boolean(cautela.dataDevolucao);
     const isConsumo = cautela.seraDevolvida === false || Boolean(cautela.foiConsumido);
 
+    const materialSigner =
+      cautela.tipoDestinatario === 'interno'
+        ? (cautela.usuarioInternoNome || cautela.responsavelEntregaNome)
+        : (cautela.usuarioExternoNome || cautela.responsavelEntregaNome);
+    const docTitle = buildStandardDocumentTitle(
+      isFinished
+        ? 'Termo de Devolução (Cautela de Materiais)'
+        : isConsumo
+        ? 'Recibo de Consumo (Cautela de Materiais)'
+        : 'Recibo de Cautela (Cautela de Materiais)',
+      cautela.protocolo || cautela.materialNome,
+      materialSigner || 'Solicitante'
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Recibo de Cautela de Material - ${cautela.protocolo || cautela.materialNome}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 12mm 15mm; }
           * { box-sizing: border-box; }

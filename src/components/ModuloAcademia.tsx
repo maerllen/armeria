@@ -44,7 +44,7 @@ import {
   Eye,
   Smartphone
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { AcademyReceiptModal } from './ModalReciboAcademia';
 import { formatTurmaCode } from './ModuloCalendario';
@@ -1564,12 +1564,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       boxesHtml = `<div style="font-style: italic; color: #64748b;">Sem Caixa de Armas vinculada.</div>`;
     }
 
+    const docTitle = buildStandardDocumentTitle(
+      'Mapa de Aula (Academia)',
+      `${mov.turmaCode || mov.className}`,
+      mov.teacherName || mov.issuedByUserName || 'Professor Responsável'
+    );
+
     const html = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Mapa de Aula - ${mov.turmaCode || mov.className} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4; margin: 15mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; background: #fff; margin: 0; padding: 20px; font-size: 12px; line-height: 1.4; }

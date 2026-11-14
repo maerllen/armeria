@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { User, Weapon, Department, Unit, VaultSpace, formatCaliberDisplay } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp, formatMasp } from '../utils/masks';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import {
   Printer,
   X,
@@ -357,12 +357,18 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       return `<span style="display: inline-block; margin-right: 12px; margin-bottom: 4px; font-size: 10px;"><strong>${c}:</strong> ${count} un.</span>`;
     }).join('');
 
+    const docTitle = buildStandardDocumentTitle(
+      'Inventário Oficial do Arsenal (Armas)',
+      `${unitDisplayName} (${authCode})`,
+      currentUser.name
+    );
+
     const htmlDocument = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <title>Inventário Oficial do Arsenal - ${unitDisplayName} - PCMG</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page {
             size: A4 portrait;

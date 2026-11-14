@@ -8,7 +8,7 @@ import {
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
   ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2
 } from 'lucide-react';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 
 interface ModuloCautelaArmasProps {
   currentUser: User;
@@ -3527,12 +3527,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       </div>
     `;
 
+    const returnDocTitle = buildStandardDocumentTitle(
+      'Recibo de Devolução (Cautela de Armas)',
+      cautela.weaponSerialNumber,
+      requesterName
+    );
+
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="utf-8" />
-        <title>Recibo de Devolução - ${cautela.weaponSerialNumber}</title>
+        <title>${escapeHtmlText(returnDocTitle)}</title>
         <style>
           @page {
             size: A4 portrait;
@@ -4243,12 +4249,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const ammoDest = linkedAmmo?.destinacao || cautela.ammoDestinacao || 'Defesa';
     const ammoSeraDevolvida = linkedAmmo?.seraDevolvida !== undefined ? linkedAmmo.seraDevolvida : (cautela.ammoDestinacao === 'Defesa');
 
+    const termoDocTitle = buildStandardDocumentTitle(
+      'Termo de Cautela (Cautela de Armas)',
+      cautela.weaponSerialNumber,
+      signerName
+    );
+
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="utf-8" />
-        <title>Termo de Cautela - ${cautela.weaponSerialNumber}</title>
+        <title>${escapeHtmlText(termoDocTitle)}</title>
         <style>
           @page {
             size: A4 portrait;
@@ -5132,12 +5144,18 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           `;
         }).join('');
 
+    const historyDocTitle = buildStandardDocumentTitle(
+      'Relatório de Histórico (Cautela de Armas)',
+      `MASP ${currentUser.masp}`,
+      currentUser.name
+    );
+
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="utf-8" />
-        <title>Relatório de Histórico de Cautelas de Armas - ${escapeHtml(currentUser.masp)}</title>
+        <title>${escapeHtmlText(historyDocTitle)}</title>
         <style>
           @page {
             size: A4 portrait;
@@ -6333,12 +6351,24 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
             })
             .join('');
 
+    const armorerReportId =
+      armorerReportScope === 'POR_ARMA' && selectedWeaponOpt
+        ? `${selectedWeaponOpt.serial} (${unitSigla})`
+        : armorerReportScope === 'POR_POLICIAL' && selectedUserOpt
+          ? `MASP ${selectedUserOpt.masp} (${unitSigla})`
+          : unitSigla;
+    const armorerReportPrintTitle = buildStandardDocumentTitle(
+      'Relatório de Cautelas (Cautela de Armas)',
+      armorerReportId,
+      issuerName
+    );
+
     const htmlContent = `
       <!DOCTYPE html>
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>${escapeHtml(reportDocTitle)}</title>
+        <title>${escapeHtmlText(armorerReportPrintTitle)}</title>
         <style>
           @page { size: A4 portrait; margin: 10mm 11mm 11mm 11mm; }
           * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }

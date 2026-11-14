@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { User, Weapon, WeaponMaintenance, Department, Unit, VaultSpace } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import {
   Wrench,
   X,
@@ -101,6 +101,11 @@ export const ModalHistoricoManutencoes: React.FC<ModalHistoricoManutencoesProps>
     const title = isWeaponSpecific
       ? `RELATÓRIO DE MANUTENÇÕES - ARMA ${weapon?.model} (SÉRIE: ${weapon?.serialNumber})`
       : 'RELATÓRIO GERAL DE MANUTENÇÕES DE ARMAMENTOS';
+    const docTitle = buildStandardDocumentTitle(
+      'Relatório de Manutenções (Armas)',
+      isWeaponSpecific ? (weapon?.serialNumber || weapon?.model || 'Arma') : 'Acervo Geral',
+      currentUser.name
+    );
 
     const rowsHtml = filteredList.map((m, idx) => {
       const wep = weapons.find(w => w.id === m.weaponId);
@@ -144,7 +149,7 @@ export const ModalHistoricoManutencoes: React.FC<ModalHistoricoManutencoesProps>
       <html>
       <head>
         <meta charset="utf-8" />
-        <title>${title}</title>
+        <title>${escapeHtmlText(docTitle)}</title>
         <style>
           @page { size: A4 landscape; margin: 12mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; color: #0f172a; margin: 0; padding: 0; }

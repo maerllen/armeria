@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { AmmoTransfer, User, AmmoTransferItem } from '../types';
 import { storage } from '../services/storage';
 import { formatTimestamp } from '../utils/masks';
-import { printDocumentInPage } from '../utils/printHelper';
+import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import {
   ArrowRightLeft,
   Search,
@@ -63,12 +63,18 @@ export function printAmmoTransferReceipt(trf: AmmoTransfer) {
 
   const totalQuantity = (trf.items || []).reduce((acc, it) => acc + (it.quantity || 0), 0) || trf.totalQuantity || 0;
 
+  const docTitle = buildStandardDocumentTitle(
+    isPending ? 'Guia de Transferência (Munições)' : 'Termo de Transferência (Munições)',
+    trf.protocolNumber || trf.id,
+    trf.receivedByUserName || trf.transferredByUserName || trf.receiverOrTransporterName
+  );
+
   const html = `
     <!DOCTYPE html>
     <html lang="pt-BR">
     <head>
       <meta charset="UTF-8">
-      <title>Guia de Transferência de Munições - ${trf.protocolNumber || trf.id} - PCMG</title>
+      <title>${escapeHtmlText(docTitle)}</title>
       <style>
         @page { size: A4 portrait; margin: 12mm; }
         body {

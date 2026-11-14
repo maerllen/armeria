@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
+import { buildStandardDocumentFilename } from '../utils/printHelper';
 import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 
@@ -535,7 +536,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     ws['!cols'] = [{ wch: 32 }, { wch: 16 }, { wch: 20 }, { wch: 28 }];
     XLSX.utils.book_append_sheet(wb, ws, 'Usuários');
-    XLSX.writeFile(wb, 'usuarios.xlsx');
+    XLSX.writeFile(
+      wb,
+      buildStandardDocumentFilename(
+        'Modelo Importação de Usuários (Usuários)',
+        sampleUnitName,
+        currentUser.name,
+        'xlsx'
+      )
+    );
   };
 
   const handleExcelFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
