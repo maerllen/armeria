@@ -176,13 +176,13 @@ class PreloaderService {
    * à API do sistema ative o preloader automaticamente.
    */
   private installFetchInterceptor() {
-    if (this.interceptorInstalled || typeof window === 'undefined') return;
+    if (this.interceptorInstalled || typeof window === 'undefined' || typeof window.fetch !== 'function') return;
     this.interceptorInstalled = true;
 
-    const originalFetch = window.fetch;
+    const originalFetch = window.fetch.bind(window);
     const self = this;
 
-    window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
+    const wrappedFetch: typeof window.fetch = async function (input: RequestInfo | URL, init?: RequestInit) {
       let urlString = '';
       if (typeof input === 'string') {
         urlString = input;
@@ -207,7 +207,7 @@ class PreloaderService {
       const isMutatingOrAuth = method !== 'GET' || urlString.includes('/api/auth/login') || urlString.includes('/api/auth/change-password');
 
       if (!isApiCall || skipPreloader || !isMutatingOrAuth) {
-        return originalFetch.apply(this, [input as any, init]);
+        return originalFetch(input, init);
       }
 
       // Define mensagens contextuais conforme o endpoint e método
@@ -215,12 +215,28 @@ class PreloaderService {
       const taskId = self.start(message, submessage, type);
 
       try {
-        const response = await originalFetch.apply(this, [input as any, init]);
+        const response = await originalFetch(input, init);
         return response;
       } finally {
         self.stop(taskId);
       }
     };
+
+    try {
+      const ownDescriptor = Object.getOwnPropertyDescriptor(window, 'fetch');
+      if (!ownDescriptor || ownDescriptor.configurable) {
+        Object.defineProperty(window, 'fetch', {
+          value: wrappedFetch,
+          writable: true,
+          configurable: true,
+          enumerable: ownDescriptor?.enumerable ?? true
+        });
+      } else if (ownDescriptor.writable) {
+        window.fetch = wrappedFetch;
+      }
+    } catch (err) {
+      console.warn('[PreloaderService] Não foi possível sobrescrever window.fetch:', err);
+    }
   }
 
   /**
