@@ -32,6 +32,7 @@ import {
   WeaponMaintenance,
   ExternalWorkshop,
   WeaponShotRecord,
+  WeaponCustodyMovement,
   Explosivo,
   MovimentacaoExplosivo,
   TipoExplosivo,
@@ -93,6 +94,7 @@ export interface AppState {
   cautelasMunicoes: CautelaMunicao[];
   explosivoTransfers: ExplosivoTransfer[];
   materialTransfers: MaterialTransfer[];
+  weaponCustodyHistory: WeaponCustodyMovement[];
 }
 
 class StorageService {
@@ -137,7 +139,8 @@ class StorageService {
     produtosVeterinarios: [],
     movimentacoesVeterinarias: [],
     cautelasArmas: [],
-    cautelasMunicoes: []
+    cautelasMunicoes: [],
+    weaponCustodyHistory: []
   };
 
   constructor() {
@@ -196,7 +199,8 @@ class StorageService {
         movimentacoesVeterinariasRes,
         cautelasArmasRes,
         cautelasMunicoesRes,
-        materialTransfersRes
+        materialTransfersRes,
+        weaponCustodyHistoryRes
       ] = await Promise.all([
         fetchSync('/api/users'),
         fetchSync('/api/departments'),
@@ -236,7 +240,8 @@ class StorageService {
         fetchSync('/api/movimentacoes-veterinarias'),
         fetchSync('/api/cautelas-armas'),
         fetchSync('/api/cautelas-municoes'),
-        fetchSync('/api/material-transfers')
+        fetchSync('/api/material-transfers'),
+        fetchSync('/api/weapons-custody-history')
       ]);
 
       this.state.users = usersRes || [];
@@ -277,6 +282,7 @@ class StorageService {
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
+      this.state.weaponCustodyHistory = weaponCustodyHistoryRes || [];
 
       try {
         const rawExpTrf = localStorage.getItem('pcmg_explosivo_transfers');
@@ -1121,6 +1127,97 @@ class StorageService {
     const res = await fetch(`/api/weapons/${weaponId}/shots`);
     if (!res.ok) return [];
     return await res.json();
+  }
+
+  // --- WEAPON CUSTODY EXITS / RETURNS (DAR SAÍDA / DAR ENTRADA) ---
+  public getWeaponCustodyHistory(weaponId: string): WeaponCustodyMovement[] {
+    return (this.state.weaponCustodyHistory || [])
+      .filter(h => h.weaponId === weaponId)
+      .sort((a, b) => new Date(b.exitDate).getTime() - new Date(a.exitDate).getTime());
+  }
+
+  public async fetchWeaponCustodyHistory(weaponId: string): Promise<WeaponCustodyMovement[]> {
+    try {
+      const res = await fetch(`/api/weapons/${encodeURIComponent(weaponId)}/custody-history`, {
+        headers: { 'x-skip-preloader': 'true' }
+      });
+      if (!res.ok) return this.getWeaponCustodyHistory(weaponId);
+      const data: WeaponCustodyMovement[] = await res.json();
+      const others = (this.state.weaponCustodyHistory || []).filter(h => h.weaponId !== weaponId);
+      this.state.weaponCustodyHistory = [...data, ...others];
+      return data;
+    } catch {
+      return this.getWeaponCustodyHistory(weaponId);
+    }
+  }
+
+  public async darSaidaArma(
+    weaponId: string,
+    overrides?: { custodyUserName?: string; authorizerUserName?: string }
+  ): Promise<{ status: Weapon['status']; record: WeaponCustodyMovement }> {
+    const res = await fetch(`/api/weapons/${encodeURIComponent(weaponId)}/dar-saida`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        custodyUserName: overrides?.custodyUserName,
+        authorizerUserName: overrides?.authorizerUserName,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao registrar saída da arma.');
+
+    const target = this.state.weapons.find(w => w.id === weaponId);
+    if (target) {
+      target.status = 'Com o Policial';
+    }
+    if (data.record) {
+      this.state.weaponCustodyHistory = [data.record, ...(this.state.weaponCustodyHistory || [])];
+    }
+
+    await this.refreshFromServer();
+    return { status: 'Com o Policial', record: data.record };
+  }
+
+  public async darEntradaArma(
+    weaponId: string,
+    shotsFired: number
+  ): Promise<{ status: Weapon['status']; shotCount: number; shotsAdded: number; record?: WeaponCustodyMovement }> {
+    const cleanShots = Math.max(0, parseInt(String(shotsFired || 0), 10) || 0);
+    const res = await fetch(`/api/weapons/${encodeURIComponent(weaponId)}/dar-entrada`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        shotsFired: cleanShots,
+        actor: this.state.currentUser
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Erro ao registrar entrada da arma.');
+
+    const target = this.state.weapons.find(w => w.id === weaponId);
+    if (target) {
+      target.status = 'Acautelada';
+      if (cleanShots > 0) {
+        target.shotCount = (target.shotCount || 0) + cleanShots;
+      }
+    }
+    if (data.record) {
+      this.state.weaponCustodyHistory = (this.state.weaponCustodyHistory || []).map(h =>
+        h.id === data.record.id ? data.record : h
+      );
+      if (!this.state.weaponCustodyHistory.some(h => h.id === data.record.id)) {
+        this.state.weaponCustodyHistory.unshift(data.record);
+      }
+    }
+
+    await this.refreshFromServer();
+    return {
+      status: 'Acautelada',
+      shotCount: data.shotCount ?? (target?.shotCount || 0),
+      shotsAdded: cleanShots,
+      record: data.record
+    };
   }
 
   // --- WEAPON MAINTENANCE ---

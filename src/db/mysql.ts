@@ -1367,6 +1367,44 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 47. HISTORICO_SAIDAS_ARMAS (dependente de ARMAS)
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`HISTORICO_SAIDAS_ARMAS\` (
+          \`ID_HISTORICO_SAIDAS_ARMAS\` VARCHAR(64) NOT NULL,
+          \`ARMA_ID\` VARCHAR(64) NOT NULL,
+          \`NOME_ARMA\` VARCHAR(255) NOT NULL,
+          \`NUMERO_SERIE_ARMA\` VARCHAR(128) NOT NULL,
+          \`USUARIO_CAUTELA_NOME\` VARCHAR(255) NOT NULL,
+          \`USUARIO_AUTORIZADOR_NOME\` VARCHAR(255) NOT NULL,
+          \`DATA_SAIDA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_RETORNO\` DATETIME DEFAULT NULL,
+          \`QUANTIDADE_TIROS\` INT NOT NULL DEFAULT 0,
+          PRIMARY KEY (\`ID_HISTORICO_SAIDAS_ARMAS\`),
+          KEY \`idx_hsa_arma_id\` (\`ARMA_ID\`),
+          KEY \`idx_hsa_data_saida\` (\`DATA_SAIDA\`),
+          CONSTRAINT \`fk_hsa_arma\` FOREIGN KEY (\`ARMA_ID\`) REFERENCES \`ARMAS\` (\`ID_ARMAS\`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } catch (_fkErr) {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`HISTORICO_SAIDAS_ARMAS\` (
+          \`ID_HISTORICO_SAIDAS_ARMAS\` VARCHAR(64) NOT NULL,
+          \`ARMA_ID\` VARCHAR(64) NOT NULL,
+          \`NOME_ARMA\` VARCHAR(255) NOT NULL,
+          \`NUMERO_SERIE_ARMA\` VARCHAR(128) NOT NULL,
+          \`USUARIO_CAUTELA_NOME\` VARCHAR(255) NOT NULL,
+          \`USUARIO_AUTORIZADOR_NOME\` VARCHAR(255) NOT NULL,
+          \`DATA_SAIDA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_RETORNO\` DATETIME DEFAULT NULL,
+          \`QUANTIDADE_TIROS\` INT NOT NULL DEFAULT 0,
+          PRIMARY KEY (\`ID_HISTORICO_SAIDAS_ARMAS\`),
+          KEY \`idx_hsa_arma_id\` (\`ARMA_ID\`),
+          KEY \`idx_hsa_data_saida\` (\`DATA_SAIDA\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    }
+
     // =========================================================================
     // EXECUÇÃO DE MIGRAÇÕES DE COLUNAS EM TABELAS EXISTENTES (UPDATE SEGURO)
     // =========================================================================
@@ -1537,7 +1575,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
 
     return {
       success: true,
-      message: 'Todas as 46 tabelas do MariaDB / MySQL estruturadas e atualizadas com sucesso!',
+      message: 'Todas as 47 tabelas do MariaDB / MySQL estruturadas e atualizadas com sucesso!',
       log: logs,
     };
   } catch (err: any) {

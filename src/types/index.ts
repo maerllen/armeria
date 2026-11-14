@@ -224,7 +224,7 @@ export interface AmmunitionMovement {
   createdAt: string;
 }
 
-export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula' | 'Acautelada' | 'Cautela Pendente';
+export type WeaponStatus = 'No Cofre' | 'Em Trânsito' | 'Pendente de Recibo' | 'EM MANUTENÇÃO' | 'Em Manutenção' | 'Manutenção' | 'Em Aula' | 'Acautelada' | 'Com o Policial' | 'Cautela Pendente';
 
 export interface Weapon {
   id: string;
@@ -306,6 +306,18 @@ export interface WeaponShotRecord {
   officerMasp?: string;
   totalShotsAfter: number;
   createdAt: string;
+}
+
+export interface WeaponCustodyMovement {
+  id: string;
+  weaponId: string;
+  weaponName: string;
+  weaponSerialNumber: string;
+  custodyUserName: string;
+  authorizerUserName: string;
+  exitDate: string;
+  returnDate?: string | null;
+  shotsFired: number;
 }
 
 export type MovementStatus = 

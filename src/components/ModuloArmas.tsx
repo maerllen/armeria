@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, isUserExplosivista } from '../types';
+import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, WeaponCustodyMovement, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2 } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TransferWeaponModal } from './ModalTransferirArmas';
 import { TransferReceiptModal } from './ModalReciboTransferencia';
@@ -108,8 +108,31 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
 
   const [selectedWeapon, setSelectedWeapon] = useState<Weapon | null>(null);
   const [weaponHistory, setWeaponHistory] = useState<Movement[]>([]);
+  const [weaponCustodyHistory, setWeaponCustodyHistory] = useState<WeaponCustodyMovement[]>([]);
   const [transitMovement, setTransitMovement] = useState<Movement | null>(null);
   const [deleteTargetWeapon, setDeleteTargetWeapon] = useState<Weapon | null>(null);
+  const [darEntradaTargetWeapon, setDarEntradaTargetWeapon] = useState<Weapon | null>(null);
+  const [darEntradaShotsInput, setDarEntradaShotsInput] = useState('0');
+  const [custodyActionLoading, setCustodyActionLoading] = useState(false);
+
+  const canOperateWeaponCustody = isGeral || isArmeiro || isAdmin || Boolean(currentUser.canMoveWeapons);
+
+  useEffect(() => {
+    if (!selectedWeaponDetail) {
+      setWeaponCustodyHistory([]);
+      return;
+    }
+    const fresh = weapons.find(w => w.id === selectedWeaponDetail.id);
+    if (fresh && (fresh.status !== selectedWeaponDetail.status || (fresh.shotCount || 0) !== (selectedWeaponDetail.shotCount || 0))) {
+      setSelectedWeaponDetail(fresh);
+    }
+    setWeaponCustodyHistory(storage.getWeaponCustodyHistory(selectedWeaponDetail.id));
+    let active = true;
+    storage.fetchWeaponCustodyHistory(selectedWeaponDetail.id).then(rows => {
+      if (active) setWeaponCustodyHistory(rows);
+    });
+    return () => { active = false; };
+  }, [selectedWeaponDetail?.id, weapons]);
 
   // Weapon form states
   const [editingWeapon, setEditingWeapon] = useState<Weapon | null>(null);
@@ -419,12 +442,83 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     setShowMaintenanceModal(true);
   };
 
-  // Open Movement History
-  const handleOpenHistory = (weap: Weapon) => {
+  // Open Custody History (HISTORICO_SAIDAS_ARMAS)
+  const handleOpenHistory = async (weap: Weapon) => {
     setSelectedWeapon(weap);
-    const hist = storage.getWeaponMovementHistory(weap.id);
-    setWeaponHistory(hist);
+    setWeaponHistory(storage.getWeaponMovementHistory(weap.id));
+    setWeaponCustodyHistory(storage.getWeaponCustodyHistory(weap.id));
     setShowHistoryModal(true);
+    const records = await storage.fetchWeaponCustodyHistory(weap.id);
+    setWeaponCustodyHistory(records);
+  };
+
+  const getCustodyNamesForWeapon = (w: Weapon) => {
+    const activeCaut = storage
+      .getCautelasArmas()
+      .find(c => c.weaponId === w.id && (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE'));
+    const locNote = String((w as any).locationNote || '');
+    const parsedName = locNote
+      ? locNote.split('•')[0].replace(/^Acautelada com\s*/i, '').split('(MASP:')[0].trim()
+      : '';
+    return {
+      activeCaut,
+      custodyUserName: activeCaut?.requesterName || parsedName || 'Policial',
+      authorizerUserName: activeCaut?.armorerName || currentUser.name
+    };
+  };
+
+  const handleDarSaidaWeapon = async (w: Weapon) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setCustodyActionLoading(true);
+    try {
+      const { custodyUserName, authorizerUserName } = getCustodyNamesForWeapon(w);
+      await storage.darSaidaArma(w.id, { custodyUserName, authorizerUserName });
+      setSuccessMsg(`Saída registrada: ${w.type} ${w.model} (Série: ${w.serialNumber}) está agora "Com o Policial".`);
+      if (selectedWeaponDetail?.id === w.id) {
+        const rows = await storage.fetchWeaponCustodyHistory(w.id);
+        setWeaponCustodyHistory(rows);
+      }
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar saída na arma.');
+    } finally {
+      setCustodyActionLoading(false);
+    }
+  };
+
+  const handleOpenDarEntradaModal = (w: Weapon) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDarEntradaTargetWeapon(w);
+    setDarEntradaShotsInput('0');
+  };
+
+  const handleConfirmDarEntrada = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!darEntradaTargetWeapon) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+    const shots = Math.max(0, parseInt(darEntradaShotsInput || '0', 10) || 0);
+    const targetId = darEntradaTargetWeapon.id;
+    setCustodyActionLoading(true);
+    try {
+      const res = await storage.darEntradaArma(targetId, shots);
+      setSuccessMsg(
+        `Entrada registrada: ${darEntradaTargetWeapon.type} ${darEntradaTargetWeapon.model} (Série: ${darEntradaTargetWeapon.serialNumber}) retornou para "Acautelada"${shots > 0 ? ` com +${shots} tiro(s) acrescentado(s) (Total: ${res.shotCount} tiros)` : ''}.`
+      );
+      setDarEntradaTargetWeapon(null);
+      setDarEntradaShotsInput('0');
+      if (selectedWeaponDetail?.id === targetId) {
+        const rows = await storage.fetchWeaponCustodyHistory(targetId);
+        setWeaponCustodyHistory(rows);
+      }
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao dar entrada na arma.');
+    } finally {
+      setCustodyActionLoading(false);
+    }
   };
 
   // View Transit Details
@@ -555,6 +649,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
     if (statusFilter !== 'TODOS') {
       if (statusFilter === 'NO_COFRE' && w.status !== 'No Cofre') return false;
       if (statusFilter === 'ACAUTELADA' && w.status !== 'Acautelada') return false;
+      if (statusFilter === 'COM_O_POLICIAL' && w.status !== 'Com o Policial') return false;
       if (statusFilter === 'EM_MOVIMENTO' && w.status !== 'Em Trânsito' && w.status !== 'Em Transito') return false;
       if (statusFilter === 'EM_AULA' && w.status !== 'Em Aula' && w.status !== 'Em Sala de Aula') return false;
       if (statusFilter === 'EM_MANUTENCAO' && w.status !== 'Em Manutenção' && w.status !== 'Manutenção') return false;
@@ -974,6 +1069,17 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </button>
 
                 <button
+                  onClick={() => setStatusFilter('COM_O_POLICIAL')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                    statusFilter === 'COM_O_POLICIAL'
+                      ? 'bg-sky-950 text-sky-300 border border-sky-600'
+                      : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
+                  }`}
+                >
+                  Com o Policial
+                </button>
+
+                <button
                   onClick={() => setStatusFilter('EM_MOVIMENTO')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
                     statusFilter === 'EM_MOVIMENTO'
@@ -1248,6 +1354,10 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 const officerMasp = activeCautela ? activeCautela.requesterMasp : (((w as any).locationNote && (w as any).locationNote.includes('MASP:')) ? (w as any).locationNote.split('MASP:')[1].split(')')[0].trim() : '');
                 const officerDisplay = officerMasp ? `${officerName} (MASP: ${officerMasp})` : officerName;
 
+                const isCustodyActive = w.status === 'Acautelada' || w.status === 'Com o Policial';
+                const canDarSaida = canOperateWeaponCustody && (w.status === 'Acautelada' || (Boolean(activeCautela) && w.status !== 'Com o Policial' && w.status !== 'Manutenção' && w.status !== 'Em Manutenção'));
+                const canDarEntrada = canOperateWeaponCustody && w.status === 'Com o Policial';
+
                 return (
                   <div
                     key={w.id}
@@ -1262,6 +1372,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             ? 'bg-emerald-950 text-emerald-400 border-emerald-800'
                             : w.status === 'Cautela Pendente'
                             ? 'bg-amber-950 text-amber-300 border-amber-800 animate-pulse'
+                            : w.status === 'Com o Policial'
+                            ? 'bg-sky-950 text-sky-300 border-sky-700 max-w-[280px] truncate'
                             : w.status === 'Acautelada'
                             ? 'bg-purple-950 text-purple-300 border-purple-800 max-w-[280px] truncate'
                             : w.status === 'Em Trânsito'
@@ -1271,8 +1383,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                             : w.status === 'Manutenção' || w.status === 'Em Manutenção'
                             ? 'bg-amber-500/25 text-amber-300 border-amber-500/50'
                             : 'bg-purple-950 text-purple-300 border-purple-800'
-                        }`} title={w.status === 'Acautelada' ? `Acautelada com ${officerDisplay}` : w.status}>
-                          {w.status === 'Acautelada' ? `Acautelada — ${officerDisplay}` : w.status}
+                        }`} title={isCustodyActive ? `${w.status} — ${officerDisplay}` : w.status}>
+                          {isCustodyActive ? `${w.status} — ${officerDisplay}` : w.status}
                         </span>
 
                         <div className="flex items-center space-x-1">
@@ -1304,11 +1416,11 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                           </p>
                         )}
                         <p>Calibre: <strong className="text-slate-200">{w.caliber}</strong></p>
-                        {w.status === 'Acautelada' ? (
+                        {isCustodyActive ? (
                           <div className="mt-2 pt-1.5 border-t border-purple-900/40 text-[11px] font-sans">
-                            <p className="text-purple-300 font-semibold flex items-center space-x-1">
-                              <Shield className="w-3.5 h-3.5 text-purple-400 shrink-0" />
-                              <span>Acautelada com: <strong className="text-purple-100">{officerName}</strong> {officerMasp ? <span className="text-purple-300 font-mono font-bold">(MASP: {officerMasp})</span> : null}</span>
+                            <p className={`${w.status === 'Com o Policial' ? 'text-sky-300' : 'text-purple-300'} font-semibold flex items-center space-x-1`}>
+                              <Shield className={`w-3.5 h-3.5 ${w.status === 'Com o Policial' ? 'text-sky-400' : 'text-purple-400'} shrink-0`} />
+                              <span>{w.status === 'Com o Policial' ? 'Com o Policial:' : 'Acautelada com:'} <strong className="text-slate-100">{officerName}</strong> {officerMasp ? <span className="font-mono font-bold">(MASP: {officerMasp})</span> : null}</span>
                             </p>
                             <p className="text-[10px] text-purple-300/80 font-mono mt-0.5">
                               {officerMasp ? `MASP: ${officerMasp} • ` : ''}Último cofre: <strong className="text-purple-200">{lastVaultCode}</strong>
@@ -1326,12 +1438,44 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                       </div>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
+                    <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-xs">
                       <span className="text-[11px] text-slate-400 font-medium flex items-center space-x-1 group-hover:text-amber-400">
                         <Eye className="w-3.5 h-3.5" />
                         <span>Ver Detalhes</span>
                       </span>
-                      <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition" />
+                      <div className="flex items-center space-x-1.5">
+                        {canDarSaida && (
+                          <button
+                            type="button"
+                            disabled={custodyActionLoading}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDarSaidaWeapon(w);
+                            }}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-sm disabled:opacity-50"
+                            title="Dar saída da arma para o policial"
+                          >
+                            <ArrowUpRight className="w-3.5 h-3.5" />
+                            <span>Dar Saída</span>
+                          </button>
+                        )}
+                        {canDarEntrada && (
+                          <button
+                            type="button"
+                            disabled={custodyActionLoading}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleOpenDarEntradaModal(w);
+                            }}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-sm disabled:opacity-50"
+                            title="Dar entrada da arma e informar tiros disparados"
+                          >
+                            <ArrowDownLeft className="w-3.5 h-3.5" />
+                            <span>Dar Entrada</span>
+                          </button>
+                        )}
+                        <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition" />
+                      </div>
                     </div>
                   </div>
                 );
@@ -1407,12 +1551,14 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                   <span className={`font-bold ${
                     selectedWeaponDetail.status === 'No Cofre'
                       ? 'text-emerald-400'
+                      : selectedWeaponDetail.status === 'Com o Policial'
+                      ? 'text-sky-400'
                       : selectedWeaponDetail.status === 'Acautelada'
                       ? 'text-purple-400'
                       : 'text-amber-400'
                   }`}>
-                    {selectedWeaponDetail.status === 'Acautelada'
-                      ? `Acautelada — ${(() => {
+                    {(selectedWeaponDetail.status === 'Acautelada' || selectedWeaponDetail.status === 'Com o Policial')
+                      ? `${selectedWeaponDetail.status} — ${(() => {
                           const activeCautelaDetail = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');
                           const name = activeCautelaDetail ? activeCautelaDetail.requesterName : (((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '').split('(MASP:')[0].trim() : 'Policial'));
                           const masp = activeCautelaDetail ? activeCautelaDetail.requesterMasp : (((selectedWeaponDetail as any).locationNote && (selectedWeaponDetail as any).locationNote.includes('MASP:')) ? (selectedWeaponDetail as any).locationNote.split('MASP:')[1].split(')')[0].trim() : '');
@@ -1423,20 +1569,21 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 </div>
               </div>
 
-              {selectedWeaponDetail.status === 'Acautelada' && (() => {
+              {(selectedWeaponDetail.status === 'Acautelada' || selectedWeaponDetail.status === 'Com o Policial') && (() => {
                 const activeCautelaDetail = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');
                 const lastVault = vaultSpaces.find(v => v.id === (selectedWeaponDetail.previousVaultSpaceId || activeCautelaDetail?.vaultSpaceId));
+                const isComOPolicial = selectedWeaponDetail.status === 'Com o Policial';
                 return (
-                  <div className="p-3 bg-purple-950/40 border border-purple-800/60 rounded-xl text-xs text-purple-200 space-y-1">
-                    <div className="font-bold text-purple-300 flex items-center space-x-1.5">
-                      <Shield className="w-4 h-4 text-purple-400" />
-                      <span>Armamento Acautelado com Policial</span>
+                  <div className={`p-3 rounded-xl text-xs space-y-1 border ${isComOPolicial ? 'bg-sky-950/40 border-sky-800/60 text-sky-200' : 'bg-purple-950/40 border-purple-800/60 text-purple-200'}`}>
+                    <div className={`font-bold flex items-center space-x-1.5 ${isComOPolicial ? 'text-sky-300' : 'text-purple-300'}`}>
+                      <Shield className={`w-4 h-4 ${isComOPolicial ? 'text-sky-400' : 'text-purple-400'}`} />
+                      <span>{isComOPolicial ? 'Armamento em Posse Externa (Com o Policial)' : 'Armamento Acautelado com Policial'}</span>
                     </div>
                     <p>
                       Servidor Responsável: <strong>{activeCautelaDetail?.requesterName || ((selectedWeaponDetail as any).locationNote ? (selectedWeaponDetail as any).locationNote.split('•')[0].replace('Acautelada com ', '') : 'Policial')}</strong> {activeCautelaDetail?.requesterMasp ? `(MASP: ${activeCautelaDetail.requesterMasp})` : ''}
                     </p>
-                    <p className="text-[11px] text-purple-300/80">
-                      Último cofre registrado antes da saída: <strong className="text-purple-100">{lastVault ? lastVault.code : 'No Cofre de Origem'}</strong>
+                    <p className="text-[11px] opacity-85">
+                      Último cofre registrado antes da saída: <strong className="text-slate-100">{lastVault ? lastVault.code : 'No Cofre de Origem'}</strong>
                     </p>
                   </div>
                 );
@@ -1458,8 +1605,8 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
                 <div>
                   <span className="text-slate-400 text-[10px] block">LOCAL NO COFRE:</span>
                   <span className="font-bold text-amber-400">
-                    {selectedWeaponDetail.status === 'Acautelada'
-                      ? `Acautelada (Último: ${vaultSpaces.find(v => v.id === (selectedWeaponDetail.previousVaultSpaceId || selectedWeaponDetail.vaultSpaceId))?.code || 'Cofre'})`
+                    {(selectedWeaponDetail.status === 'Acautelada' || selectedWeaponDetail.status === 'Com o Policial')
+                      ? `${selectedWeaponDetail.status} (Cofre: ${vaultSpaces.find(v => v.id === (selectedWeaponDetail.previousVaultSpaceId || selectedWeaponDetail.vaultSpaceId))?.code || 'Cofre'})`
                       : vaultSpaces.find(v => v.id === selectedWeaponDetail.vaultSpaceId)?.code || (selectedWeaponDetail.status === 'Manutenção' ? 'Em Manutenção' : 'Em Trânsito')}
                   </span>
                 </div>
@@ -1498,10 +1645,95 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
               </div>
             </div>
 
+            {/* Histórico de Saídas e Retornos (Tabela dependente da arma) */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                  <History className="w-4 h-4" />
+                  <span>Histórico de Saídas e Entradas</span>
+                </h4>
+                <span className="text-[11px] font-mono text-slate-400">
+                  {weaponCustodyHistory.length} registro(s)
+                </span>
+              </div>
+
+              {weaponCustodyHistory.length === 0 ? (
+                <p className="text-xs text-slate-500 italic py-2 text-center">
+                  Nenhuma saída ou entrada registrada para esta arma até o momento.
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                  {weaponCustodyHistory.map((rec) => (
+                    <div key={rec.id} className="bg-slate-900 border border-slate-800 rounded-xl p-3 text-xs space-y-1">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <span className="font-bold text-slate-100">
+                          {rec.weaponName} <span className="text-amber-400 font-mono">({rec.weaponSerialNumber})</span>
+                        </span>
+                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                          rec.returnDate
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                        }`}>
+                          {rec.returnDate ? 'Retornou' : 'Com o Policial'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-slate-300">
+                        <p>Usuário Cautela: <strong className="text-slate-100">{rec.custodyUserName}</strong></p>
+                        <p>Autorizado por: <strong className="text-slate-100">{rec.authorizerUserName}</strong></p>
+                        <p>Saída: <span className="font-mono text-amber-300">{new Date(rec.exitDate).toLocaleString('pt-BR')}</span></p>
+                        <p>
+                          Retorno:{' '}
+                          {rec.returnDate ? (
+                            <span className="font-mono text-emerald-300">{new Date(rec.returnDate).toLocaleString('pt-BR')}</span>
+                          ) : (
+                            <span className="italic text-sky-300">Em aberto</span>
+                          )}
+                        </p>
+                        <p>Tiros disparados: <strong className="font-mono text-amber-400">{rec.shotsFired || 0}</strong></p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Quick Actions Bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
               
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Dar Saída / Dar Entrada */}
+                {canOperateWeaponCustody && (() => {
+                  const activeCaut = storage.getCautelasArmas().find(c => c.weaponId === selectedWeaponDetail.id && c.status === 'AUTORIZADA');
+                  const canDarSaida = selectedWeaponDetail.status === 'Acautelada' || (Boolean(activeCaut) && selectedWeaponDetail.status !== 'Com o Policial' && selectedWeaponDetail.status !== 'Manutenção' && selectedWeaponDetail.status !== 'Em Manutenção');
+                  const canDarEntrada = selectedWeaponDetail.status === 'Com o Policial';
+                  return (
+                    <>
+                      {canDarSaida && (
+                        <button
+                          type="button"
+                          disabled={custodyActionLoading}
+                          onClick={() => handleDarSaidaWeapon(selectedWeaponDetail)}
+                          className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3 py-2 rounded-xl transition flex items-center space-x-1.5 shadow disabled:opacity-50"
+                        >
+                          <ArrowUpRight className="w-4 h-4" />
+                          <span>Dar Saída</span>
+                        </button>
+                      )}
+                      {canDarEntrada && (
+                        <button
+                          type="button"
+                          disabled={custodyActionLoading}
+                          onClick={() => handleOpenDarEntradaModal(selectedWeaponDetail)}
+                          className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center space-x-1.5 shadow disabled:opacity-50"
+                        >
+                          <ArrowDownLeft className="w-4 h-4" />
+                          <span>Dar Entrada</span>
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
+
                 {/* Movement History Button */}
                 <button
                   onClick={() => handleOpenHistory(selectedWeaponDetail)}
@@ -1986,14 +2218,14 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
         />
       )}
 
-      {/* Modal History (Last 5 movements) */}
+      {/* Modal History (Registros de Saídas e Entradas da Arma) */}
       {showHistoryModal && selectedWeapon && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-xl shadow-2xl my-8">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
               <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
                 <History className="w-5 h-5 text-amber-400" />
-                <span>Histórico (Últimas 5 Retiradas e Devoluções)</span>
+                <span>Histórico de Saídas e Entradas</span>
               </h3>
               <button
                 onClick={() => setShowHistoryModal(false)}
@@ -2004,35 +2236,41 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             </div>
 
             <p className="text-xs text-slate-400 mb-3">
-              Arma: <strong className="text-amber-400 font-mono">{selectedWeapon.type} {selectedWeapon.model} - Série {selectedWeapon.serialNumber}</strong>
+              Arma: <strong className="text-amber-400 font-mono">{selectedWeapon.type} {selectedWeapon.manufacturer} {selectedWeapon.model} - Série {selectedWeapon.serialNumber}</strong>
             </p>
 
-            <div className="space-y-3 max-h-80 overflow-y-auto">
-              {weaponHistory.length === 0 ? (
+            <div className="space-y-3 max-h-96 overflow-y-auto pr-1">
+              {weaponCustodyHistory.length === 0 ? (
                 <p className="text-xs text-slate-500 italic py-4 text-center">
-                  Nenhuma movimentação registrada no histórico desta arma.
+                  Nenhum registro de saída ou retorno encontrado para esta arma.
                 </p>
               ) : (
-                weaponHistory.map((m) => (
-                  <div key={m.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-100">{m.requesterName} (MASP {m.requesterMasp})</span>
-                      <span className="text-[10px] font-mono text-amber-400 bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
-                        {m.status}
+                weaponCustodyHistory.map((rec) => (
+                  <div key={rec.id} className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <span className="font-bold text-slate-100">{rec.weaponName} <span className="font-mono text-amber-400">({rec.weaponSerialNumber})</span></span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+                        rec.returnDate
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          : 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                      }`}>
+                        {rec.returnDate ? 'Retornou ao Cofre' : 'Com o Policial'}
                       </span>
                     </div>
 
-                    <div className="text-[11px] text-slate-400 space-y-0.5">
-                      <p>Retirada: <span className="text-slate-200">{m.ammunitionCount} munições • {m.magazineCount} carregadores</span></p>
-                      <p>Autorizado por: <span className="text-slate-300 font-semibold">{m.approvedByUserName || 'N/A'}</span></p>
-                      {m.receiptDate && (
-                        <p>Devolução confirmada em: <span className="text-emerald-400 font-mono">{formatTimestamp(m.receiptDate)}</span> por {m.receiptConfirmedByUserName}</p>
-                      )}
-                      {m.divergenceJustification && (
-                        <p className="text-amber-300 bg-amber-950/40 p-1.5 rounded border border-amber-900/50 mt-1">
-                          Justificativa Divergência: "{m.divergenceJustification}"
-                        </p>
-                      )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-[11px] text-slate-300">
+                      <p>Usuário com a cautela: <strong className="text-slate-100">{rec.custodyUserName}</strong></p>
+                      <p>Autorizou a cautela: <strong className="text-slate-100">{rec.authorizerUserName}</strong></p>
+                      <p>Data de saída: <span className="text-amber-300 font-mono">{formatTimestamp(rec.exitDate)}</span></p>
+                      <p>
+                        Data de retorno:{' '}
+                        {rec.returnDate ? (
+                          <span className="text-emerald-300 font-mono">{formatTimestamp(rec.returnDate)}</span>
+                        ) : (
+                          <span className="text-sky-300 italic">Em curso / Com o Policial</span>
+                        )}
+                      </p>
+                      <p>Tiros disparados: <strong className="text-amber-400 font-mono">{rec.shotsFired || 0}</strong></p>
                     </div>
                   </div>
                 ))
@@ -2340,6 +2578,73 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
           initialDeptId={selectedDeptId}
           onClose={() => setShowPrintArsenalModal(false)}
         />
+      )}
+
+      {/* Modal Dar Entrada (Informar Tiros Disparados) */}
+      {darEntradaTargetWeapon && (
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4 z-[60] overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md shadow-2xl space-y-4 my-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-emerald-500/15 border border-emerald-500/30 rounded-xl text-emerald-400">
+                  <ArrowDownLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-100">Dar Entrada no Armamento</h3>
+                  <p className="text-xs font-mono text-amber-400 font-bold">
+                    {darEntradaTargetWeapon.type} {darEntradaTargetWeapon.manufacturer} {darEntradaTargetWeapon.model} • {darEntradaTargetWeapon.serialNumber}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDarEntradaTargetWeapon(null)}
+                className="text-slate-400 hover:text-slate-100 p-1 rounded-lg hover:bg-slate-800"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDarEntrada} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
+                  Quantidade de tiros disparados no retorno
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={darEntradaShotsInput}
+                  onChange={(e) => setDarEntradaShotsInput(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm font-mono font-bold text-slate-100 focus:outline-none focus:border-emerald-500"
+                  placeholder="0"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-400 mt-1.5">
+                  Caso tenham sido realizados disparos, a quantidade será acrescentada automaticamente ao total de tiros do armamento ({darEntradaTargetWeapon.shotCount || 0} atualmente).
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setDarEntradaTargetWeapon(null)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200 rounded-xl hover:bg-slate-800"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={custodyActionLoading}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow flex items-center space-x-1.5 disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{custodyActionLoading ? 'Salvando...' : 'Confirmar Entrada'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
       )}
 
     </div>

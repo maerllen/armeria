@@ -926,7 +926,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         if (!isMyWeaponMatch) return;
 
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        const isWeaponAcautelada = w.status === 'Acautelada';
+        const isWeaponAcautelada = w.status === 'Acautelada' || w.status === 'Com o Policial';
 
         if (isWeaponPending && !list.some(c => c.weaponId === w.id)) {
           list.unshift({
@@ -1069,7 +1069,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
       // Sincroniza armas da unidade/departamento com status Cautela Pendente e Acautelada
       (weapons || []).forEach(w => {
         const isWeaponPending = w.status === 'Cautela Pendente' || w.status === 'Pendente de Recibo' || w.status === 'Pendente Recibo';
-        const isWeaponAcautelada = w.status === 'Acautelada';
+        const isWeaponAcautelada = w.status === 'Acautelada' || w.status === 'Com o Policial';
 
         const matchUnit = isGeral
           ? true

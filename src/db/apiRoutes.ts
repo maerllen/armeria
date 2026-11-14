@@ -2228,6 +2228,69 @@ apiRouter.delete('/ammo-movements/:id', async (req: Request, res: Response) => {
 // -------------------------------------------------------------
 // WEAPONS
 // -------------------------------------------------------------
+let historicoSaidasArmasEnsured = false;
+function extractCustodyUserFromNote(rawNote?: string | null): { name: string; masp: string } {
+  if (!rawNote) return { name: '', masp: '' };
+  const note = String(rawNote).trim();
+  let extractedMasp = '';
+  if (note.includes('MASP:')) {
+    extractedMasp = note.split('MASP:')[1].split(')')[0].split('•')[0].trim();
+  }
+  const extractedName = note
+    .split('•')[0]
+    .replace(/^Cautela Pendente\s*[—\-:]\s*Solicitante:\s*/i, '')
+    .replace(/^Devolu[cç][aã]o Pendente[^—\-:]*[—\-:]\s*Policial:\s*/i, '')
+    .replace(/^Acautelada com\s*/i, '')
+    .replace(/^Solicitante:\s*/i, '')
+    .replace(/^Policial:\s*/i, '')
+    .split('(MASP:')[0]
+    .trim();
+  return { name: extractedName, masp: extractedMasp };
+}
+
+async function ensureHistoricoSaidasArmasSchema(pool: any) {
+  if (historicoSaidasArmasEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`HISTORICO_SAIDAS_ARMAS\` (
+        \`ID_HISTORICO_SAIDAS_ARMAS\` VARCHAR(64) NOT NULL,
+        \`ARMA_ID\` VARCHAR(64) NOT NULL,
+        \`NOME_ARMA\` VARCHAR(255) NOT NULL,
+        \`NUMERO_SERIE_ARMA\` VARCHAR(128) NOT NULL,
+        \`USUARIO_CAUTELA_NOME\` VARCHAR(255) NOT NULL,
+        \`USUARIO_AUTORIZADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`DATA_SAIDA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_RETORNO\` DATETIME DEFAULT NULL,
+        \`QUANTIDADE_TIROS\` INT NOT NULL DEFAULT 0,
+        PRIMARY KEY (\`ID_HISTORICO_SAIDAS_ARMAS\`),
+        KEY \`idx_hsa_arma_id\` (\`ARMA_ID\`),
+        KEY \`idx_hsa_data_saida\` (\`DATA_SAIDA\`),
+        CONSTRAINT \`fk_hsa_arma\` FOREIGN KEY (\`ARMA_ID\`) REFERENCES \`ARMAS\` (\`ID_ARMAS\`) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+  } catch (_fkErr) {
+    try {
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`HISTORICO_SAIDAS_ARMAS\` (
+          \`ID_HISTORICO_SAIDAS_ARMAS\` VARCHAR(64) NOT NULL,
+          \`ARMA_ID\` VARCHAR(64) NOT NULL,
+          \`NOME_ARMA\` VARCHAR(255) NOT NULL,
+          \`NUMERO_SERIE_ARMA\` VARCHAR(128) NOT NULL,
+          \`USUARIO_CAUTELA_NOME\` VARCHAR(255) NOT NULL,
+          \`USUARIO_AUTORIZADOR_NOME\` VARCHAR(255) NOT NULL,
+          \`DATA_SAIDA\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_RETORNO\` DATETIME DEFAULT NULL,
+          \`QUANTIDADE_TIROS\` INT NOT NULL DEFAULT 0,
+          PRIMARY KEY (\`ID_HISTORICO_SAIDAS_ARMAS\`),
+          KEY \`idx_hsa_arma_id\` (\`ARMA_ID\`),
+          KEY \`idx_hsa_data_saida\` (\`DATA_SAIDA\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } catch (_) {}
+  }
+  historicoSaidasArmasEnsured = true;
+}
+
 apiRouter.get('/weapons', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
@@ -2406,10 +2469,11 @@ apiRouter.delete('/weapons/:id', async (req: Request, res: Response) => {
     const model = weaps[0].model || weaps[0].modelo || '';
 
     await pool.query('DELETE FROM MOVIMENTACOES_ARMAS WHERE ARMA_ID_MOVIMENTACOES_ARMAS = ?', [id]);
-    await pool.query('DELETE FROM ARMAS WHERE ID_ARMAS = ?', [id]);
     try {
-      
+      await ensureHistoricoSaidasArmasSchema(pool);
+      await pool.query('DELETE FROM HISTORICO_SAIDAS_ARMAS WHERE ARMA_ID = ?', [id]);
     } catch (_) {}
+    await pool.query('DELETE FROM ARMAS WHERE ID_ARMAS = ?', [id]);
 
     await insertAuditLog('Armas', 'Excluir', `Excluída arma ${model} (Série: ${serial})`, actor, req.ip);
     return res.json({ success: true });
@@ -2494,6 +2558,318 @@ apiRouter.get('/weapons/:id/shots', async (req: Request, res: Response) => {
       [id]
     );
     return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// WEAPON CUSTODY EXITS / RETURNS (DAR SAÍDA / DAR ENTRADA)
+// -------------------------------------------------------------
+apiRouter.get('/weapons-custody-history', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureHistoricoSaidasArmasSchema(pool);
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_HISTORICO_SAIDAS_ARMAS as id,
+        ARMA_ID as weaponId,
+        NOME_ARMA as weaponName,
+        NUMERO_SERIE_ARMA as weaponSerialNumber,
+        USUARIO_CAUTELA_NOME as custodyUserName,
+        USUARIO_AUTORIZADOR_NOME as authorizerUserName,
+        DATA_SAIDA as exitDate,
+        DATA_RETORNO as returnDate,
+        COALESCE(QUANTIDADE_TIROS, 0) as shotsFired
+      FROM HISTORICO_SAIDAS_ARMAS
+      ORDER BY DATA_SAIDA DESC
+    `);
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      shotsFired: Number(r.shotsFired || 0)
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/weapons/:id/custody-history', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await ensureHistoricoSaidasArmasSchema(pool);
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_HISTORICO_SAIDAS_ARMAS as id,
+        ARMA_ID as weaponId,
+        NOME_ARMA as weaponName,
+        NUMERO_SERIE_ARMA as weaponSerialNumber,
+        USUARIO_CAUTELA_NOME as custodyUserName,
+        USUARIO_AUTORIZADOR_NOME as authorizerUserName,
+        DATA_SAIDA as exitDate,
+        DATA_RETORNO as returnDate,
+        COALESCE(QUANTIDADE_TIROS, 0) as shotsFired
+       FROM HISTORICO_SAIDAS_ARMAS
+       WHERE ARMA_ID = ?
+       ORDER BY DATA_SAIDA DESC`,
+      [id]
+    );
+    const mapped = (rows || []).map((r: any) => ({
+      ...r,
+      shotsFired: Number(r.shotsFired || 0)
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/weapons/:id/dar-saida', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { custodyUserName: bodyCustodyName, authorizerUserName: bodyAuthorizerName, actor } = req.body || {};
+
+    const pool = getPool();
+    await ensureHistoricoSaidasArmasSchema(pool);
+
+    const [weaps]: any = await pool.query('SELECT * FROM ARMAS WHERE ID_ARMAS = ? LIMIT 1', [id]);
+    if (!weaps || weaps.length === 0) {
+      return res.status(404).json({ error: 'Arma não encontrada.' });
+    }
+    const weapon = weaps[0];
+
+    if (weapon.STATUS_ARMAS === 'Com o Policial') {
+      return res.status(400).json({ error: 'Esta arma já está com status "Com o Policial".' });
+    }
+
+    const weaponName = [weapon.TIPO_ARMAS, weapon.FABRICANTE_ARMAS, weapon.MODELO_ARMAS]
+      .filter(Boolean)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const serialNumber = weapon.NUMERO_SERIE_ARMAS || '';
+
+    // Busca cautela ativa para identificar policial e autorizador
+    let custodyUserName = (bodyCustodyName || '').trim();
+    let authorizerUserName = (bodyAuthorizerName || '').trim();
+
+    try {
+      const [cautRows]: any = await pool.query(
+        `SELECT REQUERENTE_NOME_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS
+         FROM ACAUTELAR_ARMAS
+         WHERE ARMA_ID_ACAUTELAR_ARMAS = ?
+           AND STATUS_ACAUTELAR_ARMAS IN ('AUTORIZADA', 'DEVOLUCAO_PENDENTE')
+         ORDER BY DATA_AUTORIZACAO_ACAUTELAR_ARMAS DESC, DATA_CRIACAO_ACAUTELAR_ARMAS DESC
+         LIMIT 1`,
+        [id]
+      );
+      if (cautRows && cautRows.length > 0) {
+        if (!custodyUserName && cautRows[0].REQUERENTE_NOME_ACAUTELAR_ARMAS) {
+          custodyUserName = String(cautRows[0].REQUERENTE_NOME_ACAUTELAR_ARMAS).trim();
+        }
+        if (!authorizerUserName && cautRows[0].ARMEIRO_NOME_ACAUTELAR_ARMAS) {
+          authorizerUserName = String(cautRows[0].ARMEIRO_NOME_ACAUTELAR_ARMAS).trim();
+        }
+      }
+    } catch (_) {}
+
+    if (!custodyUserName && weapon.POLICIAL_ACAUTELADO_ARMAS) {
+      custodyUserName = String(weapon.POLICIAL_ACAUTELADO_ARMAS).trim();
+    }
+    if (!custodyUserName && weapon.OBSERVACAO_LOCALIZACAO_ARMAS) {
+      const parsed = extractCustodyUserFromNote(weapon.OBSERVACAO_LOCALIZACAO_ARMAS);
+      if (parsed.name) custodyUserName = parsed.name;
+    }
+    if (!custodyUserName) {
+      custodyUserName = 'Policial com Cautela';
+    }
+    if (!authorizerUserName) {
+      authorizerUserName = actor?.name ? String(actor.name).trim() : 'Armeiro Autorizador';
+    }
+
+    const recordId = `hsa-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    await pool.query(
+      `INSERT INTO HISTORICO_SAIDAS_ARMAS (
+        ID_HISTORICO_SAIDAS_ARMAS, ARMA_ID, NOME_ARMA, NUMERO_SERIE_ARMA,
+        USUARIO_CAUTELA_NOME, USUARIO_AUTORIZADOR_NOME, DATA_SAIDA, DATA_RETORNO, QUANTIDADE_TIROS
+      ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NULL, 0)`,
+      [recordId, id, weaponName, serialNumber, custodyUserName, authorizerUserName]
+    );
+
+    // Na tabela ARMAS, modifica APENAS o status da arma
+    await pool.query(
+      "UPDATE ARMAS SET STATUS_ARMAS = 'Com o Policial' WHERE ID_ARMAS = ?",
+      [id]
+    );
+
+    const [createdRows]: any = await pool.query(
+      `SELECT
+        ID_HISTORICO_SAIDAS_ARMAS as id,
+        ARMA_ID as weaponId,
+        NOME_ARMA as weaponName,
+        NUMERO_SERIE_ARMA as weaponSerialNumber,
+        USUARIO_CAUTELA_NOME as custodyUserName,
+        USUARIO_AUTORIZADOR_NOME as authorizerUserName,
+        DATA_SAIDA as exitDate,
+        DATA_RETORNO as returnDate,
+        COALESCE(QUANTIDADE_TIROS, 0) as shotsFired
+       FROM HISTORICO_SAIDAS_ARMAS WHERE ID_HISTORICO_SAIDAS_ARMAS = ? LIMIT 1`,
+      [recordId]
+    );
+
+    await insertAuditLog(
+      'Armas',
+      'Saída',
+      `Saída registrada para ${weaponName} (Série: ${serialNumber}). Policial: ${custodyUserName}. Autorizado por: ${authorizerUserName}. Status alterado para "Com o Policial".`,
+      actor,
+      req.ip
+    );
+
+    const created = createdRows?.[0]
+      ? { ...createdRows[0], shotsFired: Number(createdRows[0].shotsFired || 0) }
+      : {
+          id: recordId,
+          weaponId: id,
+          weaponName,
+          weaponSerialNumber: serialNumber,
+          custodyUserName,
+          authorizerUserName,
+          exitDate: new Date().toISOString(),
+          returnDate: null,
+          shotsFired: 0
+        };
+
+    return res.json({ success: true, status: 'Com o Policial', record: created });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/weapons/:id/dar-entrada', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { shotsFired, actor } = req.body || {};
+    const parsedShots = Math.max(0, parseInt(String(shotsFired ?? 0), 10) || 0);
+
+    const pool = getPool();
+    await ensureHistoricoSaidasArmasSchema(pool);
+
+    const [weaps]: any = await pool.query('SELECT * FROM ARMAS WHERE ID_ARMAS = ? LIMIT 1', [id]);
+    if (!weaps || weaps.length === 0) {
+      return res.status(404).json({ error: 'Arma não encontrada.' });
+    }
+    const weapon = weaps[0];
+
+    const [openRows]: any = await pool.query(
+      `SELECT ID_HISTORICO_SAIDAS_ARMAS
+       FROM HISTORICO_SAIDAS_ARMAS
+       WHERE ARMA_ID = ? AND DATA_RETORNO IS NULL
+       ORDER BY DATA_SAIDA DESC
+       LIMIT 1`,
+      [id]
+    );
+
+    let targetRecordId = openRows?.[0]?.ID_HISTORICO_SAIDAS_ARMAS || '';
+    if (targetRecordId) {
+      await pool.query(
+        `UPDATE HISTORICO_SAIDAS_ARMAS
+         SET DATA_RETORNO = NOW(), QUANTIDADE_TIROS = ?
+         WHERE ID_HISTORICO_SAIDAS_ARMAS = ?`,
+        [parsedShots, targetRecordId]
+      );
+    } else {
+      const weaponName = [weapon.TIPO_ARMAS, weapon.FABRICANTE_ARMAS, weapon.MODELO_ARMAS]
+        .filter(Boolean)
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const serialNumber = weapon.NUMERO_SERIE_ARMAS || '';
+      let custodyUserName = weapon.POLICIAL_ACAUTELADO_ARMAS || '';
+      let authorizerUserName = actor?.name ? String(actor.name).trim() : 'Armeiro';
+      try {
+        const [cautRows]: any = await pool.query(
+          `SELECT REQUERENTE_NOME_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS
+           FROM ACAUTELAR_ARMAS
+           WHERE ARMA_ID_ACAUTELAR_ARMAS = ?
+             AND STATUS_ACAUTELAR_ARMAS IN ('AUTORIZADA', 'DEVOLUCAO_PENDENTE')
+           ORDER BY DATA_AUTORIZACAO_ACAUTELAR_ARMAS DESC, DATA_CRIACAO_ACAUTELAR_ARMAS DESC
+           LIMIT 1`,
+          [id]
+        );
+        if (cautRows?.[0]) {
+          custodyUserName = custodyUserName || cautRows[0].REQUERENTE_NOME_ACAUTELAR_ARMAS || '';
+          authorizerUserName = cautRows[0].ARMEIRO_NOME_ACAUTELAR_ARMAS || authorizerUserName;
+        }
+      } catch (_) {}
+      if (!custodyUserName && weapon.OBSERVACAO_LOCALIZACAO_ARMAS) {
+        const parsed = extractCustodyUserFromNote(weapon.OBSERVACAO_LOCALIZACAO_ARMAS);
+        if (parsed.name) custodyUserName = parsed.name;
+      }
+      custodyUserName = custodyUserName || 'Policial com Cautela';
+
+      targetRecordId = `hsa-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      await pool.query(
+        `INSERT INTO HISTORICO_SAIDAS_ARMAS (
+          ID_HISTORICO_SAIDAS_ARMAS, ARMA_ID, NOME_ARMA, NUMERO_SERIE_ARMA,
+          USUARIO_CAUTELA_NOME, USUARIO_AUTORIZADOR_NOME, DATA_SAIDA, DATA_RETORNO, QUANTIDADE_TIROS
+        ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW(), ?)`,
+        [targetRecordId, id, weaponName, serialNumber, custodyUserName, authorizerUserName, parsedShots]
+      );
+    }
+
+    // Na tabela ARMAS, modifica apenas o status da arma e, quando houver tiros no retorno, acrescenta ao total de tiros
+    if (parsedShots > 0) {
+      await pool.query(
+        "UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada', TIROS_DISPARADOS_ARMAS = COALESCE(TIROS_DISPARADOS_ARMAS, 0) + ? WHERE ID_ARMAS = ?",
+        [parsedShots, id]
+      );
+    } else {
+      await pool.query(
+        "UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada' WHERE ID_ARMAS = ?",
+        [id]
+      );
+    }
+
+    const [updatedWeaponRows]: any = await pool.query(
+      'SELECT STATUS_ARMAS as status, COALESCE(TIROS_DISPARADOS_ARMAS, 0) as shotCount FROM ARMAS WHERE ID_ARMAS = ? LIMIT 1',
+      [id]
+    );
+    const [updatedRecordRows]: any = await pool.query(
+      `SELECT
+        ID_HISTORICO_SAIDAS_ARMAS as id,
+        ARMA_ID as weaponId,
+        NOME_ARMA as weaponName,
+        NUMERO_SERIE_ARMA as weaponSerialNumber,
+        USUARIO_CAUTELA_NOME as custodyUserName,
+        USUARIO_AUTORIZADOR_NOME as authorizerUserName,
+        DATA_SAIDA as exitDate,
+        DATA_RETORNO as returnDate,
+        COALESCE(QUANTIDADE_TIROS, 0) as shotsFired
+       FROM HISTORICO_SAIDAS_ARMAS WHERE ID_HISTORICO_SAIDAS_ARMAS = ? LIMIT 1`,
+      [targetRecordId]
+    );
+
+    await insertAuditLog(
+      'Armas',
+      'Entrada',
+      `Entrada registrada para arma Série ${weapon.NUMERO_SERIE_ARMAS}. Tiros apontados no retorno: ${parsedShots}. Status retornado para "Acautelada".`,
+      actor,
+      req.ip
+    );
+
+    const newShotCount = Number(updatedWeaponRows?.[0]?.shotCount ?? ((Number(weapon.TIROS_DISPARADOS_ARMAS) || 0) + parsedShots));
+    const record = updatedRecordRows?.[0]
+      ? { ...updatedRecordRows[0], shotsFired: Number(updatedRecordRows[0].shotsFired || 0) }
+      : null;
+
+    return res.json({
+      success: true,
+      status: 'Acautelada',
+      shotCount: newShotCount,
+      shotsAdded: parsedShots,
+      record
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -10092,11 +10468,11 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         ]);
       }
 
-      // Auto-sincroniza armas com status 'Acautelada' garantindo que apareçam para o armeiro em Deferidas (Ativas)
+      // Auto-sincroniza armas com status 'Acautelada' ou 'Com o Policial' garantindo que apareçam para o armeiro em Deferidas (Ativas)
       const [acautArmas]: any = await pool.query(`
         SELECT a.* 
         FROM ARMAS a
-        WHERE a.STATUS_ARMAS = 'Acautelada'
+        WHERE a.STATUS_ARMAS IN ('Acautelada', 'Com o Policial')
           AND NOT EXISTS (
             SELECT 1 FROM ACAUTELAR_ARMAS ac 
             WHERE ac.ARMA_ID_ACAUTELAR_ARMAS = a.ID_ARMAS 
