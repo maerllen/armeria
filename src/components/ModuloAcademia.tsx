@@ -1149,13 +1149,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const hasUnicaKeyword = (raw: string): boolean =>
     /\bUNICA\b/.test(normalizeNoAccentUpper(raw));
 
-  const normTurmaKey = (raw: string): string =>
-    String(raw || '')
+  const normTurmaKey = (raw: string): string => {
+    const noAccent = String(raw || '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .trim()
-      .replace(/[\s\-_]+/g, '')
       .toUpperCase();
+    const compact = noAccent.replace(/[\s\-_]+/g, '');
+    if (!compact) return '';
+    const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+    if (m) {
+      const num = parseInt(m[2], 10);
+      if (!isNaN(num) && num > 0) {
+        return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+      }
+    }
+    return compact;
+  };
 
   const formatTurmaDisplayLabel = (raw: string): string => {
     const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
@@ -1166,36 +1176,121 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       const beforeUnica = trimmed.replace(/\b[uú]nica\b/i, '').trim().toUpperCase();
       return beforeUnica ? `${beforeUnica} Única` : 'Única';
     }
+    const compact = trimmed
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[\s\-_]+/g, '')
+      .toUpperCase();
+    const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+    if (m) {
+      const num = parseInt(m[2], 10);
+      if (!isNaN(num) && num > 0) {
+        return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+      }
+    }
     return trimmed.replace(/\s+/g, '').toUpperCase();
+  };
+
+  const getDeduplicatedTurmaRecords = (crsId: string): TurmaCftp[] => {
+    const courseRegs = turmasCftp.filter(t => t.cursoId === crsId);
+    const courseAlunos = alunosTurmaCftp.filter(a => a.cursoId === crsId);
+
+    const bestByKey = new Map<string, { reg: TurmaCftp; exactStudents: number }>();
+
+    for (const reg of courseRegs) {
+      const key = normTurmaKey(reg.turma);
+      if (!key) continue;
+
+      const byIdCount = courseAlunos.filter(a => a.turmaCftpId === reg.id).length;
+      const byExactNameCount = courseAlunos.filter(
+        a => String(a.turma || '').trim().toUpperCase() === String(reg.turma || '').trim().toUpperCase()
+      ).length;
+      const studentScore = byIdCount > 0 ? byIdCount : byExactNameCount;
+
+      const existing = bestByKey.get(key);
+      if (!existing) {
+        bestByKey.set(key, { reg, exactStudents: studentScore });
+      } else if (studentScore > existing.exactStudents) {
+        bestByKey.set(key, { reg, exactStudents: studentScore });
+      }
+    }
+
+    return Array.from(bestByKey.values())
+      .map(v => v.reg)
+      .sort((a, b) => a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true, sensitivity: 'base' }));
   };
 
   const getDeduplicatedCourseTurmas = (crs: AcademyCourse | null): string[] => {
     if (!crs) return [];
-    const map = new Map<string, string>();
-    const registerTurma = (raw?: string) => {
+    const courseAlunos = alunosTurmaCftp.filter(a => a.cursoId === crs.id);
+    const courseTurmasRegs = turmasCftp.filter(t => t.cursoId === crs.id);
+
+    // Agrupa por chave canônica (DL01 == DL1 == DL 1 == DL 01), priorizando a turma que possui alunos cadastrados
+    const bestLabelByKey = new Map<string, { label: string; studentCount: number; fromLinkedTurma: boolean }>();
+
+    // Conta alunos por variação literal dentro de cada chave canônica
+    const studentVariantCounts = new Map<string, Map<string, number>>();
+    for (const al of courseAlunos) {
+      const rawT = String(al.turma || '').trim();
+      const key = normTurmaKey(rawT);
+      if (!key) continue;
+      if (!studentVariantCounts.has(key)) {
+        studentVariantCounts.set(key, new Map<string, number>());
+      }
+      const varMap = studentVariantCounts.get(key)!;
+      const label = formatTurmaDisplayLabel(rawT) || rawT;
+      varMap.set(label, (varMap.get(label) || 0) + 1);
+    }
+
+    const considerCandidate = (raw: string | undefined, fromLinkedTurma: boolean, directStudentCount = 0) => {
       const cleaned = String(raw || '').trim();
       if (!cleaned || cleaned === '—' || cleaned === '-') return;
       const key = normTurmaKey(cleaned);
       if (!key) return;
-      const display = formatTurmaDisplayLabel(cleaned);
-      if (!map.has(key)) {
-        map.set(key, display);
+
+      const display = formatTurmaDisplayLabel(cleaned) || cleaned;
+      const variantMap = studentVariantCounts.get(key);
+      const exactStudents = directStudentCount || (variantMap?.get(display) || 0) || (variantMap?.get(cleaned) || 0);
+
+      const current = bestLabelByKey.get(key);
+      if (!current) {
+        bestLabelByKey.set(key, { label: display, studentCount: exactStudents, fromLinkedTurma });
+        return;
+      }
+
+      if (exactStudents > current.studentCount) {
+        bestLabelByKey.set(key, { label: display, studentCount: exactStudents, fromLinkedTurma });
+      } else if (exactStudents === current.studentCount && fromLinkedTurma && !current.fromLinkedTurma) {
+        bestLabelByKey.set(key, { label: display, studentCount: exactStudents, fromLinkedTurma });
       }
     };
 
-    if (Array.isArray(crs.moduleSchedule)) {
-      crs.moduleSchedule.forEach(row => registerTurma(row?.turma));
+    // 1) Prioriza turmas que possuem alunos cadastrados
+    for (const al of courseAlunos) {
+      const rawT = String(al.turma || '').trim();
+      const key = normTurmaKey(rawT);
+      const count = (key && studentVariantCounts.get(key)?.get(formatTurmaDisplayLabel(rawT) || rawT)) || 1;
+      considerCandidate(rawT, true, count);
     }
-    turmasCftp
-      .filter(t => t.cursoId === crs.id)
-      .forEach(t => registerTurma(t.turma));
-    alunosTurmaCftp
-      .filter(a => a.cursoId === crs.id)
-      .forEach(a => registerTurma(a.turma));
 
-    return Array.from(map.values()).sort((a, b) =>
-      a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' })
-    );
+    // 2) Turmas vinculadas em TURMAS_CFTP
+    for (const t of courseTurmasRegs) {
+      const linkedCount = courseAlunos.filter(
+        a => a.turmaCftpId === t.id || normTurmaKey(a.turma) === normTurmaKey(t.turma)
+      ).length;
+      considerCandidate(t.turma, true, linkedCount);
+    }
+
+    // 3) Turmas extraídas do horário do módulo (ex.: DL1, DL2 -> unificadas com DL01, DL02)
+    if (Array.isArray(crs.moduleSchedule)) {
+      for (const row of crs.moduleSchedule) {
+        considerCandidate(row?.turma, false, 0);
+      }
+    }
+
+    return Array.from(bestLabelByKey.values())
+      .map(v => v.label)
+      .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' }));
   };
 
   const getEligibleTurmasCourses = (): AcademyCourse[] => {
@@ -3436,7 +3531,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
           const renderVisualizarTurmasPanel = (crs: AcademyCourse, isEligibleToManage: boolean) => {
             const dedupTurmas = getDeduplicatedCourseTurmas(crs);
-            const courseTurmasRegs = turmasCftp.filter(t => t.cursoId === crs.id);
+            const courseTurmasRegs = getDeduplicatedTurmaRecords(crs.id);
             const courseAlunos = alunosTurmaCftp.filter(a => a.cursoId === crs.id);
             const activeTurmaFilter = visualizarTurmaFilterMap[crs.id] || 'TODAS';
 
@@ -3853,11 +3948,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             const eligibleCourses = [...activeCourses, ...upcomingCourses];
             const selectedTurmaCourse = eligibleCourses.find(c => c.id === turmaManageCourseId) || null;
             const deduplicatedTurmas = getDeduplicatedCourseTurmas(selectedTurmaCourse);
-            const effectiveSelectedTurma = deduplicatedTurmas.includes(turmaManageSelectedTurma)
-              ? turmaManageSelectedTurma
-              : '';
+            const effectiveSelectedTurma =
+              deduplicatedTurmas.find(t => normTurmaKey(t) === normTurmaKey(turmaManageSelectedTurma)) || '';
             const courseLinkedTurmas = selectedTurmaCourse
-              ? turmasCftp.filter(t => t.cursoId === selectedTurmaCourse.id)
+              ? getDeduplicatedTurmaRecords(selectedTurmaCourse.id)
               : [];
             const courseAllAlunos = selectedTurmaCourse
               ? alunosTurmaCftp.filter(a => a.cursoId === selectedTurmaCourse.id)
@@ -3873,10 +3967,16 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
             const stagingTurmaCounts = Array.from(
               turmaManageStagingAlunos.reduce((acc, st) => {
-                const key = st.turma || 'Sem turma';
-                acc.set(key, (acc.get(key) || 0) + 1);
+                const displayT = formatTurmaDisplayLabel(st.turma || '') || 'Sem turma';
+                const key = normTurmaKey(displayT) || 'SEM_TURMA';
+                const existing = acc.get(key);
+                if (existing) {
+                  existing[1] += 1;
+                } else {
+                  acc.set(key, [displayT, 1]);
+                }
                 return acc;
-              }, new Map<string, number>()).entries()
+              }, new Map<string, [string, number]>()).values()
             );
 
             return (

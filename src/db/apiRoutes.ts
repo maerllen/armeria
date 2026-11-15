@@ -6706,6 +6706,45 @@ apiRouter.delete('/equipe-professores-cftp/:id', async (req: Request, res: Respo
 // TURMAS E ALUNOS CFTP (CURSO DE FORMAÇÃO)
 // ============================================================================
 
+const normalizeCftpTurmaKey = (raw: string): string => {
+  const noAccent = String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+  const compact = noAccent.replace(/[\s\-_]+/g, '');
+  if (!compact) return '';
+  const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+  if (m) {
+    const num = parseInt(m[2], 10);
+    if (!isNaN(num) && num > 0) {
+      return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+    }
+  }
+  return compact;
+};
+
+const canonicalizeCftpTurmaLabel = (raw: string): string => {
+  const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+  const noAccent = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (/\bUNICA\b/.test(noAccent)) {
+    const prefixMatch = noAccent.match(/\b(DL|IP|EP|ML|PC)\b/);
+    if (prefixMatch) return `${prefixMatch[1]} Única`;
+    const beforeUnica = trimmed.replace(/\b[uú]nica\b/i, '').trim().toUpperCase();
+    return beforeUnica ? `${beforeUnica} Única` : 'Única';
+  }
+  const compact = noAccent.replace(/[\s\-_]+/g, '');
+  const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+  if (m) {
+    const num = parseInt(m[2], 10);
+    if (!isNaN(num) && num > 0) {
+      return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+    }
+  }
+  return trimmed.replace(/\s+/g, '').toUpperCase();
+};
+
 const verifyCanManageFormacaoTurmas = async (pool: any, actor: any): Promise<boolean> => {
   if (!actor) return false;
   if (actor.role === 'Geral' || (Array.isArray(actor.roles) && actor.roles.includes('Geral'))) {
@@ -6743,21 +6782,39 @@ apiRouter.get('/turmas-cftp', async (req: Request, res: Response) => {
     const cursoIdFilter = req.query.cursoId ? String(req.query.cursoId).trim() : '';
     const sql = `
       SELECT
-        ID_TURMA_CFTP as id,
-        CURSO_ID_TURMA_CFTP as curso_id,
-        CFTP as cftp,
-        TURMA as turma,
-        ARQUIVO_ALUNOS_NOME as arquivo_alunos_nome,
-        CRIADO_POR_ID as criado_por_id,
-        CRIADO_POR_NOME as criado_por_nome,
-        DATA_CRIACAO as created_at,
-        DATA_ATUALIZACAO as updated_at
-      FROM TURMAS_CFTP
-      ${cursoIdFilter ? 'WHERE CURSO_ID_TURMA_CFTP = ?' : ''}
-      ORDER BY TURMA ASC, DATA_CRIACAO DESC
+        t.ID_TURMA_CFTP as id,
+        t.CURSO_ID_TURMA_CFTP as curso_id,
+        t.CFTP as cftp,
+        t.TURMA as turma,
+        t.ARQUIVO_ALUNOS_NOME as arquivo_alunos_nome,
+        t.CRIADO_POR_ID as criado_por_id,
+        t.CRIADO_POR_NOME as criado_por_nome,
+        t.DATA_CRIACAO as created_at,
+        t.DATA_ATUALIZACAO as updated_at,
+        (
+          SELECT COUNT(*)
+          FROM ALUNOS_TURMA_CFTP a
+          WHERE a.CURSO_ID_ALUNO_TURMA_CFTP = t.CURSO_ID_TURMA_CFTP
+            AND (a.TURMA_CFTP_ID = t.ID_TURMA_CFTP OR UPPER(TRIM(a.TURMA)) = UPPER(TRIM(t.TURMA)))
+        ) as student_count
+      FROM TURMAS_CFTP t
+      ${cursoIdFilter ? 'WHERE t.CURSO_ID_TURMA_CFTP = ?' : ''}
+      ORDER BY student_count DESC, t.TURMA ASC, t.DATA_CRIACAO DESC
     `;
     const [rows]: any = await pool.query(sql, cursoIdFilter ? [cursoIdFilter] : []);
-    const mapped = (rows || []).map((r: any) => ({
+
+    // Deduplica por (cursoId + chave canônica), mantendo sempre a turma que possui alunos cadastrados
+    const dedupMap = new Map<string, any>();
+    for (const r of (rows || [])) {
+      const key = `${r.curso_id}::${normalizeCftpTurmaKey(r.turma)}`;
+      const count = Number(r.student_count || 0);
+      const existing = dedupMap.get(key);
+      if (!existing || count > existing.studentCount) {
+        dedupMap.set(key, { row: r, studentCount: count });
+      }
+    }
+
+    const mapped = Array.from(dedupMap.values()).map(({ row: r }) => ({
       id: r.id,
       cursoId: r.curso_id,
       cftp: r.cftp,
@@ -6861,34 +6918,33 @@ apiRouter.post('/turmas-cftp', async (req: Request, res: Response) => {
     const defaultCftpLabel = `${selectedCourse.module || selectedCourse.name || 'CFTP'} - ${selectedCourse.code || ''}`.replace(/\s+-\s*$/, '').trim();
     const cleanCftp = String(cftp || defaultCftpLabel).trim();
 
-    const normTurma = (t: string) =>
-      String(t || '')
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .trim()
-        .replace(/[\s\-_]+/g, '')
-        .toUpperCase();
+    const [existingCourseTurmas]: any = await pool.query(
+      `SELECT t.ID_TURMA_CFTP as id, t.TURMA as turma,
+              (SELECT COUNT(*) FROM ALUNOS_TURMA_CFTP a WHERE a.TURMA_CFTP_ID = t.ID_TURMA_CFTP OR (a.CURSO_ID_ALUNO_TURMA_CFTP = t.CURSO_ID_TURMA_CFTP AND UPPER(TRIM(a.TURMA)) = UPPER(TRIM(t.TURMA)))) as student_count
+       FROM TURMAS_CFTP t
+       WHERE t.CURSO_ID_TURMA_CFTP = ?
+       ORDER BY student_count DESC, t.DATA_CRIACAO ASC`,
+      [cursoId]
+    );
 
     const ensureTurmaCftp = async (turmaCodeRaw: string): Promise<{ id: string; turma: string }> => {
-      const cleanT = String(turmaCodeRaw || '').trim();
-      const [existingTurmaRows]: any = await pool.query(
-        `SELECT ID_TURMA_CFTP as id, TURMA as turma
-         FROM TURMAS_CFTP
-         WHERE CURSO_ID_TURMA_CFTP = ?
-           AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(TURMA)), ' ', ''), '-', ''), '_', '') = REPLACE(REPLACE(REPLACE(UPPER(TRIM(?)), ' ', ''), '-', ''), '_', '')
-         LIMIT 1`,
-        [cursoId, cleanT]
+      const targetKey = normalizeCftpTurmaKey(turmaCodeRaw);
+      const canonicalT = canonicalizeCftpTurmaLabel(turmaCodeRaw) || String(turmaCodeRaw || '').trim();
+
+      const matchingExisting = (existingCourseTurmas || []).filter(
+        (r: any) => normalizeCftpTurmaKey(r.turma) === targetKey
       );
 
-      if (existingTurmaRows && existingTurmaRows.length > 0) {
-        const existingId = existingTurmaRows[0].id;
+      if (matchingExisting.length > 0) {
+        // Já ordenado por student_count DESC: permanece a turma com alunos cadastrados
+        const winner = matchingExisting[0];
         if (arquivoAlunosNome) {
           await pool.query(
             'UPDATE TURMAS_CFTP SET ARQUIVO_ALUNOS_NOME = ?, DATA_ATUALIZACAO = NOW() WHERE ID_TURMA_CFTP = ?',
-            [String(arquivoAlunosNome).trim(), existingId]
+            [String(arquivoAlunosNome).trim(), winner.id]
           );
         }
-        return { id: existingId, turma: existingTurmaRows[0].turma || cleanT };
+        return { id: winner.id, turma: winner.turma || canonicalT };
       }
 
       const newId = `tcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
@@ -6901,20 +6957,21 @@ apiRouter.post('/turmas-cftp', async (req: Request, res: Response) => {
           newId,
           cursoId,
           cleanCftp,
-          cleanT,
+          canonicalT,
           arquivoAlunosNome ? String(arquivoAlunosNome).trim() : null,
           actor?.id || null,
           actor?.name || null
         ]
       );
-      return { id: newId, turma: cleanT };
+      existingCourseTurmas.push({ id: newId, turma: canonicalT, student_count: 0 });
+      return { id: newId, turma: canonicalT };
     };
 
     const turmaCache = new Map<string, { id: string; turma: string }>();
 
     const getOrCreateTurma = async (rawT: string) => {
       const cleaned = String(rawT || '').trim();
-      const key = normTurma(cleaned);
+      const key = normalizeCftpTurmaKey(cleaned);
       if (!key) return null;
       const cached = turmaCache.get(key);
       if (cached) return cached;
@@ -7001,42 +7058,48 @@ apiRouter.put('/alunos-turma-cftp/:id', async (req: Request, res: Response) => {
     }
 
     const cleanNome = String(nomeCompleto || '').trim();
-    const cleanTurma = String(turma || '').trim();
+    const canonicalInputTurma = canonicalizeCftpTurmaLabel(String(turma || '').trim());
     if (!cleanNome) {
       return res.status(400).json({ error: 'O nome completo do aluno não pode ficar vazio.' });
     }
-    if (!cleanTurma) {
+    if (!canonicalInputTurma) {
       return res.status(400).json({ error: 'A turma do aluno é obrigatória.' });
     }
     const cleanMasp = masp !== undefined && masp !== null ? String(masp).trim() : '';
 
-    // Keep TURMA_CFTP_ID synchronized with the student's turma under the same cursoId
+    // Keep TURMA_CFTP_ID synchronized with the student's canonical turma under the same cursoId
     const [existingAlunoRows]: any = await pool.query(
       'SELECT CURSO_ID_ALUNO_TURMA_CFTP as cursoId, CFTP as cftp, TURMA_CFTP_ID as turmaCftpId FROM ALUNOS_TURMA_CFTP WHERE ID_ALUNO_TURMA_CFTP = ?',
       [id]
     );
     let targetTurmaCftpId = existingAlunoRows?.[0]?.turmaCftpId || null;
+    let resolvedTurmaLabel = canonicalInputTurma;
     const alunoCursoId = existingAlunoRows?.[0]?.cursoId || null;
     const alunoCftp = existingAlunoRows?.[0]?.cftp || '';
 
     if (alunoCursoId) {
-      const [matchingTurmas]: any = await pool.query(
-        `SELECT ID_TURMA_CFTP as id, TURMA as turma
-         FROM TURMAS_CFTP
-         WHERE CURSO_ID_TURMA_CFTP = ?
-           AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(TURMA)), ' ', ''), '-', ''), '_', '') = REPLACE(REPLACE(REPLACE(UPPER(TRIM(?)), ' ', ''), '-', ''), '_', '')
-         LIMIT 1`,
-        [alunoCursoId, cleanTurma]
+      const targetKey = normalizeCftpTurmaKey(canonicalInputTurma);
+      const [courseTurmas]: any = await pool.query(
+        `SELECT t.ID_TURMA_CFTP as id, t.TURMA as turma,
+                (SELECT COUNT(*) FROM ALUNOS_TURMA_CFTP a WHERE a.TURMA_CFTP_ID = t.ID_TURMA_CFTP OR (a.CURSO_ID_ALUNO_TURMA_CFTP = t.CURSO_ID_TURMA_CFTP AND UPPER(TRIM(a.TURMA)) = UPPER(TRIM(t.TURMA)))) as student_count
+         FROM TURMAS_CFTP t
+         WHERE t.CURSO_ID_TURMA_CFTP = ?
+         ORDER BY student_count DESC, t.DATA_CRIACAO ASC`,
+        [alunoCursoId]
       );
-      if (matchingTurmas && matchingTurmas.length > 0) {
-        targetTurmaCftpId = matchingTurmas[0].id;
+      const matchingTurma = (courseTurmas || []).find(
+        (r: any) => normalizeCftpTurmaKey(r.turma) === targetKey
+      );
+      if (matchingTurma) {
+        targetTurmaCftpId = matchingTurma.id;
+        resolvedTurmaLabel = matchingTurma.turma;
       } else {
         targetTurmaCftpId = `tcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
         await pool.query(
           `INSERT INTO TURMAS_CFTP (
             ID_TURMA_CFTP, CURSO_ID_TURMA_CFTP, CFTP, TURMA, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
           ) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [targetTurmaCftpId, alunoCursoId, alunoCftp || 'CFTP', cleanTurma, actor?.id || null, actor?.name || null]
+          [targetTurmaCftpId, alunoCursoId, alunoCftp || 'CFTP', canonicalInputTurma, actor?.id || null, actor?.name || null]
         );
       }
     }
@@ -7048,11 +7111,11 @@ apiRouter.put('/alunos-turma-cftp/:id', async (req: Request, res: Response) => {
         TURMA = ?,
         MASP = ?,
         DATA_ATUALIZACAO = NOW()
-      WHERE ID_ALUNO_TURMA_CFTP = ?`,
-      [targetTurmaCftpId, cleanNome, cleanTurma, cleanMasp || null, id]
+       WHERE ID_ALUNO_TURMA_CFTP = ?`,
+      [targetTurmaCftpId, cleanNome, resolvedTurmaLabel, cleanMasp || null, id]
     );
 
-    await insertAuditLog('Cursos', 'Editar', `Atualizados dados do aluno "${cleanNome}" (Turma ${cleanTurma})`, actor, req.ip);
+    await insertAuditLog('Cursos', 'Editar', `Atualizados dados do aluno "${cleanNome}" (Turma ${resolvedTurmaLabel})`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
