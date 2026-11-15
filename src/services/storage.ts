@@ -23,6 +23,7 @@ import {
   EquipeCalendario,
   ProfessorEquipe,
   AuxiliarTabelaEquipe,
+  EquipeProfessoresCursoFormacao,
   Certificado,
   WeaponTransfer,
   WeaponTransferItem,
@@ -77,6 +78,7 @@ export interface AppState {
   calendarRecords: CalendarRecord[];
   equipesCalendario: EquipeCalendario[];
   auxiliarTabelaEquipe?: AuxiliarTabelaEquipe[];
+  equipesProfessoresCftp?: EquipeProfessoresCursoFormacao[];
   certificados: Certificado[];
   tiposMateriais: TipoMaterial[];
   materiais: Material[];
@@ -125,6 +127,7 @@ class StorageService {
     calendarRecords: [],
     equipesCalendario: [],
     auxiliarTabelaEquipe: [],
+    equipesProfessoresCftp: [],
     certificados: [],
     tiposMateriais: [],
     materiais: [],
@@ -182,6 +185,7 @@ class StorageService {
         calendarRecordsRes,
         equipesCalendarioRes,
         auxiliarTabelaEquipeRes,
+        equipesProfessoresCftpRes,
         certificadosRes,
         weaponTransfersRes,
         ammoTransfersRes,
@@ -223,6 +227,7 @@ class StorageService {
         fetchSync('/api/calendario-aulas'),
         fetchSync('/api/equipes-calendario'),
         fetchSync('/api/auxiliar-tabela-equipe'),
+        fetchSync('/api/equipe-professores-cftp'),
         fetchSync('/api/certificados'),
         fetchSync('/api/weapon-transfers'),
         fetchSync('/api/ammo-transfers'),
@@ -265,6 +270,7 @@ class StorageService {
       this.state.calendarRecords = calendarRecordsRes || [];
       this.state.equipesCalendario = equipesCalendarioRes || [];
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
+      this.state.equipesProfessoresCftp = equipesProfessoresCftpRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
       this.state.ammoTransfers = ammoTransfersRes || [];
@@ -2620,6 +2626,51 @@ class StorageService {
   public async deleteAuxiliarTabelaEquipe(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/auxiliar-tabela-equipe/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- EQUIPE PROFESSORES CURSO DE FORMAÇÃO (CFTP) ---
+  public getEquipesProfessoresCftp(): EquipeProfessoresCursoFormacao[] {
+    return this.state.equipesProfessoresCftp || [];
+  }
+
+  public async saveEquipeProfessoresCftp(
+    equipe: Partial<EquipeProfessoresCursoFormacao>
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const method = equipe.id ? 'PUT' : 'POST';
+      const url = equipe.id
+        ? `/api/equipe-professores-cftp/${equipe.id}`
+        : '/api/equipe-professores-cftp';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...equipe, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteEquipeProfessoresCftp(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/equipe-professores-cftp/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })

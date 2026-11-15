@@ -4080,6 +4080,9 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
     try {
       await pool.query('DELETE FROM HORARIO_MODULO_CFTP WHERE CURSO_ID_HORARIO_MODULO_CFTP = ?', [id]);
     } catch (_) {}
+    try {
+      await pool.query('DELETE FROM EQUIPE_PROFESSORES_CURSO_FORMACAO WHERE CURSO_ID_EQUIPE_PROFESSORES_CFTP = ?', [id]);
+    } catch (_) {}
     await pool.query('DELETE FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?', [id]);
     await insertAuditLog('Cursos', 'Excluir', `Excluído curso da academia ID ${id}`, actor, req.ip);
     return res.json({ success: true });
@@ -6382,6 +6385,295 @@ apiRouter.delete('/auxiliar-tabela-equipe/:id', async (req: Request, res: Respon
     const { id } = req.params;
     const pool = getPool();
     await pool.query('DELETE FROM AUXILIAR_TABELA_EQUIPE WHERE ID_AUXILIAR_TABELA_EQUIPE = ?', [id]);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// EQUIPE DE PROFESSORES DO CURSO DE FORMAÇÃO (CFTP) ENDPOINTS
+// ============================================================================
+const formatIsoDateField = (val: any): string => {
+  if (!val) return '';
+  if (val instanceof Date && !isNaN(val.getTime())) {
+    return val.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+  const match = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : s;
+};
+
+const verifyCanManageFormacaoTeams = async (pool: any, actor: any): Promise<boolean> => {
+  if (!actor) return false;
+  if (actor.role === 'Geral' || (Array.isArray(actor.roles) && actor.roles.includes('Geral'))) {
+    return true;
+  }
+  if (actor.id) {
+    try {
+      const [rows]: any = await pool.query(
+        'SELECT PERFIL_USUARIOS as role, ROLES_USUARIOS as roles_json, PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao FROM USUARIOS WHERE ID_USUARIOS = ?',
+        [actor.id]
+      );
+      if (rows && rows.length > 0) {
+        const u = rows[0];
+        let parsedRoles: string[] = [];
+        try {
+          parsedRoles = typeof u.roles_json === 'string' ? JSON.parse(u.roles_json) : (u.roles_json || []);
+        } catch {
+          parsedRoles = [];
+        }
+        if (u.role === 'Geral' || parsedRoles.includes('Geral')) return true;
+        return Boolean(u.can_manage_formacao);
+      }
+    } catch (_) {}
+  }
+  return Boolean(actor.canManageFormacaoCourses);
+};
+
+apiRouter.get('/equipe-professores-cftp', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { cursoId } = req.query;
+    const params: any[] = [];
+    let sql = `
+      SELECT
+        ID_EQUIPE_PROFESSORES_CFTP as id,
+        CURSO_ID_EQUIPE_PROFESSORES_CFTP as curso_id,
+        MATERIA as materia,
+        CFTP as cftp,
+        APELIDO_EQUIPE as apelido_equipe,
+        EQUIPE_01 as equipe_01,
+        EQUIPE_02 as equipe_02,
+        EQUIPE_03 as equipe_03,
+        EQUIPE_04 as equipe_04,
+        EQUIPE_05 as equipe_05,
+        EQUIPE_06 as equipe_06,
+        EQUIPE_01_ID as equipe_01_id,
+        EQUIPE_02_ID as equipe_02_id,
+        EQUIPE_03_ID as equipe_03_id,
+        EQUIPE_04_ID as equipe_04_id,
+        EQUIPE_05_ID as equipe_05_id,
+        EQUIPE_06_ID as equipe_06_id,
+        DATA_1 as data_1,
+        DATA_2 as data_2,
+        CRIADO_POR_ID as criado_por_id,
+        CRIADO_POR_NOME as criado_por_nome,
+        DATA_CRIACAO as created_at,
+        DATA_ATUALIZACAO as updated_at
+      FROM EQUIPE_PROFESSORES_CURSO_FORMACAO
+    `;
+    if (cursoId) {
+      sql += ' WHERE CURSO_ID_EQUIPE_PROFESSORES_CFTP = ?';
+      params.push(String(cursoId));
+    }
+    sql += ' ORDER BY DATA_CRIACAO DESC';
+
+    const [rows]: any = await pool.query(sql, params);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      cursoId: r.curso_id,
+      materia: r.materia,
+      cftp: r.cftp,
+      apelidoEquipe: r.apelido_equipe,
+      equipe01: r.equipe_01 || undefined,
+      equipe02: r.equipe_02 || undefined,
+      equipe03: r.equipe_03 || undefined,
+      equipe04: r.equipe_04 || undefined,
+      equipe05: r.equipe_05 || undefined,
+      equipe06: r.equipe_06 || undefined,
+      equipe01Id: r.equipe_01_id || undefined,
+      equipe02Id: r.equipe_02_id || undefined,
+      equipe03Id: r.equipe_03_id || undefined,
+      equipe04Id: r.equipe_04_id || undefined,
+      equipe05Id: r.equipe_05_id || undefined,
+      equipe06Id: r.equipe_06_id || undefined,
+      data1: formatIsoDateField(r.data_1),
+      data2: formatIsoDateField(r.data_2),
+      criadoPorId: r.criado_por_id || undefined,
+      criadoPorNome: r.criado_por_nome || undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    if (err.code === 'ER_NO_SUCH_TABLE') {
+      return res.json([]);
+    }
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+const handleSaveEquipeProfessoresCftp = async (req: Request, res: Response, forcedId?: string) => {
+  try {
+    const pool = getPool();
+    const {
+      id: bodyId,
+      cursoId,
+      materia,
+      cftp,
+      apelidoEquipe,
+      equipe01,
+      equipe02,
+      equipe03,
+      equipe04,
+      equipe05,
+      equipe06,
+      equipe01Id,
+      equipe02Id,
+      equipe03Id,
+      equipe04Id,
+      equipe05Id,
+      equipe06Id,
+      data1,
+      data2,
+      actor
+    } = req.body;
+
+    const allowed = await verifyCanManageFormacaoTeams(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Apenas usuários com permissão "Pode gerir cursos de formações" podem gerenciar equipes de CFTP.' });
+    }
+
+    if (!cursoId) {
+      return res.status(400).json({ error: 'É obrigatório selecionar um curso de formação CFTP em andamento.' });
+    }
+
+    const [courseRows]: any = await pool.query(
+      'SELECT ID_CURSOS_ACADEMIA as id, NOME_CURSOS_ACADEMIA as name, TIPO_CURSOS_ACADEMIA as type, CODIGO_CURSOS_ACADEMIA as code, MODULO_CURSOS_ACADEMIA as module, DATA_INICIO_CURSOS_ACADEMIA as start_date, DATA_FIM_CURSOS_ACADEMIA as end_date FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?',
+      [cursoId]
+    );
+    if (!courseRows || courseRows.length === 0) {
+      return res.status(404).json({ error: 'Curso de formação CFTP selecionado não encontrado.' });
+    }
+
+    const selectedCourse = courseRows[0];
+    const cleanMateria = String(materia || '').trim().toUpperCase();
+    if (!['MEAF', 'TAP', 'DP'].includes(cleanMateria)) {
+      return res.status(400).json({ error: 'Matéria inválida. Selecione MEAF, TAP ou DP.' });
+    }
+
+    const cleanApelido = String(apelidoEquipe || '').trim();
+    if (!cleanApelido) {
+      return res.status(400).json({ error: 'Informe o apelido da equipe.' });
+    }
+
+    const cleanEq01 = equipe01 ? String(equipe01).trim() : null;
+    if (!cleanEq01) {
+      return res.status(400).json({ error: 'Selecione pelo menos 1 professor para a equipe (Equipe 01).' });
+    }
+
+    const cleanData1 = formatIsoDateField(data1) || formatIsoDateField(selectedCourse.start_date);
+    const cleanData2 = formatIsoDateField(data2) || formatIsoDateField(selectedCourse.end_date);
+    if (!cleanData1 || !cleanData2) {
+      return res.status(400).json({ error: 'Informe as datas de início e fim da equipe.' });
+    }
+    if (cleanData2 < cleanData1) {
+      return res.status(400).json({ error: 'A data final da equipe não pode ser anterior à data inicial.' });
+    }
+
+    const defaultCftpLabel = `${selectedCourse.module || selectedCourse.name || 'CFTP'} - ${selectedCourse.code || ''}`.replace(/\s+-\s*$/, '').trim();
+    const cleanCftp = String(cftp || defaultCftpLabel).trim();
+
+    const recordId = forcedId || bodyId || `eq-cftp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+    await pool.query(
+      `INSERT INTO EQUIPE_PROFESSORES_CURSO_FORMACAO (
+        ID_EQUIPE_PROFESSORES_CFTP,
+        CURSO_ID_EQUIPE_PROFESSORES_CFTP,
+        MATERIA,
+        CFTP,
+        APELIDO_EQUIPE,
+        EQUIPE_01,
+        EQUIPE_02,
+        EQUIPE_03,
+        EQUIPE_04,
+        EQUIPE_05,
+        EQUIPE_06,
+        EQUIPE_01_ID,
+        EQUIPE_02_ID,
+        EQUIPE_03_ID,
+        EQUIPE_04_ID,
+        EQUIPE_05_ID,
+        EQUIPE_06_ID,
+        DATA_1,
+        DATA_2,
+        CRIADO_POR_ID,
+        CRIADO_POR_NOME,
+        DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        CURSO_ID_EQUIPE_PROFESSORES_CFTP = VALUES(CURSO_ID_EQUIPE_PROFESSORES_CFTP),
+        MATERIA = VALUES(MATERIA),
+        CFTP = VALUES(CFTP),
+        APELIDO_EQUIPE = VALUES(APELIDO_EQUIPE),
+        EQUIPE_01 = VALUES(EQUIPE_01),
+        EQUIPE_02 = VALUES(EQUIPE_02),
+        EQUIPE_03 = VALUES(EQUIPE_03),
+        EQUIPE_04 = VALUES(EQUIPE_04),
+        EQUIPE_05 = VALUES(EQUIPE_05),
+        EQUIPE_06 = VALUES(EQUIPE_06),
+        EQUIPE_01_ID = VALUES(EQUIPE_01_ID),
+        EQUIPE_02_ID = VALUES(EQUIPE_02_ID),
+        EQUIPE_03_ID = VALUES(EQUIPE_03_ID),
+        EQUIPE_04_ID = VALUES(EQUIPE_04_ID),
+        EQUIPE_05_ID = VALUES(EQUIPE_05_ID),
+        EQUIPE_06_ID = VALUES(EQUIPE_06_ID),
+        DATA_1 = VALUES(DATA_1),
+        DATA_2 = VALUES(DATA_2)`,
+      [
+        recordId,
+        cursoId,
+        cleanMateria,
+        cleanCftp,
+        cleanApelido,
+        cleanEq01,
+        equipe02 ? String(equipe02).trim() : null,
+        equipe03 ? String(equipe03).trim() : null,
+        equipe04 ? String(equipe04).trim() : null,
+        equipe05 ? String(equipe05).trim() : null,
+        equipe06 ? String(equipe06).trim() : null,
+        equipe01Id || null,
+        equipe02Id || null,
+        equipe03Id || null,
+        equipe04Id || null,
+        equipe05Id || null,
+        equipe06Id || null,
+        cleanData1,
+        cleanData2,
+        actor?.id || null,
+        actor?.name || null
+      ]
+    );
+
+    await insertAuditLog('Cursos', forcedId || bodyId ? 'Editar' : 'Criar', `Equipe de professores "${cleanApelido}" (${cleanMateria}) salva para ${cleanCftp}`, actor, req.ip);
+    return res.json({ success: true, id: recordId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+apiRouter.post('/equipe-professores-cftp', async (req: Request, res: Response) => {
+  return handleSaveEquipeProfessoresCftp(req, res);
+});
+
+apiRouter.put('/equipe-professores-cftp/:id', async (req: Request, res: Response) => {
+  return handleSaveEquipeProfessoresCftp(req, res, req.params.id);
+});
+
+apiRouter.delete('/equipe-professores-cftp/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body.actor;
+    const pool = getPool();
+
+    const allowed = await verifyCanManageFormacaoTeams(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Apenas usuários com permissão "Pode gerir cursos de formações" podem excluir equipes.' });
+    }
+
+    await pool.query('DELETE FROM EQUIPE_PROFESSORES_CURSO_FORMACAO WHERE ID_EQUIPE_PROFESSORES_CFTP = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluída equipe de professores CFTP ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

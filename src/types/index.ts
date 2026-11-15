@@ -467,6 +467,32 @@ export interface AcademyCourse {
   createdAt: string;
 }
 
+export interface EquipeProfessoresCursoFormacao {
+  id: string;
+  cursoId: string;
+  materia: TeacherSubject;
+  cftp: string;
+  apelidoEquipe: string;
+  equipe01?: string;
+  equipe02?: string;
+  equipe03?: string;
+  equipe04?: string;
+  equipe05?: string;
+  equipe06?: string;
+  equipe01Id?: string;
+  equipe02Id?: string;
+  equipe03Id?: string;
+  equipe04Id?: string;
+  equipe05Id?: string;
+  equipe06Id?: string;
+  data1: string;
+  data2: string;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface CourseFormacao {
   id: string;
   name: string;
