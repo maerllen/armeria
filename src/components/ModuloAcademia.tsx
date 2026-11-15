@@ -2780,10 +2780,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                         <div>
                           <span className="text-sm font-bold text-white">
-                            Professores da Equipe ({teamSlots.length}/6)
+                            Professores da Equipe
                           </span>
                           <p className="text-[11px] text-slate-400">
-                            Busque pelo nome (todas as unidades). Exibindo usuários com "É Professor Usuário = Sim" e matéria <strong className="text-amber-300">{teamMateria}</strong> ({eligibleTeachers.length} encontrado(s)).
+                            Selecione os professores entre os nomes dos docentes do <strong className="text-amber-300">{teamMateria}</strong>
                           </p>
                         </div>
 
