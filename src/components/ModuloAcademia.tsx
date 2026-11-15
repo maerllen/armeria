@@ -23,6 +23,7 @@ import {
   EquipeProfessoresCursoFormacao,
   TurmaCftp,
   AlunoTurmaCftp,
+  DesignacaoEquipeTurmaCftp,
   formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
@@ -54,7 +55,9 @@ import {
   ChevronDown,
   ChevronUp,
   FileSpreadsheet,
-  X
+  X,
+  UserCheck,
+  Lock
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
@@ -143,7 +146,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   courseTypeFilterProp
 }) => {
   const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'cursos'>('movements');
-  const [formacaoTab, setFormacaoTab] = useState<'cftp' | 'novo-cftp' | 'gerenciar-equipes' | 'gerenciar-turmas'>('cftp');
+  const [formacaoTab, setFormacaoTab] = useState<'cftp' | 'novo-cftp' | 'gerenciar-equipes' | 'gerenciar-turmas' | 'designar-equipe'>('cftp');
 
   // --- NOVO CFTP & CFTP LIST STATE ---
   const [cftpEditingId, setCftpEditingId] = useState<string | null>(null);
@@ -195,6 +198,17 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   });
   const [savingAlunoCftpEdit, setSavingAlunoCftpEdit] = useState(false);
 
+  // --- DESIGNAR EQUIPE POR TURMA CFTP STATE ---
+  const [designarCourseId, setDesignarCourseId] = useState<string>('');
+  const [designarTurma, setDesignarTurma] = useState<string>('');
+  const [designarMateria, setDesignarMateria] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
+  const [designarEquipeId, setDesignarEquipeId] = useState<string>('');
+  const [designarPrimeiraAula, setDesignarPrimeiraAula] = useState<string>('');
+  const [designarUltimaAula, setDesignarUltimaAula] = useState<string>('');
+  const [designarEditingId, setDesignarEditingId] = useState<string | null>(null);
+  const [designarConsultOpen, setDesignarConsultOpen] = useState<boolean>(false);
+  const [designarSaving, setDesignarSaving] = useState<boolean>(false);
+
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
   const isProfessorAcadepol = Boolean(
@@ -242,6 +256,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const equipesProfessoresCftp = storage.getEquipesProfessoresCftp();
   const turmasCftp = storage.getTurmasCftp();
   const alunosTurmaCftp = storage.getAlunosTurmaCftp();
+  const designacoesEquipeCftp = storage.getDesignacoesEquipeCftp();
 
   const availableCalendarTurmas = React.useMemo(() => {
     const set = new Set<string>();
@@ -507,7 +522,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan' | 'movement' | 'equipe-cftp' | 'turma-cftp' | 'aluno-cftp'; id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan' | 'movement' | 'equipe-cftp' | 'turma-cftp' | 'aluno-cftp' | 'designacao-equipe-cftp'; id: string; name: string } | null>(null);
 
   // Edit Mapa de Aula state
   const [showEditMovModal, setShowEditMovModal] = useState(false);
@@ -1291,6 +1306,359 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return Array.from(bestLabelByKey.values())
       .map(v => v.label)
       .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' }));
+  };
+
+  // --- DESIGNAR EQUIPE POR TURMA CFTP HELPERS & HANDLERS ---
+  const normalizeScheduleDateToIso = (raw: string): string => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return '';
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    const brMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+    const dashBrMatch = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})/);
+    if (dashBrMatch) return `${dashBrMatch[3]}-${dashBrMatch[2]}-${dashBrMatch[1]}`;
+    return '';
+  };
+
+  const addDaysIso = (isoDate: string, days: number): string => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) return '';
+    const ms = new Date(`${isoDate}T00:00:00Z`).getTime();
+    if (isNaN(ms)) return '';
+    return new Date(ms + days * 86400000).toISOString().slice(0, 10);
+  };
+
+  const getLocalTodayIso = (): string => {
+    const nowLocal = new Date();
+    return `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+  };
+
+  const formatBrDate = (iso?: string) => {
+    if (!iso) return '—';
+    const clean = iso.slice(0, 10);
+    const parts = clean.split('-');
+    if (parts.length !== 3) return iso;
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  };
+
+  const getTurmaClassScheduleSummary = (
+    crs: AcademyCourse | null,
+    turmaLabel: string,
+    materia: 'MEAF' | 'TAP' | 'DP'
+  ) => {
+    if (!crs) {
+      return {
+        dates: [] as string[],
+        primeiraAulaTurma: '',
+        ultimaAulaTurma: '',
+        totalAulas: 0,
+        usedSubjectFilter: false
+      };
+    }
+
+    const targetKey = normTurmaKey(turmaLabel);
+    const schedule = Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule : [];
+    const turmaRows = targetKey
+      ? schedule.filter(r => normTurmaKey(r.turma || '') === targetKey)
+      : [];
+
+    const subjectRows = turmaRows.filter(r => {
+      const sig = String(r.sigla || '').toUpperCase().trim();
+      const disc = normalizeNoAccentUpper(r.disciplina || '');
+      if (sig) return sig === materia;
+      if (materia === 'MEAF') return disc.includes('MEAF') || disc.includes('ARMAMENTO');
+      if (materia === 'TAP') return disc.includes('TAP') || disc.includes('TIRO');
+      if (materia === 'DP') return disc.includes('DP') || disc.includes('DEFESA PESSOAL');
+      return false;
+    });
+
+    const sourceRows = subjectRows.length > 0 ? subjectRows : turmaRows;
+    const uniqueDates = Array.from(
+      new Set(
+        sourceRows
+          .map(r => normalizeScheduleDateToIso(r.data))
+          .filter(Boolean)
+      )
+    ).sort();
+
+    if (uniqueDates.length > 0) {
+      return {
+        dates: uniqueDates,
+        primeiraAulaTurma: uniqueDates[0],
+        ultimaAulaTurma: uniqueDates[uniqueDates.length - 1],
+        totalAulas: sourceRows.length,
+        usedSubjectFilter: subjectRows.length > 0
+      };
+    }
+
+    const courseStart = (crs.startDate || (crs.dates && crs.dates[0]) || '').slice(0, 10);
+    const courseEnd = (crs.endDate || (crs.dates && crs.dates.length > 1 ? crs.dates[crs.dates.length - 1] : courseStart) || '').slice(0, 10);
+    const fallbackDates = Array.from(new Set([courseStart, courseEnd].filter(Boolean))).sort();
+
+    return {
+      dates: fallbackDates,
+      primeiraAulaTurma: courseStart,
+      ultimaAulaTurma: courseEnd || courseStart,
+      totalAulas: 0,
+      usedSubjectFilter: false
+    };
+  };
+
+  const getTurmaAssignmentCoverage = (
+    cursoId: string,
+    turmaLabel: string,
+    materia: 'MEAF' | 'TAP' | 'DP',
+    crs: AcademyCourse | null,
+    excludeDesignacaoId?: string | null
+  ) => {
+    const targetKey = normTurmaKey(turmaLabel);
+    const allForTurmaMateria = designacoesEquipeCftp
+      .filter(
+        d =>
+          d.cursoId === cursoId &&
+          normTurmaKey(d.turma) === targetKey &&
+          String(d.materia || '').toUpperCase().trim() === materia
+      )
+      .sort((a, b) => a.primeiraAula.localeCompare(b.primeiraAula) || a.ultimaAula.localeCompare(b.ultimaAula));
+
+    const existingForCalc = allForTurmaMateria.filter(d => d.id !== excludeDesignacaoId);
+    const summary = getTurmaClassScheduleSummary(crs, turmaLabel, materia);
+
+    let minStart = '';
+    let maxEnd = '';
+    for (const item of existingForCalc) {
+      const p = (item.primeiraAula || '').slice(0, 10);
+      const u = (item.ultimaAula || '').slice(0, 10);
+      if (p && (!minStart || p < minStart)) minStart = p;
+      if (u && (!maxEnd || u > maxEnd)) maxEnd = u;
+    }
+
+    const isComplete =
+      existingForCalc.length > 0 &&
+      Boolean(summary.ultimaAulaTurma) &&
+      maxEnd >= summary.ultimaAulaTurma &&
+      (!summary.primeiraAulaTurma || minStart <= summary.primeiraAulaTurma);
+
+    let suggestedPrimeiraAula = summary.primeiraAulaTurma;
+    const suggestedUltimaAula = summary.ultimaAulaTurma;
+
+    if (existingForCalc.length > 0 && !isComplete && maxEnd) {
+      const nextScheduled = summary.dates.find(d => d > maxEnd);
+      if (nextScheduled) {
+        suggestedPrimeiraAula = nextScheduled;
+      } else {
+        const nextDay = addDaysIso(maxEnd, 1);
+        if (nextDay) {
+          suggestedPrimeiraAula =
+            suggestedUltimaAula && nextDay > suggestedUltimaAula
+              ? suggestedUltimaAula
+              : nextDay;
+        }
+      }
+    }
+
+    return {
+      assignments: allForTurmaMateria,
+      existingForCalc,
+      summary,
+      minStart,
+      maxEnd,
+      isComplete,
+      suggestedPrimeiraAula,
+      suggestedUltimaAula
+    };
+  };
+
+  const applyDesignarSuggestedDates = (
+    crs: AcademyCourse | null,
+    turmaLabel: string,
+    materia: 'MEAF' | 'TAP' | 'DP'
+  ) => {
+    if (!crs || !turmaLabel) {
+      setDesignarPrimeiraAula('');
+      setDesignarUltimaAula('');
+      return;
+    }
+    const cov = getTurmaAssignmentCoverage(crs.id, turmaLabel, materia, crs, null);
+    setDesignarPrimeiraAula(cov.suggestedPrimeiraAula);
+    setDesignarUltimaAula(cov.suggestedUltimaAula);
+  };
+
+  const handleOpenDesignarEquipeTab = () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDesignarEditingId(null);
+    const defaultMat = getLoggedUserDefaultSubject();
+    setDesignarMateria(defaultMat);
+    if (designarCourseId) {
+      const crs = academyCourses.find(c => c.id === designarCourseId && c.type === 'Formação') || null;
+      if (crs && designarTurma) {
+        applyDesignarSuggestedDates(crs, designarTurma, defaultMat);
+      }
+    }
+    setFormacaoTab('designar-equipe');
+  };
+
+  const handleCancelDesignarCadastro = () => {
+    setDesignarEditingId(null);
+    setDesignarEquipeId('');
+    setDesignarConsultOpen(false);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setFormacaoTab('cftp');
+  };
+
+  const handleSelectDesignarCourse = (courseId: string) => {
+    setDesignarCourseId(courseId);
+    setDesignarTurma('');
+    setDesignarEditingId(null);
+    setDesignarEquipeId('');
+    setDesignarConsultOpen(false);
+    const defaultMat = getLoggedUserDefaultSubject();
+    setDesignarMateria(defaultMat);
+    setDesignarPrimeiraAula('');
+    setDesignarUltimaAula('');
+    setErrorMsg('');
+    setSuccessMsg('');
+  };
+
+  const handleSelectDesignarTurma = (turmaLabel: string) => {
+    setDesignarTurma(turmaLabel);
+    setDesignarEditingId(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    const crs = academyCourses.find(c => c.id === designarCourseId) || null;
+    applyDesignarSuggestedDates(crs, turmaLabel, designarMateria);
+  };
+
+  const handleSelectDesignarMateria = (newMateria: 'MEAF' | 'TAP' | 'DP') => {
+    setDesignarMateria(newMateria);
+    setDesignarEquipeId('');
+    setErrorMsg('');
+    if (!designarEditingId) {
+      const crs = academyCourses.find(c => c.id === designarCourseId) || null;
+      if (crs && designarTurma) {
+        applyDesignarSuggestedDates(crs, designarTurma, newMateria);
+      }
+    }
+  };
+
+  const handleStartEditDesignacao = (d: DesignacaoEquipeTurmaCftp) => {
+    const localToday = getLocalTodayIso();
+    const lastDate = (d.ultimaAula || '').slice(0, 10);
+    if (lastDate && localToday >= lastDate) {
+      setErrorMsg(
+        `Esta equipe só pode ser editada enquanto a data atual (${formatBrDate(localToday)}) for inferior à última aula da equipe (${formatBrDate(lastDate)}).`
+      );
+      return;
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+    setDesignarEditingId(d.id);
+    setDesignarCourseId(d.cursoId);
+    setDesignarTurma(d.turma);
+    const matUpper = String(d.materia || 'MEAF').toUpperCase().trim();
+    setDesignarMateria(matUpper === 'TAP' || matUpper === 'DP' ? matUpper : 'MEAF');
+    setDesignarEquipeId(d.equipeId);
+    setDesignarPrimeiraAula((d.primeiraAula || '').slice(0, 10));
+    setDesignarUltimaAula((d.ultimaAula || '').slice(0, 10));
+  };
+
+  const handleSaveDesignacaoEquipe = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const selectedCourse = academyCourses.find(c => c.id === designarCourseId) || null;
+    if (!selectedCourse) {
+      setErrorMsg('Selecione o curso de formação CFTP.');
+      return;
+    }
+    if (!designarTurma) {
+      setErrorMsg('Selecione uma turma do curso de formação.');
+      return;
+    }
+    if (!designarPrimeiraAula || !designarUltimaAula) {
+      setErrorMsg('Informe as datas da Primeira aula e Última aula.');
+      return;
+    }
+    if (designarUltimaAula < designarPrimeiraAula) {
+      setErrorMsg('A data da Última aula deve ser igual ou posterior à Primeira aula.');
+      return;
+    }
+    if (!designarEquipeId) {
+      setErrorMsg('Selecione uma equipe para designar à turma.');
+      return;
+    }
+
+    const covBefore = getTurmaAssignmentCoverage(
+      selectedCourse.id,
+      designarTurma,
+      designarMateria,
+      selectedCourse,
+      designarEditingId
+    );
+    if (!designarEditingId && covBefore.isComplete) {
+      setErrorMsg(`A turma ${designarTurma} já está com equipe completa na matéria ${designarMateria}.`);
+      return;
+    }
+
+    const localToday = getLocalTodayIso();
+    setDesignarSaving(true);
+    try {
+      const res = await storage.saveDesignacaoEquipeCftp({
+        id: designarEditingId || undefined,
+        cursoId: selectedCourse.id,
+        turma: designarTurma,
+        materia: designarMateria,
+        equipeId: designarEquipeId,
+        primeiraAula: designarPrimeiraAula,
+        ultimaAula: designarUltimaAula,
+        primeiraAulaTurma: covBefore.summary.primeiraAulaTurma || designarPrimeiraAula,
+        ultimaAulaTurma: covBefore.summary.ultimaAulaTurma || designarUltimaAula,
+        referenceDate: localToday
+      });
+      if (!res.success) {
+        throw new Error(res.error || 'Erro ao designar equipe para a turma.');
+      }
+
+      const eqObj = equipesProfessoresCftp.find(eq => eq.id === designarEquipeId);
+      const eqName = eqObj?.apelidoEquipe || 'Equipe';
+      const turmaUltima = covBefore.summary.ultimaAulaTurma || designarUltimaAula;
+      const turmaPrimeira = covBefore.summary.primeiraAulaTurma || designarPrimeiraAula;
+      const combinedMinStart = covBefore.minStart && covBefore.minStart < designarPrimeiraAula ? covBefore.minStart : designarPrimeiraAula;
+      const combinedMaxEnd = covBefore.maxEnd && covBefore.maxEnd > designarUltimaAula ? covBefore.maxEnd : designarUltimaAula;
+      const nowComplete = combinedMinStart <= turmaPrimeira && combinedMaxEnd >= turmaUltima;
+
+      setSuccessMsg(
+        designarEditingId
+          ? `Designação da equipe "${eqName}" (${designarMateria}) na turma ${designarTurma} atualizada com sucesso!`
+          : nowComplete
+            ? `Equipe "${eqName}" (${designarMateria}) designada! A turma ${designarTurma} consta agora com equipe completa.`
+            : `Equipe "${eqName}" (${designarMateria}) designada até ${formatBrDate(designarUltimaAula)}. Você já pode selecionar outra equipe para completar o período restante da turma ${designarTurma}.`
+      );
+
+      setDesignarEditingId(null);
+      setDesignarEquipeId('');
+      onRefresh();
+
+      // Recalcula imediatamente os campos Primeira aula / Última aula caso falte completar o período
+      if (!nowComplete) {
+        const nextScheduled = covBefore.summary.dates.find(d => d > combinedMaxEnd);
+        const nextStart = nextScheduled || addDaysIso(combinedMaxEnd, 1);
+        setDesignarPrimeiraAula(
+          nextStart && turmaUltima && nextStart > turmaUltima ? turmaUltima : nextStart
+        );
+        setDesignarUltimaAula(turmaUltima);
+      } else {
+        setDesignarPrimeiraAula(turmaPrimeira);
+        setDesignarUltimaAula(turmaUltima);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao designar equipe para a turma.');
+    } finally {
+      setDesignarSaving(false);
+    }
   };
 
   const getEligibleTurmasCourses = (): AcademyCourse[] => {
@@ -3048,6 +3416,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         const res = await storage.deleteAlunoTurmaCftp(deleteTarget.id);
         if (!res.success) throw new Error(res.error || 'Erro ao excluir aluno.');
       }
+      if (deleteTarget.type === 'designacao-equipe-cftp') {
+        const res = await storage.deleteDesignacaoEquipeCftp(deleteTarget.id);
+        if (!res.success) throw new Error(res.error || 'Erro ao excluir designação de equipe.');
+      }
       setSuccessMsg('Item excluído com sucesso.');
       onRefresh();
     } catch (err: any) {
@@ -3238,6 +3610,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 <span>Gerenciar turmas</span>
               </button>
             )}
+            {(canManageFormacaoTeams || canManageFormacaoTurmas) && (
+              <button
+                type="button"
+                onClick={handleOpenDesignarEquipeTab}
+                className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                  formacaoTab === 'designar-equipe'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Designar equipe</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="flex items-center bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs font-semibold">
@@ -3306,14 +3692,6 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           }
 
           const selectedActiveTeamCourse = activeCourses.find(c => c.id === selectedTeamCourseId) || null;
-
-          const formatBrDate = (iso?: string) => {
-            if (!iso) return '—';
-            const clean = iso.slice(0, 10);
-            const parts = clean.split('-');
-            if (parts.length !== 3) return iso;
-            return `${parts[2]}/${parts[1]}/${parts[0]}`;
-          };
 
           const userDefaultSubject = getLoggedUserDefaultSubject();
           const TEAM_SUBJECTS: Array<'MEAF' | 'TAP' | 'DP'> = ['MEAF', 'TAP', 'DP'];
@@ -4530,6 +4908,639 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                         </button>
                                       </div>
                                     )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          }
+
+          if (formacaoTab === 'designar-equipe' && (canManageFormacaoTeams || canManageFormacaoTurmas)) {
+            const selectableCourses = [...activeCourses, ...upcomingCourses, ...pastCourses];
+            const selectedDesignarCourse = selectableCourses.find(c => c.id === designarCourseId) || null;
+            const courseDedupTurmas = getDeduplicatedCourseTurmas(selectedDesignarCourse);
+            const effectiveTurma =
+              courseDedupTurmas.find(t => normTurmaKey(t) === normTurmaKey(designarTurma)) || designarTurma || '';
+
+            const availableCourseTeams = selectedDesignarCourse
+              ? equipesProfessoresCftp.filter(
+                  eq =>
+                    eq.cursoId === selectedDesignarCourse.id &&
+                    String(eq.materia || '').toUpperCase().trim() === designarMateria
+                )
+              : [];
+
+            const coverage =
+              selectedDesignarCourse && effectiveTurma
+                ? getTurmaAssignmentCoverage(
+                    selectedDesignarCourse.id,
+                    effectiveTurma,
+                    designarMateria,
+                    selectedDesignarCourse,
+                    designarEditingId
+                  )
+                : null;
+
+            const allTurmaDesignacoes =
+              selectedDesignarCourse && effectiveTurma
+                ? designacoesEquipeCftp
+                    .filter(
+                      d =>
+                        d.cursoId === selectedDesignarCourse.id &&
+                        normTurmaKey(d.turma) === normTurmaKey(effectiveTurma)
+                    )
+                    .sort(
+                      (a, b) =>
+                        String(a.materia).localeCompare(String(b.materia)) ||
+                        a.primeiraAula.localeCompare(b.primeiraAula)
+                    )
+                : [];
+
+            const courseAllDesignacoes = selectedDesignarCourse
+              ? designacoesEquipeCftp
+                  .filter(d => d.cursoId === selectedDesignarCourse.id)
+                  .sort(
+                    (a, b) =>
+                      a.turma.localeCompare(b.turma, 'pt-BR', { numeric: true, sensitivity: 'base' }) ||
+                      String(a.materia).localeCompare(String(b.materia)) ||
+                      a.primeiraAula.localeCompare(b.primeiraAula)
+                  )
+              : [];
+
+            const localToday = getLocalTodayIso();
+            const isPeriodCompleteForNew = Boolean(!designarEditingId && coverage?.isComplete);
+
+            const formatTeamProfessors = (desig: DesignacaoEquipeTurmaCftp): string[] => {
+              const eq = equipesProfessoresCftp.find(e => e.id === desig.equipeId);
+              const list = [
+                desig.equipe01 || eq?.equipe01,
+                desig.equipe02 || eq?.equipe02,
+                desig.equipe03 || eq?.equipe03,
+                desig.equipe04 || eq?.equipe04,
+                desig.equipe05 || eq?.equipe05,
+                desig.equipe06 || eq?.equipe06
+              ].filter((n): n is string => Boolean(n && n.trim()));
+              return list;
+            };
+
+            return (
+              <div className="space-y-5">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-white">Designar equipe</h2>
+                      <p className="text-xs text-slate-400">
+                        Vincule uma equipe de professores às turmas do CFTP. Uma mesma equipe pode atender várias turmas, e uma turma pode ter mais de uma equipe até completar todo o período de aulas.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelDesignarCadastro}
+                      className="px-3.5 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-xs font-semibold text-red-300 hover:text-red-200 whitespace-nowrap self-start sm:self-auto"
+                    >
+                      Cancelar cadastro
+                    </button>
+                  </div>
+
+                  {selectableCourses.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      Nenhum curso de formação CFTP cadastrado.
+                    </div>
+                  ) : (
+                    <form onSubmit={handleSaveDesignacaoEquipe} className="space-y-5 text-xs">
+                      {/* Passo 1: Curso de Formação CFTP + Matéria */}
+                      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                        <div className="md:col-span-8">
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Curso de Formação CFTP
+                          </label>
+                          <select
+                            value={designarCourseId}
+                            onChange={(e) => handleSelectDesignarCourse(e.target.value)}
+                            disabled={Boolean(designarEditingId)}
+                            className="w-full bg-slate-950 border border-amber-500/50 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-400 focus:outline-none disabled:opacity-60"
+                          >
+                            <option value="">Selecione o curso de formação CFTP...</option>
+                            {activeCourses.map(crs => (
+                              <option key={crs.id} value={crs.id}>
+                                {formatCftpCourseLabel(crs)} — Em andamento ({formatBrDate((crs.startDate || '').slice(0, 10))} a {formatBrDate((crs.endDate || '').slice(0, 10))})
+                              </option>
+                            ))}
+                            {upcomingCourses.map(crs => (
+                              <option key={crs.id} value={crs.id}>
+                                {formatCftpCourseLabel(crs)} — Próximo ({formatBrDate((crs.startDate || '').slice(0, 10))} a {formatBrDate((crs.endDate || '').slice(0, 10))})
+                              </option>
+                            ))}
+                            {pastCourses.map(crs => (
+                              <option key={crs.id} value={crs.id}>
+                                {formatCftpCourseLabel(crs)} — Encerrado ({formatBrDate((crs.startDate || '').slice(0, 10))} a {formatBrDate((crs.endDate || '').slice(0, 10))})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="md:col-span-4">
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Matéria (padrão: {getLoggedUserDefaultSubject()})
+                          </label>
+                          <select
+                            value={designarMateria}
+                            onChange={(e) => handleSelectDesignarMateria(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none"
+                          >
+                            <option value="MEAF">MEAF</option>
+                            <option value="TAP">TAP</option>
+                            <option value="DP">DP</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Informações resgatadas do curso selecionado */}
+                      {selectedDesignarCourse && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-wrap items-center justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                              <span className="text-xs font-bold text-white">
+                                {selectedDesignarCourse.module || selectedDesignarCourse.name}
+                              </span>
+                              <span className="text-xs font-mono text-amber-400">
+                                {selectedDesignarCourse.code}
+                              </span>
+                              <span className="text-xs font-mono text-slate-300 tabular-nums">
+                                {formatBrDate((selectedDesignarCourse.startDate || '').slice(0, 10))} a {formatBrDate((selectedDesignarCourse.endDate || '').slice(0, 10))}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              <span className="font-semibold text-slate-300">Carreiras: </span>
+                              {Array.isArray(selectedDesignarCourse.careers) && selectedDesignarCourse.careers.length > 0
+                                ? selectedDesignarCourse.careers.join(', ')
+                                : (selectedDesignarCourse.career || 'Não informada')}
+                            </div>
+                          </div>
+                          <div className="text-[11px] text-slate-300 font-mono tabular-nums">
+                            Turmas disponíveis: <strong className="text-amber-300">{courseDedupTurmas.length}</strong> · Equipes ({designarMateria}): <strong className="text-emerald-300">{availableCourseTeams.length}</strong>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Passo 2: Selecionar Turma + Botão Consultar equipe */}
+                      {selectedDesignarCourse && (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+                            <div className="md:col-span-8">
+                              <label className="block text-slate-200 font-semibold mb-1.5">
+                                Turma do Curso de Formação
+                              </label>
+                              <select
+                                value={effectiveTurma}
+                                onChange={(e) => handleSelectDesignarTurma(e.target.value)}
+                                disabled={Boolean(designarEditingId)}
+                                className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none disabled:opacity-60"
+                              >
+                                <option value="">Selecione a turma...</option>
+                                {courseDedupTurmas.map(tCode => {
+                                  const tCov = getTurmaAssignmentCoverage(
+                                    selectedDesignarCourse.id,
+                                    tCode,
+                                    designarMateria,
+                                    selectedDesignarCourse,
+                                    null
+                                  );
+                                  const statusLabel = tCov.isComplete
+                                    ? 'Equipe completa'
+                                    : tCov.assignments.length > 0
+                                      ? `Parcial (até ${formatBrDate(tCov.maxEnd)})`
+                                      : 'Sem equipe';
+                                  return (
+                                    <option key={tCode} value={tCode}>
+                                      {tCode} — {statusLabel}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+
+                            <div className="md:col-span-4 flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={!effectiveTurma}
+                                onClick={() => setDesignarConsultOpen(prev => !prev)}
+                                className={`w-full px-3.5 py-2 rounded-lg border text-xs font-bold transition flex items-center justify-center space-x-2 disabled:opacity-40 disabled:cursor-not-allowed ${
+                                  designarConsultOpen
+                                    ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                    : 'bg-slate-950 border-amber-500/50 text-amber-300 hover:bg-amber-500 hover:text-slate-950'
+                                }`}
+                              >
+                                <Search className="w-3.5 h-3.5" />
+                                <span>
+                                  {designarConsultOpen
+                                    ? `Ocultar equipe (${allTurmaDesignacoes.length})`
+                                    : `Consultar equipe${effectiveTurma ? ` (${allTurmaDesignacoes.length})` : ''}`}
+                                </span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Painel Consultar equipe da turma selecionada */}
+                          {designarConsultOpen && effectiveTurma && (
+                            <div className="bg-slate-950 border border-amber-500/40 rounded-xl p-4 space-y-3">
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                                <div>
+                                  <h3 className="text-xs font-bold text-amber-300">
+                                    Equipes designadas para a turma {effectiveTurma}
+                                  </h3>
+                                  <p className="text-[11px] text-slate-400">
+                                    A edição permanece liberada enquanto a data atual ({formatBrDate(localToday)}) for inferior à última aula da equipe.
+                                  </p>
+                                </div>
+                                {coverage && (
+                                  <span
+                                    className={`px-2.5 py-1 rounded-md border text-[11px] font-bold ${
+                                      coverage.isComplete
+                                        ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                                        : coverage.assignments.length > 0
+                                          ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+                                          : 'bg-slate-900 border-slate-700 text-slate-400'
+                                    }`}
+                                  >
+                                    {designarMateria}:{' '}
+                                    {coverage.isComplete
+                                      ? 'Equipe completa'
+                                      : coverage.assignments.length > 0
+                                        ? `Período parcial (até ${formatBrDate(coverage.maxEnd)})`
+                                        : 'Nenhuma equipe designada'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {allTurmaDesignacoes.length === 0 ? (
+                                <div className="py-4 text-center text-xs text-slate-400">
+                                  Nenhuma equipe designada para a turma <strong className="text-white">{effectiveTurma}</strong> até o momento.
+                                </div>
+                              ) : (
+                                <div className="space-y-2.5">
+                                  {allTurmaDesignacoes.map(d => {
+                                    const matKey = (String(d.materia || 'MEAF').toUpperCase().trim() as 'MEAF' | 'TAP' | 'DP');
+                                    const matCov = getTurmaAssignmentCoverage(
+                                      selectedDesignarCourse.id,
+                                      effectiveTurma,
+                                      matKey,
+                                      selectedDesignarCourse,
+                                      null
+                                    );
+                                    const profs = formatTeamProfessors(d);
+                                    const canEditRow = Boolean(d.ultimaAula && localToday < d.ultimaAula.slice(0, 10));
+                                    return (
+                                      <div
+                                        key={d.id}
+                                        className="bg-slate-900 border border-slate-800 rounded-lg p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                                      >
+                                        <div className="space-y-1 min-w-0">
+                                          <div className="flex flex-wrap items-center gap-2">
+                                            <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 font-mono font-bold text-[11px]">
+                                              {d.materia}
+                                            </span>
+                                            <span className="font-bold text-white text-xs">
+                                              Equipe {d.apelidoEquipe}
+                                            </span>
+                                            <span className="text-[11px] font-mono text-slate-300 tabular-nums">
+                                              {formatBrDate(d.primeiraAula)} a {formatBrDate(d.ultimaAula)}
+                                            </span>
+                                            <span
+                                              className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                                                matCov.isComplete
+                                                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                                  : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                                              }`}
+                                            >
+                                              {matCov.isComplete ? 'Equipe completa' : 'Complementar'}
+                                            </span>
+                                          </div>
+                                          <div className="text-[11px] text-slate-400">
+                                            <span className="text-slate-300 font-semibold">Professores: </span>
+                                            {profs.length > 0 ? profs.join(', ') : 'Professores vinculados à equipe'}
+                                          </div>
+                                        </div>
+
+                                        <div className="flex items-center gap-2 shrink-0">
+                                          {canEditRow ? (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleStartEditDesignacao(d)}
+                                              className="px-2.5 py-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-200 hover:text-amber-300 text-[11px] font-semibold flex items-center space-x-1 transition"
+                                              title="Editar equipe designada"
+                                            >
+                                              <Edit2 className="w-3 h-3" />
+                                              <span>Editar</span>
+                                            </button>
+                                          ) : (
+                                            <span
+                                              className="px-2.5 py-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-500 text-[11px] font-semibold flex items-center space-x-1"
+                                              title="Edição bloqueada: data atual igual ou superior à última aula da equipe"
+                                            >
+                                              <Lock className="w-3 h-3" />
+                                              <span>Edição encerrada</span>
+                                            </span>
+                                          )}
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setDeleteTarget({
+                                                type: 'designacao-equipe-cftp',
+                                                id: d.id,
+                                                name: `Equipe ${d.apelidoEquipe} (${d.materia}) - Turma ${d.turma}`
+                                              })
+                                            }
+                                            className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                                            title="Excluir designação"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {/* Passo 3: Status de cobertura, Primeira aula, Última aula e Seleção da Equipe */}
+                          {effectiveTurma && coverage && (
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
+                                <div className="text-xs text-slate-300">
+                                  Turma <strong className="text-white font-mono">{effectiveTurma}</strong> · Matéria{' '}
+                                  <strong className="text-amber-300 font-mono">{designarMateria}</strong>
+                                  {coverage.summary.primeiraAulaTurma && coverage.summary.ultimaAulaTurma && (
+                                    <span className="ml-2 text-[11px] text-slate-400 font-mono tabular-nums">
+                                      (Período no horário: {formatBrDate(coverage.summary.primeiraAulaTurma)} a {formatBrDate(coverage.summary.ultimaAulaTurma)}
+                                      {coverage.summary.totalAulas > 0 ? ` · ${coverage.summary.totalAulas} aula(s)` : ''})
+                                    </span>
+                                  )}
+                                </div>
+                                <div>
+                                  {coverage.isComplete && !designarEditingId ? (
+                                    <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>Turma com equipe completa</span>
+                                    </span>
+                                  ) : coverage.existingForCalc.length > 0 && !designarEditingId ? (
+                                    <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
+                                      <Calendar className="w-3.5 h-3.5" />
+                                      <span>
+                                        Próxima etapa: iniciando após {formatBrDate(coverage.maxEnd)}
+                                      </span>
+                                    </span>
+                                  ) : designarEditingId ? (
+                                    <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-md bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
+                                      <Edit2 className="w-3.5 h-3.5" />
+                                      <span>Editando designação</span>
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {isPeriodCompleteForNew ? (
+                                <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-lg p-3.5 text-xs text-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                                  <span>
+                                    A turma <strong className="text-white">{effectiveTurma}</strong> já possui equipe completa cobrindo todo o período de aulas da matéria <strong className="text-emerald-300">{designarMateria}</strong>. Use <strong className="text-white">Consultar equipe</strong> para visualizar ou editar uma designação em aberto.
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDesignarConsultOpen(true)}
+                                    className="px-3 py-1.5 rounded-lg border border-emerald-500/40 bg-slate-950 hover:bg-emerald-500/20 text-emerald-300 font-bold text-xs whitespace-nowrap"
+                                  >
+                                    Ver equipe da turma
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+                                    <div className="md:col-span-3">
+                                      <label className="block text-slate-200 font-semibold mb-1.5">
+                                        Primeira aula
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={designarPrimeiraAula}
+                                        onChange={(e) => setDesignarPrimeiraAula(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:border-amber-500 focus:outline-none"
+                                      />
+                                    </div>
+
+                                    <div className="md:col-span-3">
+                                      <label className="block text-slate-200 font-semibold mb-1.5">
+                                        Última aula
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={designarUltimaAula}
+                                        onChange={(e) => setDesignarUltimaAula(e.target.value)}
+                                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-mono focus:border-amber-500 focus:outline-none"
+                                      />
+                                    </div>
+
+                                    <div className="md:col-span-6">
+                                      <label className="block text-slate-200 font-semibold mb-1.5">
+                                        Equipe ({designarMateria})
+                                      </label>
+                                      {availableCourseTeams.length === 0 ? (
+                                        <div className="bg-slate-900 border border-amber-500/30 rounded-lg px-3 py-2 text-[11px] text-amber-300 flex items-center justify-between gap-2">
+                                          <span>Nenhuma equipe cadastrada para {designarMateria} neste CFTP.</span>
+                                          {canManageFormacaoTeams && (
+                                            <button
+                                              type="button"
+                                              onClick={() => handleSelectActiveCourseForTeams(selectedDesignarCourse)}
+                                              className="underline font-bold text-amber-200 hover:text-white whitespace-nowrap"
+                                            >
+                                              Cadastrar equipe
+                                            </button>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <select
+                                          value={designarEquipeId}
+                                          onChange={(e) => setDesignarEquipeId(e.target.value)}
+                                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none"
+                                        >
+                                          <option value="">Selecione uma equipe...</option>
+                                          {availableCourseTeams.map(eq => {
+                                            const profs = [eq.equipe01, eq.equipe02, eq.equipe03, eq.equipe04, eq.equipe05, eq.equipe06].filter(Boolean);
+                                            const assignedCount = designacoesEquipeCftp.filter(d => d.equipeId === eq.id).length;
+                                            return (
+                                              <option key={eq.id} value={eq.id}>
+                                                Equipe {eq.apelidoEquipe} ({profs.length} prof. — {profs.slice(0, 2).join(', ')}{profs.length > 2 ? '...' : ''})
+                                                {assignedCount > 0 ? ` [${assignedCount} turma(s)]` : ''}
+                                              </option>
+                                            );
+                                          })}
+                                        </select>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                                    <p className="text-[11px] text-slate-400">
+                                      Se a equipe atuar somente até uma data anterior a {formatBrDate(coverage.summary.ultimaAulaTurma || designarUltimaAula)}, você poderá designar outra equipe para completar o período restante.
+                                    </p>
+                                    <div className="flex items-center gap-2 ml-auto">
+                                      {designarEditingId && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setDesignarEditingId(null);
+                                            setDesignarEquipeId('');
+                                            applyDesignarSuggestedDates(selectedDesignarCourse, effectiveTurma, designarMateria);
+                                          }}
+                                          className="px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-900 hover:bg-slate-800 text-xs font-semibold text-slate-200"
+                                        >
+                                          Cancelar edição
+                                        </button>
+                                      )}
+                                      <button
+                                        type="submit"
+                                        disabled={designarSaving || availableCourseTeams.length === 0}
+                                        className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition flex items-center space-x-1.5 disabled:opacity-50"
+                                      >
+                                        <UserCheck className="w-3.5 h-3.5" />
+                                        <span>
+                                          {designarSaving
+                                            ? 'Salvando...'
+                                            : designarEditingId
+                                              ? 'Atualizar Equipe da Turma'
+                                              : 'Designar Equipe'}
+                                        </span>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </form>
+                  )}
+                </div>
+
+                {/* Lista consolidada das equipes designadas no CFTP selecionado */}
+                {selectedDesignarCourse && (
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                      <div>
+                        <h3 className="text-sm font-bold text-white">
+                          Equipes Designadas — {formatCftpCourseLabel(selectedDesignarCourse)}
+                        </h3>
+                        <p className="text-xs text-slate-400">
+                          Acompanhe o status de cobertura de cada turma e edite designações enquanto a data atual for inferior à última aula da equipe.
+                        </p>
+                      </div>
+                      <span className="text-xs font-mono text-amber-300 tabular-nums">
+                        {courseAllDesignacoes.length} designação(ões)
+                      </span>
+                    </div>
+
+                    {courseAllDesignacoes.length === 0 ? (
+                      <div className="py-6 text-center text-xs text-slate-400">
+                        Nenhuma equipe foi designada às turmas deste CFTP ainda.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto border border-slate-800 rounded-lg">
+                        <table className="w-full text-left text-xs text-slate-200">
+                          <thead className="bg-slate-950 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800">
+                            <tr>
+                              <th className="py-2.5 px-3">Turma</th>
+                              <th className="py-2.5 px-3">Matéria</th>
+                              <th className="py-2.5 px-3">Equipe</th>
+                              <th className="py-2.5 px-3">Professores</th>
+                              <th className="py-2.5 px-3">Primeira aula</th>
+                              <th className="py-2.5 px-3">Última aula</th>
+                              <th className="py-2.5 px-3">Cobertura</th>
+                              <th className="py-2.5 px-3 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {courseAllDesignacoes.map(d => {
+                              const matKey = String(d.materia || 'MEAF').toUpperCase().trim() as 'MEAF' | 'TAP' | 'DP';
+                              const rowCov = getTurmaAssignmentCoverage(
+                                selectedDesignarCourse.id,
+                                d.turma,
+                                matKey,
+                                selectedDesignarCourse,
+                                null
+                              );
+                              const profs = formatTeamProfessors(d);
+                              const canEditRow = Boolean(d.ultimaAula && localToday < d.ultimaAula.slice(0, 10));
+
+                              return (
+                                <tr key={d.id} className="hover:bg-slate-800/30">
+                                  <td className="py-2 px-3 font-bold text-white whitespace-nowrap">{d.turma}</td>
+                                  <td className="py-2 px-3 font-mono text-amber-300 whitespace-nowrap">{d.materia}</td>
+                                  <td className="py-2 px-3 font-semibold text-white whitespace-nowrap">
+                                    Equipe {d.apelidoEquipe}
+                                  </td>
+                                  <td className="py-2 px-3 text-slate-300 max-w-xs truncate" title={profs.join(', ')}>
+                                    {profs.length > 0 ? profs.join(', ') : '—'}
+                                  </td>
+                                  <td className="py-2 px-3 font-mono tabular-nums whitespace-nowrap">
+                                    {formatBrDate(d.primeiraAula)}
+                                  </td>
+                                  <td className="py-2 px-3 font-mono tabular-nums whitespace-nowrap">
+                                    {formatBrDate(d.ultimaAula)}
+                                  </td>
+                                  <td className="py-2 px-3 whitespace-nowrap">
+                                    <span
+                                      className={`px-2 py-0.5 rounded border text-[10px] font-bold ${
+                                        rowCov.isComplete
+                                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                          : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                                      }`}
+                                    >
+                                      {rowCov.isComplete ? 'Equipe completa' : 'Parcial'}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-3 text-right whitespace-nowrap">
+                                    <div className="inline-flex items-center space-x-1.5">
+                                      {canEditRow ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartEditDesignacao(d)}
+                                          className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
+                                          title="Editar equipe designada"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      ) : (
+                                        <span
+                                          className="p-1.5 rounded-lg border border-slate-800 bg-slate-950 text-slate-500 inline-flex items-center"
+                                          title="Edição bloqueada: data atual igual ou superior à última aula da equipe"
+                                        >
+                                          <Lock className="w-3.5 h-3.5" />
+                                        </span>
+                                      )}
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDeleteTarget({
+                                            type: 'designacao-equipe-cftp',
+                                            id: d.id,
+                                            name: `Equipe ${d.apelidoEquipe} (${d.materia}) - Turma ${d.turma}`
+                                          })
+                                        }
+                                        className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                                        title="Excluir designação"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
                                   </td>
                                 </tr>
                               );

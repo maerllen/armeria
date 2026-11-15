@@ -4081,6 +4081,9 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
       await pool.query('DELETE FROM HORARIO_MODULO_CFTP WHERE CURSO_ID_HORARIO_MODULO_CFTP = ?', [id]);
     } catch (_) {}
     try {
+      await pool.query('DELETE FROM DESIGNACAO_EQUIPE_TURMA_CFTP WHERE CURSO_ID_DESIGNACAO_EQUIPE_CFTP = ?', [id]);
+    } catch (_) {}
+    try {
       await pool.query('DELETE FROM ALUNOS_TURMA_CFTP WHERE CURSO_ID_ALUNO_TURMA_CFTP = ?', [id]);
     } catch (_) {}
     try {
@@ -7152,9 +7155,356 @@ apiRouter.delete('/turmas-cftp/:id', async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Sem permissão para excluir turmas CFTP.' });
     }
 
+    try {
+      await pool.query('DELETE FROM DESIGNACAO_EQUIPE_TURMA_CFTP WHERE TURMA_CFTP_ID = ?', [id]);
+    } catch (_) {}
     await pool.query('DELETE FROM ALUNOS_TURMA_CFTP WHERE TURMA_CFTP_ID = ?', [id]);
     await pool.query('DELETE FROM TURMAS_CFTP WHERE ID_TURMA_CFTP = ?', [id]);
     await insertAuditLog('Cursos', 'Excluir', `Excluída turma CFTP ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// DESIGNAÇÃO DE EQUIPE POR TURMA CFTP (CURSO DE FORMAÇÃO)
+// ============================================================================
+
+const resolveEffectiveTodayIso = (clientReferenceDate?: any): string => {
+  const now = new Date();
+  const serverToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  if (typeof clientReferenceDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(clientReferenceDate.trim())) {
+    const clientMs = new Date(`${clientReferenceDate.trim()}T00:00:00Z`).getTime();
+    const serverMs = new Date(`${serverToday}T00:00:00Z`).getTime();
+    if (!isNaN(clientMs) && Math.abs(clientMs - serverMs) <= 86400000) {
+      return clientReferenceDate.trim();
+    }
+  }
+  return serverToday;
+};
+
+apiRouter.get('/designacoes-equipe-cftp', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const cursoIdFilter = req.query.cursoId ? String(req.query.cursoId).trim() : '';
+    const turmaFilter = req.query.turma ? String(req.query.turma).trim() : '';
+    const materiaFilter = req.query.materia ? String(req.query.materia).trim().toUpperCase() : '';
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (cursoIdFilter) {
+      conditions.push('d.CURSO_ID_DESIGNACAO_EQUIPE_CFTP = ?');
+      params.push(cursoIdFilter);
+    }
+    if (materiaFilter) {
+      conditions.push('UPPER(TRIM(d.MATERIA)) = ?');
+      params.push(materiaFilter);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const [rows]: any = await pool.query(
+      `SELECT
+        d.ID_DESIGNACAO_EQUIPE_CFTP as id,
+        d.CURSO_ID_DESIGNACAO_EQUIPE_CFTP as curso_id,
+        d.TURMA_CFTP_ID as turma_cftp_id,
+        d.TURMA as turma,
+        d.CFTP as cftp,
+        d.MATERIA as materia,
+        d.EQUIPE_ID as equipe_id,
+        d.APELIDO_EQUIPE as apelido_equipe,
+        d.PRIMEIRA_AULA as primeira_aula,
+        d.ULTIMA_AULA as ultima_aula,
+        d.PRIMEIRA_AULA_TURMA as primeira_aula_turma,
+        d.ULTIMA_AULA_TURMA as ultima_aula_turma,
+        d.CRIADO_POR_ID as criado_por_id,
+        d.CRIADO_POR_NOME as criado_por_nome,
+        d.DATA_CRIACAO as created_at,
+        d.DATA_ATUALIZACAO as updated_at,
+        e.EQUIPE_01 as equipe_01,
+        e.EQUIPE_02 as equipe_02,
+        e.EQUIPE_03 as equipe_03,
+        e.EQUIPE_04 as equipe_04,
+        e.EQUIPE_05 as equipe_05,
+        e.EQUIPE_06 as equipe_06
+      FROM DESIGNACAO_EQUIPE_TURMA_CFTP d
+      LEFT JOIN EQUIPE_PROFESSORES_CURSO_FORMACAO e
+        ON e.ID_EQUIPE_PROFESSORES_CFTP = d.EQUIPE_ID
+      ${whereClause}
+      ORDER BY d.TURMA ASC, d.MATERIA ASC, d.PRIMEIRA_AULA ASC, d.DATA_CRIACAO ASC`,
+      params
+    );
+
+    const targetTurmaKey = turmaFilter ? normalizeCftpTurmaKey(turmaFilter) : '';
+    const mapped = (rows || [])
+      .filter((r: any) => !targetTurmaKey || normalizeCftpTurmaKey(r.turma) === targetTurmaKey)
+      .map((r: any) => ({
+        id: r.id,
+        cursoId: r.curso_id,
+        turmaCftpId: r.turma_cftp_id || undefined,
+        turma: r.turma,
+        cftp: r.cftp,
+        materia: r.materia,
+        equipeId: r.equipe_id,
+        apelidoEquipe: r.apelido_equipe,
+        primeiraAula: formatIsoDateField(r.primeira_aula),
+        ultimaAula: formatIsoDateField(r.ultima_aula),
+        primeiraAulaTurma: r.primeira_aula_turma ? formatIsoDateField(r.primeira_aula_turma) : undefined,
+        ultimaAulaTurma: r.ultima_aula_turma ? formatIsoDateField(r.ultima_aula_turma) : undefined,
+        equipe01: r.equipe_01 || undefined,
+        equipe02: r.equipe_02 || undefined,
+        equipe03: r.equipe_03 || undefined,
+        equipe04: r.equipe_04 || undefined,
+        equipe05: r.equipe_05 || undefined,
+        equipe06: r.equipe_06 || undefined,
+        criadoPorId: r.criado_por_id || undefined,
+        criadoPorNome: r.criado_por_nome || undefined,
+        createdAt: r.created_at,
+        updatedAt: r.updated_at
+      }));
+
+    return res.json(mapped);
+  } catch (err: any) {
+    if (err.code === 'ER_NO_SUCH_TABLE') return res.json([]);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+const handleSaveDesignacaoEquipeCftp = async (req: Request, res: Response, forcedId?: string) => {
+  try {
+    const pool = getPool();
+    const {
+      id: bodyId,
+      cursoId,
+      turma,
+      materia,
+      equipeId,
+      primeiraAula,
+      ultimaAula,
+      primeiraAulaTurma,
+      ultimaAulaTurma,
+      referenceDate,
+      actor
+    } = req.body;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para designar equipes às turmas do Curso de Formação.' });
+    }
+
+    const recordId = forcedId || bodyId || '';
+    const isEdit = Boolean(recordId);
+
+    if (isEdit) {
+      const [existingRows]: any = await pool.query(
+        'SELECT ID_DESIGNACAO_EQUIPE_CFTP as id, ULTIMA_AULA as ultima_aula FROM DESIGNACAO_EQUIPE_TURMA_CFTP WHERE ID_DESIGNACAO_EQUIPE_CFTP = ?',
+        [recordId]
+      );
+      if (!existingRows || existingRows.length === 0) {
+        return res.status(404).json({ error: 'Designação de equipe não encontrada.' });
+      }
+      const existingUltimaAula = formatIsoDateField(existingRows[0].ultima_aula);
+      const effectiveToday = resolveEffectiveTodayIso(referenceDate);
+      if (existingUltimaAula && effectiveToday >= existingUltimaAula) {
+        return res.status(403).json({
+          error: `Edição não permitida: a data atual (${effectiveToday.split('-').reverse().join('/')}) não é inferior à última aula da equipe (${existingUltimaAula.split('-').reverse().join('/')}).`
+        });
+      }
+    }
+
+    if (!cursoId) {
+      return res.status(400).json({ error: 'Selecione um curso de formação CFTP.' });
+    }
+    const cleanTurmaRaw = String(turma || '').trim();
+    if (!cleanTurmaRaw) {
+      return res.status(400).json({ error: 'Selecione uma turma do curso de formação.' });
+    }
+    const cleanMateria = String(materia || '').trim().toUpperCase();
+    if (!['MEAF', 'TAP', 'DP'].includes(cleanMateria)) {
+      return res.status(400).json({ error: 'Matéria inválida. Selecione MEAF, TAP ou DP.' });
+    }
+    if (!equipeId) {
+      return res.status(400).json({ error: 'Selecione uma equipe para designar à turma.' });
+    }
+
+    const cleanPrimeira = formatIsoDateField(primeiraAula);
+    const cleanUltima = formatIsoDateField(ultimaAula);
+    if (!cleanPrimeira || !cleanUltima) {
+      return res.status(400).json({ error: 'Informe as datas da Primeira aula e Última aula.' });
+    }
+    if (cleanUltima < cleanPrimeira) {
+      return res.status(400).json({ error: 'A data da Última aula não pode ser anterior à Primeira aula.' });
+    }
+
+    const cleanTurmaPrimeira = formatIsoDateField(primeiraAulaTurma) || cleanPrimeira;
+    const cleanTurmaUltima = formatIsoDateField(ultimaAulaTurma) || cleanUltima;
+
+    const [courseRows]: any = await pool.query(
+      'SELECT ID_CURSOS_ACADEMIA as id, NOME_CURSOS_ACADEMIA as name, CODIGO_CURSOS_ACADEMIA as code, MODULO_CURSOS_ACADEMIA as module FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?',
+      [cursoId]
+    );
+    if (!courseRows || courseRows.length === 0) {
+      return res.status(404).json({ error: 'Curso de formação CFTP não encontrado.' });
+    }
+    const selectedCourse = courseRows[0];
+    const cleanCftp = `${selectedCourse.module || selectedCourse.name || 'CFTP'} - ${selectedCourse.code || ''}`.replace(/\s+-\s*$/, '').trim();
+
+    const [equipeRows]: any = await pool.query(
+      'SELECT ID_EQUIPE_PROFESSORES_CFTP as id, APELIDO_EQUIPE as apelido, MATERIA as materia, CURSO_ID_EQUIPE_PROFESSORES_CFTP as curso_id FROM EQUIPE_PROFESSORES_CURSO_FORMACAO WHERE ID_EQUIPE_PROFESSORES_CFTP = ?',
+      [equipeId]
+    );
+    if (!equipeRows || equipeRows.length === 0) {
+      return res.status(404).json({ error: 'Equipe selecionada não encontrada.' });
+    }
+    const selectedEquipe = equipeRows[0];
+    if (selectedEquipe.curso_id !== cursoId) {
+      return res.status(400).json({ error: 'A equipe selecionada não pertence ao curso CFTP escolhido.' });
+    }
+
+    // Resolve ou vincula a turma canônica na tabela TURMAS_CFTP (preservando turma com alunos cadastrados)
+    const targetTurmaKey = normalizeCftpTurmaKey(cleanTurmaRaw);
+    const canonicalTurmaLabel = canonicalizeCftpTurmaLabel(cleanTurmaRaw) || cleanTurmaRaw;
+    const [existingCourseTurmas]: any = await pool.query(
+      `SELECT t.ID_TURMA_CFTP as id, t.TURMA as turma,
+              (SELECT COUNT(*) FROM ALUNOS_TURMA_CFTP a WHERE a.TURMA_CFTP_ID = t.ID_TURMA_CFTP OR (a.CURSO_ID_ALUNO_TURMA_CFTP = t.CURSO_ID_TURMA_CFTP AND UPPER(TRIM(a.TURMA)) = UPPER(TRIM(t.TURMA)))) as student_count
+       FROM TURMAS_CFTP t
+       WHERE t.CURSO_ID_TURMA_CFTP = ?
+       ORDER BY student_count DESC, t.DATA_CRIACAO ASC`,
+      [cursoId]
+    );
+
+    const matchedTurma = (existingCourseTurmas || []).find(
+      (t: any) => normalizeCftpTurmaKey(t.turma) === targetTurmaKey
+    );
+
+    let turmaCftpId: string;
+    let resolvedTurmaLabel: string;
+    if (matchedTurma) {
+      turmaCftpId = matchedTurma.id;
+      resolvedTurmaLabel = matchedTurma.turma || canonicalTurmaLabel;
+    } else {
+      turmaCftpId = `tcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      resolvedTurmaLabel = canonicalTurmaLabel;
+      await pool.query(
+        `INSERT INTO TURMAS_CFTP (
+          ID_TURMA_CFTP, CURSO_ID_TURMA_CFTP, CFTP, TURMA, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [turmaCftpId, cursoId, cleanCftp, resolvedTurmaLabel, actor?.id || null, actor?.name || null]
+      );
+    }
+
+    // Evita cadastrar outra equipe para a mesma turma/matéria se o período completo já estiver coberto
+    const [sameTurmaRows]: any = await pool.query(
+      `SELECT ID_DESIGNACAO_EQUIPE_CFTP as id, TURMA as turma, PRIMEIRA_AULA as primeira_aula, ULTIMA_AULA as ultima_aula
+       FROM DESIGNACAO_EQUIPE_TURMA_CFTP
+       WHERE CURSO_ID_DESIGNACAO_EQUIPE_CFTP = ?
+         AND UPPER(TRIM(MATERIA)) = ?
+         AND ID_DESIGNACAO_EQUIPE_CFTP <> ?`,
+      [cursoId, cleanMateria, recordId || '__none__']
+    );
+    const siblings = (sameTurmaRows || []).filter(
+      (r: any) => normalizeCftpTurmaKey(r.turma) === targetTurmaKey
+    );
+    if (!isEdit && siblings.length > 0 && cleanTurmaUltima) {
+      const minStart = siblings.reduce((min: string, r: any) => {
+        const d = formatIsoDateField(r.primeira_aula);
+        return !min || (d && d < min) ? d : min;
+      }, '');
+      const maxEnd = siblings.reduce((max: string, r: any) => {
+        const d = formatIsoDateField(r.ultima_aula);
+        return !max || (d && d > max) ? d : max;
+      }, '');
+      if (minStart && maxEnd && minStart <= cleanTurmaPrimeira && maxEnd >= cleanTurmaUltima) {
+        return res.status(409).json({
+          error: `A turma ${resolvedTurmaLabel} já possui equipe completa cadastrada para a matéria ${cleanMateria} (${cleanTurmaPrimeira.split('-').reverse().join('/')} a ${cleanTurmaUltima.split('-').reverse().join('/')}).`
+        });
+      }
+    }
+
+    const finalId = recordId || `deqcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    await pool.query(
+      `INSERT INTO DESIGNACAO_EQUIPE_TURMA_CFTP (
+        ID_DESIGNACAO_EQUIPE_CFTP,
+        CURSO_ID_DESIGNACAO_EQUIPE_CFTP,
+        TURMA_CFTP_ID,
+        TURMA,
+        CFTP,
+        MATERIA,
+        EQUIPE_ID,
+        APELIDO_EQUIPE,
+        PRIMEIRA_AULA,
+        ULTIMA_AULA,
+        PRIMEIRA_AULA_TURMA,
+        ULTIMA_AULA_TURMA,
+        CRIADO_POR_ID,
+        CRIADO_POR_NOME,
+        DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        TURMA_CFTP_ID = VALUES(TURMA_CFTP_ID),
+        TURMA = VALUES(TURMA),
+        CFTP = VALUES(CFTP),
+        MATERIA = VALUES(MATERIA),
+        EQUIPE_ID = VALUES(EQUIPE_ID),
+        APELIDO_EQUIPE = VALUES(APELIDO_EQUIPE),
+        PRIMEIRA_AULA = VALUES(PRIMEIRA_AULA),
+        ULTIMA_AULA = VALUES(ULTIMA_AULA),
+        PRIMEIRA_AULA_TURMA = VALUES(PRIMEIRA_AULA_TURMA),
+        ULTIMA_AULA_TURMA = VALUES(ULTIMA_AULA_TURMA)`,
+      [
+        finalId,
+        cursoId,
+        turmaCftpId,
+        resolvedTurmaLabel,
+        cleanCftp,
+        cleanMateria,
+        selectedEquipe.id,
+        selectedEquipe.apelido,
+        cleanPrimeira,
+        cleanUltima,
+        cleanTurmaPrimeira || null,
+        cleanTurmaUltima || null,
+        actor?.id || null,
+        actor?.name || null
+      ]
+    );
+
+    await insertAuditLog(
+      'Cursos',
+      isEdit ? 'Editar' : 'Criar',
+      `Equipe "${selectedEquipe.apelido}" (${cleanMateria}) designada para a turma ${resolvedTurmaLabel} (${cleanCftp}) de ${cleanPrimeira} a ${cleanUltima}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, id: finalId, turmaCftpId, turma: resolvedTurmaLabel });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+};
+
+apiRouter.post('/designacoes-equipe-cftp', async (req: Request, res: Response) => {
+  return handleSaveDesignacaoEquipeCftp(req, res);
+});
+
+apiRouter.put('/designacoes-equipe-cftp/:id', async (req: Request, res: Response) => {
+  return handleSaveDesignacaoEquipeCftp(req, res, req.params.id);
+});
+
+apiRouter.delete('/designacoes-equipe-cftp/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const actor = req.body.actor;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para excluir designações de equipe.' });
+    }
+
+    await pool.query('DELETE FROM DESIGNACAO_EQUIPE_TURMA_CFTP WHERE ID_DESIGNACAO_EQUIPE_CFTP = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Removida designação de equipe CFTP ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

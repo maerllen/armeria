@@ -26,6 +26,7 @@ import {
   EquipeProfessoresCursoFormacao,
   TurmaCftp,
   AlunoTurmaCftp,
+  DesignacaoEquipeTurmaCftp,
   Certificado,
   WeaponTransfer,
   WeaponTransferItem,
@@ -83,6 +84,7 @@ export interface AppState {
   equipesProfessoresCftp?: EquipeProfessoresCursoFormacao[];
   turmasCftp?: TurmaCftp[];
   alunosTurmaCftp?: AlunoTurmaCftp[];
+  designacoesEquipeCftp?: DesignacaoEquipeTurmaCftp[];
   certificados: Certificado[];
   tiposMateriais: TipoMaterial[];
   materiais: Material[];
@@ -134,6 +136,7 @@ class StorageService {
     equipesProfessoresCftp: [],
     turmasCftp: [],
     alunosTurmaCftp: [],
+    designacoesEquipeCftp: [],
     certificados: [],
     tiposMateriais: [],
     materiais: [],
@@ -194,6 +197,7 @@ class StorageService {
         equipesProfessoresCftpRes,
         turmasCftpRes,
         alunosTurmaCftpRes,
+        designacoesEquipeCftpRes,
         certificadosRes,
         weaponTransfersRes,
         ammoTransfersRes,
@@ -238,6 +242,7 @@ class StorageService {
         fetchSync('/api/equipe-professores-cftp'),
         fetchSync('/api/turmas-cftp'),
         fetchSync('/api/alunos-turma-cftp'),
+        fetchSync('/api/designacoes-equipe-cftp'),
         fetchSync('/api/certificados'),
         fetchSync('/api/weapon-transfers'),
         fetchSync('/api/ammo-transfers'),
@@ -283,6 +288,7 @@ class StorageService {
       this.state.equipesProfessoresCftp = equipesProfessoresCftpRes || [];
       this.state.turmasCftp = turmasCftpRes || [];
       this.state.alunosTurmaCftp = alunosTurmaCftpRes || [];
+      this.state.designacoesEquipeCftp = designacoesEquipeCftpRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
       this.state.ammoTransfers = ammoTransfersRes || [];
@@ -2792,6 +2798,51 @@ class StorageService {
   public async deleteTurmaCftp(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/turmas-cftp/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- DESIGNAÇÃO DE EQUIPE POR TURMA CFTP ---
+  public getDesignacoesEquipeCftp(): DesignacaoEquipeTurmaCftp[] {
+    return this.state.designacoesEquipeCftp || [];
+  }
+
+  public async saveDesignacaoEquipeCftp(
+    payload: Partial<DesignacaoEquipeTurmaCftp> & { referenceDate?: string }
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const method = payload.id ? 'PUT' : 'POST';
+      const url = payload.id
+        ? `/api/designacoes-equipe-cftp/${payload.id}`
+        : '/api/designacoes-equipe-cftp';
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteDesignacaoEquipeCftp(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/designacoes-equipe-cftp/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })
