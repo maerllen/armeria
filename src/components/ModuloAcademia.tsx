@@ -838,10 +838,38 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return code ? `${crs.name} - ${code}` : crs.name;
   };
 
-  const resetTeamFormForCourse = (crs: AcademyCourse | null) => {
+  const getFirstAvailableTeamName = (
+    cursoId: string,
+    materia: 'MEAF' | 'TAP' | 'DP',
+    ignoreTeamId?: string | null,
+    extraUsedName?: string
+  ): string => {
+    const usedNames = new Set(
+      equipesProfessoresCftp
+        .filter(
+          eq =>
+            eq.cursoId === cursoId &&
+            (eq.materia || '').toUpperCase().trim() === materia &&
+            eq.id !== ignoreTeamId
+        )
+        .map(eq => (eq.apelidoEquipe || '').trim().toLowerCase())
+    );
+    if (extraUsedName) {
+      usedNames.add(extraUsedName.trim().toLowerCase());
+    }
+    const available = CFTP_TEAM_NAMES.find(name => !usedNames.has(name.toLowerCase()));
+    return available || CFTP_TEAM_NAMES[0];
+  };
+
+  const resetTeamFormForCourse = (
+    crs: AcademyCourse | null,
+    justSaved?: { materia: 'MEAF' | 'TAP' | 'DP'; apelido: string }
+  ) => {
+    const defaultMat = getLoggedUserDefaultSubject();
     setTeamEditingId(null);
-    setTeamMateria(getLoggedUserDefaultSubject());
-    setTeamApelido('Alfa');
+    setTeamMateria(defaultMat);
+    const extraUsed = justSaved && justSaved.materia === defaultMat ? justSaved.apelido : undefined;
+    setTeamApelido(crs ? getFirstAvailableTeamName(crs.id, defaultMat, null, extraUsed) : 'Alfa');
     const sDate = (crs?.startDate || (crs?.dates && crs.dates[0]) || '').slice(0, 10);
     const eDate = (crs?.endDate || (crs?.dates && crs.dates.length > 1 ? crs.dates[crs.dates.length - 1] : sDate) || '').slice(0, 10);
     setTeamData1(sDate);
@@ -861,6 +889,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const handleTeamMateriaChange = (newMateria: 'MEAF' | 'TAP' | 'DP') => {
     setTeamMateria(newMateria);
     setOpenTeacherDropdownIdx(null);
+    if (selectedTeamCourseId) {
+      const isCurrentTaken = equipesProfessoresCftp.some(
+        eq =>
+          eq.cursoId === selectedTeamCourseId &&
+          (eq.materia || '').toUpperCase().trim() === newMateria &&
+          (eq.apelidoEquipe || '').trim().toLowerCase() === teamApelido.trim().toLowerCase() &&
+          eq.id !== teamEditingId
+      );
+      if (isCurrentTaken) {
+        setTeamApelido(getFirstAvailableTeamName(selectedTeamCourseId, newMateria, teamEditingId));
+      }
+    }
     setTeamSlots(prev =>
       prev.map(slot => {
         if (!slot.userId) return { userId: '', userName: '', searchText: '' };
@@ -947,6 +987,18 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       return;
     }
 
+    const duplicateTeam = equipesProfessoresCftp.find(
+      eq =>
+        eq.cursoId === selectedCourse.id &&
+        (eq.materia || '').toUpperCase().trim() === teamMateria &&
+        (eq.apelidoEquipe || '').trim().toLowerCase() === teamApelido.trim().toLowerCase() &&
+        eq.id !== teamEditingId
+    );
+    if (duplicateTeam) {
+      setErrorMsg(`Já existe uma equipe "${teamApelido}" cadastrada para a matéria ${teamMateria} neste curso CFTP.`);
+      return;
+    }
+
     setTeamSaving(true);
     try {
       const cftpLabel = formatCftpCourseLabel(selectedCourse);
@@ -981,7 +1033,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
           ? `Equipe "${teamApelido}" (${teamMateria}) atualizada com sucesso!`
           : `Equipe "${teamApelido}" (${teamMateria}) criada com sucesso!`
       );
-      resetTeamFormForCourse(selectedCourse);
+      resetTeamFormForCourse(selectedCourse, { materia: teamMateria, apelido: teamApelido });
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao salvar equipe de professores.');
@@ -2632,6 +2684,15 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
             const courseTeams = equipesProfessoresCftp.filter(eq => eq.cursoId === selectedActiveTeamCourse.id);
+            const usedTeamNamesForSubject = new Set(
+              courseTeams
+                .filter(
+                  eq =>
+                    eq.id !== teamEditingId &&
+                    (eq.materia || '').toUpperCase().trim() === teamMateria
+                )
+                .map(eq => (eq.apelidoEquipe || '').trim().toLowerCase())
+            );
             const cftpDisplayValue = formatCftpCourseLabel(selectedActiveTeamCourse);
 
             return (
@@ -2658,7 +2719,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           const found = activeCourses.find(c => c.id === e.target.value);
                           if (found) handleSelectActiveCourseForTeams(found);
                         }}
-                        className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-semibold focus:border-amber-500 focus:outline-none"
+                        className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-white font-semibold focus:border-amber-500 focus:outline-none"
                       >
                         {activeCourses.map(c => (
                           <option key={c.id} value={c.id}>
@@ -2701,8 +2762,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   </div>
 
                   <form onSubmit={(e) => handleSaveTeam(e, selectedActiveTeamCourse)} className="space-y-5 text-xs">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-                      <div className="lg:col-span-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4">
+                      <div className="lg:col-span-4">
                         <label className="block text-slate-200 font-semibold mb-1.5">
                           CFTP
                         </label>
@@ -2714,9 +2775,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         />
                       </div>
 
-                      <div>
+                      <div className="lg:col-span-2">
                         <label className="block text-slate-200 font-semibold mb-1.5">
-                          Matéria <span className="text-red-400">*</span>
+                          Matéria
                         </label>
                         <select
                           value={teamMateria}
@@ -2730,9 +2791,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         </select>
                       </div>
 
-                      <div>
+                      <div className="lg:col-span-2">
                         <label className="block text-slate-200 font-semibold mb-1.5">
-                          Equipe <span className="text-red-400">*</span>
+                          Equipe
                         </label>
                         <select
                           value={teamApelido}
@@ -2740,16 +2801,21 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none"
                           required
                         >
-                          {CFTP_TEAM_NAMES.map(name => (
-                            <option key={name} value={name}>{name}</option>
-                          ))}
+                          {CFTP_TEAM_NAMES.map(name => {
+                            const isUsed = usedTeamNamesForSubject.has(name.toLowerCase());
+                            return (
+                              <option key={name} value={name} disabled={isUsed}>
+                                {isUsed ? `${name} (Já cadastrada)` : name}
+                              </option>
+                            );
+                          })}
                         </select>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 lg:col-span-1">
+                      <div className="grid grid-cols-2 gap-2 lg:col-span-4">
                         <div>
                           <label className="block text-slate-200 font-semibold mb-1.5">
-                            Início da equipe <span className="text-red-400">*</span>
+                            Início da equipe
                           </label>
                           <input
                             type="date"
@@ -2761,7 +2827,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         </div>
                         <div>
                           <label className="block text-slate-200 font-semibold mb-1.5">
-                            Fim da equipe <span className="text-red-400">*</span>
+                            Fim da equipe
                           </label>
                           <input
                             type="date"
@@ -2824,7 +2890,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2 relative">
                               <div className="flex items-center justify-between">
                                 <label className="text-xs font-bold text-slate-200">
-                                  Professor {slotNumber} {idx === 0 && <span className="text-red-400">*</span>}
+                                  Professor {slotNumber}
                                 </label>
                                 {teamSlots.length > 1 && (
                                   <button

@@ -6577,6 +6577,22 @@ const handleSaveEquipeProfessoresCftp = async (req: Request, res: Response, forc
 
     const recordId = forcedId || bodyId || `eq-cftp-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
+    const [dupRows]: any = await pool.query(
+      `SELECT ID_EQUIPE_PROFESSORES_CFTP
+       FROM EQUIPE_PROFESSORES_CURSO_FORMACAO
+       WHERE CURSO_ID_EQUIPE_PROFESSORES_CFTP = ?
+         AND UPPER(TRIM(MATERIA)) = ?
+         AND LOWER(TRIM(APELIDO_EQUIPE)) = LOWER(?)
+         AND ID_EQUIPE_PROFESSORES_CFTP <> ?
+       LIMIT 1`,
+      [cursoId, cleanMateria, cleanApelido, recordId]
+    );
+    if (dupRows && dupRows.length > 0) {
+      return res.status(409).json({
+        error: `Já existe uma equipe "${cleanApelido}" cadastrada para a matéria ${cleanMateria} neste curso CFTP.`
+      });
+    }
+
     await pool.query(
       `INSERT INTO EQUIPE_PROFESSORES_CURSO_FORMACAO (
         ID_EQUIPE_PROFESSORES_CFTP,
