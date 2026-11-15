@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import * as XLSX from 'xlsx';
 import {
   User,
   Weapon,
@@ -17,6 +18,8 @@ import {
   AcademyCareer,
   AlunoTurma,
   AlunoAula,
+  CFTP_CAREERS_LIST,
+  CftpModuleScheduleRow,
   formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
@@ -43,7 +46,12 @@ import {
   Calendar,
   RotateCcw,
   Eye,
-  Smartphone
+  Smartphone,
+  Upload,
+  ChevronDown,
+  ChevronUp,
+  FileSpreadsheet,
+  X
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
@@ -125,6 +133,22 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   courseTypeFilterProp
 }) => {
   const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'cursos'>('movements');
+  const [formacaoTab, setFormacaoTab] = useState<'cftp' | 'novo-cftp'>('cftp');
+
+  // --- NOVO CFTP & CFTP LIST STATE ---
+  const [cftpEditingId, setCftpEditingId] = useState<string | null>(null);
+  const [cftpStartDate, setCftpStartDate] = useState('');
+  const [cftpEndDate, setCftpEndDate] = useState('');
+  const [cftpModuleRoman, setCftpModuleRoman] = useState<string>('I');
+  const [cftpSelectedCareers, setCftpSelectedCareers] = useState<string[]>([]);
+  const [cftpScheduleRows, setCftpScheduleRows] = useState<CftpModuleScheduleRow[]>([]);
+  const [cftpScheduleFileName, setCftpScheduleFileName] = useState('');
+  const [cftpSaving, setCftpSaving] = useState(false);
+
+  // Grupos CFTP: Próximos e Passados começam ocultos por padrão
+  const [showProximosCftp, setShowProximosCftp] = useState(false);
+  const [showPassadosCftp, setShowPassadosCftp] = useState(false);
+  const [expandedCftpScheduleIds, setExpandedCftpScheduleIds] = useState<Record<string, boolean>>({});
 
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
@@ -136,7 +160,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     currentUser.role === 'Geral' ||
     (isAcademiaDept && (currentUser.role === 'Administrador' || currentUser.role === 'Armeiro'))
   );
-  const canManageCourses = currentUser.role === 'Geral' || 
+  const canManageCourses =
+    currentUser.role === 'Geral' ||
+    Boolean(currentUser?.isCourseCoordinator) ||
+    Boolean(currentUser?.canManageFormacaoCourses) ||
+    Boolean(currentUser?.canManageContinuadoCourses) ||
+    Boolean(currentUser?.canCreateAcademyCourses) ||
     ((currentUser.role === 'Administrador' || currentUser.role === 'Armeiro') && isAcademiaDept) ||
     isProfessorAcadepol;
 
@@ -148,7 +177,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         </div>
         <h2 className="text-xl font-bold text-slate-100">Acesso Restrito - Gestão de Cursos</h2>
         <p className="text-xs text-slate-400 leading-relaxed">
-          Apenas usuários do perfil <strong className="text-amber-400">Geral</strong>, <strong className="text-amber-400">Professores da Acadepol</strong> e usuários <strong className="text-amber-400">Administradores e Armeiros</strong> vinculados ao departamento <strong className="text-slate-200">ACADEMIA DE POLICIA</strong> têm permissão para gerenciar cursos da Academia.
+          Apenas usuários do perfil <strong className="text-amber-400">Geral</strong>, <strong className="text-amber-400">Coordenadores de Curso</strong>, <strong className="text-amber-400">Professores da Acadepol</strong> e usuários <strong className="text-amber-400">Administradores e Armeiros</strong> vinculados ao departamento <strong className="text-slate-200">ACADEMIA DE POLICIA</strong> têm permissão para gerenciar cursos da Academia.
         </p>
       </div>
     );
@@ -410,8 +439,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return dateA.localeCompare(dateB);
   });
 
-  // Permission check for deleting courses (only Geral)
-  const canDeleteCourse = currentUser.role === 'Geral';
+  // Permission check for deleting courses
+  const canDeleteCourse =
+    currentUser.role === 'Geral' ||
+    Boolean(currentUser?.isCourseCoordinator) ||
+    Boolean(currentUser?.canManageFormacaoCourses) ||
+    Boolean(currentUser?.canManageContinuadoCourses);
 
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
@@ -567,6 +600,200 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       onRefresh();
     } catch (err: any) {
       setErrorMsg(err.message || 'Erro ao salvar curso.');
+    }
+  };
+
+  // --- CFTP (NOVO CFTP / CFTP) HANDLERS ---
+  const normalizeHeaderKey = (raw: string) =>
+    String(raw || '')
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ');
+
+  const formatExcelDateCell = (val: any): string => {
+    if (val === null || val === undefined || val === '') return '';
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      const dd = String(val.getDate()).padStart(2, '0');
+      const mm = String(val.getMonth() + 1).padStart(2, '0');
+      const yyyy = val.getFullYear();
+      return `${dd}/${mm}/${yyyy}`;
+    }
+    if (typeof val === 'number' && val > 20000) {
+      const parsed = XLSX.SSF.parse_date_code(val);
+      if (parsed && parsed.y && parsed.m && parsed.d) {
+        return `${String(parsed.d).padStart(2, '0')}/${String(parsed.m).padStart(2, '0')}/${parsed.y}`;
+      }
+    }
+    const str = String(val).trim();
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) {
+      return `${isoMatch[3]}/${isoMatch[2]}/${isoMatch[1]}`;
+    }
+    return str;
+  };
+
+  const formatExcelTimeCell = (val: any): string => {
+    if (val === null || val === undefined || val === '') return '';
+    if (val instanceof Date && !isNaN(val.getTime())) {
+      return `${String(val.getHours()).padStart(2, '0')}:${String(val.getMinutes()).padStart(2, '0')}`;
+    }
+    if (typeof val === 'number' && val >= 0 && val < 1) {
+      const totalMinutes = Math.round(val * 24 * 60);
+      const hh = String(Math.floor(totalMinutes / 60) % 24).padStart(2, '0');
+      const mm = String(totalMinutes % 60).padStart(2, '0');
+      return `${hh}:${mm}`;
+    }
+    return String(val).trim();
+  };
+
+  const handleCftpExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const buffer = await file.arrayBuffer();
+      const workbook = XLSX.read(buffer, { type: 'array', cellDates: true });
+      const firstSheetName = workbook.SheetNames[0];
+      if (!firstSheetName) {
+        setErrorMsg('A planilha selecionada não possui abas válidas.');
+        return;
+      }
+      const ws = workbook.Sheets[firstSheetName];
+      const rawRows: Record<string, any>[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+      if (!rawRows || rawRows.length === 0) {
+        setErrorMsg('A planilha importada está vazia.');
+        return;
+      }
+
+      // Mapeia EXCLUSIVAMENTE as colunas: Data, Horário, Turma, Sigla, Disciplina, Sala
+      // Ignora qualquer outra coluna existente no arquivo Excel
+      const parsedRows: CftpModuleScheduleRow[] = [];
+      for (const row of rawRows) {
+        const keyMap: Record<string, string> = {};
+        for (const rawKey of Object.keys(row)) {
+          keyMap[normalizeHeaderKey(rawKey)] = rawKey;
+        }
+
+        const dataRaw = keyMap['data'] !== undefined ? row[keyMap['data']] : '';
+        const horarioRaw = keyMap['horario'] !== undefined ? row[keyMap['horario']] : '';
+        const turmaRaw = keyMap['turma'] !== undefined ? row[keyMap['turma']] : '';
+        const siglaRaw = keyMap['sigla'] !== undefined ? row[keyMap['sigla']] : '';
+        const disciplinaRaw = keyMap['disciplina'] !== undefined ? row[keyMap['disciplina']] : '';
+        const salaRaw = keyMap['sala'] !== undefined ? row[keyMap['sala']] : '';
+
+        const entry: CftpModuleScheduleRow = {
+          data: formatExcelDateCell(dataRaw),
+          horario: formatExcelTimeCell(horarioRaw),
+          turma: String(turmaRaw || '').trim(),
+          sigla: String(siglaRaw || '').trim(),
+          disciplina: String(disciplinaRaw || '').trim(),
+          sala: String(salaRaw || '').trim()
+        };
+
+        if (entry.data || entry.horario || entry.turma || entry.sigla || entry.disciplina || entry.sala) {
+          parsedRows.push(entry);
+        }
+      }
+
+      if (parsedRows.length === 0) {
+        setErrorMsg('Nenhuma linha válida encontrada com as colunas esperadas (Data, Horário, Turma, Sigla, Disciplina, Sala).');
+        return;
+      }
+
+      setCftpScheduleRows(parsedRows);
+      setCftpScheduleFileName(file.name);
+      setErrorMsg('');
+      setSuccessMsg(`Horário do módulo importado: ${parsedRows.length} registro(s) carregado(s) do arquivo "${file.name}".`);
+    } catch (err: any) {
+      setErrorMsg(`Erro ao ler arquivo Excel: ${err.message || 'formato inválido'}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const toggleCftpCareer = (careerName: string) => {
+    setCftpSelectedCareers(prev =>
+      prev.includes(careerName) ? prev.filter(c => c !== careerName) : [...prev, careerName]
+    );
+  };
+
+  const resetCftpForm = () => {
+    setCftpEditingId(null);
+    setCftpStartDate('');
+    setCftpEndDate('');
+    setCftpModuleRoman('I');
+    setCftpSelectedCareers([]);
+    setCftpScheduleRows([]);
+    setCftpScheduleFileName('');
+  };
+
+  const handleEditCftpCourse = (crs: AcademyCourse) => {
+    setCftpEditingId(crs.id);
+    setCftpStartDate(crs.startDate ? crs.startDate.slice(0, 10) : '');
+    setCftpEndDate(crs.endDate ? crs.endDate.slice(0, 10) : '');
+    const rawRoman = (crs.module || '').replace(/M[óo]dulo\s*/i, '').trim();
+    setCftpModuleRoman(ROMAN_NUMERALS.includes(rawRoman) ? rawRoman : 'I');
+    const existingCareers = Array.isArray(crs.careers) && crs.careers.length > 0
+      ? crs.careers
+      : (crs.career ? String(crs.career).split(',').map(s => s.trim()).filter(Boolean) : []);
+    setCftpSelectedCareers(existingCareers);
+    setCftpScheduleRows(Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule : []);
+    setCftpScheduleFileName(crs.scheduleFileName || '');
+    setFormacaoTab('novo-cftp');
+  };
+
+  const handleSaveCftpCourse = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!cftpStartDate || !cftpEndDate) {
+      setErrorMsg('Informe a Data de início e a Data final do módulo.');
+      return;
+    }
+    if (cftpEndDate < cftpStartDate) {
+      setErrorMsg('A Data final deve ser igual ou posterior à Data de início.');
+      return;
+    }
+    if (cftpSelectedCareers.length === 0) {
+      setErrorMsg('Selecione pelo menos uma carreira para o CFTP.');
+      return;
+    }
+
+    setCftpSaving(true);
+    try {
+      const moduleLabel = `Módulo ${cftpModuleRoman}`;
+      const moduleIdx = ROMAN_NUMERALS.indexOf(cftpModuleRoman);
+      const yearPart = cftpStartDate.slice(0, 4) || String(new Date().getFullYear());
+      const res = await storage.saveAcademyCourse({
+        id: cftpEditingId || undefined,
+        name: `CFTP - ${moduleLabel}`,
+        type: 'Formação',
+        code: `CFTP-${cftpModuleRoman}-${yearPart}`,
+        career: cftpSelectedCareers.join(', '),
+        careers: cftpSelectedCareers,
+        module: moduleLabel,
+        moduleNumber: moduleIdx >= 0 ? moduleIdx + 1 : 1,
+        startDate: cftpStartDate,
+        endDate: cftpEndDate,
+        dates: [cftpStartDate, cftpEndDate],
+        departmentName: 'ACADEPOL',
+        moduleSchedule: cftpScheduleRows,
+        scheduleFileName: cftpScheduleFileName || undefined
+      });
+      if (!res.success) throw new Error(res.error || 'Erro ao salvar CFTP.');
+
+      setSuccessMsg(cftpEditingId ? `CFTP (${moduleLabel}) atualizado com sucesso!` : `CFTP (${moduleLabel}) criado com sucesso!`);
+      resetCftpForm();
+      setFormacaoTab('cftp');
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar CFTP.');
+    } finally {
+      setCftpSaving(false);
     }
   };
 
@@ -1833,9 +2060,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     <div className="space-y-6">
       
       {/* Top Banner Header */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl">
+          <div className="p-2.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-lg">
             <GraduationCap className="w-6 h-6" />
           </div>
           <div>
@@ -1848,53 +2075,519 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               {courseTypeFilterProp === 'Ensino Continuado'
                 ? 'Administre todos os Cursos de Ensino Continuado, especializações e aperfeiçoamento da Polícia Civil.'
                 : (courseTypeFilterProp === 'Formação'
-                  ? 'Módulo exclusivo para consulta de cursos, turmas e dados de formação policial.'
+                  ? 'Cadastro e acompanhamento dos módulos CFTP e horários importados'
                   : 'Controle de turmas, caixas de armamento para instruções, saídas e mapas de aula com balanço de munições')}
             </p>
           </div>
         </div>
 
         {/* Sub-tab Navigation */}
-        <div className="flex items-center bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs font-semibold">
-          <button
-            onClick={() => setActiveTab('movements')}
-            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
-              activeTab === 'movements'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-            <span>Mapas de Aula ({filteredMovements.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('turmas')}
-            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
-              activeTab === 'turmas'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            <span>Turmas ({filteredClasses.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('cursos')}
-            className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 ${
-              activeTab === 'cursos'
-                ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <BookOpen className="w-3.5 h-3.5" />
-            <span>Cursos ({sortedUnifiedCourses.length})</span>
-          </button>
-        </div>
+        {courseTypeFilterProp === 'Formação' ? (
+          <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold shrink-0">
+            <button
+              type="button"
+              onClick={() => setFormacaoTab('cftp')}
+              className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                formacaoTab === 'cftp'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>CFTP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormacaoTab('novo-cftp')}
+              className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                formacaoTab === 'novo-cftp'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Novo CFTP</span>
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs font-semibold">
+            <button
+              onClick={() => setActiveTab('movements')}
+              className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap ${
+                activeTab === 'movements'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              <span>Mapas de Aula ({filteredMovements.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('turmas')}
+              className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap ${
+                activeTab === 'turmas'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Users className="w-3.5 h-3.5" />
+              <span>Turmas ({filteredClasses.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('cursos')}
+              className={`px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap ${
+                activeTab === 'cursos'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Cursos ({sortedUnifiedCourses.length})</span>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Messages na primeira camada */}
       <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg('')} />
       <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg('')} />
+
+      {courseTypeFilterProp === 'Formação' ? (
+        (() => {
+          const nowLocal = new Date();
+          const localTodayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+          const formacaoCourses = academyCourses.filter(c => c.type === 'Formação');
+
+          const activeCourses: AcademyCourse[] = [];
+          const upcomingCourses: AcademyCourse[] = [];
+          const pastCourses: AcademyCourse[] = [];
+
+          for (const c of formacaoCourses) {
+            const sDate = (c.startDate || (c.dates && c.dates[0]) || '').slice(0, 10);
+            const eDate = (c.endDate || (c.dates && c.dates.length > 1 ? c.dates[c.dates.length - 1] : sDate) || '').slice(0, 10);
+
+            if (sDate && localTodayStr < sDate) {
+              upcomingCourses.push(c);
+            } else if (eDate && localTodayStr > eDate) {
+              pastCourses.push(c);
+            } else {
+              activeCourses.push(c);
+            }
+          }
+
+          const formatBrDate = (iso?: string) => {
+            if (!iso) return '—';
+            const clean = iso.slice(0, 10);
+            const parts = clean.split('-');
+            if (parts.length !== 3) return iso;
+            return `${parts[2]}/${parts[1]}/${parts[0]}`;
+          };
+
+          const renderCftpCourseList = (items: AcademyCourse[], emptyText: string) => {
+            if (items.length === 0) {
+              return (
+                <div className="px-4 py-6 text-center text-xs text-slate-400 border-t border-slate-800">
+                  {emptyText}
+                </div>
+              );
+            }
+            return (
+              <div className="divide-y divide-slate-800 border-t border-slate-800">
+                {items.map((crs) => {
+                  const sDate = (crs.startDate || (crs.dates && crs.dates[0]) || '').slice(0, 10);
+                  const eDate = (crs.endDate || (crs.dates && crs.dates.length > 1 ? crs.dates[crs.dates.length - 1] : sDate) || '').slice(0, 10);
+                  const careersArr = Array.isArray(crs.careers) && crs.careers.length > 0
+                    ? crs.careers
+                    : (crs.career ? String(crs.career).split(',').map(s => s.trim()).filter(Boolean) : []);
+                  const scheduleRows = Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule : [];
+                  const isScheduleOpen = Boolean(expandedCftpScheduleIds[crs.id]);
+
+                  return (
+                    <div key={crs.id} className="p-4 hover:bg-slate-800/30 transition space-y-3">
+                      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="text-sm font-bold text-white">
+                              {crs.module || crs.name}
+                            </span>
+                            <span className="text-xs font-mono text-amber-400 tabular-nums">
+                              {crs.code}
+                            </span>
+                            <span className="text-xs text-slate-300 font-mono tabular-nums">
+                              {formatBrDate(sDate)} a {formatBrDate(eDate)}
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-slate-300">
+                            <span className="text-slate-400 font-semibold">Carreiras: </span>
+                            {careersArr.length > 0 ? careersArr.join(', ') : 'Não informada'}
+                          </div>
+
+                          <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-3 gap-y-1">
+                            <span className="font-mono tabular-nums">
+                              Horário do módulo: <strong className="text-slate-200">{scheduleRows.length}</strong> registro(s)
+                            </span>
+                            {crs.scheduleFileName && (
+                              <span className="text-slate-400">Arquivo: {crs.scheduleFileName}</span>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          {scheduleRows.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExpandedCftpScheduleIds(prev => ({
+                                  ...prev,
+                                  [crs.id]: !prev[crs.id]
+                                }))
+                              }
+                              className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-xs font-semibold text-amber-300 transition flex items-center space-x-1.5 whitespace-nowrap"
+                            >
+                              <FileSpreadsheet className="w-3.5 h-3.5" />
+                              <span>{isScheduleOpen ? 'Ocultar Horário' : 'Ver Horário'}</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleEditCftpCourse(crs)}
+                            className="p-2 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
+                            title="Editar CFTP"
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </button>
+
+                          {canDeleteCourse && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget({ type: 'course', id: crs.id, name: crs.module || crs.name })}
+                              className="p-2 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                              title="Excluir CFTP"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {isScheduleOpen && scheduleRows.length > 0 && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                            <table className="w-full text-left text-xs text-slate-200">
+                              <thead className="bg-slate-900 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                                <tr>
+                                  <th className="py-2 px-3">Data</th>
+                                  <th className="py-2 px-3">Horário</th>
+                                  <th className="py-2 px-3">Turma</th>
+                                  <th className="py-2 px-3">Sigla</th>
+                                  <th className="py-2 px-3">Disciplina</th>
+                                  <th className="py-2 px-3">Sala</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/80">
+                                {scheduleRows.map((row, rIdx) => (
+                                  <tr key={rIdx} className="hover:bg-slate-900/60">
+                                    <td className="py-1.5 px-3 font-mono tabular-nums whitespace-nowrap">{row.data || '—'}</td>
+                                    <td className="py-1.5 px-3 font-mono tabular-nums whitespace-nowrap">{row.horario || '—'}</td>
+                                    <td className="py-1.5 px-3 font-semibold whitespace-nowrap">{row.turma || '—'}</td>
+                                    <td className="py-1.5 px-3 font-mono text-amber-300 whitespace-nowrap">{row.sigla || '—'}</td>
+                                    <td className="py-1.5 px-3">{row.disciplina || '—'}</td>
+                                    <td className="py-1.5 px-3 whitespace-nowrap">{row.sala || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          };
+
+          if (formacaoTab === 'novo-cftp') {
+            return (
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                  <div>
+                    <h2 className="text-base font-bold text-white">
+                      {cftpEditingId ? 'Editar CFTP (Curso de Formação)' : 'Novo CFTP (Curso de Formação)'}
+                    </h2>
+                    <p className="text-xs text-slate-400">
+                      Configure período, módulo, carreiras participantes e importe o Excel de Horário do módulo.
+                    </p>
+                  </div>
+                  {cftpEditingId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetCftpForm();
+                        setFormacaoTab('cftp');
+                      }}
+                      className="px-3 py-1.5 rounded-lg border border-slate-700 text-xs font-semibold text-slate-300 hover:text-white whitespace-nowrap"
+                    >
+                      Cancelar Edição
+                    </button>
+                  )}
+                </div>
+
+                <form onSubmit={handleSaveCftpCourse} className="space-y-5 text-xs">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="block text-slate-200 font-semibold mb-1.5">
+                        Data de início <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={cftpStartDate}
+                        onChange={(e) => setCftpStartDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-200 font-semibold mb-1.5">
+                        Data final <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        type="date"
+                        value={cftpEndDate}
+                        min={cftpStartDate || undefined}
+                        onChange={(e) => setCftpEndDate(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:border-amber-500 focus:outline-none"
+                        required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-200 font-semibold mb-1.5">
+                        Módulo <span className="text-red-400">*</span>
+                      </label>
+                      <select
+                        value={cftpModuleRoman}
+                        onChange={(e) => setCftpModuleRoman(e.target.value)}
+                        className="w-full bg-slate-950 border border-amber-500/50 rounded-lg px-3.5 py-2 text-amber-300 font-bold focus:border-amber-400 focus:outline-none"
+                        required
+                      >
+                        {ROMAN_NUMERALS.map((rom) => (
+                          <option key={rom} value={rom}>
+                            Módulo {rom}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Carreiras multi-select */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-slate-200 font-semibold">
+                        Carreiras <span className="text-red-400">*</span>
+                      </label>
+                      <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                        {cftpSelectedCareers.length} selecionada(s)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                      {CFTP_CAREERS_LIST.map((careerOpt) => {
+                        const checked = cftpSelectedCareers.includes(careerOpt);
+                        return (
+                          <label
+                            key={careerOpt}
+                            className={`flex items-center space-x-2.5 p-3 rounded-lg border cursor-pointer transition ${
+                              checked
+                                ? 'bg-amber-500/15 border-amber-500/60 text-white font-semibold'
+                                : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleCftpCareer(careerOpt)}
+                              className="w-4 h-4 accent-amber-500 rounded"
+                            />
+                            <span className="text-xs">{careerOpt}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Horário do módulo (Importação Excel) */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div>
+                        <label className="block text-sm font-bold text-white">
+                          Horário do módulo
+                        </label>
+                        <p className="text-[11px] text-slate-400">
+                          Importe um arquivo EXCEL (.xlsx / .xls). Serão armazenadas apenas as colunas: <strong className="text-amber-300">Data, Horário, Turma, Sigla, Disciplina, Sala</strong> (demais colunas serão ignoradas).
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <label className="cursor-pointer bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>{cftpScheduleRows.length > 0 ? 'Substituir Excel' : 'Importar Excel'}</span>
+                          <input
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            onChange={handleCftpExcelUpload}
+                            className="hidden"
+                          />
+                        </label>
+
+                        {cftpScheduleRows.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCftpScheduleRows([]);
+                              setCftpScheduleFileName('');
+                            }}
+                            className="px-3 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-red-400 text-xs font-semibold flex items-center space-x-1 whitespace-nowrap"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Limpar</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {cftpScheduleRows.length > 0 && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between text-[11px] text-slate-300 font-mono tabular-nums">
+                          <span>Arquivo: {cftpScheduleFileName || 'Planilha importada'}</span>
+                          <span className="text-emerald-400 font-bold">{cftpScheduleRows.length} linha(s) importada(s)</span>
+                        </div>
+                        <div className="border border-slate-800 rounded-lg overflow-hidden">
+                          <div className="overflow-x-auto max-h-64 overflow-y-auto">
+                            <table className="w-full text-left text-xs text-slate-200">
+                              <thead className="bg-slate-900 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                                <tr>
+                                  <th className="py-2 px-3">Data</th>
+                                  <th className="py-2 px-3">Horário</th>
+                                  <th className="py-2 px-3">Turma</th>
+                                  <th className="py-2 px-3">Sigla</th>
+                                  <th className="py-2 px-3">Disciplina</th>
+                                  <th className="py-2 px-3">Sala</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-slate-800/80">
+                                {cftpScheduleRows.map((row, idx) => (
+                                  <tr key={idx} className="hover:bg-slate-900/50">
+                                    <td className="py-1.5 px-3 font-mono tabular-nums whitespace-nowrap">{row.data || '—'}</td>
+                                    <td className="py-1.5 px-3 font-mono tabular-nums whitespace-nowrap">{row.horario || '—'}</td>
+                                    <td className="py-1.5 px-3 font-semibold whitespace-nowrap">{row.turma || '—'}</td>
+                                    <td className="py-1.5 px-3 font-mono text-amber-300 whitespace-nowrap">{row.sigla || '—'}</td>
+                                    <td className="py-1.5 px-3">{row.disciplina || '—'}</td>
+                                    <td className="py-1.5 px-3 whitespace-nowrap">{row.sala || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        resetCftpForm();
+                        setFormacaoTab('cftp');
+                      }}
+                      className="px-4 py-2 rounded-lg border border-slate-700 text-slate-300 hover:text-white text-xs font-semibold"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={cftpSaving}
+                      className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs px-5 py-2 rounded-lg transition"
+                    >
+                      {cftpSaving ? 'Salvando...' : (cftpEditingId ? 'Atualizar CFTP' : 'Salvar CFTP')}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            );
+          }
+
+          // ABA CFTP (Listagem separada em Ativos, Próximos [oculto], Passados [oculto])
+          return (
+            <div className="space-y-4">
+              {/* GRUPO 1: ATIVOS */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <div className="px-4 py-3 flex items-center justify-between bg-slate-900">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <h2 className="text-sm font-bold text-white">Ativos</h2>
+                    <span className="text-xs font-mono tabular-nums text-emerald-400 font-bold">
+                      ({activeCourses.length})
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                    Data de acesso: {formatBrDate(localTodayStr)}
+                  </span>
+                </div>
+                {renderCftpCourseList(activeCourses, 'Nenhum curso de formação ativo na data atual.')}
+              </div>
+
+              {/* GRUPO 2: PRÓXIMOS (começa oculto) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowProximosCftp(prev => !prev)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-800/40 transition"
+                >
+                  <div className="flex items-center space-x-2">
+                    <Calendar className="w-4 h-4 text-amber-400" />
+                    <h2 className="text-sm font-bold text-white">Próximos</h2>
+                    <span className="text-xs font-mono tabular-nums text-amber-400 font-bold">
+                      ({upcomingCourses.length})
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300">
+                    <span>{showProximosCftp ? 'Ocultar' : 'Mostrar'}</span>
+                    {showProximosCftp ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
+                </button>
+                {showProximosCftp && renderCftpCourseList(upcomingCourses, 'Nenhum curso de formação próximo agendado.')}
+              </div>
+
+              {/* GRUPO 3: PASSADOS (começa oculto) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setShowPassadosCftp(prev => !prev)}
+                  className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-slate-800/40 transition"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RotateCcw className="w-4 h-4 text-slate-400" />
+                    <h2 className="text-sm font-bold text-white">Passados</h2>
+                    <span className="text-xs font-mono tabular-nums text-slate-300 font-bold">
+                      ({pastCourses.length})
+                    </span>
+                  </div>
+                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-slate-300">
+                    <span>{showPassadosCftp ? 'Ocultar' : 'Mostrar'}</span>
+                    {showPassadosCftp ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  </div>
+                </button>
+                {showPassadosCftp && renderCftpCourseList(pastCourses, 'Nenhum curso de formação encerrado.')}
+              </div>
+            </div>
+          );
+        })()
+      ) : (
+        <>
 
       {/* ========================================================================= */}
       {/* TAB 1: MOVIMENTAÇÕES DE AULA (MAPA DE AULA - SAÍDA E DEVOLUÇÃO)           */}
@@ -5052,6 +5745,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* Delete Confirmation Modal */}

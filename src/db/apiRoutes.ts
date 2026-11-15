@@ -96,12 +96,17 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             EH_PROFESSOR_USUARIOS as is_teacher,
             DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
             SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+            COORDENACAO_CURSO_USUARIOS as is_course_coordinator,
+            MATERIA_COORDENACAO_USUARIOS as coordinator_subject,
+            PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
+            PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
+            PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
         `, [cleanMasp]);
       } catch (colErr) {
-        // Fallback se a coluna ROLES_USUARIOS ainda não foi criada no banco remoto
+        // Fallback se as colunas mais recentes ainda não foram criadas no banco remoto
         [rows] = await pool.query(`
           SELECT 
             ID_USUARIOS as id,
@@ -121,6 +126,11 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             EH_PROFESSOR_USUARIOS as is_teacher,
             DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
             SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+            0 as is_course_coordinator,
+            NULL as coordinator_subject,
+            0 as can_manage_formacao,
+            0 as can_manage_continuado,
+            0 as can_create_academy_courses,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -208,6 +218,11 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       teacherSubject: dbUser.teacher_subject || undefined,
       professorSigla: dbUser.professor_sigla || '',
       professor_sigla: dbUser.professor_sigla || '',
+      isCourseCoordinator: Boolean(dbUser.is_course_coordinator),
+      coordinatorSubject: dbUser.coordinator_subject || undefined,
+      canManageFormacaoCourses: Boolean(dbUser.can_manage_formacao),
+      canManageContinuadoCourses: Boolean(dbUser.can_manage_continuado),
+      canCreateAcademyCourses: Boolean(dbUser.can_create_academy_courses),
       courses: (courses || []).map((c: any) => ({
         courseId: c.courseId,
         completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
@@ -443,6 +458,11 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           EH_PROFESSOR_USUARIOS as is_teacher,
           DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
           SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          COORDENACAO_CURSO_USUARIOS as is_course_coordinator,
+          MATERIA_COORDENACAO_USUARIOS as coordinator_subject,
+          PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
+          PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
+          PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -468,6 +488,11 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           EH_PROFESSOR_USUARIOS as is_teacher,
           DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
           SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          0 as is_course_coordinator,
+          NULL as coordinator_subject,
+          0 as can_manage_formacao,
+          0 as can_manage_continuado,
+          0 as can_create_academy_courses,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -513,6 +538,11 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         teacherSubject: u.teacher_subject || undefined,
         professorSigla: u.professor_sigla || '',
         professor_sigla: u.professor_sigla || '',
+        isCourseCoordinator: Boolean(u.is_course_coordinator),
+        coordinatorSubject: u.coordinator_subject || undefined,
+        canManageFormacaoCourses: Boolean(u.can_manage_formacao),
+        canManageContinuadoCourses: Boolean(u.can_manage_continuado),
+        canCreateAcademyCourses: Boolean(u.can_create_academy_courses),
         courses,
         createdAt: u.created_at
       };
@@ -526,14 +556,26 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
 
 apiRouter.post('/users', async (req: Request, res: Response) => {
   try {
-    const { masp, name, phone, cargo, role, roles, departmentId, unitId, managementScope, canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject, professorSigla, professor_sigla, courses, actor } = req.body;
+    const {
+      masp, name, phone, cargo, role, roles, departmentId, unitId, managementScope,
+      canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject,
+      professorSigla, professor_sigla,
+      isCourseCoordinator, coordinatorSubject, canManageFormacaoCourses, canManageContinuadoCourses, canCreateAcademyCourses,
+      courses, actor
+    } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
     const siglaProf = professorSigla || professor_sigla || null;
     const userRoles = parseUserRoles(roles, role);
     const rolesJson = JSON.stringify(userRoles);
     const userScope = managementScope === 'department' ? 'department' : 'unit';
 
-    // Validação estrita: O usuário cadastrador só pode liberar acesso aos perfis que ele próprio possui
+    const finalIsCoordinator = Boolean(isCourseCoordinator);
+    const finalCoordinatorSubject = finalIsCoordinator && coordinatorSubject ? String(coordinatorSubject).trim() : null;
+    const finalCanManageFormacao = Boolean(canManageFormacaoCourses);
+    const finalCanManageContinuado = Boolean(canManageContinuadoCourses);
+    const finalCanCreateCourses = Boolean(canCreateAcademyCourses);
+
+    // Validação estrita: O usuário cadastrador só pode liberar acesso aos perfis e permissões que possui
     if (actor) {
       const actorRoles = parseUserRoles(actor.roles, actor.role);
       const isActorGeral = actorRoles.includes('Geral') || actor.role === 'Geral';
@@ -545,6 +587,18 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
               error: `Você não possui o perfil "${label}" e não tem autorização para concedê-lo a outros usuários.`
             });
           }
+        }
+        if (finalIsCoordinator && !actor.isCourseCoordinator) {
+          return res.status(403).json({ error: 'Apenas usuários com Coordenação de curso ativa podem atribuir essa permissão.' });
+        }
+        if (finalCanManageFormacao && !actor.canManageFormacaoCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a gerir cursos de formações podem atribuir essa permissão.' });
+        }
+        if (finalCanManageContinuado && !actor.canManageContinuadoCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a gerir cursos de atividade continuada podem atribuir essa permissão.' });
+        }
+        if (finalCanCreateCourses && !actor.canCreateAcademyCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a criar cursos podem atribuir essa permissão.' });
         }
       }
     }
@@ -559,8 +613,15 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const hashedDefaultPass = hashPassword(cleanMasp);
     try {
       await pool.query(
-        `INSERT INTO USUARIOS (ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS, PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS, EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS, DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        `INSERT INTO USUARIOS (
+          ID_USUARIOS, MASP_USUARIOS, SENHA_USUARIOS, NOME_USUARIOS, TELEFONE_USUARIOS, CARGO_USUARIOS,
+          PERFIL_USUARIOS, ROLES_USUARIOS, DEPARTAMENTO_ID_USUARIOS, UNIDADE_ID_USUARIOS, ABRANGENCIA_GESTAO_USUARIOS,
+          PODE_MOVER_MUNICAO_USUARIOS, PODE_MOVER_ARMAS_USUARIOS, TEM_ACESSO_SISTEMA_USUARIOS,
+          EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS,
+          COORDENACAO_CURSO_USUARIOS, MATERIA_COORDENACAO_USUARIOS, PODE_GERIR_FORMACAO_USUARIOS,
+          PODE_GERIR_CONTINUADO_USUARIOS, PODE_CRIAR_CURSOS_USUARIOS,
+          DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -578,7 +639,12 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           hasSystemAccess ? 1 : 0,
           isTeacher ? 1 : 0,
           teacherSubject || null,
-          siglaProf
+          siglaProf,
+          finalIsCoordinator ? 1 : 0,
+          finalCoordinatorSubject,
+          finalCanManageFormacao ? 1 : 0,
+          finalCanManageContinuado ? 1 : 0,
+          finalCanCreateCourses ? 1 : 0
         ]
       );
     } catch {
@@ -628,6 +694,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       phone: phone || '',
       cargo,
       role,
+      roles: userRoles,
       departmentId,
       unitId,
       managementScope: userScope,
@@ -636,6 +703,11 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       hasSystemAccess,
       isTeacher: Boolean(isTeacher),
       teacherSubject,
+      isCourseCoordinator: finalIsCoordinator,
+      coordinatorSubject: finalCoordinatorSubject || undefined,
+      canManageFormacaoCourses: finalCanManageFormacao,
+      canManageContinuadoCourses: finalCanManageContinuado,
+      canCreateAcademyCourses: finalCanCreateCourses,
       mustChangePassword: true,
       courses: courses || [],
       createdAt: new Date().toISOString()
@@ -905,6 +977,11 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           EH_PROFESSOR_USUARIOS as is_teacher,
           DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
           SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          COORDENACAO_CURSO_USUARIOS as is_course_coordinator,
+          MATERIA_COORDENACAO_USUARIOS as coordinator_subject,
+          PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
+          PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
+          PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -929,6 +1006,11 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           EH_PROFESSOR_USUARIOS as is_teacher,
           DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
           SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+          0 as is_course_coordinator,
+          NULL as coordinator_subject,
+          0 as can_manage_formacao,
+          0 as can_manage_continuado,
+          0 as can_create_academy_courses,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -962,22 +1044,43 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     const rolesJson = updatedRoles ? JSON.stringify(updatedRoles) : null;
     const userScope = updates.managementScope !== undefined ? (updates.managementScope === 'department' ? 'department' : 'unit') : null;
 
-    // Validação estrita: O usuário editor só pode conceder perfis que ele próprio possui
-    if (updatedRoles !== undefined && actor) {
+    // Validação estrita: O usuário editor só pode conceder perfis e permissões que ele próprio possui
+    if (actor) {
       const actorRoles = parseUserRoles(actor.roles, actor.role);
       const isActorGeral = actorRoles.includes('Geral') || actor.role === 'Geral';
       if (!isActorGeral) {
-        const existingRoles = parseUserRoles(rows[0].roles_json, rows[0].role);
-        for (const r of updatedRoles) {
-          if (r !== 'Policial' && !actorRoles.includes(r) && !existingRoles.includes(r)) {
-            const label = r === 'operador_canino' ? 'Operador Canino' : r;
-            return res.status(403).json({
-              error: `Você não possui o perfil "${label}" e não tem autorização para concedê-lo a outros usuários.`
-            });
+        if (updatedRoles !== undefined) {
+          const existingRoles = parseUserRoles(rows[0].roles_json, rows[0].role);
+          for (const r of updatedRoles) {
+            if (r !== 'Policial' && !actorRoles.includes(r) && !existingRoles.includes(r)) {
+              const label = r === 'operador_canino' ? 'Operador Canino' : r;
+              return res.status(403).json({
+                error: `Você não possui o perfil "${label}" e não tem autorização para concedê-lo a outros usuários.`
+              });
+            }
           }
+        }
+        if (updates.isCourseCoordinator !== undefined && Boolean(updates.isCourseCoordinator) !== Boolean(rows[0].is_course_coordinator) && !actor.isCourseCoordinator) {
+          return res.status(403).json({ error: 'Apenas usuários com Coordenação de curso ativa podem atribuir ou alterar essa permissão.' });
+        }
+        if (updates.canManageFormacaoCourses !== undefined && Boolean(updates.canManageFormacaoCourses) !== Boolean(rows[0].can_manage_formacao) && !actor.canManageFormacaoCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a gerir cursos de formações podem atribuir ou alterar essa permissão.' });
+        }
+        if (updates.canManageContinuadoCourses !== undefined && Boolean(updates.canManageContinuadoCourses) !== Boolean(rows[0].can_manage_continuado) && !actor.canManageContinuadoCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a gerir cursos de atividade continuada podem atribuir ou alterar essa permissão.' });
+        }
+        if (updates.canCreateAcademyCourses !== undefined && Boolean(updates.canCreateAcademyCourses) !== Boolean(rows[0].can_create_academy_courses) && !actor.canCreateAcademyCourses) {
+          return res.status(403).json({ error: 'Apenas usuários autorizados a criar cursos podem atribuir ou alterar essa permissão.' });
         }
       }
     }
+
+    const nextIsCoordinator = updates.isCourseCoordinator !== undefined
+      ? (updates.isCourseCoordinator ? 1 : 0)
+      : (rows[0].is_course_coordinator ? 1 : 0);
+    const nextCoordinatorSubject = nextIsCoordinator
+      ? (updates.coordinatorSubject !== undefined ? (updates.coordinatorSubject || null) : (rows[0].coordinator_subject || null))
+      : null;
 
     try {
       await pool.query(
@@ -996,7 +1099,12 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           TEM_ACESSO_SISTEMA_USUARIOS = COALESCE(?, TEM_ACESSO_SISTEMA_USUARIOS),
           EH_PROFESSOR_USUARIOS = COALESCE(?, EH_PROFESSOR_USUARIOS),
           DISCIPLINA_PROFESSOR_USUARIOS = COALESCE(?, DISCIPLINA_PROFESSOR_USUARIOS),
-          SIGLA_PROFESSOR_USUARIOS = COALESCE(?, SIGLA_PROFESSOR_USUARIOS)
+          SIGLA_PROFESSOR_USUARIOS = COALESCE(?, SIGLA_PROFESSOR_USUARIOS),
+          COORDENACAO_CURSO_USUARIOS = ?,
+          MATERIA_COORDENACAO_USUARIOS = ?,
+          PODE_GERIR_FORMACAO_USUARIOS = COALESCE(?, PODE_GERIR_FORMACAO_USUARIOS),
+          PODE_GERIR_CONTINUADO_USUARIOS = COALESCE(?, PODE_GERIR_CONTINUADO_USUARIOS),
+          PODE_CRIAR_CURSOS_USUARIOS = COALESCE(?, PODE_CRIAR_CURSOS_USUARIOS)
          WHERE ID_USUARIOS = ?`,
         [
           cleanMasp,
@@ -1014,6 +1122,11 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           updates.isTeacher !== undefined ? (updates.isTeacher ? 1 : 0) : null,
           updates.teacherSubject !== undefined ? updates.teacherSubject : null,
           updates.professorSigla ?? updates.professor_sigla ?? null,
+          nextIsCoordinator,
+          nextCoordinatorSubject,
+          updates.canManageFormacaoCourses !== undefined ? (updates.canManageFormacaoCourses ? 1 : 0) : null,
+          updates.canManageContinuadoCourses !== undefined ? (updates.canManageContinuadoCourses ? 1 : 0) : null,
+          updates.canCreateAcademyCourses !== undefined ? (updates.canCreateAcademyCourses ? 1 : 0) : null,
           id
         ]
       );
@@ -3513,59 +3626,192 @@ apiRouter.post('/audit-logs', async (req: Request, res: Response) => {
 // -------------------------------------------------------------
 
 // Academy Courses
+const sanitizeCftpScheduleRows = (rows: any): Array<{ data: string; horario: string; turma: string; sigla: string; disciplina: string; sala: string }> => {
+  if (!Array.isArray(rows)) return [];
+  return rows.map((row: any) => ({
+    data: String(row?.data || '').trim(),
+    horario: String(row?.horario || '').trim(),
+    turma: String(row?.turma || '').trim(),
+    sigla: String(row?.sigla || '').trim(),
+    disciplina: String(row?.disciplina || '').trim(),
+    sala: String(row?.sala || '').trim()
+  }));
+};
+
+const syncHorarioModuloCftpTable = async (
+  pool: any,
+  courseId: string,
+  scheduleRows: Array<{ data: string; horario: string; turma: string; sigla: string; disciplina: string; sala: string }>
+) => {
+  try {
+    await pool.query('DELETE FROM HORARIO_MODULO_CFTP WHERE CURSO_ID_HORARIO_MODULO_CFTP = ?', [courseId]);
+    for (let idx = 0; idx < scheduleRows.length; idx++) {
+      const r = scheduleRows[idx];
+      const rowId = `hmc-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`;
+      await pool.query(
+        `INSERT INTO HORARIO_MODULO_CFTP (
+          ID_HORARIO_MODULO_CFTP, CURSO_ID_HORARIO_MODULO_CFTP, DATA_HORARIO_MODULO_CFTP,
+          HORARIO_HORARIO_MODULO_CFTP, TURMA_HORARIO_MODULO_CFTP, SIGLA_HORARIO_MODULO_CFTP,
+          DISCIPLINA_HORARIO_MODULO_CFTP, SALA_HORARIO_MODULO_CFTP, ORDEM_LINHA_HORARIO_MODULO_CFTP
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [rowId, courseId, r.data, r.horario, r.turma, r.sigla, r.disciplina, r.sala, idx + 1]
+      );
+    }
+  } catch (syncErr) {
+    console.warn('[Aviso HORARIO_MODULO_CFTP]', syncErr);
+  }
+};
+
 apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        ID_CURSOS_ACADEMIA as id,
-        NOME_CURSOS_ACADEMIA as name,
-        TIPO_CURSOS_ACADEMIA as type,
-        CARREIRA_CURSOS_ACADEMIA as career,
-        CODIGO_CURSOS_ACADEMIA as code,
-        DATAS_CURSOS_ACADEMIA as dates,
-        NOME_DEPARTAMENTO_CURSOS_ACADEMIA as department_name,
-        DATA_INICIO_CURSOS_ACADEMIA as start_date,
-        DATA_FIM_CURSOS_ACADEMIA as end_date,
-        NUMERO_MODULO_CURSOS_ACADEMIA as module_number,
-        MODULO_CURSOS_ACADEMIA as module,
-        NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA as teaching_department_name,
-        DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA as teaching_department_id,
-        NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA as location_department_name,
-        DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA as location_department_id,
-        DURACAO_DIAS_CURSOS_ACADEMIA as duration_days,
-        DISCIPLINA_CURSOS_ACADEMIA as subject,
-        QUANTIDADE_AULAS_CURSOS_ACADEMIA as lesson_count,
-        DADOS_AULAS_CURSOS_ACADEMIA as lessons_data,
-        DEPARTAMENTO_ID_CURSOS_ACADEMIA as department_id,
-        UNIDADE_ID_CURSOS_ACADEMIA as unit_id,
-        DATA_CRIACAO_CURSOS_ACADEMIA as created_at
-      FROM CURSOS_ACADEMIA ORDER BY DATA_CRIACAO_CURSOS_ACADEMIA DESC
-    `);
-    const mapped = (rows || []).map((r: any) => ({
-      id: r.id,
-      name: r.name,
-      type: r.type,
-      career: r.career || undefined,
-      code: r.code || '',
-      dates: typeof r.dates === 'string' ? JSON.parse(r.dates) : (Array.isArray(r.dates) ? r.dates : []),
-      departmentName: r.department_name || undefined,
-      startDate: r.start_date ? new Date(r.start_date).toISOString().split('T')[0] : undefined,
-      endDate: r.end_date ? new Date(r.end_date).toISOString().split('T')[0] : undefined,
-      moduleNumber: r.module_number || undefined,
-      module: r.module || undefined,
-      teachingDepartmentName: r.teaching_department_name || undefined,
-      teachingDepartmentId: r.teaching_department_id || undefined,
-      locationDepartmentName: r.location_department_name || undefined,
-      locationDepartmentId: r.location_department_id || undefined,
-      durationDays: r.duration_days ? Number(r.duration_days) : undefined,
-      subject: r.subject || undefined,
-      lessonCount: r.lesson_count || 1,
-      lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
-      departmentId: r.department_id || undefined,
-      unitId: r.unit_id || undefined,
-      createdAt: r.created_at
-    }));
+    let rows: any[] = [];
+    try {
+      const [resRows]: any = await pool.query(`
+        SELECT 
+          ID_CURSOS_ACADEMIA as id,
+          NOME_CURSOS_ACADEMIA as name,
+          TIPO_CURSOS_ACADEMIA as type,
+          CARREIRA_CURSOS_ACADEMIA as career,
+          CARREIRAS_CURSOS_ACADEMIA as careers_json,
+          CODIGO_CURSOS_ACADEMIA as code,
+          DATAS_CURSOS_ACADEMIA as dates,
+          NOME_DEPARTAMENTO_CURSOS_ACADEMIA as department_name,
+          DATA_INICIO_CURSOS_ACADEMIA as start_date,
+          DATA_FIM_CURSOS_ACADEMIA as end_date,
+          NUMERO_MODULO_CURSOS_ACADEMIA as module_number,
+          MODULO_CURSOS_ACADEMIA as module,
+          NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA as teaching_department_name,
+          DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA as teaching_department_id,
+          NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA as location_department_name,
+          DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA as location_department_id,
+          DURACAO_DIAS_CURSOS_ACADEMIA as duration_days,
+          DISCIPLINA_CURSOS_ACADEMIA as subject,
+          HORARIO_MODULO_CURSOS_ACADEMIA as module_schedule_json,
+          HORARIO_ARQUIVO_NOME_CURSOS_ACADEMIA as schedule_file_name,
+          QUANTIDADE_AULAS_CURSOS_ACADEMIA as lesson_count,
+          DADOS_AULAS_CURSOS_ACADEMIA as lessons_data,
+          DEPARTAMENTO_ID_CURSOS_ACADEMIA as department_id,
+          UNIDADE_ID_CURSOS_ACADEMIA as unit_id,
+          DATA_CRIACAO_CURSOS_ACADEMIA as created_at
+        FROM CURSOS_ACADEMIA ORDER BY DATA_CRIACAO_CURSOS_ACADEMIA DESC
+      `);
+      rows = resRows || [];
+    } catch {
+      const [resRows]: any = await pool.query(`
+        SELECT 
+          ID_CURSOS_ACADEMIA as id,
+          NOME_CURSOS_ACADEMIA as name,
+          TIPO_CURSOS_ACADEMIA as type,
+          CARREIRA_CURSOS_ACADEMIA as career,
+          NULL as careers_json,
+          CODIGO_CURSOS_ACADEMIA as code,
+          DATAS_CURSOS_ACADEMIA as dates,
+          NOME_DEPARTAMENTO_CURSOS_ACADEMIA as department_name,
+          DATA_INICIO_CURSOS_ACADEMIA as start_date,
+          DATA_FIM_CURSOS_ACADEMIA as end_date,
+          NUMERO_MODULO_CURSOS_ACADEMIA as module_number,
+          MODULO_CURSOS_ACADEMIA as module,
+          NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA as teaching_department_name,
+          DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA as teaching_department_id,
+          NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA as location_department_name,
+          DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA as location_department_id,
+          DURACAO_DIAS_CURSOS_ACADEMIA as duration_days,
+          DISCIPLINA_CURSOS_ACADEMIA as subject,
+          NULL as module_schedule_json,
+          NULL as schedule_file_name,
+          QUANTIDADE_AULAS_CURSOS_ACADEMIA as lesson_count,
+          DADOS_AULAS_CURSOS_ACADEMIA as lessons_data,
+          DEPARTAMENTO_ID_CURSOS_ACADEMIA as department_id,
+          UNIDADE_ID_CURSOS_ACADEMIA as unit_id,
+          DATA_CRIACAO_CURSOS_ACADEMIA as created_at
+        FROM CURSOS_ACADEMIA ORDER BY DATA_CRIACAO_CURSOS_ACADEMIA DESC
+      `);
+      rows = resRows || [];
+    }
+
+    let scheduleByCourse: Record<string, Array<{ data: string; horario: string; turma: string; sigla: string; disciplina: string; sala: string }>> = {};
+    try {
+      const [schedRows]: any = await pool.query(`
+        SELECT
+          CURSO_ID_HORARIO_MODULO_CFTP as course_id,
+          DATA_HORARIO_MODULO_CFTP as data,
+          HORARIO_HORARIO_MODULO_CFTP as horario,
+          TURMA_HORARIO_MODULO_CFTP as turma,
+          SIGLA_HORARIO_MODULO_CFTP as sigla,
+          DISCIPLINA_HORARIO_MODULO_CFTP as disciplina,
+          SALA_HORARIO_MODULO_CFTP as sala
+        FROM HORARIO_MODULO_CFTP
+        ORDER BY ORDEM_LINHA_HORARIO_MODULO_CFTP ASC, DATA_CRIACAO_HORARIO_MODULO_CFTP ASC
+      `);
+      for (const s of schedRows || []) {
+        if (!scheduleByCourse[s.course_id]) scheduleByCourse[s.course_id] = [];
+        scheduleByCourse[s.course_id].push({
+          data: s.data || '',
+          horario: s.horario || '',
+          turma: s.turma || '',
+          sigla: s.sigla || '',
+          disciplina: s.disciplina || '',
+          sala: s.sala || ''
+        });
+      }
+    } catch {
+      scheduleByCourse = {};
+    }
+
+    const mapped = (rows || []).map((r: any) => {
+      let parsedCareers: string[] = [];
+      if (typeof r.careers_json === 'string') {
+        try {
+          const arr = JSON.parse(r.careers_json);
+          if (Array.isArray(arr)) parsedCareers = arr.map((x: any) => String(x));
+        } catch {}
+      } else if (Array.isArray(r.careers_json)) {
+        parsedCareers = r.careers_json.map((x: any) => String(x));
+      }
+      if (parsedCareers.length === 0 && r.career) {
+        parsedCareers = String(r.career).split(',').map((s: string) => s.trim()).filter(Boolean);
+      }
+
+      let parsedSchedule: Array<{ data: string; horario: string; turma: string; sigla: string; disciplina: string; sala: string }> = [];
+      if (scheduleByCourse[r.id] && scheduleByCourse[r.id].length > 0) {
+        parsedSchedule = scheduleByCourse[r.id];
+      } else if (typeof r.module_schedule_json === 'string') {
+        try {
+          parsedSchedule = sanitizeCftpScheduleRows(JSON.parse(r.module_schedule_json));
+        } catch {}
+      } else if (Array.isArray(r.module_schedule_json)) {
+        parsedSchedule = sanitizeCftpScheduleRows(r.module_schedule_json);
+      }
+
+      return {
+        id: r.id,
+        name: r.name,
+        type: r.type,
+        career: r.career || (parsedCareers.length > 0 ? parsedCareers.join(', ') : undefined),
+        careers: parsedCareers,
+        code: r.code || '',
+        dates: typeof r.dates === 'string' ? JSON.parse(r.dates) : (Array.isArray(r.dates) ? r.dates : []),
+        departmentName: r.department_name || undefined,
+        startDate: r.start_date ? new Date(r.start_date).toISOString().split('T')[0] : undefined,
+        endDate: r.end_date ? new Date(r.end_date).toISOString().split('T')[0] : undefined,
+        moduleNumber: r.module_number || undefined,
+        module: r.module || undefined,
+        teachingDepartmentName: r.teaching_department_name || undefined,
+        teachingDepartmentId: r.teaching_department_id || undefined,
+        locationDepartmentName: r.location_department_name || undefined,
+        locationDepartmentId: r.location_department_id || undefined,
+        durationDays: r.duration_days ? Number(r.duration_days) : undefined,
+        subject: r.subject || undefined,
+        moduleSchedule: parsedSchedule,
+        scheduleFileName: r.schedule_file_name || undefined,
+        lessonCount: r.lesson_count || 1,
+        lessonsData: typeof r.lessons_data === 'string' ? JSON.parse(r.lessons_data) : (r.lessons_data || []),
+        departmentId: r.department_id || undefined,
+        unitId: r.unit_id || undefined,
+        createdAt: r.created_at
+      };
+    });
     return res.json(mapped);
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -3575,12 +3821,18 @@ apiRouter.get('/academy-courses', async (req: Request, res: Response) => {
 apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
   try {
     const {
-      name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module,
+      name, type, career, careers, code, dates, departmentName, startDate, endDate, moduleNumber, module,
       teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId,
-      durationDays, subject, lessonCount, lessonsData, departmentId, unitId, actor
+      durationDays, subject, moduleSchedule, scheduleFileName, lessonCount, lessonsData, departmentId, unitId, actor
     } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Nome do curso é obrigatório' });
     if (!code || !code.trim()) return res.status(400).json({ error: 'Código do curso é obrigatório' });
+
+    const careersArray: string[] = Array.isArray(careers)
+      ? careers.map((c: any) => String(c).trim()).filter(Boolean)
+      : (career ? String(career).split(',').map(s => s.trim()).filter(Boolean) : []);
+    const careerJoined = career ? String(career) : (careersArray.length > 0 ? careersArray.join(', ') : null);
+    const sanitizedSchedule = sanitizeCftpScheduleRows(moduleSchedule);
 
     const pool = getPool();
     const id = `acad-crs-${Date.now()}`;
@@ -3588,18 +3840,204 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
     try {
       await pool.query(
         `INSERT INTO CURSOS_ACADEMIA (
-          ID_CURSOS_ACADEMIA, NOME_CURSOS_ACADEMIA, TIPO_CURSOS_ACADEMIA, CARREIRA_CURSOS_ACADEMIA, CODIGO_CURSOS_ACADEMIA,
+          ID_CURSOS_ACADEMIA, NOME_CURSOS_ACADEMIA, TIPO_CURSOS_ACADEMIA, CARREIRA_CURSOS_ACADEMIA, CARREIRAS_CURSOS_ACADEMIA, CODIGO_CURSOS_ACADEMIA,
           DATAS_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_CURSOS_ACADEMIA, DATA_INICIO_CURSOS_ACADEMIA, DATA_FIM_CURSOS_ACADEMIA,
           NUMERO_MODULO_CURSOS_ACADEMIA, MODULO_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA,
           DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA,
           DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA, DURACAO_DIAS_CURSOS_ACADEMIA, DISCIPLINA_CURSOS_ACADEMIA,
+          HORARIO_MODULO_CURSOS_ACADEMIA, HORARIO_ARQUIVO_NOME_CURSOS_ACADEMIA,
           QUANTIDADE_AULAS_CURSOS_ACADEMIA, DADOS_AULAS_CURSOS_ACADEMIA, DEPARTAMENTO_ID_CURSOS_ACADEMIA, UNIDADE_ID_CURSOS_ACADEMIA, DATA_CRIACAO_CURSOS_ACADEMIA
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
         [
           id,
           name.trim(),
           type || 'Formação',
-          career || null,
+          careerJoined,
+          JSON.stringify(careersArray),
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          endDate || null,
+          moduleNumber || null,
+          module || null,
+          teachingDepartmentName ? teachingDepartmentName.trim() : null,
+          teachingDepartmentId || null,
+          locationDepartmentName ? locationDepartmentName.trim() : null,
+          locationDepartmentId || null,
+          durationDays ? Number(durationDays) : 1,
+          subject || null,
+          JSON.stringify(sanitizedSchedule),
+          scheduleFileName || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    } catch (dbErr: any) {
+      // Fallback query if some newly added columns do not exist yet
+      await pool.query(
+        `INSERT INTO CURSOS_ACADEMIA (ID_CURSOS_ACADEMIA, NOME_CURSOS_ACADEMIA, TIPO_CURSOS_ACADEMIA, CARREIRA_CURSOS_ACADEMIA, CODIGO_CURSOS_ACADEMIA, DATAS_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_CURSOS_ACADEMIA, DATA_INICIO_CURSOS_ACADEMIA, DATA_FIM_CURSOS_ACADEMIA, NUMERO_MODULO_CURSOS_ACADEMIA, MODULO_CURSOS_ACADEMIA, QUANTIDADE_AULAS_CURSOS_ACADEMIA, DADOS_AULAS_CURSOS_ACADEMIA, DEPARTAMENTO_ID_CURSOS_ACADEMIA, UNIDADE_ID_CURSOS_ACADEMIA, DATA_CRIACAO_CURSOS_ACADEMIA)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          id,
+          name.trim(),
+          type || 'Formação',
+          careerJoined ? careerJoined.slice(0, 64) : null,
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          endDate || null,
+          moduleNumber || null,
+          module || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null
+        ]
+      );
+    }
+
+    if (sanitizedSchedule.length > 0) {
+      await syncHorarioModuloCftpTable(pool, id, sanitizedSchedule);
+    }
+
+    await insertAuditLog('Cursos', 'Criar', `Cadastrado curso da academia: ${name} (${type} - Cód: ${code})`, actor, req.ip);
+    return res.json({
+      id,
+      name,
+      type,
+      career: careerJoined,
+      careers: careersArray,
+      code,
+      dates,
+      departmentName,
+      startDate,
+      endDate,
+      moduleNumber,
+      module,
+      teachingDepartmentName,
+      teachingDepartmentId,
+      locationDepartmentName,
+      locationDepartmentId,
+      durationDays,
+      subject,
+      moduleSchedule: sanitizedSchedule,
+      scheduleFileName,
+      lessonCount,
+      lessonsData,
+      departmentId,
+      unitId,
+      createdAt: new Date().toISOString()
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      name, type, career, careers, code, dates, departmentName, startDate, endDate, moduleNumber, module,
+      teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId,
+      durationDays, subject, moduleSchedule, scheduleFileName, lessonCount, lessonsData, departmentId, unitId, actor
+    } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Nome do curso é obrigatório' });
+    if (!code || !code.trim()) return res.status(400).json({ error: 'Código do curso é obrigatório' });
+
+    const careersArray: string[] = Array.isArray(careers)
+      ? careers.map((c: any) => String(c).trim()).filter(Boolean)
+      : (career ? String(career).split(',').map(s => s.trim()).filter(Boolean) : []);
+    const careerJoined = career ? String(career) : (careersArray.length > 0 ? careersArray.join(', ') : null);
+    const sanitizedSchedule = sanitizeCftpScheduleRows(moduleSchedule);
+
+    const pool = getPool();
+
+    try {
+      await pool.query(
+        `UPDATE CURSOS_ACADEMIA SET
+          NOME_CURSOS_ACADEMIA = ?,
+          TIPO_CURSOS_ACADEMIA = ?,
+          CARREIRA_CURSOS_ACADEMIA = ?,
+          CARREIRAS_CURSOS_ACADEMIA = ?,
+          CODIGO_CURSOS_ACADEMIA = ?,
+          DATAS_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_CURSOS_ACADEMIA = ?,
+          DATA_INICIO_CURSOS_ACADEMIA = ?,
+          DATA_FIM_CURSOS_ACADEMIA = ?,
+          NUMERO_MODULO_CURSOS_ACADEMIA = ?,
+          MODULO_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA = ?,
+          DURACAO_DIAS_CURSOS_ACADEMIA = ?,
+          DISCIPLINA_CURSOS_ACADEMIA = ?,
+          HORARIO_MODULO_CURSOS_ACADEMIA = ?,
+          HORARIO_ARQUIVO_NOME_CURSOS_ACADEMIA = ?,
+          QUANTIDADE_AULAS_CURSOS_ACADEMIA = ?,
+          DADOS_AULAS_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_ID_CURSOS_ACADEMIA = ?,
+          UNIDADE_ID_CURSOS_ACADEMIA = ?
+         WHERE ID_CURSOS_ACADEMIA = ?`,
+        [
+          name.trim(),
+          type,
+          careerJoined,
+          JSON.stringify(careersArray),
+          code.trim(),
+          JSON.stringify(dates || []),
+          departmentName ? departmentName.trim() : null,
+          startDate || null,
+          endDate || null,
+          moduleNumber || null,
+          module || null,
+          teachingDepartmentName ? teachingDepartmentName.trim() : null,
+          teachingDepartmentId || null,
+          locationDepartmentName ? locationDepartmentName.trim() : null,
+          locationDepartmentId || null,
+          durationDays ? Number(durationDays) : 1,
+          subject || null,
+          JSON.stringify(sanitizedSchedule),
+          scheduleFileName || null,
+          lessonCount || 1,
+          JSON.stringify(lessonsData || []),
+          departmentId || null,
+          unitId || null,
+          id
+        ]
+      );
+    } catch {
+      await pool.query(
+        `UPDATE CURSOS_ACADEMIA SET
+          NOME_CURSOS_ACADEMIA = ?,
+          TIPO_CURSOS_ACADEMIA = ?,
+          CARREIRA_CURSOS_ACADEMIA = ?,
+          CODIGO_CURSOS_ACADEMIA = ?,
+          DATAS_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_CURSOS_ACADEMIA = ?,
+          DATA_INICIO_CURSOS_ACADEMIA = ?,
+          DATA_FIM_CURSOS_ACADEMIA = ?,
+          NUMERO_MODULO_CURSOS_ACADEMIA = ?,
+          MODULO_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA = ?,
+          NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA = ?,
+          DURACAO_DIAS_CURSOS_ACADEMIA = ?,
+          DISCIPLINA_CURSOS_ACADEMIA = ?,
+          QUANTIDADE_AULAS_CURSOS_ACADEMIA = ?,
+          DADOS_AULAS_CURSOS_ACADEMIA = ?,
+          DEPARTAMENTO_ID_CURSOS_ACADEMIA = ?,
+          UNIDADE_ID_CURSOS_ACADEMIA = ?
+         WHERE ID_CURSOS_ACADEMIA = ?`,
+        [
+          name.trim(),
+          type,
+          careerJoined ? careerJoined.slice(0, 64) : null,
           code.trim(),
           JSON.stringify(dates || []),
           departmentName ? departmentName.trim() : null,
@@ -3616,99 +4054,15 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
           lessonCount || 1,
           JSON.stringify(lessonsData || []),
           departmentId || null,
-          unitId || null
-        ]
-      );
-    } catch (dbErr: any) {
-      // Fallback query if some newly added columns do not exist yet
-      await pool.query(
-        `INSERT INTO CURSOS_ACADEMIA (ID_CURSOS_ACADEMIA, NOME_CURSOS_ACADEMIA, TIPO_CURSOS_ACADEMIA, CARREIRA_CURSOS_ACADEMIA, CODIGO_CURSOS_ACADEMIA, DATAS_CURSOS_ACADEMIA, NOME_DEPARTAMENTO_CURSOS_ACADEMIA, DATA_INICIO_CURSOS_ACADEMIA, NUMERO_MODULO_CURSOS_ACADEMIA, QUANTIDADE_AULAS_CURSOS_ACADEMIA, DADOS_AULAS_CURSOS_ACADEMIA, DEPARTAMENTO_ID_CURSOS_ACADEMIA, UNIDADE_ID_CURSOS_ACADEMIA, DATA_CRIACAO_CURSOS_ACADEMIA)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-        [
-          id,
-          name.trim(),
-          type || 'Formação',
-          career || null,
-          code.trim(),
-          JSON.stringify(dates || []),
-          departmentName ? departmentName.trim() : null,
-          startDate || null,
-          moduleNumber || null,
-          lessonCount || 1,
-          JSON.stringify(lessonsData || []),
-          departmentId || null,
-          unitId || null
+          unitId || null,
+          id
         ]
       );
     }
 
-    await insertAuditLog('Cursos', 'Criar', `Cadastrado curso da academia: ${name} (${type} - Cód: ${code})`, actor, req.ip);
-    return res.json({ id, name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module, teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId, durationDays, subject, lessonCount, lessonsData, departmentId, unitId, createdAt: new Date().toISOString() });
-  } catch (err: any) {
-    return res.status(500).json({ error: err.message });
-  }
-});
-
-apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
-  try {
-    const { id } = req.params;
-    const {
-      name, type, career, code, dates, departmentName, startDate, endDate, moduleNumber, module,
-      teachingDepartmentName, teachingDepartmentId, locationDepartmentName, locationDepartmentId,
-      durationDays, subject, lessonCount, lessonsData, departmentId, unitId, actor
-    } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Nome do curso é obrigatório' });
-    if (!code || !code.trim()) return res.status(400).json({ error: 'Código do curso é obrigatório' });
-
-    const pool = getPool();
-
-    await pool.query(
-      `UPDATE CURSOS_ACADEMIA SET
-        NOME_CURSOS_ACADEMIA = ?,
-        TIPO_CURSOS_ACADEMIA = ?,
-        CARREIRA_CURSOS_ACADEMIA = ?,
-        CODIGO_CURSOS_ACADEMIA = ?,
-        DATAS_CURSOS_ACADEMIA = ?,
-        NOME_DEPARTAMENTO_CURSOS_ACADEMIA = ?,
-        DATA_INICIO_CURSOS_ACADEMIA = ?,
-        DATA_FIM_CURSOS_ACADEMIA = ?,
-        NUMERO_MODULO_CURSOS_ACADEMIA = ?,
-        MODULO_CURSOS_ACADEMIA = ?,
-        NOME_DEPARTAMENTO_ENSINO_CURSOS_ACADEMIA = ?,
-        DEPARTAMENTO_ENSINO_ID_CURSOS_ACADEMIA = ?,
-        NOME_DEPARTAMENTO_LOCALIZACAO_CURSOS_ACADEMIA = ?,
-        DEPARTAMENTO_LOCALIZACAO_ID_CURSOS_ACADEMIA = ?,
-        DURACAO_DIAS_CURSOS_ACADEMIA = ?,
-        DISCIPLINA_CURSOS_ACADEMIA = ?,
-        QUANTIDADE_AULAS_CURSOS_ACADEMIA = ?,
-        DADOS_AULAS_CURSOS_ACADEMIA = ?,
-        DEPARTAMENTO_ID_CURSOS_ACADEMIA = ?,
-        UNIDADE_ID_CURSOS_ACADEMIA = ?
-       WHERE ID_CURSOS_ACADEMIA = ?`,
-      [
-        name.trim(),
-        type,
-        career || null,
-        code.trim(),
-        JSON.stringify(dates || []),
-        departmentName ? departmentName.trim() : null,
-        startDate || null,
-        endDate || null,
-        moduleNumber || null,
-        module || null,
-        teachingDepartmentName ? teachingDepartmentName.trim() : null,
-        teachingDepartmentId || null,
-        locationDepartmentName ? locationDepartmentName.trim() : null,
-        locationDepartmentId || null,
-        durationDays ? Number(durationDays) : 1,
-        subject || null,
-        lessonCount || 1,
-        JSON.stringify(lessonsData || []),
-        departmentId || null,
-        unitId || null,
-        id
-      ]
-    );
+    if (moduleSchedule !== undefined) {
+      await syncHorarioModuloCftpTable(pool, id, sanitizedSchedule);
+    }
 
     await insertAuditLog('Cursos', 'Editar', `Atualizado curso da academia: ${name} (Cód: ${code})`, actor, req.ip);
     return res.json({ success: true });
@@ -3723,6 +4077,9 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
     const actor = req.body.actor;
     const pool = getPool();
 
+    try {
+      await pool.query('DELETE FROM HORARIO_MODULO_CFTP WHERE CURSO_ID_HORARIO_MODULO_CFTP = ?', [id]);
+    } catch (_) {}
     await pool.query('DELETE FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?', [id]);
     await insertAuditLog('Cursos', 'Excluir', `Excluído curso da academia ID ${id}`, actor, req.ip);
     return res.json({ success: true });

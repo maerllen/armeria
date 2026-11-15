@@ -45,7 +45,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'cofre': 'Locais do Cofre',
   'movimentacoes': 'Movimentações Bélicas',
   'materiais': 'Módulo de Materiais',
-  'iniciar-aula-mobile': 'Modo Celular (Aula)',
+  'iniciar-aula-mobile': 'Iniciar Aula',
   'cursos': 'Curso de Formação',
   'ensino-continuado': 'Ensino Continuado',
   'gerencia-cursos': 'Gerência de Cursos',
@@ -716,7 +716,7 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'calendario' && (currentUser?.isTeacher || currentUser?.teacherSubject || currentUser?.professorSigla || currentUser?.professor_sigla || currentUser?.role === 'Geral') && (
+          {activeModule === 'calendario' && (currentUser?.isTeacher || currentUser?.teacherSubject || currentUser?.professorSigla || currentUser?.professor_sigla || currentUser?.isCourseCoordinator || currentUser?.role === 'Geral') && (
             <CalendarModule
               currentUser={currentUser}
             />
@@ -728,7 +728,7 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'iniciar-aula-mobile' && currentUser?.role === 'Geral' && (
+          {activeModule === 'iniciar-aula-mobile' && (currentUser?.role === 'Geral' || Boolean(currentUser?.isCourseCoordinator)) && (
             <MobileClassModule
               currentUser={currentUser}
               onRefresh={refreshData}

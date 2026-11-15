@@ -146,7 +146,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     },
     {
       id: 'iniciar-aula-mobile',
-      label: 'Iniciar Aula (Modo Celular)',
+      label: 'Iniciar Aula',
       icon: Smartphone,
       visible: allowedModules.includes('iniciar-aula-mobile')
     },

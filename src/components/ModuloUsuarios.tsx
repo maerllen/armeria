@@ -81,10 +81,15 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [managementScope, setManagementScope] = useState<'department' | 'unit'>('unit');
   const [userCourses, setUserCourses] = useState<UserCourse[]>([]);
 
-  // Teacher states
+  // Teacher & Academy Coordinator states
   const [isTeacher, setIsTeacher] = useState(false);
   const [teacherSubject, setTeacherSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
   const [professorSigla, setProfessorSigla] = useState('');
+  const [isCourseCoordinator, setIsCourseCoordinator] = useState(false);
+  const [coordinatorSubject, setCoordinatorSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
+  const [canManageFormacaoCourses, setCanManageFormacaoCourses] = useState(false);
+  const [canManageContinuadoCourses, setCanManageContinuadoCourses] = useState(false);
+  const [canCreateAcademyCourses, setCanCreateAcademyCourses] = useState(false);
   const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
   const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
   const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -145,6 +150,17 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
   const canManageTeachers = isGeral || (isAdminOrArmeiro && isAcademiaDept);
 
+  // Regras estritas de visibilidade e atribuição para Coordenação e Gestão de Cursos
+  const canAssignCourseCoordinator = isGeral || Boolean(currentUser.isCourseCoordinator);
+  const canAssignManageFormacao = isGeral || Boolean(currentUser.canManageFormacaoCourses);
+  const canAssignManageContinuado = isGeral || Boolean(currentUser.canManageContinuadoCourses);
+  const canAssignCreateCourses = isGeral || Boolean(currentUser.canCreateAcademyCourses);
+  const hasAnyAcademyPermissionUI =
+    canAssignCourseCoordinator ||
+    canAssignManageFormacao ||
+    canAssignManageContinuado ||
+    canAssignCreateCourses;
+
   // Available models from registered weapons & defaults
   const availableModels = Array.from(
     new Set([...storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).map(w => w.model), 'T4', 'IA2', 'PT92', 'Glock G22', 'TH40', 'CBC 586-P'])
@@ -201,6 +217,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setIsTeacher(Boolean(usr.isTeacher));
       setTeacherSubject(usr.teacherSubject || 'MEAF');
       setProfessorSigla(usr.professorSigla || '');
+      setIsCourseCoordinator(Boolean(usr.isCourseCoordinator));
+      setCoordinatorSubject(usr.coordinatorSubject || 'MEAF');
+      setCanManageFormacaoCourses(Boolean(usr.canManageFormacaoCourses));
+      setCanManageContinuadoCourses(Boolean(usr.canManageContinuadoCourses));
+      setCanCreateAcademyCourses(Boolean(usr.canCreateAcademyCourses));
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -235,6 +256,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setIsTeacher(false);
       setTeacherSubject('MEAF');
       setProfessorSigla('');
+      setIsCourseCoordinator(false);
+      setCoordinatorSubject('MEAF');
+      setCanManageFormacaoCourses(false);
+      setCanManageContinuadoCourses(false);
+      setCanCreateAcademyCourses(false);
     }
     setShowUserModal(true);
   };
@@ -317,6 +343,22 @@ export const UserModule: React.FC<UserModuleProps> = ({
       const finalCanMoveWeapons = isRestrictedRegistrar ? false : canMoveWeapons;
       const finalManagementScope = managementScope || 'unit';
 
+      const finalIsCoordinator = canAssignCourseCoordinator
+        ? isCourseCoordinator
+        : Boolean(editingUser?.isCourseCoordinator);
+      const finalCoordinatorSubject = finalIsCoordinator
+        ? (canAssignCourseCoordinator ? coordinatorSubject : editingUser?.coordinatorSubject)
+        : undefined;
+      const finalCanManageFormacao = canAssignManageFormacao
+        ? canManageFormacaoCourses
+        : Boolean(editingUser?.canManageFormacaoCourses);
+      const finalCanManageContinuado = canAssignManageContinuado
+        ? canManageContinuadoCourses
+        : Boolean(editingUser?.canManageContinuadoCourses);
+      const finalCanCreateCourses = canAssignCreateCourses
+        ? canCreateAcademyCourses
+        : Boolean(editingUser?.canCreateAcademyCourses);
+
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
           masp: cleanMaspInput,
@@ -334,7 +376,12 @@ export const UserModule: React.FC<UserModuleProps> = ({
           courses: userCourses,
           isTeacher,
           teacherSubject: isTeacher ? teacherSubject : undefined,
-          professorSigla: professorSigla.trim() || undefined
+          professorSigla: professorSigla.trim() || undefined,
+          isCourseCoordinator: finalIsCoordinator,
+          coordinatorSubject: finalCoordinatorSubject,
+          canManageFormacaoCourses: finalCanManageFormacao,
+          canManageContinuadoCourses: finalCanManageContinuado,
+          canCreateAcademyCourses: finalCanCreateCourses
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -354,7 +401,12 @@ export const UserModule: React.FC<UserModuleProps> = ({
           courses: userCourses,
           isTeacher,
           teacherSubject: isTeacher ? teacherSubject : undefined,
-          professorSigla: professorSigla.trim() || undefined
+          professorSigla: professorSigla.trim() || undefined,
+          isCourseCoordinator: finalIsCoordinator,
+          coordinatorSubject: finalCoordinatorSubject,
+          canManageFormacaoCourses: finalCanManageFormacao,
+          canManageContinuadoCourses: finalCanManageContinuado,
+          canCreateAcademyCourses: finalCanCreateCourses
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -1323,6 +1375,26 @@ export const UserModule: React.FC<UserModuleProps> = ({
                                 {usr.managementScope === 'department' ? 'Departamento' : 'Unidade'}
                               </span>
                             </div>
+                            {canAssignCourseCoordinator && usr.isCourseCoordinator && (
+                              <div className="text-[10px] text-amber-300 font-semibold">
+                                Coord. Curso: {usr.coordinatorSubject || 'MEAF'}
+                              </div>
+                            )}
+                            {canAssignManageFormacao && usr.canManageFormacaoCourses && (
+                              <div className="text-[10px] text-sky-400 font-semibold">
+                                Gerir Formação: Sim
+                              </div>
+                            )}
+                            {canAssignManageContinuado && usr.canManageContinuadoCourses && (
+                              <div className="text-[10px] text-indigo-400 font-semibold">
+                                Gerir Continuada: Sim
+                              </div>
+                            )}
+                            {canAssignCreateCourses && usr.canCreateAcademyCourses && (
+                              <div className="text-[10px] text-emerald-400 font-semibold">
+                                Criar Cursos: Sim
+                              </div>
+                            )}
                           </td>
 
                           {/* Courses */}
@@ -1678,6 +1750,101 @@ export const UserModule: React.FC<UserModuleProps> = ({
                       </>
                     )}
                   </>
+                )}
+
+                {/* Coordenação de Curso e Gestão de Cursos da Academia de Polícia */}
+                {hasAnyAcademyPermissionUI && (
+                  <div className="md:col-span-2 border border-slate-800 bg-slate-950/60 rounded-xl p-4 space-y-3">
+                    <div className="text-xs font-bold text-amber-400 uppercase tracking-wider flex items-center space-x-1.5">
+                      <GraduationCap className="w-4 h-4" />
+                      <span>Coordenação e Gestão de Cursos (Academia de Polícia)</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {canAssignCourseCoordinator && (
+                        <>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                              Coordenação de curso?
+                            </label>
+                            <select
+                              value={isCourseCoordinator ? 'sim' : 'nao'}
+                              onChange={(e) => setIsCourseCoordinator(e.target.value === 'sim')}
+                              className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                            >
+                              <option value="nao">Não</option>
+                              <option value="sim">Sim</option>
+                            </select>
+                          </div>
+
+                          {isCourseCoordinator && (
+                            <div>
+                              <label className="block text-xs font-semibold text-amber-400 uppercase tracking-wider mb-1">
+                                Matéria da Academia de Polícia
+                              </label>
+                              <select
+                                value={coordinatorSubject}
+                                onChange={(e) => setCoordinatorSubject(e.target.value as 'MEAF' | 'TAP' | 'DP')}
+                                className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                              >
+                                <option value="MEAF">MEAF</option>
+                                <option value="TAP">TAP</option>
+                                <option value="DP">DP</option>
+                              </select>
+                            </div>
+                          )}
+                        </>
+                      )}
+
+                      {canAssignManageFormacao && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                            Pode gerir cursos de formações?
+                          </label>
+                          <select
+                            value={canManageFormacaoCourses ? 'sim' : 'nao'}
+                            onChange={(e) => setCanManageFormacaoCourses(e.target.value === 'sim')}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                          >
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {canAssignManageContinuado && (
+                        <div>
+                          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                            Pode Gerir cursos de atividade continuada?
+                          </label>
+                          <select
+                            value={canManageContinuadoCourses ? 'sim' : 'nao'}
+                            onChange={(e) => setCanManageContinuadoCourses(e.target.value === 'sim')}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                          >
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                          </select>
+                        </div>
+                      )}
+
+                      {canAssignCreateCourses && (
+                        <div className="md:col-span-2">
+                          <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                            Pode Criar cursos de atividade continuada e Cursos de formação?
+                          </label>
+                          <select
+                            value={canCreateAcademyCourses ? 'sim' : 'nao'}
+                            onChange={(e) => setCanCreateAcademyCourses(e.target.value === 'sim')}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                          >
+                            <option value="nao">Não</option>
+                            <option value="sim">Sim</option>
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 {/* Permissões Especiais de Manuseio com Armas e Munições (Ocultas quando o usuário não possui o privilégio ou for Explosivista/Administrativo) */}

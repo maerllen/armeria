@@ -67,6 +67,11 @@ export interface User {
   teacherSubject?: TeacherSubject;
   professorSigla?: string;
   professor_sigla?: string;
+  isCourseCoordinator?: boolean;
+  coordinatorSubject?: TeacherSubject;
+  canManageFormacaoCourses?: boolean;
+  canManageContinuadoCourses?: boolean;
+  canCreateAcademyCourses?: boolean;
   createdAt: string;
 }
 
@@ -414,11 +419,32 @@ export interface AcademyLessonPlan {
   suggestedTeachersCount: number;
 }
 
+export const CFTP_CAREERS_LIST = [
+  'Delegado de Polícia',
+  'Perito',
+  'Médico Legista',
+  'Escrivão de Polícia',
+  'Investigador de Polícia',
+  'Oficial Investigador de Polícia'
+] as const;
+
+export type CftpCareer = typeof CFTP_CAREERS_LIST[number];
+
+export interface CftpModuleScheduleRow {
+  data: string;
+  horario: string;
+  turma: string;
+  sigla: string;
+  disciplina: string;
+  sala: string;
+}
+
 export interface AcademyCourse {
   id: string;
   name: string;
   type: AcademyCourseType;
-  career?: AcademyCareer;
+  career?: AcademyCareer | string;
+  careers?: string[];
   code: string;
   // Formação specific:
   moduleNumber?: number;
@@ -427,6 +453,8 @@ export interface AcademyCourse {
   endDate?: string;
   departmentName?: string;
   departmentId?: string;
+  moduleSchedule?: CftpModuleScheduleRow[];
+  scheduleFileName?: string;
   // Ensino Continuado specific:
   teachingDepartmentName?: string;
   teachingDepartmentId?: string;
@@ -1323,9 +1351,27 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
 
   const role = user.activeRole || user.role;
 
+  const appendCoordinatorModules = (modules: ModuleType[]): ModuleType[] => {
+    if (!user.isCourseCoordinator) return modules;
+    const coordinatorModules: ModuleType[] = [
+      'cursos',
+      'ensino-continuado',
+      'gerencia-cursos',
+      'calendario',
+      'iniciar-aula-mobile'
+    ];
+    const merged = [...modules];
+    for (const mod of coordinatorModules) {
+      if (!merged.includes(mod)) {
+        merged.push(mod);
+      }
+    }
+    return merged;
+  };
+
   // 1. Geral
   if (role === 'Geral') {
-    return [
+    return appendCoordinatorModules([
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
@@ -1347,12 +1393,12 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'veterinario',
       'relatorio',
       'manual'
-    ];
+    ]);
   }
 
   // 2. Armeiro
   if (role === 'Armeiro') {
-    return [
+    return appendCoordinatorModules([
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
@@ -1367,12 +1413,12 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'materiais',
       'relatorio',
       'manual'
-    ];
+    ]);
   }
 
   // 3. Administrador
   if (role === 'Administrador' || (role as string) === 'Administrativo') {
-    return [
+    return appendCoordinatorModules([
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
@@ -1386,12 +1432,12 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'materiais',
       'relatorio',
       'manual'
-    ];
+    ]);
   }
 
   // 4. Explosivista
   if (role === 'Explosivista') {
-    return [
+    return appendCoordinatorModules([
       'meu-perfil',
       'cautela-armas',
       'cautela-municoes',
@@ -1402,17 +1448,17 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'cofre',
       'relatorio',
       'manual'
-    ];
+    ]);
   }
 
   // 5. Operador Canino
   if (role === 'operador_canino') {
-    return [
+    return appendCoordinatorModules([
       'meu-perfil',
       'veterinario',
       'relatorio',
       'manual'
-    ];
+    ]);
   }
 
   // 6. Policial
@@ -1428,16 +1474,16 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       policeModules.push('explosivos');
       policeModules.push('relatorio');
     }
-    return policeModules;
+    return appendCoordinatorModules(policeModules);
   }
 
   // Padrão de segurança
-  return [
+  return appendCoordinatorModules([
     'meu-perfil',
     'cautela-armas',
     'cautela-municoes',
     'cautela-materiais',
     'manual'
-  ];
+  ]);
 };
 
