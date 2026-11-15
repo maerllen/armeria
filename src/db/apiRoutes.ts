@@ -6555,12 +6555,12 @@ const handleSaveEquipeProfessoresCftp = async (req: Request, res: Response, forc
 
     const cleanApelido = String(apelidoEquipe || '').trim();
     if (!cleanApelido) {
-      return res.status(400).json({ error: 'Informe o apelido da equipe.' });
+      return res.status(400).json({ error: 'Selecione a equipe.' });
     }
 
     const cleanEq01 = equipe01 ? String(equipe01).trim() : null;
     if (!cleanEq01) {
-      return res.status(400).json({ error: 'Selecione pelo menos 1 professor para a equipe (Equipe 01).' });
+      return res.status(400).json({ error: 'Selecione pelo menos 1 professor para a equipe (Professor 01).' });
     }
 
     const cleanData1 = formatIsoDateField(data1) || formatIsoDateField(selectedCourse.start_date);

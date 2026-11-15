@@ -97,6 +97,13 @@ const ACADEPOL_CATALOG = [
 
 const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X'];
 
+const CFTP_TEAM_NAMES = [
+  'Alfa', 'Bravo', 'Charlie', 'Delta', 'Echo', 'Foxtrot', 'Golf', 'Hotel',
+  'India', 'Juliet', 'Kilo', 'Lima', 'Mike', 'November', 'Oscar', 'Papa',
+  'Quebec', 'Romeo', 'Sierra', 'Tango', 'Uniform', 'Victor', 'Whisky',
+  'X-ray', 'Yankee', 'Zulu'
+] as const;
+
 function generateDateRange(startStr: string, endStr: string): string[] {
   if (!startStr) return [];
   if (!endStr || endStr < startStr) return [startStr];
@@ -155,7 +162,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [selectedTeamCourseId, setSelectedTeamCourseId] = useState<string | null>(null);
   const [teamEditingId, setTeamEditingId] = useState<string | null>(null);
   const [teamMateria, setTeamMateria] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
-  const [teamApelido, setTeamApelido] = useState<string>('Professor 01');
+  const [teamApelido, setTeamApelido] = useState<string>('Alfa');
   const [teamData1, setTeamData1] = useState<string>('');
   const [teamData2, setTeamData2] = useState<string>('');
   const [teamSlots, setTeamSlots] = useState<Array<{ userId: string; userName: string; searchText: string }>>([
@@ -834,7 +841,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const resetTeamFormForCourse = (crs: AcademyCourse | null) => {
     setTeamEditingId(null);
     setTeamMateria(getLoggedUserDefaultSubject());
-    setTeamApelido('Professor 01');
+    setTeamApelido('Alfa');
     const sDate = (crs?.startDate || (crs?.dates && crs.dates[0]) || '').slice(0, 10);
     const eDate = (crs?.endDate || (crs?.dates && crs.dates.length > 1 ? crs.dates[crs.dates.length - 1] : sDate) || '').slice(0, 10);
     setTeamData1(sDate);
@@ -885,7 +892,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setTeamEditingId(team.id);
     const mat = (team.materia || 'MEAF').toUpperCase().trim();
     setTeamMateria(mat === 'TAP' || mat === 'DP' || mat === 'MEAF' ? mat : 'MEAF');
-    setTeamApelido(team.apelidoEquipe || 'Professor 01');
+    setTeamApelido(
+      team.apelidoEquipe && (CFTP_TEAM_NAMES as readonly string[]).includes(team.apelidoEquipe)
+        ? team.apelidoEquipe
+        : 'Alfa'
+    );
     setTeamData1((team.data1 || '').slice(0, 10));
     setTeamData2((team.data2 || '').slice(0, 10));
 
@@ -923,7 +934,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
     const validProfessors = teamSlots.filter(s => s.userName.trim() !== '');
     if (validProfessors.length === 0) {
-      setErrorMsg('Selecione pelo menos 1 professor para a equipe (Equipe_01).');
+      setErrorMsg('Selecione pelo menos 1 professor para a equipe (Professor 01).');
       return;
     }
 
@@ -2721,7 +2732,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
                       <div>
                         <label className="block text-slate-200 font-semibold mb-1.5">
-                          Apelido equipe <span className="text-red-400">*</span>
+                          Equipe <span className="text-red-400">*</span>
                         </label>
                         <select
                           value={teamApelido}
@@ -2729,10 +2740,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none"
                           required
                         >
-                          <option value="Professor 01">Professor 01</option>
-                          <option value="Professor 02">Professor 02</option>
-                          <option value="Professor 03">Professor 03</option>
-                          <option value="Professor 04">Professor 04</option>
+                          {CFTP_TEAM_NAMES.map(name => (
+                            <option key={name} value={name}>{name}</option>
+                          ))}
                         </select>
                       </div>
 
@@ -2814,7 +2824,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2 relative">
                               <div className="flex items-center justify-between">
                                 <label className="text-xs font-bold text-slate-200">
-                                  Equipe_{slotNumber} — Professor {slotNumber} {idx === 0 && <span className="text-red-400">*</span>}
+                                  Professor {slotNumber} {idx === 0 && <span className="text-red-400">*</span>}
                                 </label>
                                 {teamSlots.length > 1 && (
                                   <button
@@ -2983,11 +2993,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       <table className="w-full text-left text-xs text-slate-200">
                         <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
                           <tr>
-                            <th className="py-3 px-4">Apelido Equipe</th>
+                            <th className="py-3 px-4">Equipe</th>
                             <th className="py-3 px-4">Matéria</th>
                             <th className="py-3 px-4">CFTP</th>
                             <th className="py-3 px-4">Início / Fim</th>
-                            <th className="py-3 px-4">Professores (Equipe 01 a 06)</th>
+                            <th className="py-3 px-4">Professores</th>
                             <th className="py-3 px-4 text-right">Ações</th>
                           </tr>
                         </thead>
