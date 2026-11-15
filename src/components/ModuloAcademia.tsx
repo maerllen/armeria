@@ -157,6 +157,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [showProximosCftp, setShowProximosCftp] = useState(false);
   const [showPassadosCftp, setShowPassadosCftp] = useState(false);
   const [expandedCftpScheduleIds, setExpandedCftpScheduleIds] = useState<Record<string, boolean>>({});
+  const [expandedCftpTeamsIds, setExpandedCftpTeamsIds] = useState<Record<string, boolean>>({});
+  const [visibleTeamSubjectsMap, setVisibleTeamSubjectsMap] = useState<Record<string, Record<'MEAF' | 'TAP' | 'DP', boolean>>>({});
 
   // --- GERENCIAR EQUIPES (CFTP EM ANDAMENTO) STATE ---
   const [selectedTeamCourseId, setSelectedTeamCourseId] = useState<string | null>(null);
@@ -884,6 +886,39 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     resetTeamFormForCourse(crs);
     setErrorMsg('');
     setFormacaoTab('gerenciar-equipes');
+  };
+
+  const handleOpenGerenciarEquipesTab = () => {
+    if (!canManageFormacaoTeams) return;
+    const nowLocal = new Date();
+    const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const activeFormacao = academyCourses.filter(c => {
+      if (c.type !== 'Formação') return false;
+      const sDate = (c.startDate || (c.dates && c.dates[0]) || '').slice(0, 10);
+      const eDate = (c.endDate || (c.dates && c.dates.length > 1 ? c.dates[c.dates.length - 1] : sDate) || '').slice(0, 10);
+      if (sDate && todayStr < sDate) return false;
+      if (eDate && todayStr > eDate) return false;
+      return true;
+    });
+    const currentSelected = activeFormacao.find(c => c.id === selectedTeamCourseId) || activeFormacao[0] || null;
+    if (currentSelected && currentSelected.id !== selectedTeamCourseId) {
+      setSelectedTeamCourseId(currentSelected.id);
+      resetTeamFormForCourse(currentSelected);
+    } else if (currentSelected && !teamEditingId) {
+      resetTeamFormForCourse(currentSelected);
+    }
+    setErrorMsg('');
+    setSuccessMsg('');
+    setFormacaoTab('gerenciar-equipes');
+  };
+
+  const handleCancelTeamCadastro = () => {
+    setTeamEditingId(null);
+    setTeamSlots([{ userId: '', userName: '', searchText: '' }]);
+    setOpenTeacherDropdownIdx(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setFormacaoTab('cftp');
   };
 
   const handleTeamMateriaChange = (newMateria: 'MEAF' | 'TAP' | 'DP') => {
@@ -2329,64 +2364,46 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
         {/* Sub-tab Navigation */}
         {courseTypeFilterProp === 'Formação' ? (
-          (() => {
-            const nowTop = new Date();
-            const todayTop = `${nowTop.getFullYear()}-${String(nowTop.getMonth() + 1).padStart(2, '0')}-${String(nowTop.getDate()).padStart(2, '0')}`;
-            const hasSelectedActiveCourse = Boolean(
-              selectedTeamCourseId &&
-              academyCourses.some(c => {
-                if (c.type !== 'Formação' || c.id !== selectedTeamCourseId) return false;
-                const sD = (c.startDate || (c.dates && c.dates[0]) || '').slice(0, 10);
-                const eD = (c.endDate || (c.dates && c.dates.length > 1 ? c.dates[c.dates.length - 1] : sD) || '').slice(0, 10);
-                if (sD && todayTop < sD) return false;
-                if (eD && todayTop > eD) return false;
-                return true;
-              })
-            );
-
-            return (
-              <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setFormacaoTab('cftp')}
-                  className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
-                    formacaoTab === 'cftp'
-                      ? 'bg-amber-500 text-slate-950 font-bold'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <ClipboardList className="w-3.5 h-3.5" />
-                  <span>CFTP</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormacaoTab('novo-cftp')}
-                  className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
-                    formacaoTab === 'novo-cftp'
-                      ? 'bg-amber-500 text-slate-950 font-bold'
-                      : 'text-slate-300 hover:text-white'
-                  }`}
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Novo CFTP</span>
-                </button>
-                {canManageFormacaoTeams && hasSelectedActiveCourse && (
-                  <button
-                    type="button"
-                    onClick={() => setFormacaoTab('gerenciar-equipes')}
-                    className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
-                      formacaoTab === 'gerenciar-equipes'
-                        ? 'bg-amber-500 text-slate-950 font-bold'
-                        : 'text-slate-300 hover:text-white'
-                    }`}
-                  >
-                    <Users className="w-3.5 h-3.5" />
-                    <span>Gerenciar Equipes</span>
-                  </button>
-                )}
-              </div>
-            );
-          })()
+          <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold shrink-0">
+            <button
+              type="button"
+              onClick={() => setFormacaoTab('cftp')}
+              className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                formacaoTab === 'cftp'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <ClipboardList className="w-3.5 h-3.5" />
+              <span>CFTP</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setFormacaoTab('novo-cftp')}
+              className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                formacaoTab === 'novo-cftp'
+                  ? 'bg-amber-500 text-slate-950 font-bold'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Novo CFTP</span>
+            </button>
+            {canManageFormacaoTeams && (
+              <button
+                type="button"
+                onClick={handleOpenGerenciarEquipesTab}
+                className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                  formacaoTab === 'gerenciar-equipes'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Users className="w-3.5 h-3.5" />
+                <span>Gerenciar Equipes</span>
+              </button>
+            )}
+          </div>
         ) : (
           <div className="flex items-center bg-slate-950 p-1.5 rounded-xl border border-slate-800 text-xs font-semibold">
             <button
@@ -2463,6 +2480,220 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             return `${parts[2]}/${parts[1]}/${parts[0]}`;
           };
 
+          const userDefaultSubject = getLoggedUserDefaultSubject();
+          const TEAM_SUBJECTS: Array<'MEAF' | 'TAP' | 'DP'> = ['MEAF', 'TAP', 'DP'];
+
+          const getSubjectVisibility = (scopeKey: string): Record<'MEAF' | 'TAP' | 'DP', boolean> => {
+            const existing = visibleTeamSubjectsMap[scopeKey];
+            if (existing) return existing;
+            return {
+              MEAF: userDefaultSubject === 'MEAF',
+              TAP: userDefaultSubject === 'TAP',
+              DP: userDefaultSubject === 'DP'
+            };
+          };
+
+          const toggleSubjectVisibility = (scopeKey: string, subject: 'MEAF' | 'TAP' | 'DP') => {
+            setVisibleTeamSubjectsMap(prev => {
+              const current = prev[scopeKey] || {
+                MEAF: userDefaultSubject === 'MEAF',
+                TAP: userDefaultSubject === 'TAP',
+                DP: userDefaultSubject === 'DP'
+              };
+              return {
+                ...prev,
+                [scopeKey]: {
+                  ...current,
+                  [subject]: !current[subject]
+                }
+              };
+            });
+          };
+
+          const setAllSubjectsVisibility = (scopeKey: string, showAll: boolean) => {
+            setVisibleTeamSubjectsMap(prev => ({
+              ...prev,
+              [scopeKey]: showAll
+                ? { MEAF: true, TAP: true, DP: true }
+                : {
+                    MEAF: userDefaultSubject === 'MEAF',
+                    TAP: userDefaultSubject === 'TAP',
+                    DP: userDefaultSubject === 'DP'
+                  }
+            }));
+          };
+
+          const renderTeamsFilteredBySubject = (
+            crs: AcademyCourse,
+            teamsList: EquipeProfessoresCursoFormacao[],
+            scopeKey: string,
+            allowManageActions: boolean
+          ) => {
+            const visibility = getSubjectVisibility(scopeKey);
+            const allVisible = TEAM_SUBJECTS.every(s => visibility[s]);
+
+            return (
+              <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="px-3.5 py-2.5 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-slate-300 mr-1">
+                      Filtrar por matéria:
+                    </span>
+                    {TEAM_SUBJECTS.map(subj => {
+                      const countSubj = teamsList.filter(eq => (eq.materia || '').toUpperCase().trim() === subj).length;
+                      const isVis = visibility[subj];
+                      const isUserSubj = subj === userDefaultSubject;
+                      return (
+                        <button
+                          key={subj}
+                          type="button"
+                          onClick={() => toggleSubjectVisibility(scopeKey, subj)}
+                          className={`px-2.5 py-1 rounded-md border text-[11px] font-bold transition flex items-center gap-1 ${
+                            isVis
+                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                              : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-600'
+                          }`}
+                          title={isVis ? `Ocultar equipes de ${subj}` : `Exibir equipes de ${subj}`}
+                        >
+                          <span>{subj}</span>
+                          <span className="font-mono tabular-nums opacity-80">({countSubj})</span>
+                          {isUserSubj && <span className="text-[9px] text-emerald-400 font-semibold">• Sua</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setAllSubjectsVisibility(scopeKey, !allVisible)}
+                    className="text-[11px] font-semibold text-slate-300 hover:text-amber-300 transition whitespace-nowrap"
+                  >
+                    {allVisible ? 'Somente Minha Matéria' : 'Exibir Todas'}
+                  </button>
+                </div>
+
+                <div className="divide-y divide-slate-800">
+                  {TEAM_SUBJECTS.map(subj => {
+                    const subjTeams = teamsList.filter(eq => (eq.materia || '').toUpperCase().trim() === subj);
+                    const isVis = visibility[subj];
+                    const isUserSubj = subj === userDefaultSubject;
+
+                    return (
+                      <div key={subj}>
+                        <button
+                          type="button"
+                          onClick={() => toggleSubjectVisibility(scopeKey, subj)}
+                          className="w-full px-3.5 py-2 bg-slate-900/50 hover:bg-slate-900 flex items-center justify-between text-left transition"
+                        >
+                          <div className="flex items-center space-x-2">
+                            <span className="text-xs font-bold text-amber-400 font-mono">{subj}</span>
+                            <span className="text-[11px] text-slate-400 font-mono tabular-nums">
+                              ({subjTeams.length} equipe{subjTeams.length === 1 ? '' : 's'})
+                            </span>
+                            {isUserSubj && (
+                              <span className="text-[10px] font-semibold text-emerald-400">
+                                Matéria vinculada ao usuário
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-semibold text-slate-400">
+                            {isVis ? 'Ocultar ▲' : 'Exibir ▼'}
+                          </span>
+                        </button>
+
+                        {isVis && (
+                          subjTeams.length === 0 ? (
+                            <div className="px-4 py-3 text-xs text-slate-400 bg-slate-950/60">
+                              Nenhuma equipe cadastrada em {subj} para este CFTP.
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left text-xs text-slate-200">
+                                <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-y border-slate-800/80">
+                                  <tr>
+                                    <th className="py-2 px-3">Equipe</th>
+                                    <th className="py-2 px-3">Matéria</th>
+                                    <th className="py-2 px-3">CFTP</th>
+                                    <th className="py-2 px-3">Início / Fim</th>
+                                    <th className="py-2 px-3">Professores</th>
+                                    {allowManageActions && <th className="py-2 px-3 text-right">Ações</th>}
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-800/80">
+                                  {subjTeams.map(eq => {
+                                    const members = [
+                                      eq.equipe01,
+                                      eq.equipe02,
+                                      eq.equipe03,
+                                      eq.equipe04,
+                                      eq.equipe05,
+                                      eq.equipe06
+                                    ].filter(Boolean) as string[];
+
+                                    return (
+                                      <tr key={eq.id} className="hover:bg-slate-900/50 transition">
+                                        <td className="py-2 px-3 font-bold text-white whitespace-nowrap">{eq.apelidoEquipe}</td>
+                                        <td className="py-2 px-3 font-mono font-bold text-amber-400 whitespace-nowrap">{eq.materia}</td>
+                                        <td className="py-2 px-3 text-slate-300 whitespace-nowrap">{eq.cftp}</td>
+                                        <td className="py-2 px-3 font-mono tabular-nums text-slate-300 whitespace-nowrap">
+                                          {formatBrDate(eq.data1)} a {formatBrDate(eq.data2)}
+                                        </td>
+                                        <td className="py-2 px-3 text-slate-200">
+                                          {members.map((m, mIdx) => (
+                                            <span key={mIdx}>
+                                              {mIdx > 0 ? ' · ' : ''}
+                                              <strong className="text-slate-400 font-mono">0{mIdx + 1}:</strong> {m}
+                                            </span>
+                                          ))}
+                                        </td>
+                                        {allowManageActions && (
+                                          <td className="py-2 px-3 text-right whitespace-nowrap">
+                                            <div className="inline-flex items-center space-x-1.5">
+                                              <button
+                                                type="button"
+                                                onClick={() => {
+                                                  setSelectedTeamCourseId(crs.id);
+                                                  handleEditTeam(eq);
+                                                  setFormacaoTab('gerenciar-equipes');
+                                                }}
+                                                className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
+                                                title="Editar Equipe"
+                                              >
+                                                <Edit2 className="w-3.5 h-3.5" />
+                                              </button>
+                                              <button
+                                                type="button"
+                                                onClick={() =>
+                                                  setDeleteTarget({
+                                                    type: 'equipe-cftp',
+                                                    id: eq.id,
+                                                    name: `${eq.apelidoEquipe} (${eq.materia})`
+                                                  })
+                                                }
+                                                className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                                                title="Excluir Equipe"
+                                              >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </td>
+                                        )}
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          };
+
           const renderCftpCourseList = (items: AcademyCourse[], emptyText: string, isActiveGroup = false) => {
             if (items.length === 0) {
               return (
@@ -2481,20 +2712,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     : (crs.career ? String(crs.career).split(',').map(s => s.trim()).filter(Boolean) : []);
                   const scheduleRows = Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule : [];
                   const isScheduleOpen = Boolean(expandedCftpScheduleIds[crs.id]);
-                  const isSelectedForTeam = isActiveGroup && selectedTeamCourseId === crs.id;
-                  const courseTeamsCount = equipesProfessoresCftp.filter(eq => eq.cursoId === crs.id).length;
+                  const isTeamsOpen = Boolean(expandedCftpTeamsIds[crs.id]);
+                  const courseTeamsList = equipesProfessoresCftp.filter(eq => eq.cursoId === crs.id);
+                  const courseTeamsCount = courseTeamsList.length;
 
                   return (
                     <div
                       key={crs.id}
-                      onClick={isActiveGroup && canManageFormacaoTeams ? () => handleSelectActiveCourseForTeams(crs) : undefined}
-                      className={`p-4 transition space-y-3 ${
-                        isActiveGroup && canManageFormacaoTeams ? 'cursor-pointer' : ''
-                      } ${
-                        isSelectedForTeam
-                          ? 'bg-amber-500/10 hover:bg-amber-500/15'
-                          : 'hover:bg-slate-800/30'
-                      }`}
+                      className="p-4 transition space-y-3 hover:bg-slate-800/30"
                     >
                       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                         <div className="space-y-1.5 min-w-0">
@@ -2519,11 +2744,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <span className="font-mono tabular-nums">
                               Horário do módulo: <strong className="text-slate-200">{scheduleRows.length}</strong> registro(s)
                             </span>
-                            {isActiveGroup && canManageFormacaoTeams && (
-                              <span className="font-mono tabular-nums">
-                                Equipes vinculadas: <strong className="text-amber-300">{courseTeamsCount}</strong>
-                              </span>
-                            )}
+                            <span className="font-mono tabular-nums">
+                              Equipes vinculadas: <strong className="text-amber-300">{courseTeamsCount}</strong>
+                            </span>
                             {crs.scheduleFileName && (
                               <span className="text-slate-400">Arquivo: {crs.scheduleFileName}</span>
                             )}
@@ -2531,18 +2754,23 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                         </div>
 
                         <div className="flex flex-wrap items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
-                          {isActiveGroup && canManageFormacaoTeams && (
+                          {(isActiveGroup || courseTeamsCount > 0) && (
                             <button
                               type="button"
-                              onClick={() => handleSelectActiveCourseForTeams(crs)}
+                              onClick={() =>
+                                setExpandedCftpTeamsIds(prev => ({
+                                  ...prev,
+                                  [crs.id]: !prev[crs.id]
+                                }))
+                              }
                               className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition flex items-center space-x-1.5 whitespace-nowrap ${
-                                isSelectedForTeam
+                                isTeamsOpen
                                   ? 'bg-amber-500 text-slate-950 border-amber-400'
                                   : 'bg-slate-950 border-amber-500/50 text-amber-300 hover:bg-amber-500 hover:text-slate-950'
                               }`}
                             >
                               <Users className="w-3.5 h-3.5" />
-                              <span>Gerenciar Equipes</span>
+                              <span>{isTeamsOpen ? 'Ocultar equipes' : 'Ver equipes'}</span>
                             </button>
                           )}
 
@@ -2583,6 +2811,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           )}
                         </div>
                       </div>
+
+                      {isTeamsOpen && renderTeamsFilteredBySubject(crs, courseTeamsList, `view-${crs.id}`, canManageFormacaoTeams)}
 
                       {isScheduleOpen && scheduleRows.length > 0 && (
                         <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
@@ -2634,10 +2864,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     </div>
                     <button
                       type="button"
-                      onClick={() => setFormacaoTab('cftp')}
-                      className="px-3.5 py-2 rounded-lg border border-slate-700 text-xs font-semibold text-slate-200 hover:text-white whitespace-nowrap"
+                      onClick={handleCancelTeamCadastro}
+                      className="px-3.5 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-xs font-semibold text-red-300 hover:text-red-200 whitespace-nowrap"
                     >
-                      Voltar para CFTP
+                      Cancelar cadastro
                     </button>
                   </div>
 
@@ -2731,10 +2961,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => setFormacaoTab('cftp')}
-                      className="px-3.5 py-2 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-xs font-semibold text-slate-200 hover:text-white whitespace-nowrap"
+                      onClick={handleCancelTeamCadastro}
+                      className="px-3.5 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-xs font-semibold text-red-300 hover:text-red-200 whitespace-nowrap"
                     >
-                      Voltar para CFTP
+                      Cancelar cadastro
                     </button>
                   </div>
                 </div>
@@ -3019,7 +3249,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       </div>
                     </div>
 
-                    <div className="flex justify-end items-center gap-2 pt-3 border-t border-slate-800">
+                    <div className="flex flex-wrap justify-end items-center gap-2 pt-3 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={handleCancelTeamCadastro}
+                        className="px-4 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-red-300 hover:text-red-200 text-xs font-semibold"
+                      >
+                        Cancelar cadastro
+                      </button>
                       <button
                         type="button"
                         onClick={() => resetTeamFormForCourse(selectedActiveTeamCourse)}
@@ -3055,77 +3292,12 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       Nenhuma equipe cadastrada para este curso de formação até o momento.
                     </div>
                   ) : (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-left text-xs text-slate-200">
-                        <thead className="bg-slate-950 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800">
-                          <tr>
-                            <th className="py-3 px-4">Equipe</th>
-                            <th className="py-3 px-4">Matéria</th>
-                            <th className="py-3 px-4">CFTP</th>
-                            <th className="py-3 px-4">Início / Fim</th>
-                            <th className="py-3 px-4">Professores</th>
-                            <th className="py-3 px-4 text-right">Ações</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800">
-                          {courseTeams.map(eq => {
-                            const members = [
-                              eq.equipe01,
-                              eq.equipe02,
-                              eq.equipe03,
-                              eq.equipe04,
-                              eq.equipe05,
-                              eq.equipe06
-                            ].filter(Boolean) as string[];
-
-                            return (
-                              <tr key={eq.id} className="hover:bg-slate-800/30 transition">
-                                <td className="py-3 px-4 font-bold text-white whitespace-nowrap">{eq.apelidoEquipe}</td>
-                                <td className="py-3 px-4 font-mono font-bold text-amber-400 whitespace-nowrap">{eq.materia}</td>
-                                <td className="py-3 px-4 text-slate-300 whitespace-nowrap">{eq.cftp}</td>
-                                <td className="py-3 px-4 font-mono tabular-nums text-slate-300 whitespace-nowrap">
-                                  {formatBrDate(eq.data1)} a {formatBrDate(eq.data2)}
-                                </td>
-                                <td className="py-3 px-4 text-slate-200">
-                                  {members.map((m, mIdx) => (
-                                    <span key={mIdx}>
-                                      {mIdx > 0 ? ' · ' : ''}
-                                      <strong className="text-slate-400 font-mono">0{mIdx + 1}:</strong> {m}
-                                    </span>
-                                  ))}
-                                </td>
-                                <td className="py-3 px-4 text-right whitespace-nowrap">
-                                  <div className="inline-flex items-center space-x-1.5">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEditTeam(eq)}
-                                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
-                                      title="Editar Equipe"
-                                    >
-                                      <Edit2 className="w-3.5 h-3.5" />
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        setDeleteTarget({
-                                          type: 'equipe-cftp',
-                                          id: eq.id,
-                                          name: `${eq.apelidoEquipe} (${eq.materia})`
-                                        })
-                                      }
-                                      className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
-                                      title="Excluir Equipe"
-                                    >
-                                      <Trash2 className="w-3.5 h-3.5" />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                    renderTeamsFilteredBySubject(
+                      selectedActiveTeamCourse,
+                      courseTeams,
+                      `manage-${selectedActiveTeamCourse.id}`,
+                      true
+                    )
                   )}
                 </div>
               </div>
