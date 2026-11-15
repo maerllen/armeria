@@ -675,6 +675,87 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
     }
 
+    // 17D. TURMAS_CFTP (turmas do horário vinculadas a CURSOS_ACADEMIA)
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`TURMAS_CFTP\` (
+          \`ID_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CURSO_ID_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CFTP\` VARCHAR(255) NOT NULL,
+          \`TURMA\` VARCHAR(64) NOT NULL,
+          \`ARQUIVO_ALUNOS_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`ID_TURMA_CFTP\`),
+          UNIQUE KEY \`uq_turma_cftp_curso\` (\`CURSO_ID_TURMA_CFTP\`, \`TURMA\`),
+          KEY \`idx_turmacftp_curso\` (\`CURSO_ID_TURMA_CFTP\`),
+          CONSTRAINT \`fk_turmacftp_curso\` FOREIGN KEY (\`CURSO_ID_TURMA_CFTP\`) REFERENCES \`CURSOS_ACADEMIA\` (\`ID_CURSOS_ACADEMIA\`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } catch (_fkTurmaErr) {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`TURMAS_CFTP\` (
+          \`ID_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CURSO_ID_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CFTP\` VARCHAR(255) NOT NULL,
+          \`TURMA\` VARCHAR(64) NOT NULL,
+          \`ARQUIVO_ALUNOS_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`ID_TURMA_CFTP\`),
+          UNIQUE KEY \`uq_turma_cftp_curso\` (\`CURSO_ID_TURMA_CFTP\`, \`TURMA\`),
+          KEY \`idx_turmacftp_curso\` (\`CURSO_ID_TURMA_CFTP\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    }
+
+    // 17E. ALUNOS_TURMA_CFTP (alunos vinculados à turma e ao curso CFTP)
+    try {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`ALUNOS_TURMA_CFTP\` (
+          \`ID_ALUNO_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`TURMA_CFTP_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CURSO_ID_ALUNO_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CFTP\` VARCHAR(255) DEFAULT NULL,
+          \`TURMA\` VARCHAR(64) NOT NULL,
+          \`NOME_COMPLETO\` VARCHAR(255) NOT NULL,
+          \`MASP\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`ID_ALUNO_TURMA_CFTP\`),
+          KEY \`idx_alunocftp_curso_turma\` (\`CURSO_ID_ALUNO_TURMA_CFTP\`, \`TURMA\`),
+          KEY \`idx_alunocftp_turma_id\` (\`TURMA_CFTP_ID\`),
+          CONSTRAINT \`fk_alunocftp_turma\` FOREIGN KEY (\`TURMA_CFTP_ID\`) REFERENCES \`TURMAS_CFTP\` (\`ID_TURMA_CFTP\`) ON DELETE CASCADE,
+          CONSTRAINT \`fk_alunocftp_curso\` FOREIGN KEY (\`CURSO_ID_ALUNO_TURMA_CFTP\`) REFERENCES \`CURSOS_ACADEMIA\` (\`ID_CURSOS_ACADEMIA\`) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    } catch (_fkAlunoCftpErr) {
+      await connection.query(`
+        CREATE TABLE IF NOT EXISTS \`ALUNOS_TURMA_CFTP\` (
+          \`ID_ALUNO_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`TURMA_CFTP_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CURSO_ID_ALUNO_TURMA_CFTP\` VARCHAR(64) NOT NULL,
+          \`CFTP\` VARCHAR(255) DEFAULT NULL,
+          \`TURMA\` VARCHAR(64) NOT NULL,
+          \`NOME_COMPLETO\` VARCHAR(255) NOT NULL,
+          \`MASP\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+          \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+          \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`ID_ALUNO_TURMA_CFTP\`),
+          KEY \`idx_alunocftp_curso_turma\` (\`CURSO_ID_ALUNO_TURMA_CFTP\`, \`TURMA\`),
+          KEY \`idx_alunocftp_turma_id\` (\`TURMA_CFTP_ID\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+    }
+
     // 18. TURMAS_CURSO
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`TURMAS_CURSO\` (

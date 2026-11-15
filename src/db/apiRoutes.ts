@@ -4081,6 +4081,12 @@ apiRouter.delete('/academy-courses/:id', async (req: Request, res: Response) => 
       await pool.query('DELETE FROM HORARIO_MODULO_CFTP WHERE CURSO_ID_HORARIO_MODULO_CFTP = ?', [id]);
     } catch (_) {}
     try {
+      await pool.query('DELETE FROM ALUNOS_TURMA_CFTP WHERE CURSO_ID_ALUNO_TURMA_CFTP = ?', [id]);
+    } catch (_) {}
+    try {
+      await pool.query('DELETE FROM TURMAS_CFTP WHERE CURSO_ID_TURMA_CFTP = ?', [id]);
+    } catch (_) {}
+    try {
       await pool.query('DELETE FROM EQUIPE_PROFESSORES_CURSO_FORMACAO WHERE CURSO_ID_EQUIPE_PROFESSORES_CFTP = ?', [id]);
     } catch (_) {}
     await pool.query('DELETE FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?', [id]);
@@ -6690,6 +6696,402 @@ apiRouter.delete('/equipe-professores-cftp/:id', async (req: Request, res: Respo
 
     await pool.query('DELETE FROM EQUIPE_PROFESSORES_CURSO_FORMACAO WHERE ID_EQUIPE_PROFESSORES_CFTP = ?', [id]);
     await insertAuditLog('Cursos', 'Excluir', `Excluída equipe de professores CFTP ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// TURMAS E ALUNOS CFTP (CURSO DE FORMAÇÃO)
+// ============================================================================
+
+const verifyCanManageFormacaoTurmas = async (pool: any, actor: any): Promise<boolean> => {
+  if (!actor) return false;
+  if (actor.role === 'Geral' || (Array.isArray(actor.roles) && actor.roles.includes('Geral'))) {
+    return true;
+  }
+  if (actor.id) {
+    try {
+      const [rows]: any = await pool.query(
+        `SELECT PERFIL_USUARIOS as role, ROLES_USUARIOS as roles_json,
+                PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
+                COORDENACAO_CURSO_USUARIOS as is_course_coordinator,
+                PODE_CRIAR_CURSOS_USUARIOS as can_create_courses
+         FROM USUARIOS WHERE ID_USUARIOS = ?`,
+        [actor.id]
+      );
+      if (rows && rows.length > 0) {
+        const u = rows[0];
+        let parsedRoles: string[] = [];
+        try {
+          parsedRoles = typeof u.roles_json === 'string' ? JSON.parse(u.roles_json) : (u.roles_json || []);
+        } catch {
+          parsedRoles = [];
+        }
+        if (u.role === 'Geral' || parsedRoles.includes('Geral')) return true;
+        return Boolean(u.can_manage_formacao || u.is_course_coordinator || u.can_create_courses);
+      }
+    } catch (_) {}
+  }
+  return Boolean(actor.canManageFormacaoCourses || actor.isCourseCoordinator || actor.canCreateAcademyCourses);
+};
+
+apiRouter.get('/turmas-cftp', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const cursoIdFilter = req.query.cursoId ? String(req.query.cursoId).trim() : '';
+    const sql = `
+      SELECT
+        ID_TURMA_CFTP as id,
+        CURSO_ID_TURMA_CFTP as curso_id,
+        CFTP as cftp,
+        TURMA as turma,
+        ARQUIVO_ALUNOS_NOME as arquivo_alunos_nome,
+        CRIADO_POR_ID as criado_por_id,
+        CRIADO_POR_NOME as criado_por_nome,
+        DATA_CRIACAO as created_at,
+        DATA_ATUALIZACAO as updated_at
+      FROM TURMAS_CFTP
+      ${cursoIdFilter ? 'WHERE CURSO_ID_TURMA_CFTP = ?' : ''}
+      ORDER BY TURMA ASC, DATA_CRIACAO DESC
+    `;
+    const [rows]: any = await pool.query(sql, cursoIdFilter ? [cursoIdFilter] : []);
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      cursoId: r.curso_id,
+      cftp: r.cftp,
+      turma: r.turma,
+      arquivoAlunosNome: r.arquivo_alunos_nome || undefined,
+      criadoPorId: r.criado_por_id || undefined,
+      criadoPorNome: r.criado_por_nome || undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    if (err.code === 'ER_NO_SUCH_TABLE') return res.json([]);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.get('/alunos-turma-cftp', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const cursoIdFilter = req.query.cursoId ? String(req.query.cursoId).trim() : '';
+    const turmaFilter = req.query.turma ? String(req.query.turma).trim() : '';
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (cursoIdFilter) {
+      conditions.push('CURSO_ID_ALUNO_TURMA_CFTP = ?');
+      params.push(cursoIdFilter);
+    }
+    if (turmaFilter) {
+      conditions.push('TURMA = ?');
+      params.push(turmaFilter);
+    }
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_ALUNO_TURMA_CFTP as id,
+        TURMA_CFTP_ID as turma_cftp_id,
+        CURSO_ID_ALUNO_TURMA_CFTP as curso_id,
+        CFTP as cftp,
+        TURMA as turma,
+        NOME_COMPLETO as nome_completo,
+        MASP as masp,
+        CRIADO_POR_ID as criado_por_id,
+        CRIADO_POR_NOME as criado_por_nome,
+        DATA_CRIACAO as created_at,
+        DATA_ATUALIZACAO as updated_at
+      FROM ALUNOS_TURMA_CFTP
+      ${whereClause}
+      ORDER BY TURMA ASC, NOME_COMPLETO ASC`,
+      params
+    );
+    const mapped = (rows || []).map((r: any) => ({
+      id: r.id,
+      turmaCftpId: r.turma_cftp_id || undefined,
+      cursoId: r.curso_id,
+      cftp: r.cftp || undefined,
+      turma: r.turma,
+      nomeCompleto: r.nome_completo,
+      masp: r.masp || '',
+      criadoPorId: r.criado_por_id || undefined,
+      criadoPorNome: r.criado_por_nome || undefined,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
+    }));
+    return res.json(mapped);
+  } catch (err: any) {
+    if (err.code === 'ER_NO_SUCH_TABLE') return res.json([]);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/turmas-cftp', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { cursoId, cftp, turma, arquivoAlunosNome, alunos, actor } = req.body;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para gerenciar turmas do Curso de Formação.' });
+    }
+
+    if (!cursoId) {
+      return res.status(400).json({ error: 'Selecione um curso de formação CFTP.' });
+    }
+
+    const incomingStudents: Array<{ nomeCompleto: string; turma?: string; masp?: string }> = Array.isArray(alunos) ? alunos : [];
+    const cleanDefaultTurma = String(turma || '').trim();
+
+    if (!cleanDefaultTurma && incomingStudents.length === 0) {
+      return res.status(400).json({ error: 'Selecione uma turma ou importe/informe alunos com turma para vincular ao curso de formação.' });
+    }
+
+    const [courseRows]: any = await pool.query(
+      'SELECT ID_CURSOS_ACADEMIA as id, NOME_CURSOS_ACADEMIA as name, CODIGO_CURSOS_ACADEMIA as code, MODULO_CURSOS_ACADEMIA as module FROM CURSOS_ACADEMIA WHERE ID_CURSOS_ACADEMIA = ?',
+      [cursoId]
+    );
+    if (!courseRows || courseRows.length === 0) {
+      return res.status(404).json({ error: 'Curso de formação CFTP não encontrado.' });
+    }
+    const selectedCourse = courseRows[0];
+    const defaultCftpLabel = `${selectedCourse.module || selectedCourse.name || 'CFTP'} - ${selectedCourse.code || ''}`.replace(/\s+-\s*$/, '').trim();
+    const cleanCftp = String(cftp || defaultCftpLabel).trim();
+
+    const normTurma = (t: string) =>
+      String(t || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .replace(/[\s\-_]+/g, '')
+        .toUpperCase();
+
+    const ensureTurmaCftp = async (turmaCodeRaw: string): Promise<{ id: string; turma: string }> => {
+      const cleanT = String(turmaCodeRaw || '').trim();
+      const [existingTurmaRows]: any = await pool.query(
+        `SELECT ID_TURMA_CFTP as id, TURMA as turma
+         FROM TURMAS_CFTP
+         WHERE CURSO_ID_TURMA_CFTP = ?
+           AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(TURMA)), ' ', ''), '-', ''), '_', '') = REPLACE(REPLACE(REPLACE(UPPER(TRIM(?)), ' ', ''), '-', ''), '_', '')
+         LIMIT 1`,
+        [cursoId, cleanT]
+      );
+
+      if (existingTurmaRows && existingTurmaRows.length > 0) {
+        const existingId = existingTurmaRows[0].id;
+        if (arquivoAlunosNome) {
+          await pool.query(
+            'UPDATE TURMAS_CFTP SET ARQUIVO_ALUNOS_NOME = ?, DATA_ATUALIZACAO = NOW() WHERE ID_TURMA_CFTP = ?',
+            [String(arquivoAlunosNome).trim(), existingId]
+          );
+        }
+        return { id: existingId, turma: existingTurmaRows[0].turma || cleanT };
+      }
+
+      const newId = `tcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+      await pool.query(
+        `INSERT INTO TURMAS_CFTP (
+          ID_TURMA_CFTP, CURSO_ID_TURMA_CFTP, CFTP, TURMA, ARQUIVO_ALUNOS_NOME,
+          CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          newId,
+          cursoId,
+          cleanCftp,
+          cleanT,
+          arquivoAlunosNome ? String(arquivoAlunosNome).trim() : null,
+          actor?.id || null,
+          actor?.name || null
+        ]
+      );
+      return { id: newId, turma: cleanT };
+    };
+
+    const turmaCache = new Map<string, { id: string; turma: string }>();
+
+    const getOrCreateTurma = async (rawT: string) => {
+      const cleaned = String(rawT || '').trim();
+      const key = normTurma(cleaned);
+      if (!key) return null;
+      const cached = turmaCache.get(key);
+      if (cached) return cached;
+      const ensured = await ensureTurmaCftp(cleaned);
+      turmaCache.set(key, ensured);
+      return ensured;
+    };
+
+    let primaryTurmaRecord: { id: string; turma: string } | null = null;
+    if (cleanDefaultTurma) {
+      primaryTurmaRecord = await getOrCreateTurma(cleanDefaultTurma);
+    }
+
+    let insertedCount = 0;
+
+    for (const item of incomingStudents) {
+      const cleanNome = String(item?.nomeCompleto || '').trim();
+      if (!cleanNome) continue;
+
+      const resolvedTurmaStr = String(item?.turma || cleanDefaultTurma || '').trim();
+      if (!resolvedTurmaStr) continue;
+
+      const turmaRecord = await getOrCreateTurma(resolvedTurmaStr);
+      if (!turmaRecord) continue;
+      if (!primaryTurmaRecord) primaryTurmaRecord = turmaRecord;
+
+      const cleanMasp = item?.masp !== undefined && item?.masp !== null ? String(item.masp).trim() : '';
+      const alunoId = `acftp-${Date.now()}-${Math.random().toString(36).substring(2, 8)}-${insertedCount}`;
+      await pool.query(
+        `INSERT INTO ALUNOS_TURMA_CFTP (
+          ID_ALUNO_TURMA_CFTP, TURMA_CFTP_ID, CURSO_ID_ALUNO_TURMA_CFTP, CFTP, TURMA,
+          NOME_COMPLETO, MASP, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          alunoId,
+          turmaRecord.id,
+          cursoId,
+          cleanCftp,
+          turmaRecord.turma,
+          cleanNome,
+          cleanMasp || null,
+          actor?.id || null,
+          actor?.name || null
+        ]
+      );
+      insertedCount++;
+    }
+
+    const associatedTurmas = Array.from(turmaCache.values()).map(t => t.turma);
+    if (associatedTurmas.length === 0) {
+      return res.status(400).json({ error: 'Não foi possível identificar nenhuma turma válida para associar ao curso de formação.' });
+    }
+
+    await insertAuditLog(
+      'Cursos',
+      'Criar',
+      `Turma(s) ${associatedTurmas.join(', ')} (${cleanCftp}) associada(s) ao curso com ${insertedCount} aluno(s) cadastrado(s).`,
+      actor,
+      req.ip
+    );
+
+    return res.json({
+      success: true,
+      id: primaryTurmaRecord?.id,
+      turmaCftpId: primaryTurmaRecord?.id,
+      turmas: associatedTurmas,
+      turmasCount: associatedTurmas.length,
+      insertedCount
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/alunos-turma-cftp/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const { nomeCompleto, turma, masp, actor } = req.body;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para editar alunos da turma CFTP.' });
+    }
+
+    const cleanNome = String(nomeCompleto || '').trim();
+    const cleanTurma = String(turma || '').trim();
+    if (!cleanNome) {
+      return res.status(400).json({ error: 'O nome completo do aluno não pode ficar vazio.' });
+    }
+    if (!cleanTurma) {
+      return res.status(400).json({ error: 'A turma do aluno é obrigatória.' });
+    }
+    const cleanMasp = masp !== undefined && masp !== null ? String(masp).trim() : '';
+
+    // Keep TURMA_CFTP_ID synchronized with the student's turma under the same cursoId
+    const [existingAlunoRows]: any = await pool.query(
+      'SELECT CURSO_ID_ALUNO_TURMA_CFTP as cursoId, CFTP as cftp, TURMA_CFTP_ID as turmaCftpId FROM ALUNOS_TURMA_CFTP WHERE ID_ALUNO_TURMA_CFTP = ?',
+      [id]
+    );
+    let targetTurmaCftpId = existingAlunoRows?.[0]?.turmaCftpId || null;
+    const alunoCursoId = existingAlunoRows?.[0]?.cursoId || null;
+    const alunoCftp = existingAlunoRows?.[0]?.cftp || '';
+
+    if (alunoCursoId) {
+      const [matchingTurmas]: any = await pool.query(
+        `SELECT ID_TURMA_CFTP as id, TURMA as turma
+         FROM TURMAS_CFTP
+         WHERE CURSO_ID_TURMA_CFTP = ?
+           AND REPLACE(REPLACE(REPLACE(UPPER(TRIM(TURMA)), ' ', ''), '-', ''), '_', '') = REPLACE(REPLACE(REPLACE(UPPER(TRIM(?)), ' ', ''), '-', ''), '_', '')
+         LIMIT 1`,
+        [alunoCursoId, cleanTurma]
+      );
+      if (matchingTurmas && matchingTurmas.length > 0) {
+        targetTurmaCftpId = matchingTurmas[0].id;
+      } else {
+        targetTurmaCftpId = `tcftp-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+        await pool.query(
+          `INSERT INTO TURMAS_CFTP (
+            ID_TURMA_CFTP, CURSO_ID_TURMA_CFTP, CFTP, TURMA, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
+          ) VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [targetTurmaCftpId, alunoCursoId, alunoCftp || 'CFTP', cleanTurma, actor?.id || null, actor?.name || null]
+        );
+      }
+    }
+
+    await pool.query(
+      `UPDATE ALUNOS_TURMA_CFTP SET
+        TURMA_CFTP_ID = ?,
+        NOME_COMPLETO = ?,
+        TURMA = ?,
+        MASP = ?,
+        DATA_ATUALIZACAO = NOW()
+      WHERE ID_ALUNO_TURMA_CFTP = ?`,
+      [targetTurmaCftpId, cleanNome, cleanTurma, cleanMasp || null, id]
+    );
+
+    await insertAuditLog('Cursos', 'Editar', `Atualizados dados do aluno "${cleanNome}" (Turma ${cleanTurma})`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/alunos-turma-cftp/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const actor = req.body.actor;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para excluir alunos da turma CFTP.' });
+    }
+
+    await pool.query('DELETE FROM ALUNOS_TURMA_CFTP WHERE ID_ALUNO_TURMA_CFTP = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Removido aluno CFTP ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/turmas-cftp/:id', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const { id } = req.params;
+    const actor = req.body.actor;
+
+    const allowed = await verifyCanManageFormacaoTurmas(pool, actor);
+    if (!allowed) {
+      return res.status(403).json({ error: 'Sem permissão para excluir turmas CFTP.' });
+    }
+
+    await pool.query('DELETE FROM ALUNOS_TURMA_CFTP WHERE TURMA_CFTP_ID = ?', [id]);
+    await pool.query('DELETE FROM TURMAS_CFTP WHERE ID_TURMA_CFTP = ?', [id]);
+    await insertAuditLog('Cursos', 'Excluir', `Excluída turma CFTP ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });

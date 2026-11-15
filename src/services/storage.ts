@@ -24,6 +24,8 @@ import {
   ProfessorEquipe,
   AuxiliarTabelaEquipe,
   EquipeProfessoresCursoFormacao,
+  TurmaCftp,
+  AlunoTurmaCftp,
   Certificado,
   WeaponTransfer,
   WeaponTransferItem,
@@ -79,6 +81,8 @@ export interface AppState {
   equipesCalendario: EquipeCalendario[];
   auxiliarTabelaEquipe?: AuxiliarTabelaEquipe[];
   equipesProfessoresCftp?: EquipeProfessoresCursoFormacao[];
+  turmasCftp?: TurmaCftp[];
+  alunosTurmaCftp?: AlunoTurmaCftp[];
   certificados: Certificado[];
   tiposMateriais: TipoMaterial[];
   materiais: Material[];
@@ -128,6 +132,8 @@ class StorageService {
     equipesCalendario: [],
     auxiliarTabelaEquipe: [],
     equipesProfessoresCftp: [],
+    turmasCftp: [],
+    alunosTurmaCftp: [],
     certificados: [],
     tiposMateriais: [],
     materiais: [],
@@ -186,6 +192,8 @@ class StorageService {
         equipesCalendarioRes,
         auxiliarTabelaEquipeRes,
         equipesProfessoresCftpRes,
+        turmasCftpRes,
+        alunosTurmaCftpRes,
         certificadosRes,
         weaponTransfersRes,
         ammoTransfersRes,
@@ -228,6 +236,8 @@ class StorageService {
         fetchSync('/api/equipes-calendario'),
         fetchSync('/api/auxiliar-tabela-equipe'),
         fetchSync('/api/equipe-professores-cftp'),
+        fetchSync('/api/turmas-cftp'),
+        fetchSync('/api/alunos-turma-cftp'),
         fetchSync('/api/certificados'),
         fetchSync('/api/weapon-transfers'),
         fetchSync('/api/ammo-transfers'),
@@ -271,6 +281,8 @@ class StorageService {
       this.state.equipesCalendario = equipesCalendarioRes || [];
       this.state.auxiliarTabelaEquipe = auxiliarTabelaEquipeRes || [];
       this.state.equipesProfessoresCftp = equipesProfessoresCftpRes || [];
+      this.state.turmasCftp = turmasCftpRes || [];
+      this.state.alunosTurmaCftp = alunosTurmaCftpRes || [];
       this.state.certificados = certificadosRes || [];
       this.state.weaponTransfers = weaponTransfersRes || [];
       this.state.ammoTransfers = ammoTransfersRes || [];
@@ -2688,6 +2700,98 @@ class StorageService {
   public async deleteEquipeProfessoresCftp(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/equipe-professores-cftp/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // --- TURMAS E ALUNOS CURSO DE FORMAÇÃO (CFTP) ---
+  public getTurmasCftp(): TurmaCftp[] {
+    return this.state.turmasCftp || [];
+  }
+
+  public getAlunosTurmaCftp(): AlunoTurmaCftp[] {
+    return this.state.alunosTurmaCftp || [];
+  }
+
+  public async saveTurmaCftpWithAlunos(payload: {
+    cursoId: string;
+    cftp: string;
+    turma?: string;
+    arquivoAlunosNome?: string;
+    alunos?: Array<{ nomeCompleto: string; turma?: string; masp?: string }>;
+  }): Promise<{ success: boolean; id?: string; insertedCount?: number; turmas?: string[]; turmasCount?: number; error?: string }> {
+    try {
+      const res = await fetch('/api/turmas-cftp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return {
+        success: true,
+        id: data.id,
+        insertedCount: data.insertedCount,
+        turmas: data.turmas,
+        turmasCount: data.turmasCount
+      };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateAlunoTurmaCftp(
+    id: string,
+    payload: { nomeCompleto: string; turma: string; masp?: string }
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/alunos-turma-cftp/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAlunoTurmaCftp(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/alunos-turma-cftp/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteTurmaCftp(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/turmas-cftp/${id}`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actor: this.state.currentUser })

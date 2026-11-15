@@ -21,6 +21,8 @@ import {
   CFTP_CAREERS_LIST,
   CftpModuleScheduleRow,
   EquipeProfessoresCursoFormacao,
+  TurmaCftp,
+  AlunoTurmaCftp,
   formatCaliberDisplay
 } from '../types';
 import { storage } from '../services/storage';
@@ -141,7 +143,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   courseTypeFilterProp
 }) => {
   const [activeTab, setActiveTab] = useState<'movements' | 'turmas' | 'cursos'>('movements');
-  const [formacaoTab, setFormacaoTab] = useState<'cftp' | 'novo-cftp' | 'gerenciar-equipes'>('cftp');
+  const [formacaoTab, setFormacaoTab] = useState<'cftp' | 'novo-cftp' | 'gerenciar-equipes' | 'gerenciar-turmas'>('cftp');
 
   // --- NOVO CFTP & CFTP LIST STATE ---
   const [cftpEditingId, setCftpEditingId] = useState<string | null>(null);
@@ -158,6 +160,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const [showPassadosCftp, setShowPassadosCftp] = useState(false);
   const [expandedCftpScheduleIds, setExpandedCftpScheduleIds] = useState<Record<string, boolean>>({});
   const [expandedCftpTeamsIds, setExpandedCftpTeamsIds] = useState<Record<string, boolean>>({});
+  const [expandedCftpTurmasIds, setExpandedCftpTurmasIds] = useState<Record<string, boolean>>({});
+  const [visualizarTurmaFilterMap, setVisualizarTurmaFilterMap] = useState<Record<string, string>>({});
   const [visibleTeamSubjectsMap, setVisibleTeamSubjectsMap] = useState<Record<string, Record<'MEAF' | 'TAP' | 'DP', boolean>>>({});
 
   // --- GERENCIAR EQUIPES (CFTP EM ANDAMENTO) STATE ---
@@ -172,6 +176,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   ]);
   const [openTeacherDropdownIdx, setOpenTeacherDropdownIdx] = useState<number | null>(null);
   const [teamSaving, setTeamSaving] = useState(false);
+
+  // --- GERENCIAR TURMAS & ALUNOS CFTP STATE ---
+  const [turmaManageCourseId, setTurmaManageCourseId] = useState<string | null>(null);
+  const [turmaManageSelectedTurma, setTurmaManageSelectedTurma] = useState<string>('');
+  const [turmaManageCommaInput, setTurmaManageCommaInput] = useState<string>('');
+  const [turmaManageStagingAlunos, setTurmaManageStagingAlunos] = useState<Array<{ nomeCompleto: string; turma: string; masp: string }>>([]);
+  const [turmaManageFileName, setTurmaManageFileName] = useState<string>('');
+  const [turmaManageSingleNome, setTurmaManageSingleNome] = useState<string>('');
+  const [turmaManageSingleTurma, setTurmaManageSingleTurma] = useState<string>('');
+  const [turmaManageSingleMasp, setTurmaManageSingleMasp] = useState<string>('');
+  const [turmaManageSaving, setTurmaManageSaving] = useState(false);
+  const [editingAlunoCftpId, setEditingAlunoCftpId] = useState<string | null>(null);
+  const [editingAlunoCftpForm, setEditingAlunoCftpForm] = useState<{ nomeCompleto: string; turma: string; masp: string }>({
+    nomeCompleto: '',
+    turma: '',
+    masp: ''
+  });
+  const [savingAlunoCftpEdit, setSavingAlunoCftpEdit] = useState(false);
 
   const userDept = departments.find(d => d.id === currentUser.departmentId);
   const isAcademiaDept = (userDept?.name || '').toUpperCase().includes('ACADEMIA');
@@ -218,6 +240,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
   const lessonPlans = storage.getLessonPlans();
   const calendarRecords = storage.getCalendarRecords();
   const equipesProfessoresCftp = storage.getEquipesProfessoresCftp();
+  const turmasCftp = storage.getTurmasCftp();
+  const alunosTurmaCftp = storage.getAlunosTurmaCftp();
 
   const availableCalendarTurmas = React.useMemo(() => {
     const set = new Set<string>();
@@ -474,10 +498,16 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     currentUser.role === 'Geral' ||
     Boolean(currentUser?.canManageFormacaoCourses);
 
+  const canManageFormacaoTurmas =
+    currentUser.role === 'Geral' ||
+    Boolean(currentUser?.canManageFormacaoCourses) ||
+    Boolean(currentUser?.isCourseCoordinator) ||
+    Boolean(currentUser?.canCreateAcademyCourses);
+
   // Feedback messages
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan' | 'movement' | 'equipe-cftp'; id: string; name: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'course' | 'box' | 'class' | 'plan' | 'movement' | 'equipe-cftp' | 'turma-cftp' | 'aluno-cftp'; id: string; name: string } | null>(null);
 
   // Edit Mapa de Aula state
   const [showEditMovModal, setShowEditMovModal] = useState(false);
@@ -1092,6 +1122,676 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       setErrorMsg(err.message || 'Erro ao salvar equipe de professores.');
     } finally {
       setTeamSaving(false);
+    }
+  };
+
+  // --- GERENCIAR TURMAS & ALUNOS CFTP HELPERS & HANDLERS ---
+  const normalizeNoAccentUpper = (raw: string): string =>
+    String(raw || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .replace(/[^A-Z0-9\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+  const resolveCareerPrefix = (raw: string): string => {
+    const norm = normalizeNoAccentUpper(raw);
+    if (!norm) return '';
+    if (norm.includes('DELEGADO') || /^(DL)(?:\b|\d)/.test(norm)) return 'DL';
+    if (norm.includes('INVESTIGADOR') || /^(IP)(?:\b|\d)/.test(norm)) return 'IP';
+    if (norm.includes('ESCRIVAO') || norm.includes('ESCRIV') || /^(EP)(?:\b|\d)/.test(norm)) return 'EP';
+    if (norm.includes('MEDICO') || norm.includes('LEGISTA') || /^(ML)(?:\b|\d)/.test(norm)) return 'ML';
+    if (norm.includes('PERITO') || /^(PC)(?:\b|\d)/.test(norm)) return 'PC';
+    return '';
+  };
+
+  const hasUnicaKeyword = (raw: string): boolean =>
+    /\bUNICA\b/.test(normalizeNoAccentUpper(raw));
+
+  const normTurmaKey = (raw: string): string =>
+    String(raw || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .replace(/[\s\-_]+/g, '')
+      .toUpperCase();
+
+  const formatTurmaDisplayLabel = (raw: string): string => {
+    const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
+    if (!trimmed) return '';
+    if (hasUnicaKeyword(trimmed)) {
+      const prefix = resolveCareerPrefix(trimmed);
+      if (prefix) return `${prefix} Única`;
+      const beforeUnica = trimmed.replace(/\b[uú]nica\b/i, '').trim().toUpperCase();
+      return beforeUnica ? `${beforeUnica} Única` : 'Única';
+    }
+    return trimmed.replace(/\s+/g, '').toUpperCase();
+  };
+
+  const getDeduplicatedCourseTurmas = (crs: AcademyCourse | null): string[] => {
+    if (!crs) return [];
+    const map = new Map<string, string>();
+    const registerTurma = (raw?: string) => {
+      const cleaned = String(raw || '').trim();
+      if (!cleaned || cleaned === '—' || cleaned === '-') return;
+      const key = normTurmaKey(cleaned);
+      if (!key) return;
+      const display = formatTurmaDisplayLabel(cleaned);
+      if (!map.has(key)) {
+        map.set(key, display);
+      }
+    };
+
+    if (Array.isArray(crs.moduleSchedule)) {
+      crs.moduleSchedule.forEach(row => registerTurma(row?.turma));
+    }
+    turmasCftp
+      .filter(t => t.cursoId === crs.id)
+      .forEach(t => registerTurma(t.turma));
+    alunosTurmaCftp
+      .filter(a => a.cursoId === crs.id)
+      .forEach(a => registerTurma(a.turma));
+
+    return Array.from(map.values()).sort((a, b) =>
+      a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' })
+    );
+  };
+
+  const getEligibleTurmasCourses = (): AcademyCourse[] => {
+    const nowLocal = new Date();
+    const todayStr = `${nowLocal.getFullYear()}-${String(nowLocal.getMonth() + 1).padStart(2, '0')}-${String(nowLocal.getDate()).padStart(2, '0')}`;
+    const formacao = academyCourses.filter(c => c.type === 'Formação');
+    const ativos: AcademyCourse[] = [];
+    const proximos: AcademyCourse[] = [];
+    for (const c of formacao) {
+      const sDate = (c.startDate || (c.dates && c.dates[0]) || '').slice(0, 10);
+      const eDate = (c.endDate || (c.dates && c.dates.length > 1 ? c.dates[c.dates.length - 1] : sDate) || '').slice(0, 10);
+      if (sDate && todayStr < sDate) {
+        proximos.push(c);
+      } else if (eDate && todayStr > eDate) {
+        // passados ficam excluídos da criação/gerência ativa
+      } else {
+        ativos.push(c);
+      }
+    }
+    return [...ativos, ...proximos];
+  };
+
+  const looksLikeMaspToken = (val: string): boolean => {
+    const clean = String(val || '').trim().replace(/^masp[:\s-]*/i, '');
+    return /^\d[\d.\-\/]{2,}$/.test(clean);
+  };
+
+  const extractCleanMasp = (val: string): string =>
+    String(val || '').trim().replace(/^masp[:\s-]*/i, '').trim();
+
+  const romanToInt = (romanRaw: string): number | null => {
+    const s = String(romanRaw || '').trim().toUpperCase();
+    if (!s || !/^M{0,3}(CM|CD|D?C{0,3})(XC|XL|L?X{0,3})(IX|IV|V?I{0,3})$/.test(s)) {
+      return null;
+    }
+    const map: Record<string, number> = { I: 1, V: 5, X: 10, L: 50, C: 100, D: 500, M: 1000 };
+    let total = 0;
+    for (let i = 0; i < s.length; i++) {
+      const curr = map[s[i]];
+      const next = i + 1 < s.length ? map[s[i + 1]] : 0;
+      if (curr < next) {
+        total -= curr;
+      } else {
+        total += curr;
+      }
+    }
+    return total > 0 && total <= 39 ? total : null;
+  };
+
+  const extractTurmaNumber = (raw: string): string => {
+    const norm = normalizeNoAccentUpper(raw);
+    if (!norm) return '';
+
+    // Check explicit prefix+digits directly (e.g., "DL01", "IP2", "EP 03")
+    const compactMatch = norm.match(/^(?:DL|IP|EP|ML|PC)\s*0*(\d{1,3})$/);
+    if (compactMatch) {
+      const num = parseInt(compactMatch[1], 10);
+      if (!isNaN(num) && num > 0) return String(num).padStart(2, '0');
+    }
+
+    const stripped = norm
+      .replace(/^(?:TURMA|CARREIRA|CLASSE|GRUPO)\s+/i, '')
+      .replace(/^(?:DL|IP|EP|ML|PC)\s+/i, '')
+      .replace(/^(?:N|NO|NUM|NUMERO)\s+/i, '')
+      .trim();
+
+    // Check standalone or trailing digits (e.g. "1", "02", "DELEGADO DE POLICIA 1", "T1")
+    const digitMatch = stripped.match(/(?:^|\s|T)0*(\d{1,3})(?:\s|$)/) || stripped.match(/^0*(\d{1,3})$/);
+    if (digitMatch) {
+      const num = parseInt(digitMatch[1], 10);
+      if (!isNaN(num) && num > 0) return String(num).padStart(2, '0');
+    }
+
+    // Check Roman numeral token (e.g. "I", "II", "III", "IV", "DL II", "DELEGADO DE POLICIA III")
+    const strippedAfterPrefix = norm.replace(/^(?:DL|IP|EP|ML|PC)\s*/, '').trim();
+    const tokens = strippedAfterPrefix.split(/\s+/).filter(Boolean);
+    for (let i = tokens.length - 1; i >= 0; i--) {
+      const rNum = romanToInt(tokens[i]);
+      if (rNum !== null) {
+        return String(rNum).padStart(2, '0');
+      }
+    }
+
+    return '';
+  };
+
+  const resolveImportedTurmaOrCareer = (
+    turmaRaw: string,
+    carreiraRaw: string,
+    fallbackTurma: string
+  ): string => {
+    const tRaw = String(turmaRaw || '').trim();
+    const cRaw = String(carreiraRaw || '').trim();
+
+    // "Turma OU Carreira" possuem o mesmo significado para determinar a turma
+    const prefixFromTurma = resolveCareerPrefix(tRaw);
+    const prefixFromCarreira = resolveCareerPrefix(cRaw);
+    const prefix = prefixFromTurma || prefixFromCarreira;
+
+    const isUnica = hasUnicaKeyword(tRaw) || hasUnicaKeyword(cRaw);
+    const numFromTurma = extractTurmaNumber(tRaw);
+    const numFromCarreira = extractTurmaNumber(cRaw);
+    const num = numFromTurma || numFromCarreira;
+
+    // Caso especial "Única": ex. DELEGADO DE POLICIA + Única -> "DL Única" (com espaço)
+    if (isUnica) {
+      if (prefix) return `${prefix} Única`;
+      const fallbackPrefix = resolveCareerPrefix(fallbackTurma);
+      if (fallbackPrefix) return `${fallbackPrefix} Única`;
+      return 'Única';
+    }
+
+    if (prefix && num) {
+      return `${prefix}${num}`;
+    }
+    if (prefix && !num) {
+      return prefix;
+    }
+    if (!prefix && num) {
+      const fallbackPrefix = resolveCareerPrefix(fallbackTurma);
+      if (fallbackPrefix) {
+        return `${fallbackPrefix}${num}`;
+      }
+      return num;
+    }
+
+    if (tRaw) {
+      return formatTurmaDisplayLabel(tRaw);
+    }
+    if (cRaw) {
+      return formatTurmaDisplayLabel(cRaw);
+    }
+    return fallbackTurma ? formatTurmaDisplayLabel(fallbackTurma) : '';
+  };
+
+  const looksLikeTurmaToken = (val: string, defaultTurma: string): boolean => {
+    const clean = String(val || '').trim();
+    if (!clean) return false;
+    if (defaultTurma && normTurmaKey(clean) === normTurmaKey(defaultTurma)) return true;
+    if (resolveCareerPrefix(clean)) return true;
+    if (hasUnicaKeyword(clean)) return true;
+    if (/^[A-Za-z]{1,4}[\s\-_]?\d{1,3}[A-Za-z]?$/.test(clean)) return true;
+    return romanToInt(clean) !== null;
+  };
+
+  const parseStudentLinesOrComma = (
+    rawText: string,
+    defaultTurma: string
+  ): Array<{ nomeCompleto: string; turma: string; masp: string }> => {
+    const parsed: Array<{ nomeCompleto: string; turma: string; masp: string }> = [];
+    const lines = String(rawText || '')
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    for (const line of lines) {
+      const separator = line.includes(',') ? ',' : (line.includes(';') ? ';' : null);
+      const parts = separator
+        ? line.split(separator).map(p => p.trim()).filter(Boolean)
+        : [line];
+
+      if (parts.length === 0) continue;
+
+      if (parts.length === 1) {
+        parsed.push({
+          nomeCompleto: parts[0],
+          turma: defaultTurma,
+          masp: ''
+        });
+        continue;
+      }
+
+      const hasStructuredToken = parts.some(
+        p => looksLikeMaspToken(p) || looksLikeTurmaToken(p, defaultTurma)
+      );
+
+      if (!hasStructuredToken) {
+        for (const nome of parts) {
+          if (nome) {
+            parsed.push({
+              nomeCompleto: nome,
+              turma: defaultTurma,
+              masp: ''
+            });
+          }
+        }
+      } else {
+        let foundMasp = '';
+        let foundCareerRaw = '';
+        let foundTurmaRaw = '';
+        const nameChunks: string[] = [];
+
+        for (const part of parts) {
+          if (!foundMasp && looksLikeMaspToken(part)) {
+            foundMasp = extractCleanMasp(part);
+          } else if (resolveCareerPrefix(part) && !foundCareerRaw) {
+            foundCareerRaw = part;
+          } else if (!foundTurmaRaw && (looksLikeTurmaToken(part, defaultTurma) || /^\d{1,3}$/.test(part.trim()))) {
+            foundTurmaRaw = part;
+          } else {
+            nameChunks.push(part);
+          }
+        }
+
+        const resolvedTurma = resolveImportedTurmaOrCareer(foundTurmaRaw, foundCareerRaw, defaultTurma);
+        const nomeCompleto = nameChunks.join(' ').trim();
+        if (nomeCompleto || foundMasp) {
+          parsed.push({
+            nomeCompleto: nomeCompleto || (foundMasp ? `Aluno MASP ${foundMasp}` : ''),
+            turma: resolvedTurma || defaultTurma,
+            masp: foundMasp
+          });
+        }
+      }
+    }
+
+    return parsed;
+  };
+
+  const handleOpenGerenciarTurmasTab = (preselectCourseId?: string, preselectTurma?: string) => {
+    if (!canManageFormacaoTurmas) return;
+    const eligible = getEligibleTurmasCourses();
+    const targetCourse =
+      (preselectCourseId ? eligible.find(c => c.id === preselectCourseId) : null) ||
+      (turmaManageCourseId ? eligible.find(c => c.id === turmaManageCourseId) : null) ||
+      eligible[0] ||
+      null;
+
+    setTurmaManageCourseId(targetCourse ? targetCourse.id : null);
+    const dedupTurmas = getDeduplicatedCourseTurmas(targetCourse);
+    let chosenTurma = '';
+    if (preselectTurma) {
+      const match = dedupTurmas.find(t => normTurmaKey(t) === normTurmaKey(preselectTurma));
+      chosenTurma = match || formatTurmaDisplayLabel(preselectTurma);
+    } else if (
+      turmaManageSelectedTurma &&
+      targetCourse?.id === turmaManageCourseId &&
+      dedupTurmas.some(t => normTurmaKey(t) === normTurmaKey(turmaManageSelectedTurma))
+    ) {
+      chosenTurma = turmaManageSelectedTurma;
+    } else {
+      chosenTurma = dedupTurmas[0] || '';
+    }
+
+    setTurmaManageSelectedTurma(chosenTurma);
+    setTurmaManageSingleTurma(chosenTurma);
+    setTurmaManageCommaInput('');
+    setTurmaManageStagingAlunos([]);
+    setTurmaManageFileName('');
+    setTurmaManageSingleNome('');
+    setTurmaManageSingleMasp('');
+    setEditingAlunoCftpId(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setFormacaoTab('gerenciar-turmas');
+  };
+
+  const handleSelectTurmaManageCourse = (courseId: string) => {
+    const eligible = getEligibleTurmasCourses();
+    const crs = eligible.find(c => c.id === courseId) || null;
+    setTurmaManageCourseId(courseId || null);
+    const dedupTurmas = getDeduplicatedCourseTurmas(crs);
+    const firstTurma = dedupTurmas[0] || '';
+    setTurmaManageSelectedTurma(firstTurma);
+    setTurmaManageSingleTurma(firstTurma);
+    setTurmaManageStagingAlunos([]);
+    setTurmaManageCommaInput('');
+    setTurmaManageFileName('');
+    setEditingAlunoCftpId(null);
+    setErrorMsg('');
+  };
+
+  const handleSelectTurmaManageTurma = (turmaCode: string) => {
+    setTurmaManageSelectedTurma(turmaCode);
+    setTurmaManageSingleTurma(turmaCode);
+    if (turmaCode) {
+      setTurmaManageStagingAlunos(prev =>
+        prev.map(item => ({ ...item, turma: item.turma || turmaCode }))
+      );
+    }
+    setEditingAlunoCftpId(null);
+    setErrorMsg('');
+  };
+
+  const handleCancelTurmasCadastro = () => {
+    setTurmaManageCommaInput('');
+    setTurmaManageStagingAlunos([]);
+    setTurmaManageFileName('');
+    setTurmaManageSingleNome('');
+    setTurmaManageSingleMasp('');
+    setEditingAlunoCftpId(null);
+    setErrorMsg('');
+    setSuccessMsg('');
+    setFormacaoTab('cftp');
+  };
+
+  const handleParseCommaStudents = () => {
+    setErrorMsg('');
+    const fallback = turmaManageSelectedTurma || '';
+    if (!turmaManageCommaInput.trim()) {
+      setErrorMsg('Digite os nomes dos alunos separados por vírgula antes de adicionar.');
+      return;
+    }
+    const parsed = parseStudentLinesOrComma(turmaManageCommaInput, fallback);
+    if (parsed.length === 0) {
+      setErrorMsg('Nenhum aluno válido foi identificado no texto informado.');
+      return;
+    }
+    if (parsed.some(p => !p.turma)) {
+      setErrorMsg('Selecione uma Turma padrão ou informe a Turma/Carreira em cada linha.');
+      return;
+    }
+    setTurmaManageStagingAlunos(prev => [...prev, ...parsed]);
+    setTurmaManageCommaInput('');
+    setSuccessMsg(`${parsed.length} aluno(s) adicionado(s) à lista para cadastro.`);
+  };
+
+  const handleAddSingleStagingStudent = () => {
+    setErrorMsg('');
+    const nome = turmaManageSingleNome.trim();
+    if (!nome) {
+      setErrorMsg('Informe o nome completo do aluno para adicioná-lo.');
+      return;
+    }
+    const resolvedTurma = resolveImportedTurmaOrCareer(
+      turmaManageSingleTurma || turmaManageSelectedTurma,
+      '',
+      turmaManageSelectedTurma
+    );
+    if (!resolvedTurma) {
+      setErrorMsg('Selecione ou informe a Turma do aluno.');
+      return;
+    }
+    const maspVal = extractCleanMasp(turmaManageSingleMasp);
+    setTurmaManageStagingAlunos(prev => [
+      ...prev,
+      { nomeCompleto: nome, turma: resolvedTurma, masp: maspVal }
+    ]);
+    setTurmaManageSingleNome('');
+    setTurmaManageSingleMasp('');
+  };
+
+  const handleTurmaFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!turmaManageCourseId) {
+      setErrorMsg('Selecione primeiro o Curso de Formação CFTP antes de importar o arquivo de alunos.');
+      e.target.value = '';
+      return;
+    }
+
+    const defaultTurma = turmaManageSelectedTurma || '';
+
+    try {
+      const lowerName = file.name.toLowerCase();
+      let importedStudents: Array<{ nomeCompleto: string; turma: string; masp: string }> = [];
+
+      if (lowerName.endsWith('.txt')) {
+        const textContent = await file.text();
+        importedStudents = parseStudentLinesOrComma(textContent, defaultTurma);
+      } else {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: 'array' });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) {
+          setErrorMsg('O arquivo selecionado não possui planilha válida.');
+          return;
+        }
+        const ws = workbook.Sheets[firstSheetName];
+        const rawMatrix: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        if (!rawMatrix || rawMatrix.length === 0) {
+          setErrorMsg('O arquivo selecionado está vazio.');
+          return;
+        }
+
+        // Procura linha de cabeçalho nas primeiras 10 linhas
+        let headerRowIdx = -1;
+        let nomeColIdx = -1;
+        let turmaColIdx = -1;
+        let carreiraColIdx = -1;
+        let maspColIdx = -1;
+
+        for (let r = 0; r < Math.min(rawMatrix.length, 10); r++) {
+          const rowCells = (rawMatrix[r] || []).map(c => normalizeHeaderKey(String(c || '')));
+          let matchedCols = 0;
+          let nIdx = -1;
+          let tIdx = -1;
+          let cIdx = -1;
+          let mIdx = -1;
+
+          rowCells.forEach((hk, cIndex) => {
+            if (!hk) return;
+            if (
+              nIdx === -1 &&
+              (hk === 'nome completo' || hk === 'nome' || hk === 'aluno' || hk === 'nome do aluno' || hk.includes('nome') || hk.includes('aluno') || hk.includes('discente') || hk.includes('candidato') || hk.includes('servidor') || hk.includes('policial'))
+            ) {
+              nIdx = cIndex;
+              matchedCols++;
+            } else if (cIdx === -1 && (hk === 'carreira' || hk === 'cargo' || hk.includes('carreira') || hk.includes('cargo'))) {
+              cIdx = cIndex;
+              matchedCols++;
+            } else if (tIdx === -1 && (hk === 'turma' || hk.includes('turma') || hk === 'classe' || hk === 'grupo')) {
+              tIdx = cIndex;
+              matchedCols++;
+            } else if (mIdx === -1 && (hk === 'masp' || hk.includes('masp') || hk.includes('matric') || hk.includes('registro') || hk === 'funcional')) {
+              mIdx = cIndex;
+              matchedCols++;
+            }
+          });
+
+          if (matchedCols > 0 && (nIdx !== -1 || tIdx !== -1 || cIdx !== -1 || mIdx !== -1)) {
+            headerRowIdx = r;
+            nomeColIdx = nIdx;
+            turmaColIdx = tIdx;
+            carreiraColIdx = cIdx;
+            maspColIdx = mIdx;
+            break;
+          }
+        }
+
+        if (headerRowIdx >= 0) {
+          // Lê exclusivamente Nome, Turma, Carreira e MASP; ignora todas as demais colunas
+          for (let r = headerRowIdx + 1; r < rawMatrix.length; r++) {
+            const cols = rawMatrix[r] || [];
+            const nomeRaw = nomeColIdx >= 0 ? String(cols[nomeColIdx] ?? '').trim() : '';
+            const turmaRaw = turmaColIdx >= 0 ? String(cols[turmaColIdx] ?? '').trim() : '';
+            const carreiraRaw = carreiraColIdx >= 0 ? String(cols[carreiraColIdx] ?? '').trim() : '';
+            const maspRaw = maspColIdx >= 0 ? extractCleanMasp(String(cols[maspColIdx] ?? '')) : '';
+
+            if (!nomeRaw && !maspRaw) continue;
+
+            const resolvedTurma = resolveImportedTurmaOrCareer(turmaRaw, carreiraRaw, defaultTurma);
+            importedStudents.push({
+              nomeCompleto: nomeRaw || (maspRaw ? `Aluno MASP ${maspRaw}` : ''),
+              turma: resolvedTurma,
+              masp: maspRaw
+            });
+          }
+        } else {
+          // Planilha sem cabeçalho explícito: interpreta linha a linha ignorando colunas não identificadas
+          for (const cols of rawMatrix) {
+            const nonEmpty = (cols || []).map(c => String(c || '').trim()).filter(Boolean);
+            if (nonEmpty.length === 0) continue;
+            const parsedFromRow = parseStudentLinesOrComma(nonEmpty.join(', '), defaultTurma);
+            importedStudents.push(...parsedFromRow);
+          }
+        }
+      }
+
+      if (importedStudents.length === 0) {
+        setErrorMsg('Nenhum aluno foi identificado no arquivo selecionado.');
+        return;
+      }
+
+      const detectedTurmasMap = new Map<string, number>();
+      importedStudents.forEach(st => {
+        const key = st.turma || 'Sem turma';
+        detectedTurmasMap.set(key, (detectedTurmasMap.get(key) || 0) + 1);
+      });
+      const turmasSummary = Array.from(detectedTurmasMap.entries())
+        .map(([t, count]) => `${t} (${count})`)
+        .join(', ');
+
+      setTurmaManageStagingAlunos(prev => [...prev, ...importedStudents]);
+      setTurmaManageFileName(file.name);
+      setSuccessMsg(
+        `${importedStudents.length} aluno(s) carregado(s) do arquivo "${file.name}". Turmas identificadas: ${turmasSummary}.`
+      );
+    } catch (err: any) {
+      setErrorMsg(`Erro ao ler arquivo de alunos: ${err.message || 'formato inválido'}`);
+    } finally {
+      e.target.value = '';
+    }
+  };
+
+  const handleSaveTurmaAndAlunos = async (e: React.FormEvent, selectedCourse: AcademyCourse) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    let finalAlunos = [...turmaManageStagingAlunos];
+    if (turmaManageCommaInput.trim()) {
+      const extraFromComma = parseStudentLinesOrComma(turmaManageCommaInput, turmaManageSelectedTurma);
+      finalAlunos = [...finalAlunos, ...extraFromComma];
+    }
+    if (turmaManageSingleNome.trim()) {
+      const singleTurmaResolved = resolveImportedTurmaOrCareer(
+        turmaManageSingleTurma || turmaManageSelectedTurma,
+        '',
+        turmaManageSelectedTurma
+      );
+      finalAlunos.push({
+        nomeCompleto: turmaManageSingleNome.trim(),
+        turma: singleTurmaResolved,
+        masp: extractCleanMasp(turmaManageSingleMasp)
+      });
+    }
+
+    finalAlunos = finalAlunos
+      .map(a => ({
+        nomeCompleto: String(a.nomeCompleto || '').trim(),
+        turma: resolveImportedTurmaOrCareer(a.turma || '', '', turmaManageSelectedTurma),
+        masp: extractCleanMasp(a.masp || '')
+      }))
+      .filter(a => Boolean(a.nomeCompleto));
+
+    if (!turmaManageSelectedTurma && finalAlunos.length === 0) {
+      setErrorMsg('Selecione uma Turma ou importe/adicione alunos com suas turmas antes de salvar.');
+      return;
+    }
+
+    const alunoSemTurma = finalAlunos.find(a => !a.turma);
+    if (alunoSemTurma) {
+      setErrorMsg(`O aluno "${alunoSemTurma.nomeCompleto}" está sem turma definida. Informe a turma na lista ou selecione uma turma padrão.`);
+      return;
+    }
+
+    setTurmaManageSaving(true);
+    try {
+      const cftpLabel = formatCftpCourseLabel(selectedCourse);
+      const res = await storage.saveTurmaCftpWithAlunos({
+        cursoId: selectedCourse.id,
+        cftp: cftpLabel,
+        turma: turmaManageSelectedTurma || undefined,
+        arquivoAlunosNome: turmaManageFileName || undefined,
+        alunos: finalAlunos
+      });
+
+      if (!res.success) {
+        throw new Error(res.error || 'Erro ao salvar turma e alunos.');
+      }
+
+      const added = Number(res.insertedCount ?? finalAlunos.length);
+      const turmasJoined = Array.isArray(res.turmas) && res.turmas.length > 0
+        ? res.turmas.join(', ')
+        : turmaManageSelectedTurma;
+
+      setSuccessMsg(
+        added > 0
+          ? `Turma(s) ${turmasJoined} associada(s) ao curso com ${added} aluno(s) cadastrado(s)!`
+          : `Turma ${turmasJoined} vinculada com sucesso ao curso de formação! Você pode inserir ou importar alunos posteriormente.`
+      );
+      setTurmaManageStagingAlunos([]);
+      setTurmaManageCommaInput('');
+      setTurmaManageFileName('');
+      setTurmaManageSingleNome('');
+      setTurmaManageSingleMasp('');
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar turma e alunos.');
+    } finally {
+      setTurmaManageSaving(false);
+    }
+  };
+
+  const handleStartEditSavedAluno = (al: AlunoTurmaCftp) => {
+    setEditingAlunoCftpId(al.id);
+    setEditingAlunoCftpForm({
+      nomeCompleto: al.nomeCompleto || '',
+      turma: al.turma || '',
+      masp: al.masp || ''
+    });
+  };
+
+  const handleSaveEditedAluno = async (alunoId: string) => {
+    setErrorMsg('');
+    if (!editingAlunoCftpForm.nomeCompleto.trim()) {
+      setErrorMsg('O nome completo do aluno não pode ficar vazio.');
+      return;
+    }
+    if (!editingAlunoCftpForm.turma.trim()) {
+      setErrorMsg('A turma do aluno não pode ficar vazia.');
+      return;
+    }
+
+    setSavingAlunoCftpEdit(true);
+    try {
+      const res = await storage.updateAlunoTurmaCftp(alunoId, {
+        nomeCompleto: editingAlunoCftpForm.nomeCompleto.trim(),
+        turma: formatTurmaDisplayLabel(editingAlunoCftpForm.turma),
+        masp: extractCleanMasp(editingAlunoCftpForm.masp)
+      });
+      if (!res.success) {
+        throw new Error(res.error || 'Erro ao atualizar dados do aluno.');
+      }
+      setSuccessMsg('Dados do aluno atualizados com sucesso!');
+      setEditingAlunoCftpId(null);
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao atualizar aluno.');
+    } finally {
+      setSavingAlunoCftpEdit(false);
     }
   };
 
@@ -2245,6 +2945,14 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       if (deleteTarget.type === 'plan') await storage.deleteLessonPlan(deleteTarget.id);
       if (deleteTarget.type === 'movement') await storage.deleteCourseMovement(deleteTarget.id);
       if (deleteTarget.type === 'equipe-cftp') await storage.deleteEquipeProfessoresCftp(deleteTarget.id);
+      if (deleteTarget.type === 'turma-cftp') {
+        const res = await storage.deleteTurmaCftp(deleteTarget.id);
+        if (!res.success) throw new Error(res.error || 'Erro ao excluir turma.');
+      }
+      if (deleteTarget.type === 'aluno-cftp') {
+        const res = await storage.deleteAlunoTurmaCftp(deleteTarget.id);
+        if (!res.success) throw new Error(res.error || 'Erro ao excluir aluno.');
+      }
       setSuccessMsg('Item excluído com sucesso.');
       onRefresh();
     } catch (err: any) {
@@ -2382,7 +3090,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
         {/* Sub-tab Navigation */}
         {courseTypeFilterProp === 'Formação' ? (
-          <div className="flex items-center bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold shrink-0">
+          <div className="flex flex-wrap items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold shrink-0">
             <button
               type="button"
               onClick={() => setFormacaoTab('cftp')}
@@ -2419,6 +3127,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               >
                 <Users className="w-3.5 h-3.5" />
                 <span>Gerenciar Equipes</span>
+              </button>
+            )}
+            {canManageFormacaoTurmas && (
+              <button
+                type="button"
+                onClick={() => handleOpenGerenciarTurmasTab()}
+                className={`px-3.5 py-2 rounded-md transition flex items-center space-x-1.5 whitespace-nowrap ${
+                  formacaoTab === 'gerenciar-turmas'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Gerenciar turmas</span>
               </button>
             )}
           </div>
@@ -2712,7 +3434,239 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
             );
           };
 
-          const renderCftpCourseList = (items: AcademyCourse[], emptyText: string, isActiveGroup = false) => {
+          const renderVisualizarTurmasPanel = (crs: AcademyCourse, isEligibleToManage: boolean) => {
+            const dedupTurmas = getDeduplicatedCourseTurmas(crs);
+            const courseTurmasRegs = turmasCftp.filter(t => t.cursoId === crs.id);
+            const courseAlunos = alunosTurmaCftp.filter(a => a.cursoId === crs.id);
+            const activeTurmaFilter = visualizarTurmaFilterMap[crs.id] || 'TODAS';
+
+            const filteredAlunos =
+              activeTurmaFilter === 'TODAS'
+                ? courseAlunos
+                : courseAlunos.filter(a => normTurmaKey(a.turma) === normTurmaKey(activeTurmaFilter));
+
+            return (
+              <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                <div className="px-3.5 py-2.5 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-[11px] font-semibold text-slate-300 mr-1">
+                      Turmas do CFTP ({dedupTurmas.length}):
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setVisualizarTurmaFilterMap(prev => ({ ...prev, [crs.id]: 'TODAS' }))}
+                      className={`px-2.5 py-1 rounded-md border text-[11px] font-bold transition ${
+                        activeTurmaFilter === 'TODAS'
+                          ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                          : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      Todas ({courseAlunos.length})
+                    </button>
+                    {dedupTurmas.map(tCode => {
+                      const turmaKey = normTurmaKey(tCode);
+                      const countAlunos = courseAlunos.filter(a => normTurmaKey(a.turma) === turmaKey).length;
+                      const isSavedTurma = courseTurmasRegs.some(t => normTurmaKey(t.turma) === turmaKey);
+                      const isSelectedFilter = normTurmaKey(activeTurmaFilter) === turmaKey;
+
+                      return (
+                        <button
+                          key={tCode}
+                          type="button"
+                          onClick={() => setVisualizarTurmaFilterMap(prev => ({ ...prev, [crs.id]: tCode }))}
+                          className={`px-2.5 py-1 rounded-md border text-[11px] font-bold transition flex items-center gap-1 ${
+                            isSelectedFilter
+                              ? 'bg-amber-500/20 border-amber-500/60 text-amber-300'
+                              : 'bg-slate-950 border-slate-700 text-slate-300 hover:border-slate-600'
+                          }`}
+                        >
+                          <span>{tCode}</span>
+                          <span className="font-mono tabular-nums opacity-80">({countAlunos})</span>
+                          {isSavedTurma && (
+                            <span className="text-[9px] text-emerald-400 font-semibold">• Vinculada</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {isEligibleToManage && canManageFormacaoTurmas && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleOpenGerenciarTurmasTab(
+                          crs.id,
+                          activeTurmaFilter !== 'TODAS' ? activeTurmaFilter : dedupTurmas[0]
+                        )
+                      }
+                      className="px-3 py-1.5 rounded-md bg-amber-500 hover:bg-amber-400 text-slate-950 text-[11px] font-bold transition whitespace-nowrap"
+                    >
+                      Gerenciar / Inserir Alunos
+                    </button>
+                  )}
+                </div>
+
+                {courseTurmasRegs.length > 0 && (
+                  <div className="px-3.5 py-2 bg-slate-900/40 border-b border-slate-800 flex flex-wrap items-center gap-2 text-[11px]">
+                    <span className="text-slate-400 font-semibold">Turmas vinculadas:</span>
+                    {courseTurmasRegs.map(tReg => {
+                      const tCount = courseAlunos.filter(a => normTurmaKey(a.turma) === normTurmaKey(tReg.turma)).length;
+                      return (
+                        <span
+                          key={tReg.id}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-700 bg-slate-950 text-slate-200 font-mono"
+                        >
+                          <strong className="text-amber-300">{tReg.turma}</strong>
+                          <span className="text-slate-400">({tCount} aluno{tCount === 1 ? '' : 's'})</span>
+                          {canManageFormacaoTurmas && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setDeleteTarget({
+                                  type: 'turma-cftp',
+                                  id: tReg.id,
+                                  name: `Turma ${tReg.turma} e todos os seus alunos`
+                                })
+                              }
+                              className="text-slate-400 hover:text-red-400 transition ml-0.5"
+                              title="Excluir turma vinculada"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {dedupTurmas.length === 0 && courseAlunos.length === 0 ? (
+                  <div className="px-4 py-4 text-xs text-slate-400 text-center">
+                    Nenhuma turma foi identificada no horário deste CFTP até o momento.
+                  </div>
+                ) : filteredAlunos.length === 0 ? (
+                  <div className="px-4 py-4 text-xs text-slate-400 text-center">
+                    {activeTurmaFilter === 'TODAS'
+                      ? 'Nenhum aluno cadastrado para este CFTP até o momento. Você pode vincular a turma agora e inserir alunos depois.'
+                      : `Nenhum aluno cadastrado na turma ${activeTurmaFilter} até o momento.`}
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto max-h-80 overflow-y-auto">
+                    <table className="w-full text-left text-xs text-slate-200">
+                      <thead className="bg-slate-900 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                        <tr>
+                          <th className="py-2 px-3">Nome completo</th>
+                          <th className="py-2 px-3">Turma</th>
+                          <th className="py-2 px-3">MASP</th>
+                          {canManageFormacaoTurmas && <th className="py-2 px-3 text-right">Ações</th>}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/80">
+                        {filteredAlunos.map(al => {
+                          const isEditingRow = editingAlunoCftpId === al.id;
+                          return (
+                            <tr key={al.id} className="hover:bg-slate-900/50 transition">
+                              <td className="py-2 px-3 font-medium text-white">
+                                {isEditingRow ? (
+                                  <input
+                                    type="text"
+                                    value={editingAlunoCftpForm.nomeCompleto}
+                                    onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, nomeCompleto: e.target.value }))}
+                                    className="w-full bg-slate-900 border border-amber-500/60 rounded-md px-2 py-1 text-xs text-white focus:outline-none"
+                                    placeholder="Nome completo"
+                                  />
+                                ) : (
+                                  al.nomeCompleto || <span className="text-amber-400 italic">Não informado</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 font-mono font-bold text-amber-300 whitespace-nowrap">
+                                {isEditingRow ? (
+                                  <input
+                                    type="text"
+                                    value={editingAlunoCftpForm.turma}
+                                    onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, turma: e.target.value }))}
+                                    className="w-24 bg-slate-900 border border-amber-500/60 rounded-md px-2 py-1 text-xs text-white font-mono focus:outline-none"
+                                    placeholder="Turma"
+                                  />
+                                ) : (
+                                  al.turma || <span className="text-amber-400 italic">Não informada</span>
+                                )}
+                              </td>
+                              <td className="py-2 px-3 font-mono tabular-nums whitespace-nowrap">
+                                {isEditingRow ? (
+                                  <input
+                                    type="text"
+                                    value={editingAlunoCftpForm.masp}
+                                    onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, masp: e.target.value }))}
+                                    className="w-32 bg-slate-900 border border-amber-500/60 rounded-md px-2 py-1 text-xs text-white font-mono focus:outline-none"
+                                    placeholder="MASP (opcional)"
+                                  />
+                                ) : al.masp ? (
+                                  <span className="text-slate-200">{al.masp}</span>
+                                ) : (
+                                  <span className="text-amber-400/90 text-[11px] font-sans">Não informado (inserir depois)</span>
+                                )}
+                              </td>
+                              {canManageFormacaoTurmas && (
+                                <td className="py-2 px-3 text-right whitespace-nowrap">
+                                  {isEditingRow ? (
+                                    <div className="inline-flex items-center space-x-1.5">
+                                      <button
+                                        type="button"
+                                        disabled={savingAlunoCftpEdit}
+                                        onClick={() => handleSaveEditedAluno(al.id)}
+                                        className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold transition"
+                                      >
+                                        {savingAlunoCftpEdit ? 'Salvando...' : 'Salvar'}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingAlunoCftpId(null)}
+                                        className="px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold"
+                                      >
+                                        Cancelar
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="inline-flex items-center space-x-1.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleStartEditSavedAluno(al)}
+                                        className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
+                                        title="Editar / completar dados do aluno"
+                                      >
+                                        <Edit2 className="w-3.5 h-3.5" />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setDeleteTarget({
+                                            type: 'aluno-cftp',
+                                            id: al.id,
+                                            name: `${al.nomeCompleto} (${al.turma})`
+                                          })
+                                        }
+                                        className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                                        title="Excluir aluno"
+                                      >
+                                        <Trash2 className="w-3.5 h-3.5" />
+                                      </button>
+                                    </div>
+                                  )}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          };
+
+          const renderCftpCourseList = (items: AcademyCourse[], emptyText: string, isActiveGroup = false, isUpcomingGroup = false) => {
             if (items.length === 0) {
               return (
                 <div className="px-4 py-6 text-center text-xs text-slate-400 border-t border-slate-800">
@@ -2731,8 +3685,11 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                   const scheduleRows = Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule : [];
                   const isScheduleOpen = Boolean(expandedCftpScheduleIds[crs.id]);
                   const isTeamsOpen = Boolean(expandedCftpTeamsIds[crs.id]);
+                  const isTurmasOpen = Boolean(expandedCftpTurmasIds[crs.id]);
                   const courseTeamsList = equipesProfessoresCftp.filter(eq => eq.cursoId === crs.id);
                   const courseTeamsCount = courseTeamsList.length;
+                  const courseDedupTurmas = getDeduplicatedCourseTurmas(crs);
+                  const courseAlunosCount = alunosTurmaCftp.filter(a => a.cursoId === crs.id).length;
 
                   return (
                     <div
@@ -2765,6 +3722,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                             <span className="font-mono tabular-nums">
                               Equipes vinculadas: <strong className="text-amber-300">{courseTeamsCount}</strong>
                             </span>
+                            <span className="font-mono tabular-nums">
+                              Turmas: <strong className="text-slate-200">{courseDedupTurmas.length}</strong> · Alunos: <strong className="text-emerald-300">{courseAlunosCount}</strong>
+                            </span>
                             {crs.scheduleFileName && (
                               <span className="text-slate-400">Arquivo: {crs.scheduleFileName}</span>
                             )}
@@ -2791,6 +3751,24 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                               <span>{isTeamsOpen ? 'Ocultar equipes' : 'Ver equipes'}</span>
                             </button>
                           )}
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedCftpTurmasIds(prev => ({
+                                ...prev,
+                                [crs.id]: !prev[crs.id]
+                              }))
+                            }
+                            className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition flex items-center space-x-1.5 whitespace-nowrap ${
+                              isTurmasOpen
+                                ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                : 'bg-slate-950 border-amber-500/50 text-amber-300 hover:bg-amber-500 hover:text-slate-950'
+                            }`}
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>{isTurmasOpen ? 'Ocultar turmas' : 'Visualizar turmas'}</span>
+                          </button>
 
                           {scheduleRows.length > 0 && (
                             <button
@@ -2832,6 +3810,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
 
                       {isTeamsOpen && renderTeamsFilteredBySubject(crs, courseTeamsList, `view-${crs.id}`, canManageFormacaoTeams)}
 
+                      {isTurmasOpen && renderVisualizarTurmasPanel(crs, isActiveGroup || isUpcomingGroup)}
+
                       {isScheduleOpen && scheduleRows.length > 0 && (
                         <div className="bg-slate-950 border border-slate-800 rounded-lg overflow-hidden" onClick={(e) => e.stopPropagation()}>
                           <div className="overflow-x-auto max-h-72 overflow-y-auto">
@@ -2868,6 +3848,601 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
               </div>
             );
           };
+
+          if (formacaoTab === 'gerenciar-turmas' && canManageFormacaoTurmas) {
+            const eligibleCourses = [...activeCourses, ...upcomingCourses];
+            const selectedTurmaCourse = eligibleCourses.find(c => c.id === turmaManageCourseId) || null;
+            const deduplicatedTurmas = getDeduplicatedCourseTurmas(selectedTurmaCourse);
+            const effectiveSelectedTurma = deduplicatedTurmas.includes(turmaManageSelectedTurma)
+              ? turmaManageSelectedTurma
+              : '';
+            const courseLinkedTurmas = selectedTurmaCourse
+              ? turmasCftp.filter(t => t.cursoId === selectedTurmaCourse.id)
+              : [];
+            const courseAllAlunos = selectedTurmaCourse
+              ? alunosTurmaCftp.filter(a => a.cursoId === selectedTurmaCourse.id)
+              : [];
+            const savedAlunosForView = selectedTurmaCourse
+              ? (effectiveSelectedTurma
+                  ? courseAllAlunos.filter(a => normTurmaKey(a.turma) === normTurmaKey(effectiveSelectedTurma))
+                  : courseAllAlunos)
+              : [];
+            const savedTurmaRecord = selectedTurmaCourse && effectiveSelectedTurma
+              ? courseLinkedTurmas.find(t => normTurmaKey(t.turma) === normTurmaKey(effectiveSelectedTurma))
+              : undefined;
+
+            const stagingTurmaCounts = Array.from(
+              turmaManageStagingAlunos.reduce((acc, st) => {
+                const key = st.turma || 'Sem turma';
+                acc.set(key, (acc.get(key) || 0) + 1);
+                return acc;
+              }, new Map<string, number>()).entries()
+            );
+
+            return (
+              <div className="space-y-5">
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-white">Gerenciar turmas</h2>
+                      <p className="text-xs text-slate-400">
+                        Selecione um CFTP ativo ou próximo e importe um arquivo com várias turmas/carreiras (ou selecione uma turma do horário). Cada turma será associada ao curso de formação selecionado.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleCancelTurmasCadastro}
+                      className="px-3.5 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-xs font-semibold text-red-300 hover:text-red-200 whitespace-nowrap self-start sm:self-auto"
+                    >
+                      Cancelar cadastro
+                    </button>
+                  </div>
+
+                  {eligibleCourses.length === 0 ? (
+                    <div className="py-8 text-center text-xs text-slate-400">
+                      Nenhum curso de formação CFTP está ativo ou próximo na data atual.
+                    </div>
+                  ) : (
+                    <form
+                      onSubmit={(e) => selectedTurmaCourse && handleSaveTurmaAndAlunos(e, selectedTurmaCourse)}
+                      className="space-y-5 text-xs"
+                    >
+                      {/* Passo 1 e Passo 2: Curso CFTP (Ativo ou Próximo) e Filtro/Turma Padrão (sem duplicação) */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Curso de Formação CFTP (Ativos ou Próximos)
+                          </label>
+                          <select
+                            value={selectedTurmaCourse?.id || ''}
+                            onChange={(e) => handleSelectTurmaManageCourse(e.target.value)}
+                            className="w-full bg-slate-950 border border-amber-500/50 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-400 focus:outline-none"
+                          >
+                            <option value="">Selecione um curso CFTP...</option>
+                            {activeCourses.map(crs => (
+                              <option key={crs.id} value={crs.id}>
+                                {formatCftpCourseLabel(crs)} — Ativo ({formatBrDate((crs.startDate || '').slice(0, 10))} a {formatBrDate((crs.endDate || '').slice(0, 10))})
+                              </option>
+                            ))}
+                            {upcomingCourses.map(crs => (
+                              <option key={crs.id} value={crs.id}>
+                                {formatCftpCourseLabel(crs)} — Próximo ({formatBrDate((crs.startDate || '').slice(0, 10))} a {formatBrDate((crs.endDate || '').slice(0, 10))})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Turma no horário (sem duplicação / filtro ou padrão)
+                          </label>
+                          <select
+                            value={effectiveSelectedTurma}
+                            onChange={(e) => handleSelectTurmaManageTurma(e.target.value)}
+                            disabled={!selectedTurmaCourse}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-semibold focus:border-amber-500 focus:outline-none disabled:opacity-50"
+                          >
+                            <option value="">
+                              {deduplicatedTurmas.length > 0
+                                ? `Todas / Múltiplas turmas do arquivo (${courseAllAlunos.length} aluno${courseAllAlunos.length === 1 ? '' : 's'})`
+                                : 'Múltiplas turmas via arquivo importado'}
+                            </option>
+                            {deduplicatedTurmas.map(tCode => {
+                              const existingCount = selectedTurmaCourse
+                                ? courseAllAlunos.filter(a => normTurmaKey(a.turma) === normTurmaKey(tCode)).length
+                                : 0;
+                              return (
+                                <option key={tCode} value={tCode}>
+                                  {tCode} ({existingCount} aluno{existingCount === 1 ? '' : 's'} cadastrado{existingCount === 1 ? '' : 's'})
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Seleção rápida de turmas únicas do horário/curso */}
+                      {selectedTurmaCourse && deduplicatedTurmas.length > 0 && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 space-y-2">
+                          <div className="text-[11px] font-semibold text-slate-300">
+                            Turmas do CFTP ({deduplicatedTurmas.length}):
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSelectTurmaManageTurma('')}
+                              className={`px-3 py-1.5 rounded-md border text-xs font-bold transition flex items-center gap-1.5 ${
+                                !effectiveSelectedTurma
+                                  ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                  : 'bg-slate-900 border-slate-700 text-slate-200 hover:border-amber-500/50'
+                              }`}
+                            >
+                              <span>Todas / Múltiplas</span>
+                              <span className="font-mono text-[11px] opacity-80">({courseAllAlunos.length})</span>
+                            </button>
+                            {deduplicatedTurmas.map(tCode => {
+                              const isChosen = normTurmaKey(effectiveSelectedTurma) === normTurmaKey(tCode);
+                              const existingCount = courseAllAlunos.filter(
+                                a => normTurmaKey(a.turma) === normTurmaKey(tCode)
+                              ).length;
+                              return (
+                                <button
+                                  key={tCode}
+                                  type="button"
+                                  onClick={() => handleSelectTurmaManageTurma(tCode)}
+                                  className={`px-3 py-1.5 rounded-md border text-xs font-bold transition flex items-center gap-1.5 ${
+                                    isChosen
+                                      ? 'bg-amber-500 text-slate-950 border-amber-400'
+                                      : 'bg-slate-900 border-slate-700 text-slate-200 hover:border-amber-500/50'
+                                  }`}
+                                >
+                                  <span>{tCode}</span>
+                                  <span className="font-mono text-[11px] opacity-80">({existingCount})</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Passo 3: Importação de arquivo multi-turma / vírgula / individual */}
+                      {selectedTurmaCourse && (
+                        <div className="space-y-4 border-t border-slate-800 pt-4">
+                          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            {/* Opção 1: Upload de arquivo com múltiplas turmas/carreiras */}
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div>
+                                  <h3 className="text-xs font-bold text-white">
+                                    Importar arquivo de alunos (várias turmas ou turma única)
+                                  </h3>
+                                  <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                                    Lê as colunas <strong className="text-slate-200">Nome completo, Turma, Carreira e MASP</strong> (outras colunas são ignoradas). Converte automaticamente: <strong className="text-amber-300">Delegado de Polícia → DL</strong>, <strong className="text-amber-300">Investigador → IP</strong>, <strong className="text-amber-300">Escrivão → EP</strong>, <strong className="text-amber-300">Médico Legista → ML</strong>, <strong className="text-amber-300">Perito Criminal → PC</strong>, concatenando números, algarismos romanos ou <strong className="text-white font-mono">Única</strong> (ex.: Delegado + 1/I = <strong className="text-white font-mono">DL01</strong>; Delegado + Única = <strong className="text-white font-mono">DL Única</strong>).
+                                  </p>
+                                </div>
+                                <label className="cursor-pointer bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-3 py-2 rounded-lg transition flex items-center space-x-1.5 whitespace-nowrap shrink-0">
+                                  <Upload className="w-3.5 h-3.5" />
+                                  <span>Selecionar Arquivo</span>
+                                  <input
+                                    type="file"
+                                    accept=".xlsx,.xls,.csv,.txt"
+                                    onChange={handleTurmaFileUpload}
+                                    className="hidden"
+                                  />
+                                </label>
+                              </div>
+
+                              {turmaManageFileName && (
+                                <div className="text-[11px] text-emerald-400 font-mono flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-md border border-slate-800">
+                                  <span>Arquivo carregado: {turmaManageFileName}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setTurmaManageFileName('')}
+                                    className="text-slate-400 hover:text-red-400 ml-2"
+                                    title="Limpar nome do arquivo"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Opção 2: Digitar separados por vírgula */}
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                              <div className="flex items-center justify-between gap-2">
+                                <label className="text-xs font-bold text-white">
+                                  Digitar alunos separados por vírgula
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={handleParseCommaStudents}
+                                  className="px-3 py-1.5 rounded-md border border-amber-500/50 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-amber-300 font-bold text-[11px] transition whitespace-nowrap"
+                                >
+                                  Carregar na Lista
+                                </button>
+                              </div>
+                              <textarea
+                                rows={3}
+                                value={turmaManageCommaInput}
+                                onChange={(e) => setTurmaManageCommaInput(e.target.value)}
+                                placeholder={`Ex: João da Silva, Maria Oliveira, Pedro Santos\nou linha com turma/carreira: João da Silva, DELEGADO DE POLICIA, 1, 1234567`}
+                                className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                              />
+                              <p className="text-[11px] text-slate-400">
+                                Se faltar MASP ou outra informação, deixe em branco para preencher depois.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Opção 3: Inclusão rápida individual */}
+                          <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                            <div className="text-xs font-bold text-white">
+                              Adicionar aluno individualmente
+                            </div>
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-2.5 items-end">
+                              <div className="md:col-span-6">
+                                <label className="block text-[11px] text-slate-300 font-semibold mb-1">
+                                  Nome completo
+                                </label>
+                                <input
+                                  type="text"
+                                  value={turmaManageSingleNome}
+                                  onChange={(e) => setTurmaManageSingleNome(e.target.value)}
+                                  placeholder="Digite o nome completo do aluno"
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-[11px] text-slate-300 font-semibold mb-1">
+                                  Turma / Carreira
+                                </label>
+                                <input
+                                  type="text"
+                                  value={turmaManageSingleTurma}
+                                  onChange={(e) => setTurmaManageSingleTurma(e.target.value)}
+                                  placeholder={effectiveSelectedTurma || 'Ex: DL01'}
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <label className="block text-[11px] text-slate-300 font-semibold mb-1">
+                                  MASP (opcional)
+                                </label>
+                                <input
+                                  type="text"
+                                  value={turmaManageSingleMasp}
+                                  onChange={(e) => setTurmaManageSingleMasp(e.target.value)}
+                                  placeholder="Inserir se houver"
+                                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white font-mono focus:border-amber-500 focus:outline-none"
+                                />
+                              </div>
+                              <div className="md:col-span-2">
+                                <button
+                                  type="button"
+                                  onClick={handleAddSingleStagingStudent}
+                                  className="w-full px-3 py-2 rounded-lg border border-amber-500/50 bg-slate-900 hover:bg-amber-500 hover:text-slate-950 text-amber-300 font-bold text-xs transition flex items-center justify-center space-x-1 whitespace-nowrap"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                  <span>Adicionar</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Pré-visualização editável da lista para salvar */}
+                          {turmaManageStagingAlunos.length > 0 && (
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+                              <div className="px-4 py-2.5 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                                <div className="space-y-0.5">
+                                  <div className="text-xs font-bold text-white">
+                                    Novos alunos prontos para associar ao CFTP ({turmaManageStagingAlunos.length})
+                                  </div>
+                                  <div className="text-[11px] text-amber-300 font-mono">
+                                    Turmas a vincular: {stagingTurmaCounts.map(([t, c]) => `${t} (${c})`).join(' · ')}
+                                  </div>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setTurmaManageStagingAlunos([])}
+                                  className="text-[11px] font-semibold text-red-400 hover:text-red-300"
+                                >
+                                  Limpar lista
+                                </button>
+                              </div>
+                              <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                                <table className="w-full text-left text-xs text-slate-200">
+                                  <thead className="bg-slate-900/90 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                                    <tr>
+                                      <th className="py-2 px-3">Nome completo</th>
+                                      <th className="py-2 px-3">Turma</th>
+                                      <th className="py-2 px-3">MASP</th>
+                                      <th className="py-2 px-3 text-right">Remover</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody className="divide-y divide-slate-800/80">
+                                    {turmaManageStagingAlunos.map((st, stIdx) => (
+                                      <tr key={stIdx} className="hover:bg-slate-900/50">
+                                        <td className="py-1.5 px-3">
+                                          <input
+                                            type="text"
+                                            value={st.nomeCompleto}
+                                            onChange={(e) =>
+                                              setTurmaManageStagingAlunos(prev =>
+                                                prev.map((row, idx) =>
+                                                  idx === stIdx ? { ...row, nomeCompleto: e.target.value } : row
+                                                )
+                                              )
+                                            }
+                                            className="w-full bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs text-white focus:border-amber-500 focus:outline-none"
+                                          />
+                                        </td>
+                                        <td className="py-1.5 px-3">
+                                          <input
+                                            type="text"
+                                            value={st.turma}
+                                            placeholder="Ex: DL01"
+                                            onChange={(e) =>
+                                              setTurmaManageStagingAlunos(prev =>
+                                                prev.map((row, idx) =>
+                                                  idx === stIdx ? { ...row, turma: e.target.value } : row
+                                                )
+                                              )
+                                            }
+                                            className={`w-28 bg-slate-900 border rounded-md px-2 py-1 text-xs text-white font-mono focus:border-amber-500 focus:outline-none ${
+                                              st.turma ? 'border-slate-700' : 'border-red-500'
+                                            }`}
+                                          />
+                                        </td>
+                                        <td className="py-1.5 px-3">
+                                          <input
+                                            type="text"
+                                            value={st.masp}
+                                            placeholder="Opcional (depois)"
+                                            onChange={(e) =>
+                                              setTurmaManageStagingAlunos(prev =>
+                                                prev.map((row, idx) =>
+                                                  idx === stIdx ? { ...row, masp: e.target.value } : row
+                                                )
+                                              )
+                                            }
+                                            className="w-36 bg-slate-900 border border-slate-700 rounded-md px-2 py-1 text-xs text-white font-mono placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                                          />
+                                        </td>
+                                        <td className="py-1.5 px-3 text-right">
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setTurmaManageStagingAlunos(prev =>
+                                                prev.filter((_, idx) => idx !== stIdx)
+                                              )
+                                            }
+                                            className="p-1 text-slate-400 hover:text-red-400"
+                                            title="Remover da lista"
+                                          >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                          </button>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap justify-end items-center gap-2 pt-3 border-t border-slate-800">
+                            <button
+                              type="button"
+                              onClick={handleCancelTurmasCadastro}
+                              className="px-4 py-2 rounded-lg border border-red-500/40 bg-slate-950 hover:bg-red-500/10 text-red-300 hover:text-red-200 text-xs font-semibold"
+                            >
+                              Cancelar cadastro
+                            </button>
+                            <button
+                              type="submit"
+                              disabled={turmaManageSaving}
+                              className="bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs px-5 py-2 rounded-lg transition"
+                            >
+                              {turmaManageSaving
+                                ? 'Salvando...'
+                                : turmaManageStagingAlunos.length > 0 || turmaManageCommaInput.trim() || turmaManageSingleNome.trim()
+                                ? 'Salvar Turmas e Alunos'
+                                : 'Vincular Turma (acrescentar alunos depois)'}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </form>
+                  )}
+                </div>
+
+                {/* Alunos e Turmas já salvos no Curso CFTP selecionado — com edição inline para preencher dados faltantes */}
+                {selectedTurmaCourse && (
+                  <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+                    <div className="px-5 py-3.5 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Users className="w-4 h-4 text-amber-400" />
+                        <h3 className="text-sm font-bold text-white">
+                          {effectiveSelectedTurma
+                            ? `Alunos cadastrados — Turma ${effectiveSelectedTurma} (${savedAlunosForView.length})`
+                            : `Alunos cadastrados no CFTP — Todas as Turmas (${savedAlunosForView.length})`}
+                        </h3>
+                        {courseLinkedTurmas.length > 0 && (
+                          <span className="text-[11px] font-semibold text-emerald-400">
+                            • {courseLinkedTurmas.length} turma(s) associada(s) ao curso
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {savedTurmaRecord && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setDeleteTarget({
+                                type: 'turma-cftp',
+                                id: savedTurmaRecord.id,
+                                name: `Turma ${savedTurmaRecord.turma} e seus alunos`
+                              })
+                            }
+                            className="px-2.5 py-1 rounded-md border border-red-500/40 text-red-300 hover:bg-red-500/10 text-[11px] font-semibold"
+                          >
+                            Excluir Turma {savedTurmaRecord.turma}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {courseLinkedTurmas.length > 0 && (
+                      <div className="px-5 py-2.5 bg-slate-950/60 border-b border-slate-800 flex flex-wrap items-center gap-2 text-[11px]">
+                        <span className="text-slate-400 font-semibold">Turmas associadas ao curso:</span>
+                        {courseLinkedTurmas.map(tReg => {
+                          const tCount = courseAllAlunos.filter(a => normTurmaKey(a.turma) === normTurmaKey(tReg.turma)).length;
+                          return (
+                            <span
+                              key={tReg.id}
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-700 bg-slate-900 text-slate-200 font-mono"
+                            >
+                              <strong className="text-amber-300">{tReg.turma}</strong>
+                              <span className="text-slate-400">({tCount})</span>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setDeleteTarget({
+                                    type: 'turma-cftp',
+                                    id: tReg.id,
+                                    name: `Turma ${tReg.turma} e todos os seus alunos`
+                                  })
+                                }
+                                className="text-slate-400 hover:text-red-400 transition"
+                                title={`Excluir turma ${tReg.turma}`}
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {savedAlunosForView.length === 0 ? (
+                      <div className="px-5 py-6 text-center text-xs text-slate-400">
+                        {effectiveSelectedTurma
+                          ? `Nenhum aluno cadastrado para a turma ${effectiveSelectedTurma} até o momento.`
+                          : 'Nenhum aluno cadastrado para este curso CFTP até o momento.'}
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto max-h-96 overflow-y-auto">
+                        <table className="w-full text-left text-xs text-slate-200">
+                          <thead className="bg-slate-950 text-slate-300 uppercase text-[10px] tracking-wider border-b border-slate-800 sticky top-0">
+                            <tr>
+                              <th className="py-2.5 px-4">Nome completo</th>
+                              <th className="py-2.5 px-4">Turma</th>
+                              <th className="py-2.5 px-4">MASP</th>
+                              <th className="py-2.5 px-4 text-right">Ações</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/80">
+                            {savedAlunosForView.map(al => {
+                              const isEditing = editingAlunoCftpId === al.id;
+                              return (
+                                <tr key={al.id} className="hover:bg-slate-800/30 transition">
+                                  <td className="py-2.5 px-4 font-medium text-white">
+                                    {isEditing ? (
+                                      <input
+                                        type="text"
+                                        value={editingAlunoCftpForm.nomeCompleto}
+                                        onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, nomeCompleto: e.target.value }))}
+                                        className="w-full bg-slate-950 border border-amber-500/60 rounded-md px-2.5 py-1 text-xs text-white focus:outline-none"
+                                      />
+                                    ) : (
+                                      al.nomeCompleto
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono font-bold text-amber-300 whitespace-nowrap">
+                                    {isEditing ? (
+                                      <input
+                                        type="text"
+                                        value={editingAlunoCftpForm.turma}
+                                        onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, turma: e.target.value }))}
+                                        className="w-24 bg-slate-950 border border-amber-500/60 rounded-md px-2.5 py-1 text-xs text-white font-mono focus:outline-none"
+                                      />
+                                    ) : (
+                                      al.turma
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-4 font-mono tabular-nums whitespace-nowrap">
+                                    {isEditing ? (
+                                      <input
+                                        type="text"
+                                        value={editingAlunoCftpForm.masp}
+                                        placeholder="Informar MASP"
+                                        onChange={(e) => setEditingAlunoCftpForm(prev => ({ ...prev, masp: e.target.value }))}
+                                        className="w-36 bg-slate-950 border border-amber-500/60 rounded-md px-2.5 py-1 text-xs text-white font-mono focus:outline-none"
+                                      />
+                                    ) : al.masp ? (
+                                      al.masp
+                                    ) : (
+                                      <span className="text-amber-400/90 text-[11px] font-sans">Não informado (inserir depois)</span>
+                                    )}
+                                  </td>
+                                  <td className="py-2.5 px-4 text-right whitespace-nowrap">
+                                    {isEditing ? (
+                                      <div className="inline-flex items-center space-x-1.5">
+                                        <button
+                                          type="button"
+                                          disabled={savingAlunoCftpEdit}
+                                          onClick={() => handleSaveEditedAluno(al.id)}
+                                          className="px-2.5 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold"
+                                        >
+                                          {savingAlunoCftpEdit ? 'Salvando...' : 'Salvar'}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingAlunoCftpId(null)}
+                                          className="px-2.5 py-1 rounded-md border border-slate-700 text-slate-300 hover:text-white text-[11px] font-semibold"
+                                        >
+                                          Cancelar
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <div className="inline-flex items-center space-x-1.5">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleStartEditSavedAluno(al)}
+                                          className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-amber-400 transition"
+                                          title="Editar / inserir dados faltantes"
+                                        >
+                                          <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setDeleteTarget({
+                                              type: 'aluno-cftp',
+                                              id: al.id,
+                                              name: `${al.nomeCompleto} (${al.turma})`
+                                            })
+                                          }
+                                          className="p-1.5 rounded-lg border border-slate-700 bg-slate-950 hover:bg-slate-800 text-slate-300 hover:text-red-400 transition"
+                                          title="Excluir aluno"
+                                        >
+                                          <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          }
 
           if (formacaoTab === 'gerenciar-equipes' && canManageFormacaoTeams) {
             if (!selectedActiveTeamCourse) {
@@ -3576,7 +5151,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     Data de acesso: {formatBrDate(localTodayStr)}
                   </span>
                 </div>
-                {renderCftpCourseList(activeCourses, 'Nenhum curso de formação ativo na data atual.', true)}
+                {renderCftpCourseList(activeCourses, 'Nenhum curso de formação ativo na data atual.', true, false)}
               </div>
 
               {/* GRUPO 2: PRÓXIMOS (começa oculto) */}
@@ -3598,7 +5173,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                     {showProximosCftp ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                   </div>
                 </button>
-                {showProximosCftp && renderCftpCourseList(upcomingCourses, 'Nenhum curso de formação próximo agendado.')}
+                {showProximosCftp && renderCftpCourseList(upcomingCourses, 'Nenhum curso de formação próximo agendado.', false, true)}
               </div>
 
               {/* GRUPO 3: PASSADOS (começa oculto) */}

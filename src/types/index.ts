@@ -493,6 +493,32 @@ export interface EquipeProfessoresCursoFormacao {
   updatedAt?: string;
 }
 
+export interface TurmaCftp {
+  id: string;
+  cursoId: string;
+  cftp: string;
+  turma: string;
+  arquivoAlunosNome?: string;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AlunoTurmaCftp {
+  id: string;
+  turmaCftpId?: string;
+  cursoId: string;
+  cftp?: string;
+  turma: string;
+  nomeCompleto: string;
+  masp?: string;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 export interface CourseFormacao {
   id: string;
   name: string;
