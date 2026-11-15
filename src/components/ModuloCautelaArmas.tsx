@@ -9167,6 +9167,22 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                           <span className="font-mono text-[11px] font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/50">
                                             {ammoDetails.quantity} munições
                                           </span>
+                                          {!isDevPendente && cautela.status === 'AUTORIZADA' && (
+                                            <button
+                                              type="button"
+                                              onClick={() =>
+                                                onStartLinkedAmmoCautela
+                                                  ? onStartLinkedAmmoCautela(cautela)
+                                                  : handleOpenLinkAmmoModal(cautela)
+                                              }
+                                              className="inline-flex items-center justify-center gap-0.5 px-2 py-1 rounded-lg bg-slate-800 hover:bg-amber-500 text-amber-300 hover:text-slate-950 border border-slate-700 hover:border-amber-400 transition"
+                                              title="Vincular mais munições a esta arma"
+                                              aria-label="Vincular mais munições a esta arma"
+                                            >
+                                              <Disc className="w-3.5 h-3.5" />
+                                              <Plus className="w-3 h-3" />
+                                            </button>
+                                          )}
                                         </div>
                                       </div>
                                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px]">
@@ -9187,6 +9203,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                           <strong className="text-slate-200">{ammoDetails.destinacao}</strong>
                                         </div>
                                       </div>
+                                      {pendingLinkedAmmo && (
+                                        <div className="mt-2 pt-2 border-t border-slate-800/80 flex items-center justify-between gap-2 text-[11px] text-amber-300">
+                                          <span className="flex items-center gap-1.5">
+                                            <Clock className="w-3.5 h-3.5 shrink-0" />
+                                            <span>
+                                              Solicitação adicional em análise: <strong>+{pendingLinkedAmmo.quantity} un.</strong> (será somada ao total de {ammoDetails.quantity + pendingLinkedAmmo.quantity} un.)
+                                            </span>
+                                          </span>
+                                        </div>
+                                      )}
                                     </div>
                                   ) : pendingLinkedAmmo ? (
                                     <div className="p-3 bg-amber-950/25 border border-amber-600/50 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -9225,12 +9251,12 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                                 ? onStartLinkedAmmoCautela(cautela)
                                                 : handleOpenLinkAmmoModal(cautela)
                                             }
-                                            className="relative inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-sm shrink-0"
+                                            className="inline-flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 transition shadow-sm shrink-0"
                                             title="Solicitar cautela de munições vinculada a esta arma"
                                             aria-label="Solicitar cautela de munições vinculada a esta arma"
                                           >
-                                            <Disc className="w-4 h-4" />
-                                            <Plus className="w-3 h-3 absolute -top-1 -right-1 bg-emerald-600 text-white rounded-full p-0.5 border border-white/80" />
+                                            <Disc className="w-3.5 h-3.5" />
+                                            <Plus className="w-3 h-3" />
                                           </button>
                                         )}
                                       </div>

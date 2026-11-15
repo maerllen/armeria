@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   User,
   Weapon,
+  CautelaArma,
   CautelaMunicao,
   AmmunitionStock,
   Caliber,
@@ -290,7 +291,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   // Base completa de cautelas de munições excluindo rigorosamente qualquer registro sem munição (quantity <= 0)
   const allCautelas = useMemo(() => {
     return storage.getCautelasMunicoes().filter(c => Number(c.quantity || 0) > 0);
-  }, [ammoStocks, currentUser]); // recalcula após refresh
+  }, [ammoStocks, weapons, currentUser]); // recalcula após refresh
 
   // Cofres pertencentes à unidade ou departamento
   const scopedVaults = useMemo(() => {
@@ -360,8 +361,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     []
   );
 
-  // Cautelas de armas ATIVAS (AUTORIZADA) do solicitante que atualmente não possuem munição ativa ou pendente vinculada
-  const eligibleActiveWeaponCautelas = useMemo(() => {
+  // Todas as cautelas de armas ATIVAS (AUTORIZADA) em nome do usuário selecionado / logado
+  const activeWeaponCautelasForTarget = useMemo(() => {
     const allWeaponsCautelas = storage.getCautelasArmas();
     const targetMaspDigits = cleanDigits(formTargetRequester.masp);
     const targetMaspRaw = (formTargetRequester.masp || '').trim().toLowerCase();
@@ -373,46 +374,56 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
         w.requesterId === formTargetRequester.id ||
         (targetMaspRaw && (w.requesterMasp || '').trim().toLowerCase() === targetMaspRaw) ||
         (targetMaspDigits && cleanDigits(w.requesterMasp) === targetMaspDigits);
-      if (!sameRequester) return false;
+      return sameRequester;
+    });
+  }, [formTargetRequester, cleanDigits, ammoStocks, weapons]);
 
-      const hasActiveOrPendingLinkedAmmo = allCautelas.some(
-        m =>
-          (m.linkedWeaponCautelaId === w.id || (m as any).cautelaArmaId === w.id) &&
-          (m.status === 'AUTORIZADA' || m.status === 'DEVOLUCAO_PENDENTE' || m.status === 'PENDENTE')
-      );
-      if (hasActiveOrPendingLinkedAmmo) return false;
+  const getActiveLinkedAmmoForWeapon = useCallback(
+    (w: CautelaArma): { record: CautelaMunicao | null; quantity: number } => {
+      const cleanLinkedId = w.linkedAmmoCautelaId
+        ? String(w.linkedAmmoCautelaId).replace(/^caut-mun-/, '')
+        : '';
+      const activeLinked =
+        allCautelas.find(
+          m =>
+            (m.status === 'AUTORIZADA' || m.status === 'DEVOLUCAO_PENDENTE') &&
+            ((m.linkedWeaponCautelaId && m.linkedWeaponCautelaId === w.id) ||
+              ((m as any).cautelaArmaId && (m as any).cautelaArmaId === w.id) ||
+              (w.linkedAmmoCautelaId &&
+                (m.id === w.linkedAmmoCautelaId ||
+                  m.id === cleanLinkedId ||
+                  m.id === `caut-mun-${cleanLinkedId}`)))
+        ) || null;
 
-      if (w.linkedAmmoCautelaId) {
-        const cleanLinkedId = String(w.linkedAmmoCautelaId).replace(/^caut-mun-/, '');
-        const directAmmo = allCautelas.find(
-          m => m.id === w.linkedAmmoCautelaId || m.id === cleanLinkedId || m.id === `caut-mun-${cleanLinkedId}`
-        );
-        if (
-          directAmmo &&
-          (directAmmo.status === 'AUTORIZADA' ||
-            directAmmo.status === 'DEVOLUCAO_PENDENTE' ||
-            directAmmo.status === 'PENDENTE')
-        ) {
-          return false;
-        }
-        if (!directAmmo && Number(w.ammoQuantity || 0) > 0) return false;
-      } else if (Number(w.ammoQuantity || 0) > 0) {
-        const hasClosedAmmoForWeapon = allCautelas.some(
+      if (activeLinked) {
+        return { record: activeLinked, quantity: Number(activeLinked.quantity || 0) };
+      }
+
+      if (Number(w.ammoQuantity || 0) > 0) {
+        const hasClosedOrConsolidatedOnly = allCautelas.some(
           m =>
             (m.linkedWeaponCautelaId === w.id || (m as any).cautelaArmaId === w.id) &&
             (m.status === 'DEVOLVIDA' || m.status === 'CONSUMIDA')
         );
-        if (!hasClosedAmmoForWeapon) return false;
+        if (!hasClosedOrConsolidatedOnly) {
+          return { record: null, quantity: Number(w.ammoQuantity || 0) };
+        }
       }
 
-      return true;
-    });
-  }, [formTargetRequester, allCautelas, cleanDigits]);
+      return { record: null, quantity: 0 };
+    },
+    [allCautelas]
+  );
 
   const selectedLinkedWeapon = useMemo(() => {
     if (!selectedLinkedWeaponCautelaId) return null;
-    return eligibleActiveWeaponCautelas.find(w => w.id === selectedLinkedWeaponCautelaId) || null;
-  }, [eligibleActiveWeaponCautelas, selectedLinkedWeaponCautelaId]);
+    return activeWeaponCautelasForTarget.find(w => w.id === selectedLinkedWeaponCautelaId) || null;
+  }, [activeWeaponCautelasForTarget, selectedLinkedWeaponCautelaId]);
+
+  const selectedLinkedWeaponExistingAmmo = useMemo(() => {
+    if (!selectedLinkedWeapon) return { record: null as CautelaMunicao | null, quantity: 0 };
+    return getActiveLinkedAmmoForWeapon(selectedLinkedWeapon);
+  }, [selectedLinkedWeapon, getActiveLinkedAmmoForWeapon]);
 
   // Sincroniza pré-seleção vinda do módulo Cautela de Armas
   useEffect(() => {
@@ -586,14 +597,15 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   }, [allCautelas, isOwnCautela]);
 
   // 3. Aba Policial: "Meu Histórico Cautelas de Munições"
-  // Somente munições de consumo (não passíveis de devolução) + todas as já devolvidas
+  // Munições de consumo + devolvidas + consolidadas em novos recibos
   const policialMeuHistoricoBase = useMemo(() => {
     return allCautelas.filter(
       c =>
         isOwnCautela(c) &&
         ((c.status === 'AUTORIZADA' && !c.seraDevolvida) ||
           c.status === 'CONSUMIDA' ||
-          c.status === 'DEVOLVIDA')
+          c.status === 'DEVOLVIDA' ||
+          c.status === 'CONSOLIDADA')
     );
   }, [allCautelas, isOwnCautela]);
 
@@ -699,7 +711,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   const filteredPolicialHistoricoEncerradas = useMemo(
     () =>
       policialMeuHistoricoBase.filter(
-        c => (c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA') && matchesSearch(c) && matchesLinkFilter(c)
+        c =>
+          (c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' || c.status === 'CONSOLIDADA') &&
+          matchesSearch(c) &&
+          matchesLinkFilter(c)
       ),
     [policialMeuHistoricoBase, matchesSearch, matchesLinkFilter]
   );
@@ -785,6 +800,32 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
         return bScore - aScore;
       });
   }, [authorizeModalItem, availableUnitStocks, getStockCaliberName]);
+
+  const authorizeModalExistingAmmoQty = useMemo(() => {
+    if (!authorizeModalItem) return 0;
+    const weaponCautelaId =
+      authorizeModalItem.linkedWeaponCautelaId || (authorizeModalItem as any).cautelaArmaId;
+    if (!weaponCautelaId) return 0;
+    const activeOthers = allCautelas.filter(
+      m =>
+        m.id !== authorizeModalItem.id &&
+        m.status === 'AUTORIZADA' &&
+        (m.linkedWeaponCautelaId === weaponCautelaId || (m as any).cautelaArmaId === weaponCautelaId)
+    );
+    if (activeOthers.length > 0) {
+      return activeOthers.reduce((acc, m) => acc + Number(m.quantity || 0), 0);
+    }
+    const linkedW = storage.getCautelasArmas().find(w => w.id === weaponCautelaId);
+    if (
+      linkedW &&
+      linkedW.status === 'AUTORIZADA' &&
+      linkedW.linkedAmmoCautelaId &&
+      linkedW.linkedAmmoCautelaId !== authorizeModalItem.id
+    ) {
+      return Number(linkedW.ammoQuantity || 0);
+    }
+    return 0;
+  }, [authorizeModalItem, allCautelas]);
 
   // =========================================================================
   // HANDLERS DE AÇÃO
@@ -972,19 +1013,28 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     setLoading(false);
 
     if (res.success) {
+      const linkedModel = selectedLinkedWeapon?.weaponModel;
       showToast(
         'success',
         canAuthorize && isDirectAuthorize
-          ? selectedLinkedWeapon
-            ? `Cautela de munições confirmada, subtraída do cofre e vinculada à arma ${selectedLinkedWeapon.weaponModel}!`
+          ? res.wasSupplemented
+            ? `Munição somada à cautela da arma ${linkedModel || ''} (${res.previousQuantity} + ${res.addedQuantity} = ${res.totalQuantity} un.) e novo recibo gerado!`
+            : selectedLinkedWeapon
+            ? `Cautela de munições confirmada, subtraída do cofre e vinculada à arma ${linkedModel}!`
             : 'Cautela de munições confirmada e subtraída do cofre!'
           : selectedLinkedWeapon
-          ? `Solicitação de munições vinculada à arma ${selectedLinkedWeapon.weaponModel} registrada com sucesso!`
+          ? `Solicitação de munições vinculada à arma ${linkedModel} registrada com sucesso!`
           : 'Solicitação de munições registrada com sucesso!'
       );
       setSelectedStockId('');
       setSelectedLinkedWeaponCautelaId('');
       await onRefresh();
+      if (canAuthorize && isDirectAuthorize && res.wasSupplemented && res.id) {
+        const updatedRecord = storage.getCautelasMunicoes().find(c => c.id === res.id);
+        if (updatedRecord) {
+          handlePrintReceipt(updatedRecord);
+        }
+      }
       setActiveTab(targetRequester.id === currentUser.id ? (reqSeraDevolvida ? 'MINHAS' : 'MEU_HISTORICO') : 'TODAS');
     } else {
       showToast('error', res.error || 'Erro ao registrar cautela de munições.');
@@ -1034,8 +1084,9 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
       return;
     }
 
+    const targetItemId = authorizeModalItem.id;
     setLoading(true);
-    const res = await storage.authorizeCautelaMunicao(authorizeModalItem.id, {
+    const res = await storage.authorizeCautelaMunicao(targetItemId, {
       stockId: chosenStock.id,
       vaultSpaceId: chosenStock.vaultSpaceId,
       seraDevolvida: authSeraDevolvida,
@@ -1046,9 +1097,20 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     setLoading(false);
 
     if (res.success) {
-      showToast('success', 'Pagamento de munições confirmado! Quantidade subtraída do cofre selecionado.');
+      showToast(
+        'success',
+        res.wasSupplemented
+          ? `Pagamento confirmado e somado à cautela ativa da arma (${res.previousQuantity} + ${res.addedQuantity} = ${res.totalQuantity} un.)! Novo recibo gerado.`
+          : 'Pagamento de munições confirmado! Quantidade subtraída do cofre selecionado.'
+      );
       setAuthorizeModalItem(null);
       await onRefresh();
+      if (res.wasSupplemented) {
+        const updatedRecord = storage.getCautelasMunicoes().find(c => c.id === (res.id || targetItemId));
+        if (updatedRecord) {
+          handlePrintReceipt(updatedRecord);
+        }
+      }
     } else {
       showToast('error', res.error || 'Erro ao autorizar cautela de munições.');
     }
@@ -1229,6 +1291,12 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
     const isReturned = c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA';
     const isPermanent = !c.seraDevolvida;
     const cleanObs = stripInternalTags(c.observations);
+    const reinforceMatch = cleanObs.match(
+      /Reforço somado à cautela anterior:\s*\+?(\d+)\s*un\.\s*adicionadas às\s*(\d+)\s*un\.\s*anteriores\s*\(Total na cautela:\s*(\d+)\s*un\.\)/i
+    );
+    const supplementBreakdownText = reinforceMatch
+      ? `(${reinforceMatch[2]} un. anteriores + ${reinforceMatch[1]} un. adicionadas neste recibo)`
+      : '';
 
     const docTitle = buildStandardDocumentTitle(
       isReturned
@@ -1303,7 +1371,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
           <div class="section-title">2. Especificação das Munições</div>
           <div class="grid">
             <div class="field"><span class="label">Calibre:</span> <strong>${c.caliberName}</strong></div>
-            <div class="field"><span class="label">Quantidade Retirada:</span> <strong>${c.quantity} cartuchos</strong></div>
+            <div class="field"><span class="label">Quantidade na Cautela:</span> <strong>${c.quantity} cartuchos</strong> ${supplementBreakdownText ? `<span style="font-size:9.5px;color:#475569;">${supplementBreakdownText}</span>` : ''}</div>
             <div class="field"><span class="label">Fabricante / Tipo:</span> ${c.fabricante || 'Padrão'} • ${c.tipoMunicao || 'Operacional'}</div>
             <div class="field"><span class="label">Peso / Lote:</span> ${c.pesoMunicao || 'Padrão'} • Lote: ${c.loteMunicao || 'Padrão'}</div>
             <div class="field"><span class="label">Destinação:</span> ${c.destinacao || 'Operacional'}</div>
@@ -1313,6 +1381,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 : 'Avulsa (Sem vínculo com armamento)'
             }</div>
             <div class="field" style="grid-column: span 2;"><span class="label">Motivo / Justificativa:</span> ${c.reason}</div>
+            ${cleanObs ? `<div class="field" style="grid-column: span 2;"><span class="label">Observações / Soma de Cautela:</span> ${escapeHtmlText(cleanObs)}</div>` : ''}
           </div>
         </div>
 
@@ -1412,6 +1481,12 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
         return (
           <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-700/60 text-slate-300 border border-slate-600 flex items-center gap-1">
             <Flame className="w-3 h-3" /> Consumo Encerrado
+          </span>
+        );
+      case 'CONSOLIDADA':
+        return (
+          <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider bg-slate-700/60 text-slate-300 border border-slate-600 flex items-center gap-1">
+            <Layers className="w-3 h-3" /> Consolidada (Somada)
           </span>
         );
       case 'RECUSADA':
@@ -1546,7 +1621,11 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
 
               <div>
                 <span className="text-slate-500 block text-[10px] uppercase">Situação de Retorno</span>
-                {c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' ? (
+                {c.status === 'CONSOLIDADA' ? (
+                  <strong className="text-slate-300">
+                    Somada em novo recibo
+                  </strong>
+                ) : c.status === 'DEVOLVIDA' || c.status === 'CONSUMIDA' ? (
                   <strong className="text-cyan-300">
                     Remanescentes: {c.returnedQuantity ?? 0}/{c.quantity} un.
                   </strong>
@@ -1853,34 +1932,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                   : 'Selecione o lote do cofre para retirada e o policial destinatário.'}
               </p>
             </div>
-            {selectedLinkedWeapon && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 shrink-0">
-                <Link2 className="w-3.5 h-3.5" />
-                <span>Vinculada a Arma Ativa</span>
-              </span>
-            )}
           </div>
-
-          {selectedLinkedWeapon && (
-            <div className="bg-indigo-950/35 border border-indigo-500/40 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-              <div className="flex items-start sm:items-center gap-2 text-indigo-200">
-                <Shield className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5 sm:mt-0" />
-                <div>
-                  <span className="font-bold text-indigo-300">Solicitação vinculada ao armamento: </span>
-                  <strong className="text-slate-100">
-                    {selectedLinkedWeapon.weaponModel} • Nº {selectedLinkedWeapon.weaponSerialNumber} ({selectedLinkedWeapon.weaponCaliber})
-                  </strong>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedLinkedWeaponCautelaId('')}
-                className="text-[11px] font-bold text-indigo-300 hover:text-indigo-200 underline self-end sm:self-center shrink-0"
-              >
-                Desvincular
-              </button>
-            </div>
-          )}
 
           {/* Seletor de modalidade (Passiva de Devolução x Consumo) */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1940,6 +1992,36 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
           {/* Campos de Seleção de Munição: POLICIAL (sem ver cofre nem saldo) vs ARMEIRO */}
           {isPolicial ? (
             <div className="space-y-4">
+              {activeWeaponCautelasForTarget.length > 0 && (
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
+                    Vincular à Arma Ativa (Opcional)
+                  </label>
+                  <select
+                    value={selectedLinkedWeaponCautelaId}
+                    onChange={e => setSelectedLinkedWeaponCautelaId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="">-- Sem vínculo com armamento (Munição Avulsa) --</option>
+                    {activeWeaponCautelasForTarget.map(w => {
+                      const existingAmmo = getActiveLinkedAmmoForWeapon(w);
+                      return (
+                        <option key={w.id} value={w.id}>
+                          {w.weaponModel} — Nº {w.weaponSerialNumber} ({w.weaponCaliber})
+                          {existingAmmo.quantity > 0 ? ` • Já possui ${existingAmmo.quantity} un. (irá somar)` : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  {selectedLinkedWeapon && selectedLinkedWeaponExistingAmmo.quantity > 0 && (
+                    <p className="text-xs text-slate-300 mt-1.5">
+                      Esta arma já possui <strong>{selectedLinkedWeaponExistingAmmo.quantity} un.</strong> vinculada(s). Após confirmação pelo Armeiro, a cautela totalizará{' '}
+                      <strong>{selectedLinkedWeaponExistingAmmo.quantity + reqQuantity} un.</strong> e será gerado um novo recibo.
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-300 uppercase mb-1.5">
@@ -2073,6 +2155,36 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                       </option>
                     ))}
                   </select>
+
+                  {activeWeaponCautelasForTarget.length > 0 && (
+                    <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                      <label className="block text-xs font-bold text-slate-300 uppercase">
+                        Vincular à Arma Ativa do Policial Destinatário (Opcional)
+                      </label>
+                      <select
+                        value={selectedLinkedWeaponCautelaId}
+                        onChange={e => setSelectedLinkedWeaponCautelaId(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2.5 text-sm text-slate-100 focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="">-- Sem vínculo com armamento (Munição Avulsa) --</option>
+                        {activeWeaponCautelasForTarget.map(w => {
+                          const existingAmmo = getActiveLinkedAmmoForWeapon(w);
+                          return (
+                            <option key={w.id} value={w.id}>
+                              {w.weaponModel} — Nº {w.weaponSerialNumber} ({w.weaponCaliber})
+                              {existingAmmo.quantity > 0 ? ` • Já possui ${existingAmmo.quantity} un. (irá somar)` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      {selectedLinkedWeapon && selectedLinkedWeaponExistingAmmo.quantity > 0 && (
+                        <p className="text-xs text-slate-300">
+                          Arma já possui <strong>{selectedLinkedWeaponExistingAmmo.quantity} un.</strong> vinculada(s). Total da cautela após confirmação:{' '}
+                          <strong>{selectedLinkedWeaponExistingAmmo.quantity + reqQuantity} un.</strong> (gerará um novo recibo).
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -2558,7 +2670,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
 
             <div className="flex flex-wrap gap-1.5">
               {(
-                ['TODOS', 'AUTORIZADA', 'PENDENTE', 'DEVOLUCAO_PENDENTE', 'DEVOLVIDA', 'CONSUMIDA', 'RECUSADA'] as const
+                ['TODOS', 'AUTORIZADA', 'PENDENTE', 'DEVOLUCAO_PENDENTE', 'DEVOLVIDA', 'CONSUMIDA', 'CONSOLIDADA', 'RECUSADA'] as const
               ).map(st => (
                 <button
                   key={st}
@@ -2581,6 +2693,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                     ? 'Devolvidas'
                     : st === 'CONSUMIDA'
                     ? 'Consumidas'
+                    : st === 'CONSOLIDADA'
+                    ? 'Consolidadas'
                     : 'Recusadas'}
                 </button>
               ))}
@@ -2656,7 +2770,9 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                     </strong>
                   </div>
                   <p className="text-[11px] text-indigo-300/90">
-                    Ao confirmar, esta munição será automaticamente vinculada à cautela ativa da arma.
+                    {authorizeModalExistingAmmoQty > 0
+                      ? `Esta arma já possui ${authorizeModalExistingAmmoQty} un. vinculada(s). Ao confirmar, a cautela somará para ${authorizeModalExistingAmmoQty + authorizeModalItem.quantity} un. (${authorizeModalExistingAmmoQty} + ${authorizeModalItem.quantity}) e gerará um novo recibo.`
+                      : 'Ao confirmar, esta munição será automaticamente vinculada à cautela ativa da arma.'}
                   </p>
                 </div>
               )}

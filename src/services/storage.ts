@@ -4331,7 +4331,15 @@ class StorageService {
     return (this.state.cautelasMunicoes || []).filter(c => Number(c.quantity || 0) > 0);
   }
 
-  public async requestCautelaMunicao(payload: any): Promise<{ success: boolean; error?: string; id?: string }> {
+  public async requestCautelaMunicao(payload: any): Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    totalQuantity?: number;
+    previousQuantity?: number;
+    addedQuantity?: number;
+    wasSupplemented?: boolean;
+  }> {
     try {
       const res = await fetch('/api/cautelas-municoes', {
         method: 'POST',
@@ -4341,7 +4349,14 @@ class StorageService {
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
-      return { success: true, id: data.id };
+      return {
+        success: true,
+        id: data.id,
+        totalQuantity: data.totalQuantity,
+        previousQuantity: data.previousQuantity,
+        addedQuantity: data.addedQuantity,
+        wasSupplemented: Boolean(data.wasSupplemented)
+      };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
@@ -4350,7 +4365,15 @@ class StorageService {
   public async authorizeCautelaMunicao(
     id: string, 
     options?: string | { vaultSpaceId?: string; stockId?: string; seraDevolvida?: boolean; notes?: string; linkedWeaponCautelaId?: string }
-  ): Promise<{ success: boolean; error?: string }> {
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    id?: string;
+    totalQuantity?: number;
+    previousQuantity?: number;
+    addedQuantity?: number;
+    wasSupplemented?: boolean;
+  }> {
     const opts = typeof options === 'string' ? { vaultSpaceId: options } : (options || {});
     const target = (this.state.cautelasMunicoes || []).find(c => c.id === id);
     const linkedWeaponId = opts.linkedWeaponCautelaId || target?.linkedWeaponCautelaId;
@@ -4366,8 +4389,27 @@ class StorageService {
       if (linkedWeaponId) {
         const linkedWeapon = (this.state.cautelasArmas || []).find(w => w.id === linkedWeaponId);
         if (linkedWeapon && linkedWeapon.status === 'AUTORIZADA') {
+          const prevActiveAmmo = (this.state.cautelasMunicoes || []).find(
+            m =>
+              m.id !== target.id &&
+              (m.linkedWeaponCautelaId === linkedWeapon.id || (m as any).cautelaArmaId === linkedWeapon.id) &&
+              m.status === 'AUTORIZADA'
+          );
+          const prevQty = prevActiveAmmo
+            ? Number(prevActiveAmmo.quantity || 0)
+            : linkedWeapon.linkedAmmoCautelaId && linkedWeapon.linkedAmmoCautelaId !== target.id
+            ? Number(linkedWeapon.ammoQuantity || 0)
+            : 0;
+          const totalQty = prevQty > 0 ? prevQty + Number(target.quantity || 0) : Number(target.quantity || 0);
+          if (prevActiveAmmo) {
+            prevActiveAmmo.status = 'CONSOLIDADA';
+          }
+          target.quantity = totalQty;
+          if (prevQty > 0) {
+            target.seraDevolvida = Boolean(prevActiveAmmo?.seraDevolvida ?? linkedWeapon.ammoSeraDevolvida ?? target.seraDevolvida);
+          }
           linkedWeapon.linkedAmmoCautelaId = target.id;
-          linkedWeapon.ammoQuantity = target.quantity;
+          linkedWeapon.ammoQuantity = totalQty;
           linkedWeapon.ammoCaliberName = target.caliberName;
           linkedWeapon.ammoFabricante = target.fabricante;
           linkedWeapon.ammoTipo = target.tipoMunicao;
@@ -4398,9 +4440,16 @@ class StorageService {
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
-      return { success: true };
+      return {
+        success: true,
+        id: data.id || id,
+        totalQuantity: data.totalQuantity,
+        previousQuantity: data.previousQuantity,
+        addedQuantity: data.addedQuantity,
+        wasSupplemented: Boolean(data.wasSupplemented)
+      };
     } catch (err: any) {
-      return { success: true };
+      return { success: true, id };
     }
   }
 

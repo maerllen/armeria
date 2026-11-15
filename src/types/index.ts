@@ -1207,7 +1207,7 @@ export interface MovimentacaoVeterinaria {
 }
 
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
-export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA';
+export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 
 export interface CautelaArma {
   id: string;
