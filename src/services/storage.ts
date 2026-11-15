@@ -634,6 +634,23 @@ class StorageService {
     return list;
   }
 
+  public getProfessorUsersUnscoped(): User[] {
+    return (this.state.users || []).filter(u => Boolean(u.isTeacher));
+  }
+
+  public getUsersForFormacao(currentUser?: User | null): User[] {
+    const scoped = this.getUsers(currentUser);
+    const seen = new Set(scoped.map(u => u.id));
+    const merged = [...scoped];
+    for (const u of this.state.users || []) {
+      if (Boolean(u.isTeacher) && !seen.has(u.id)) {
+        seen.add(u.id);
+        merged.push(u);
+      }
+    }
+    return merged;
+  }
+
   public async addUser(data: Omit<User, 'id' | 'password' | 'createdAt' | 'mustChangePassword'>): Promise<User> {
     const res = await fetch('/api/users', {
       method: 'POST',

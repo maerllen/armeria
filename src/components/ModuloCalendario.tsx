@@ -455,7 +455,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const loadedAuxiliar = storage.getAuxiliarTabelaEquipe ? storage.getAuxiliarTabelaEquipe() : [];
       setAuxiliarEquipesList(loadedAuxiliar);
 
-      const loadedUsers = storage.getUsers ? storage.getUsers() : [];
+      const loadedUsers = storage.getUsersForFormacao
+        ? storage.getUsersForFormacao()
+        : (storage.getUsers ? storage.getUsers() : []);
       setSystemUsers(loadedUsers);
 
       // Load Cursos de Formação

@@ -680,12 +680,12 @@ export default function App() {
           {activeModule === 'cursos' && (
             <AcademyModule
               currentUser={currentUser}
-              users={allUsers}
+              users={storage.getUsersForFormacao(currentUser)}
               weapons={weapons}
               ammoStocks={ammoStocks}
               vaultSpaces={vaultSpaces}
-              departments={departments}
-              units={units}
+              departments={storage.getAllDepartments()}
+              units={storage.getAllUnits()}
               onRefresh={refreshData}
               courseTypeFilterProp="Formação"
             />

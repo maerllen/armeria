@@ -936,10 +936,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         setTeamApelido(getFirstAvailableTeamName(selectedTeamCourseId, newMateria, teamEditingId));
       }
     }
+    const lookupUsersPool = (() => {
+      if (courseTypeFilterProp !== 'Formação') return users;
+      const unscopedTeachers = storage.getProfessorUsersUnscoped();
+      const map = new Map<string, User>();
+      users.forEach(u => map.set(u.id, u));
+      unscopedTeachers.forEach(u => map.set(u.id, u));
+      return Array.from(map.values());
+    })();
+
     setTeamSlots(prev =>
       prev.map(slot => {
         if (!slot.userId) return { userId: '', userName: '', searchText: '' };
-        const matched = users.find(u => u.id === slot.userId);
+        const matched = lookupUsersPool.find(u => u.id === slot.userId);
         if (matched && Boolean(matched.isTeacher) && (matched.teacherSubject || '').toUpperCase().trim() === newMateria) {
           return slot;
         }
@@ -984,11 +993,20 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
       { id: team.equipe06Id || '', name: team.equipe06 || '' }
     ];
 
+    const lookupUsersPool = (() => {
+      if (courseTypeFilterProp !== 'Formação') return users;
+      const unscopedTeachers = storage.getProfessorUsersUnscoped();
+      const map = new Map<string, User>();
+      users.forEach(u => map.set(u.id, u));
+      unscopedTeachers.forEach(u => map.set(u.id, u));
+      return Array.from(map.values());
+    })();
+
     const populated = slotsRaw
       .filter(s => Boolean(s.name || s.id))
       .map(s => {
-        const matchedById = s.id ? users.find(u => u.id === s.id) : undefined;
-        const matchedByName = !matchedById && s.name ? users.find(u => u.name.toLowerCase() === s.name.toLowerCase()) : undefined;
+        const matchedById = s.id ? lookupUsersPool.find(u => u.id === s.id) : undefined;
+        const matchedByName = !matchedById && s.name ? lookupUsersPool.find(u => u.name.toLowerCase() === s.name.toLowerCase()) : undefined;
         const resolved = matchedById || matchedByName;
         const displayName = resolved?.name || s.name;
         return {
@@ -2909,7 +2927,16 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 .replace(/[\u0300-\u036f]/g, '')
                 .trim();
 
-            const eligibleTeachers = users
+            const allFormacaoUnits = storage.getAllUnits().length > 0 ? storage.getAllUnits() : units;
+            const allFormacaoDepts = storage.getAllDepartments().length > 0 ? storage.getAllDepartments() : departments;
+            const formacaoTeachersPool = (() => {
+              const map = new Map<string, User>();
+              users.filter(u => Boolean(u.isTeacher)).forEach(u => map.set(u.id, u));
+              storage.getProfessorUsersUnscoped().forEach(u => map.set(u.id, u));
+              return Array.from(map.values());
+            })();
+
+            const eligibleTeachers = formacaoTeachersPool
               .filter(u => Boolean(u.isTeacher) && (u.teacherSubject || '').toUpperCase().trim() === teamMateria)
               .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
 
@@ -3107,14 +3134,28 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                           const filteredTeachers = eligibleTeachers.filter(u => {
                             if (otherSelectedIds.includes(u.id)) return false;
                             if (!queryNorm) return true;
+                            const uUnit = allFormacaoUnits.find(un => un.id === u.unitId);
+                            const uDept = allFormacaoDepts.find(dp => dp.id === (u.departmentId || uUnit?.departmentId));
                             return normalizeText(u.name).includes(queryNorm) ||
-                              normalizeText(u.professorSigla || '').includes(queryNorm);
+                              normalizeText(u.professorSigla || '').includes(queryNorm) ||
+                              normalizeText(u.masp || '').includes(queryNorm) ||
+                              normalizeText(uUnit?.name || '').includes(queryNorm) ||
+                              normalizeText(uDept?.name || '').includes(queryNorm);
                           });
 
                           const isDropdownOpen = openTeacherDropdownIdx === idx;
-                          const selectedTeacherUnit = slot.userId
-                            ? units.find(un => un.id === users.find(us => us.id === slot.userId)?.unitId)?.name
-                            : '';
+                          const selectedTeacherObj = slot.userId
+                            ? formacaoTeachersPool.find(us => us.id === slot.userId)
+                            : undefined;
+                          const selectedTeacherUnitObj = selectedTeacherObj
+                            ? allFormacaoUnits.find(un => un.id === selectedTeacherObj.unitId)
+                            : undefined;
+                          const selectedTeacherDeptObj = selectedTeacherObj
+                            ? allFormacaoDepts.find(dp => dp.id === (selectedTeacherObj.departmentId || selectedTeacherUnitObj?.departmentId))
+                            : undefined;
+                          const selectedTeacherUnit = [selectedTeacherDeptObj?.name, selectedTeacherUnitObj?.name]
+                            .filter(Boolean)
+                            .join(' · ');
 
                           return (
                             <div key={idx} className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 space-y-2 relative">
@@ -3188,7 +3229,10 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                       </div>
                                     ) : (
                                       filteredTeachers.map(teacher => {
-                                        const tUnit = units.find(un => un.id === teacher.unitId)?.name || 'Sem unidade';
+                                        const tUnitObj = allFormacaoUnits.find(un => un.id === teacher.unitId);
+                                        const tDeptObj = allFormacaoDepts.find(dp => dp.id === (teacher.departmentId || tUnitObj?.departmentId));
+                                        const tUnit = tUnitObj?.name || 'Sem unidade';
+                                        const tLocation = tDeptObj?.name ? `${tDeptObj.name} · ${tUnit}` : tUnit;
                                         const isChosen = slot.userId === teacher.id;
                                         return (
                                           <button
@@ -3217,7 +3261,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                                               <div className="font-semibold truncate">{teacher.name}</div>
                                               <div className="text-[11px] text-slate-400 truncate">
                                                 {teacher.professorSigla ? `Sigla: ${teacher.professorSigla} · ` : ''}
-                                                {tUnit}
+                                                {tLocation}
                                               </div>
                                             </div>
                                             <span className="text-[11px] font-mono text-amber-400 shrink-0">
