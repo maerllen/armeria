@@ -92,18 +92,6 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   const canVerRelatoriosTodasEquipes = isGeral || Boolean(currentUser?.canViewAllCanilReports);
   const showFarmaciaTab = canCadastrarMedicamentos && canMinistrarMedicamentos;
 
-  useEffect(() => {
-    if (
-      (activeTab === 'farmacia' && !showFarmaciaTab) ||
-      (activeTab === 'administracao' && !canMinistrarMedicamentos) ||
-      (activeTab === 'historico' && !canMinistrarMedicamentos) ||
-      (activeTab === 'relatorio-unidade' && (!canAccessTrainingTabs || !canVerRelatoriosTodasEquipes)) ||
-      ((activeTab === 'relatorio-treinamento' || activeTab === 'meus-relatorios') && !canAccessTrainingTabs)
-    ) {
-      setActiveTab('caes');
-    }
-  }, [activeTab, showFarmaciaTab, canMinistrarMedicamentos, canAccessTrainingTabs, canVerRelatoriosTodasEquipes]);
-
   // Data from storage
   const canis = storage.getCanisFisicos();
   const cachorros = storage.getCachorros();
@@ -133,6 +121,45 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     descricao: '',
     participantes: []
   });
+  const [hasUserChangedMainDog, setHasUserChangedMainDog] = useState(false);
+
+  const getDefaultDogsForUser = (userId?: string) => {
+    if (!userId) return [];
+    const active = cachorros.filter(
+      d =>
+        d &&
+        d.status !== 'Baixado / Óbito' &&
+        d.tipoVinculo === 'SISTEMA' &&
+        (d.usuarioInternoId === userId || d.usuarioInterno2Id === userId)
+    );
+    return active.sort((a, b) => {
+      const aPrimary = a.usuarioInternoId === userId ? 0 : 1;
+      const bPrimary = b.usuarioInternoId === userId ? 0 : 1;
+      if (aPrimary !== bPrimary) return aPrimary - bPrimary;
+      return (a.nome || '').localeCompare(b.nome || '', 'pt-BR');
+    });
+  };
+
+  useEffect(() => {
+    if (
+      (activeTab === 'farmacia' && !showFarmaciaTab) ||
+      (activeTab === 'administracao' && !canMinistrarMedicamentos) ||
+      (activeTab === 'historico' && !canMinistrarMedicamentos) ||
+      (activeTab === 'relatorio-unidade' && (!canAccessTrainingTabs || !canVerRelatoriosTodasEquipes)) ||
+      ((activeTab === 'relatorio-treinamento' || activeTab === 'meus-relatorios') && !canAccessTrainingTabs)
+    ) {
+      setActiveTab('caes');
+    }
+  }, [activeTab, showFarmaciaTab, canMinistrarMedicamentos, canAccessTrainingTabs, canVerRelatoriosTodasEquipes]);
+
+  useEffect(() => {
+    if (activeTab === 'relatorio-treinamento' && !hasUserChangedMainDog && !treinoForm.cachorroId && currentUser?.id) {
+      const defaultDogs = getDefaultDogsForUser(currentUser.id);
+      if (defaultDogs.length > 0) {
+        setTreinoForm(prev => (prev.cachorroId ? prev : { ...prev, cachorroId: defaultDogs[0].id }));
+      }
+    }
+  }, [activeTab, currentUser?.id, cachorros, hasUserChangedMainDog, treinoForm.cachorroId]);
   const [participantSearch, setParticipantSearch] = useState('');
   const [meusRelFilter, setMeusRelFilter] = useState<'TODOS' | 'CRIADOS' | 'CONJUNTOS_ASSINADOS' | 'PENDENTES'>('TODOS');
   const [unidadeFilterDataInicio, setUnidadeFilterDataInicio] = useState('');
@@ -373,6 +400,9 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       eligibleDogHandlers.find(u => u.id === currentUser?.id)?.id ||
       eligibleDogHandlers[0]?.id ||
       '';
+    const firstAvailableCanil = canis.find(
+      k => cachorros.filter(c => c.canilFisicoId === k.id).length < (k.capacidade || 1)
+    );
     setEditingDog(null);
     setDogForm({
       nome: '',
@@ -382,7 +412,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       microchip: '',
       pelagem: '',
       especialidade: 'Faro de Drogas / Entorpecentes',
-      canilFisicoId: canis[0]?.id || '',
+      canilFisicoId: firstAvailableCanil?.id || '',
       status: 'Ativo / Operacional',
       tipoVinculo: 'SISTEMA',
       usuarioInternoId: defaultHandler,
@@ -860,6 +890,18 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       return;
     }
     if (treinoForm.participantes.some(p => p.userId === userToAdd.id)) return;
+    const defaultDogs = getDefaultDogsForUser(userToAdd.id);
+    const initialDogs =
+      defaultDogs.length > 0
+        ? [
+            {
+              id: defaultDogs[0].id,
+              nome: defaultDogs[0].nome,
+              raca: defaultDogs[0].raca || '',
+              microchip: defaultDogs[0].microchip || ''
+            }
+          ]
+        : [];
     setTreinoForm(prev => ({
       ...prev,
       participantes: [
@@ -870,7 +912,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           masp: userToAdd.masp || '',
           cargo: userToAdd.cargo || '',
           signed: false,
-          cachorros: []
+          cachorros: initialDogs
         }
       ]
     }));
@@ -979,9 +1021,11 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     }
 
     notifySuccess('Relatório de treinamento salvo com sucesso!');
+    const nextDefaultDogs = getDefaultDogsForUser(currentUser.id);
+    setHasUserChangedMainDog(false);
     setTreinoForm({
       dataTreinamento: getTodayIsoBr(),
-      cachorroId: '',
+      cachorroId: nextDefaultDogs[0]?.id || '',
       modalidadeLocal: 'Interno',
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
@@ -2341,7 +2385,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               </label>
               <select
                 value={treinoForm.cachorroId}
-                onChange={(e) => setTreinoForm({ ...treinoForm, cachorroId: e.target.value })}
+                onChange={(e) => {
+                  setHasUserChangedMainDog(true);
+                  setTreinoForm({ ...treinoForm, cachorroId: e.target.value });
+                }}
                 className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500"
               >
                 <option value="">Selecione o cão policial...</option>
@@ -3255,11 +3302,23 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-amber-500"
                   >
                     <option value="">Nenhum canil vinculado</option>
-                    {canis.map(k => (
-                      <option key={k.id} value={k.id}>
-                        {k.nome} ({k.identificacao || 'Sem código'}) - Cap: {k.capacidade}
-                      </option>
-                    ))}
+                    {canis
+                      .filter(k => {
+                        const occupied = cachorros.filter(
+                          c => c.canilFisicoId === k.id && c.id !== editingDog?.id
+                        ).length;
+                        return occupied < (k.capacidade || 1);
+                      })
+                      .map(k => {
+                        const occupied = cachorros.filter(
+                          c => c.canilFisicoId === k.id && c.id !== editingDog?.id
+                        ).length;
+                        return (
+                          <option key={k.id} value={k.id}>
+                            {k.nome} ({k.identificacao || 'Sem código'}) - Ocupação: {occupied}/{k.capacidade}
+                          </option>
+                        );
+                      })}
                   </select>
                 </div>
 

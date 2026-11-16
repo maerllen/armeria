@@ -11530,6 +11530,36 @@ const validateAndResolveDogHandlers = async (pool: any, dog: any) => {
   };
 };
 
+const validateKennelCapacity = async (pool: any, canilFisicoId: string | null | undefined, excludeDogId?: string) => {
+  const cleanCanilId = String(canilFisicoId || '').trim();
+  if (!cleanCanilId) return { ok: true as const };
+
+  const [canilRows]: any = await pool.query(
+    'SELECT ID_CANIL as id, NOME_CANIL as nome, CAPACIDADE_CANIL as capacidade FROM CANIS_FISICOS WHERE ID_CANIL = ? LIMIT 1',
+    [cleanCanilId]
+  );
+  if (!canilRows || canilRows.length === 0) {
+    return { ok: false as const, error: 'A baia/canil selecionada não foi encontrada.' };
+  }
+  const canil = canilRows[0];
+  const capacidade = Number(canil.capacidade || 1);
+
+  const countSql = excludeDogId
+    ? 'SELECT COUNT(*) as cnt FROM CACHORROS_CANIL WHERE CANIL_FISICO_ID_CACHORRO = ? AND ID_CACHORRO != ?'
+    : 'SELECT COUNT(*) as cnt FROM CACHORROS_CANIL WHERE CANIL_FISICO_ID_CACHORRO = ?';
+  const countParams = excludeDogId ? [cleanCanilId, excludeDogId] : [cleanCanilId];
+  const [countRows]: any = await pool.query(countSql, countParams);
+  const occupied = Number(countRows?.[0]?.cnt || 0);
+
+  if (occupied >= capacidade) {
+    return {
+      ok: false as const,
+      error: `A baia/canil "${canil.nome}" já atingiu sua capacidade máxima (${capacidade}).`
+    };
+  }
+  return { ok: true as const };
+};
+
 apiRouter.post('/cachorros', async (req: Request, res: Response) => {
   try {
     const dog = req.body;
@@ -11540,6 +11570,10 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
     const resolved = await validateAndResolveDogHandlers(pool, dog);
     if (!resolved.ok) {
       return res.status(400).json({ error: resolved.error });
+    }
+    const kennelCheck = await validateKennelCapacity(pool, dog.canilFisicoId);
+    if (!kennelCheck.ok) {
+      return res.status(400).json({ error: kennelCheck.error });
     }
 
     const id = `cao-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
@@ -11599,6 +11633,10 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
     const resolved = await validateAndResolveDogHandlers(pool, dog);
     if (!resolved.ok) {
       return res.status(400).json({ error: resolved.error });
+    }
+    const kennelCheck = await validateKennelCapacity(pool, dog.canilFisicoId, id);
+    if (!kennelCheck.ok) {
+      return res.status(400).json({ error: kennelCheck.error });
     }
 
     await pool.query(`
