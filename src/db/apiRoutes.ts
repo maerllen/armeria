@@ -11482,7 +11482,7 @@ const validateAndResolveDogHandlers = async (pool: any, dog: any) => {
 
   const ids = c2Id ? [c1Id, c2Id] : [c1Id];
   const [userRows]: any = await pool.query(
-    `SELECT ID_USUARIOS as id, NOME_COMPLETO_USUARIOS as name, MASP_USUARIOS as masp, CARGO_USUARIOS as cargo,
+    `SELECT ID_USUARIOS as id, NOME_USUARIOS as name, MASP_USUARIOS as masp, CARGO_USUARIOS as cargo,
             PERFIL_USUARIOS as role, ROLES_USUARIOS as rolesJson, UNIDADE_ID_USUARIOS as unitId
      FROM USUARIOS
      WHERE ID_USUARIOS IN (${ids.map(() => '?').join(',')})`,
