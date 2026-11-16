@@ -1429,16 +1429,20 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
   const role = user.activeRole || user.role;
 
   const appendCoordinatorModules = (modules: ModuleType[]): ModuleType[] => {
-    if (!user.isCourseCoordinator) return modules;
-    const coordinatorModules: ModuleType[] = [
-      'cursos',
-      'calendario'
-    ];
     const merged = [...modules];
-    for (const mod of coordinatorModules) {
-      if (!merged.includes(mod)) {
-        merged.push(mod);
+    if (user.isCourseCoordinator) {
+      const coordinatorModules: ModuleType[] = [
+        'cursos',
+        'calendario'
+      ];
+      for (const mod of coordinatorModules) {
+        if (!merged.includes(mod)) {
+          merged.push(mod);
+        }
       }
+    }
+    if (user.isTeacher && !merged.includes('calendario')) {
+      merged.push('calendario');
     }
     return merged;
   };

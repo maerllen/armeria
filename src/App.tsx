@@ -49,7 +49,7 @@ const moduleLabels: Record<ModuleType, string> = {
   'cursos': 'Curso de Formação',
   'ensino-continuado': 'Ensino Continuado',
   'gerencia-cursos': 'Gerência de Cursos',
-  'calendario': 'Calendário de Aulas',
+  'calendario': 'Calendário Curso de Formação',
   'certificados': 'Verificação de Certificados',
   'veterinario': 'CANIL',
   'relatorio': 'Relatórios e Consultas',
@@ -719,7 +719,7 @@ export default function App() {
             />
           )}
 
-          {activeModule === 'calendario' && (currentUser?.isTeacher || currentUser?.teacherSubject || currentUser?.professorSigla || currentUser?.professor_sigla || currentUser?.isCourseCoordinator || currentUser?.role === 'Geral') && (
+          {activeModule === 'calendario' && getAllowedModulesForUser(currentUser).includes('calendario') && (
             <CalendarModule
               currentUser={currentUser}
             />
