@@ -1,7 +1,21 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import * as pdfjsLib from 'pdfjs-dist';
-import { CalendarRecord, User, AcademyCourse, LessonPlan, EquipeCalendario, ProfessorEquipe, InstrutorItem, AuxiliarTabelaEquipe, AuxiliarTabelaEquipeItem, CourseClass } from '../types';
+import {
+  CalendarRecord,
+  User,
+  AcademyCourse,
+  LessonPlan,
+  EquipeCalendario,
+  ProfessorEquipe,
+  InstrutorItem,
+  AuxiliarTabelaEquipe,
+  AuxiliarTabelaEquipeItem,
+  CourseClass,
+  EquipeProfessoresCursoFormacao,
+  DesignacaoEquipeTurmaCftp,
+  TurmaCftp
+} from '../types';
 import { storage } from '../services/storage';
 import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
 import { TopLayerAlert } from './TopLayerAlert';
@@ -43,6 +57,113 @@ const TIME_SLOTS = [
   { id: 'slot3', label: '14:00 as 15:40', type: 'class', name: '3ª Aula' },
   { id: 'slot4', label: '16:00 as 17:40', type: 'class', name: '4ª Aula' }
 ] as const;
+
+interface CftpSlotRowDef {
+  id: 'slot1' | 'slot2' | 'lunch' | 'slot3' | 'slot4' | 'slot5';
+  period: 'MANHÃ' | 'ALMOÇO' | 'TARDE' | 'NOITE';
+  title: string;
+  timeLabel: string;
+  type: 'class' | 'break';
+  order: number;
+}
+
+const CFTP_STANDARD_SLOTS: CftpSlotRowDef[] = [
+  { id: 'slot1', period: 'MANHÃ', title: '1º Horário', timeLabel: '08h00 às 09h40min', type: 'class', order: 1 },
+  { id: 'slot2', period: 'MANHÃ', title: '2º Horário', timeLabel: '10h00 às 11h40min', type: 'class', order: 2 },
+  { id: 'lunch', period: 'ALMOÇO', title: 'Horário de Almoço', timeLabel: '12h00 às 14h00', type: 'break', order: 2.5 },
+  { id: 'slot3', period: 'TARDE', title: '3º Horário', timeLabel: '14h00 às 15h40min', type: 'class', order: 3 },
+  { id: 'slot4', period: 'TARDE', title: '4º Horário', timeLabel: '16h00 às 17h40min', type: 'class', order: 4 }
+];
+
+const CFTP_FIFTH_SLOT: CftpSlotRowDef = {
+  id: 'slot5',
+  period: 'NOITE',
+  title: '5º Horário',
+  timeLabel: '18h00 às 19h40min',
+  type: 'class',
+  order: 5
+};
+
+const normalizeCftpHorarioKey = (rawHora: any): 'slot1' | 'slot2' | 'slot3' | 'slot4' | 'slot5' => {
+  const h = String(rawHora || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
+  if (h.includes('5o') || h.includes('5º') || h.includes('5°') || h.includes('5ª') || h.includes('5a') || h.includes('18:') || h.includes('18h') || h.includes('19:')) {
+    return 'slot5';
+  }
+  if (h.includes('4o') || h.includes('4º') || h.includes('4°') || h.includes('4ª') || h.includes('4a') || h.includes('16:') || h.includes('16h')) {
+    return 'slot4';
+  }
+  if (h.includes('3o') || h.includes('3º') || h.includes('3°') || h.includes('3ª') || h.includes('3a') || h.includes('14:') || h.includes('14h')) {
+    return 'slot3';
+  }
+  if (h.includes('2o') || h.includes('2º') || h.includes('2°') || h.includes('2ª') || h.includes('2a') || h.includes('10:') || h.includes('10h')) {
+    return 'slot2';
+  }
+  return 'slot1';
+};
+
+const normalizeCftpDateToIso = (raw: string): string => {
+  const trimmed = String(raw || '').trim();
+  if (!trimmed) return '';
+  const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  const brMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  const dashBrMatch = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (dashBrMatch) return `${dashBrMatch[3]}-${dashBrMatch[2]}-${dashBrMatch[1]}`;
+  return '';
+};
+
+const normCftpTurmaKey = (raw: string): string => {
+  const noAccent = String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+  const compact = noAccent.replace(/[\s\-_]+/g, '');
+  if (!compact) return '';
+  const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+  if (m) {
+    const num = parseInt(m[2], 10);
+    if (!isNaN(num) && num > 0) {
+      return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+    }
+  }
+  return compact;
+};
+
+const formatCftpTurmaLabel = (raw: string): string => {
+  const trimmed = String(raw || '').trim().replace(/\s+/g, ' ');
+  if (!trimmed) return '';
+  const noAccent = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (/\bUNICA\b/.test(noAccent)) {
+    const prefixMatch = noAccent.match(/\b(DL|IP|EP|ML|PC)\b/);
+    if (prefixMatch) return `${prefixMatch[1]} Única`;
+    const beforeUnica = trimmed.replace(/\b[uú]nica\b/i, '').trim().toUpperCase();
+    return beforeUnica ? `${beforeUnica} Única` : 'Única';
+  }
+  const compact = noAccent.replace(/[\s\-_]+/g, '');
+  const m = compact.match(/^([A-Z]{1,6})0*(\d{1,3})([A-Z]*)$/);
+  if (m) {
+    const num = parseInt(m[2], 10);
+    if (!isNaN(num) && num > 0) {
+      return `${m[1]}${String(num).padStart(2, '0')}${m[3] || ''}`;
+    }
+  }
+  return trimmed.replace(/\s+/g, '').toUpperCase();
+};
+
+const formatIsoToBr = (iso?: string): string => {
+  if (!iso) return '—';
+  const clean = iso.slice(0, 10);
+  const parts = clean.split('-');
+  if (parts.length !== 3) return iso;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+};
 
 // Helper to normalize any time slot text before saving or filtering
 const normalizeTimeSlot = (rawHora: any): string => {
@@ -231,8 +352,33 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [formacaoCoursesList, setFormacaoCoursesList] = useState<
     { name: string; module?: string; year?: number }[]
   >([]);
+  const [cftpCourses, setCftpCourses] = useState<AcademyCourse[]>([]);
+  const [equipesCftpList, setEquipesCftpList] = useState<EquipeProfessoresCursoFormacao[]>([]);
+  const [designacoesCftpList, setDesignacoesCftpList] = useState<DesignacaoEquipeTurmaCftp[]>([]);
+  const [turmasCftpList, setTurmasCftpList] = useState<TurmaCftp[]>([]);
 
-  // Selected Subject/Discipline Filter - REQUIRED TO START CALENDAR
+  // Mode: 'cftp' (Calendário por Curso de Formação CFTP) or 'legacy' (Grade Avulsa CALENDARIO_AULAS)
+  const [calendarViewMode, setCalendarViewMode] = useState<'cftp' | 'legacy'>('cftp');
+  const [selectedCftpCourseId, setSelectedCftpCourseId] = useState<string>('');
+  const [cftpSelectedSubject, setCftpSelectedSubject] = useState<string>('');
+  const [cftpFilterTurma, setCftpFilterTurma] = useState<string>('TODAS');
+  const [cftpFilterSala, setCftpFilterSala] = useState<string>('TODAS');
+  const [cftpShowAllMonths, setCftpShowAllMonths] = useState<boolean>(false);
+  const [cftpDetailCell, setCftpDetailCell] = useState<{
+    isoDate: string;
+    brDate: string;
+    slotTitle: string;
+    slotTime: string;
+    turma: string;
+    aulaNumero: number;
+    sigla: string;
+    disciplina: string;
+    sala: string;
+    equipeApelido?: string;
+    professores: Array<{ nome: string; sigla: string }>;
+  } | null>(null);
+
+  // Selected Subject/Discipline Filter - REQUIRED TO START CALENDAR (Legacy mode)
   const [selectedDiscipline, setSelectedDiscipline] = useState<string>('');
 
   // Date filters (defaults to current year/month or June 2026)
@@ -456,12 +602,18 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       setAuxiliarEquipesList(loadedAuxiliar);
 
       const loadedUsers = storage.getUsersForFormacao
-        ? storage.getUsersForFormacao()
+        ? storage.getUsersForFormacao(currentUser)
         : (storage.getUsers ? storage.getUsers() : []);
       setSystemUsers(loadedUsers);
 
-      // Load Cursos de Formação
+      // Load Cursos de Formação CFTP, Equipes, Designações e Turmas
       const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
+      const onlyFormacao = academyCourses.filter((c: AcademyCourse) => c.type === 'Formação');
+      setCftpCourses(onlyFormacao);
+      setEquipesCftpList(storage.getEquipesProfessoresCftp ? storage.getEquipesProfessoresCftp() : []);
+      setDesignacoesCftpList(storage.getDesignacoesEquipeCftp ? storage.getDesignacoesEquipeCftp() : []);
+      setTurmasCftpList(storage.getTurmasCftp ? storage.getTurmasCftp() : []);
+
       const lessonPlans = storage.getLessonPlans ? storage.getLessonPlans() : [];
       const courseClasses = storage.getCourseClasses ? storage.getCourseClasses() : [];
       setCreatedTurmasList(courseClasses);
@@ -1341,14 +1493,332 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     setShowPrintModal(false);
 
     setTimeout(() => {
+      const titleSubject =
+        calendarViewMode === 'cftp' && selectedCftpCourseObj
+          ? `${selectedCftpCourseObj.module || selectedCftpCourseObj.name} - ${cftpSelectedSubject || 'CFTP'}`
+          : `${selectedDisciplineName || selectedDiscipline || 'ACADEPOL'} (${printYearChoice})`;
       printWithWindowTitle(
         buildStandardDocumentTitle(
           'Calendário Letivo (Calendário Acadêmico)',
-          `${selectedDisciplineName || selectedDiscipline || 'ACADEPOL'} (${printYearChoice})`,
+          titleSubject,
           currentUser?.name || 'ACADEPOL'
         )
       );
     }, 250);
+  };
+
+  // --- CFTP SCHEDULE CALENDAR MEMOS & HELPERS ---
+  const selectedCftpCourseObj = useMemo(
+    () => cftpCourses.find(c => c.id === selectedCftpCourseId) || null,
+    [cftpCourses, selectedCftpCourseId]
+  );
+
+  // Matérias disponíveis no curso de formação selecionado
+  const cftpCourseSubjects = useMemo(() => {
+    if (!selectedCftpCourseObj) return [] as Array<{ sigla: string; nome: string; count: number }>;
+    const map = new Map<string, { sigla: string; nome: string; count: number }>();
+    const rows = Array.isArray(selectedCftpCourseObj.moduleSchedule) ? selectedCftpCourseObj.moduleSchedule : [];
+    for (const r of rows) {
+      const sig = String(r.sigla || '').trim().toUpperCase();
+      if (!sig) continue;
+      const nome = String(r.disciplina || sig).trim();
+      const ex = map.get(sig);
+      if (ex) {
+        ex.count += 1;
+      } else {
+        map.set(sig, { sigla: sig, nome, count: 1 });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.sigla.localeCompare(b.sigla));
+  }, [selectedCftpCourseObj]);
+
+  // Mapa canônico de exibição das turmas do curso (prioriza TURMAS_CFTP com alunos / formato padronizado)
+  const cftpTurmaDisplayMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (!selectedCftpCourseObj) return map;
+    for (const t of turmasCftpList.filter(tc => tc.cursoId === selectedCftpCourseObj.id)) {
+      const k = normCftpTurmaKey(t.turma);
+      if (k && !map.has(k)) {
+        map.set(k, formatCftpTurmaLabel(t.turma) || t.turma);
+      }
+    }
+    const rows = Array.isArray(selectedCftpCourseObj.moduleSchedule) ? selectedCftpCourseObj.moduleSchedule : [];
+    for (const r of rows) {
+      const k = normCftpTurmaKey(r.turma || '');
+      if (k && !map.has(k)) {
+        map.set(k, formatCftpTurmaLabel(r.turma || '') || r.turma);
+      }
+    }
+    return map;
+  }, [selectedCftpCourseObj, turmasCftpList]);
+
+  // Resolve as siglas dos professores designados para (cursoId, turma, materia, isoDate)
+  const resolveCftpCellProfessors = (
+    cursoId: string,
+    turmaRaw: string,
+    materiaSigla: string,
+    isoDate: string
+  ): { equipeApelido?: string; professores: Array<{ nome: string; sigla: string }> } => {
+    const targetTurmaKey = normCftpTurmaKey(turmaRaw);
+    const targetMateria = String(materiaSigla || '').trim().toUpperCase();
+
+    const matchedDesig = designacoesCftpList.find(d => {
+      if (d.cursoId !== cursoId) return false;
+      if (normCftpTurmaKey(d.turma) !== targetTurmaKey) return false;
+      if (String(d.materia || '').trim().toUpperCase() !== targetMateria) return false;
+      const p = (d.primeiraAula || '').slice(0, 10);
+      const u = (d.ultimaAula || '').slice(0, 10);
+      if (p && isoDate < p) return false;
+      if (u && isoDate > u) return false;
+      return true;
+    });
+
+    if (!matchedDesig) {
+      return { professores: [] };
+    }
+
+    const eqObj = equipesCftpList.find(e => e.id === matchedDesig.equipeId);
+    const slots: Array<{ id?: string; nome?: string }> = [
+      { id: eqObj?.equipe01Id, nome: matchedDesig.equipe01 || eqObj?.equipe01 },
+      { id: eqObj?.equipe02Id, nome: matchedDesig.equipe02 || eqObj?.equipe02 },
+      { id: eqObj?.equipe03Id, nome: matchedDesig.equipe03 || eqObj?.equipe03 },
+      { id: eqObj?.equipe04Id, nome: matchedDesig.equipe04 || eqObj?.equipe04 },
+      { id: eqObj?.equipe05Id, nome: matchedDesig.equipe05 || eqObj?.equipe05 },
+      { id: eqObj?.equipe06Id, nome: matchedDesig.equipe06 || eqObj?.equipe06 }
+    ];
+
+    const professores: Array<{ nome: string; sigla: string }> = [];
+    for (const s of slots) {
+      const cleanName = String(s.nome || '').trim();
+      if (!cleanName && !s.id) continue;
+      const matchedUser =
+        (s.id ? systemUsers.find(u => u.id === s.id) : undefined) ||
+        (cleanName
+          ? systemUsers.find(u => u.name.trim().toLowerCase() === cleanName.toLowerCase())
+          : undefined);
+
+      const rawSigla = (matchedUser?.professorSigla || matchedUser?.professor_sigla || '').trim().toUpperCase();
+      let sigla = rawSigla;
+      if (!sigla && cleanName) {
+        const words = cleanName
+          .replace(/^(Dr\.|Dra\.|Prof\.|Professor|Professora)\s+/i, '')
+          .trim()
+          .split(/\s+/)
+          .filter(Boolean);
+        sigla =
+          words.length >= 2
+            ? `${words[0][0]}${words[words.length - 1][0]}`.toUpperCase()
+            : (words[0]?.slice(0, 2) || '').toUpperCase();
+      }
+      professores.push({ nome: matchedUser?.name || cleanName, sigla });
+    }
+
+    return {
+      equipeApelido: matchedDesig.apelidoEquipe || eqObj?.apelidoEquipe,
+      professores
+    };
+  };
+
+  interface CftpNormalizedScheduleItem {
+    key: string;
+    isoDate: string;
+    brDate: string;
+    slotId: 'slot1' | 'slot2' | 'slot3' | 'slot4' | 'slot5';
+    slotOrder: number;
+    turmaKey: string;
+    turmaLabel: string;
+    sigla: string;
+    disciplina: string;
+    sala: string;
+    aulaNumero: number;
+    equipeApelido?: string;
+    professores: Array<{ nome: string; sigla: string }>;
+  }
+
+  // Registros normalizados do curso selecionado + matéria selecionada (com numeração sequencial por turma)
+  const cftpSubjectAllItems = useMemo<CftpNormalizedScheduleItem[]>(() => {
+    if (!selectedCftpCourseObj || !cftpSelectedSubject) return [];
+    const targetSubj = cftpSelectedSubject.trim().toUpperCase();
+    const rawRows = Array.isArray(selectedCftpCourseObj.moduleSchedule)
+      ? selectedCftpCourseObj.moduleSchedule
+      : [];
+
+    const preSorted = rawRows
+      .filter(r => String(r.sigla || '').trim().toUpperCase() === targetSubj)
+      .map((r, idx) => {
+        const isoDate = normalizeCftpDateToIso(r.data);
+        const slotId = normalizeCftpHorarioKey(r.horario);
+        const slotOrder = slotId === 'slot1' ? 1 : slotId === 'slot2' ? 2 : slotId === 'slot3' ? 3 : slotId === 'slot4' ? 4 : 5;
+        const turmaKey = normCftpTurmaKey(r.turma || '');
+        const turmaLabel = cftpTurmaDisplayMap.get(turmaKey) || formatCftpTurmaLabel(r.turma || '') || r.turma || '—';
+        return {
+          idx,
+          isoDate,
+          brDate: formatIsoToBr(isoDate),
+          slotId,
+          slotOrder,
+          turmaKey,
+          turmaLabel,
+          sigla: targetSubj,
+          disciplina: String(r.disciplina || targetSubj).trim(),
+          sala: String(r.sala || '').trim()
+        };
+      })
+      .filter(item => Boolean(item.isoDate))
+      .sort(
+        (a, b) =>
+          a.isoDate.localeCompare(b.isoDate) ||
+          a.slotOrder - b.slotOrder ||
+          a.turmaLabel.localeCompare(b.turmaLabel, 'pt-BR', { numeric: true, sensitivity: 'base' })
+      );
+
+    const turmaCounters = new Map<string, number>();
+    return preSorted.map(item => {
+      const nextAula = (turmaCounters.get(item.turmaKey) || 0) + 1;
+      turmaCounters.set(item.turmaKey, nextAula);
+      const profInfo = resolveCftpCellProfessors(
+        selectedCftpCourseObj.id,
+        item.turmaLabel,
+        item.sigla,
+        item.isoDate
+      );
+      return {
+        key: `${item.isoDate}-${item.slotId}-${item.turmaKey}-${item.idx}`,
+        isoDate: item.isoDate,
+        brDate: item.brDate,
+        slotId: item.slotId,
+        slotOrder: item.slotOrder,
+        turmaKey: item.turmaKey,
+        turmaLabel: item.turmaLabel,
+        sigla: item.sigla,
+        disciplina: item.disciplina,
+        sala: item.sala,
+        aulaNumero: nextAula,
+        equipeApelido: profInfo.equipeApelido,
+        professores: profInfo.professores
+      };
+    });
+  }, [selectedCftpCourseObj, cftpSelectedSubject, cftpTurmaDisplayMap, designacoesCftpList, equipesCftpList, systemUsers]);
+
+  const cftpAvailableTurmas = useMemo(() => {
+    const set = new Set<string>(cftpSubjectAllItems.map(i => i.turmaLabel));
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' }));
+  }, [cftpSubjectAllItems]);
+
+  const cftpAvailableSalas = useMemo(() => {
+    const set = new Set<string>(cftpSubjectAllItems.map(i => i.sala).filter(Boolean));
+    return Array.from(set).sort();
+  }, [cftpSubjectAllItems]);
+
+  const cftpFilteredItems = useMemo(() => {
+    return cftpSubjectAllItems.filter(item => {
+      if (cftpFilterTurma !== 'TODAS' && normCftpTurmaKey(item.turmaLabel) !== normCftpTurmaKey(cftpFilterTurma)) {
+        return false;
+      }
+      if (cftpFilterSala !== 'TODAS' && item.sala !== cftpFilterSala) {
+        return false;
+      }
+      if (searchTerm) {
+        const q = searchTerm.toLowerCase();
+        const profStr = item.professores.map(p => `${p.sigla} ${p.nome}`).join(' ').toLowerCase();
+        if (
+          !item.turmaLabel.toLowerCase().includes(q) &&
+          !item.sala.toLowerCase().includes(q) &&
+          !profStr.includes(q) &&
+          !(item.equipeApelido || '').toLowerCase().includes(q)
+        ) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [cftpSubjectAllItems, cftpFilterTurma, cftpFilterSala, searchTerm]);
+
+  // Meses que possuem aulas da matéria selecionada no CFTP
+  const cftpAvailableMonths = useMemo(() => {
+    const map = new Map<string, { year: number; month: number; label: string; count: number }>();
+    for (const item of cftpFilteredItems) {
+      const y = Number(item.isoDate.slice(0, 4));
+      const m = Number(item.isoDate.slice(5, 7)) - 1;
+      if (isNaN(y) || isNaN(m)) continue;
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        map.set(key, { year: y, month: m, label: `${MONTH_NAMES[m].slice(0, 3)}/${y}`, count: 1 });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.year - b.year || a.month - b.month);
+  }, [cftpFilteredItems]);
+
+  // Determina dinamicamente os horários do curso/matéria (padrão 4 horários + almoço, adicionando 5º apenas se existir)
+  const cftpActiveTimeSlots = useMemo<CftpSlotRowDef[]>(() => {
+    const hasFifthSlot = cftpSubjectAllItems.some(i => i.slotId === 'slot5');
+    return hasFifthSlot ? [...CFTP_STANDARD_SLOTS, CFTP_FIFTH_SLOT] : CFTP_STANDARD_SLOTS;
+  }, [cftpSubjectAllItems]);
+
+  // Semanas do calendário convencional CFTP
+  const cftpWeeksToRender = useMemo(() => {
+    const dateSet = new Set<string>(cftpFilteredItems.map(i => i.isoDate));
+    const weekHasItems = (w: CalendarWeekInfo) => w.days.some(d => dateSet.has(d.dateStr));
+
+    if (cftpShowAllMonths) {
+      const allWeeks: CalendarWeekInfo[] = [];
+      const seenFirstDay = new Set<string>();
+      for (const mInfo of cftpAvailableMonths) {
+        const mWeeks = getMonthWeeks(mInfo.year, mInfo.month);
+        for (const w of mWeeks) {
+          if (weekHasItems(w)) {
+            const fd = w.days[0]?.dateStr || '';
+            if (!seenFirstDay.has(fd)) {
+              seenFirstDay.add(fd);
+              allWeeks.push({ ...w, weekNum: allWeeks.length + 1 });
+            }
+          }
+        }
+      }
+      return allWeeks;
+    }
+
+    const mWeeks = getMonthWeeks(selectedYear, selectedMonth);
+    const withClasses = mWeeks.filter(weekHasItems);
+    return withClasses.length > 0 ? withClasses : mWeeks;
+  }, [cftpFilteredItems, cftpShowAllMonths, cftpAvailableMonths, selectedYear, selectedMonth]);
+
+  const handleSelectCftpCourse = (courseId: string) => {
+    setSelectedCftpCourseId(courseId);
+    setCftpSelectedSubject('');
+    setCftpFilterTurma('TODAS');
+    setCftpFilterSala('TODAS');
+    setCftpShowAllMonths(false);
+    setSearchTerm('');
+  };
+
+  const handleSelectCftpSubject = (sigla: string) => {
+    setCftpSelectedSubject(sigla);
+    setCftpFilterTurma('TODAS');
+    setCftpFilterSala('TODAS');
+    setCftpShowAllMonths(false);
+
+    // Pula automaticamente para o primeiro mês com aulas dessa matéria no CFTP selecionado
+    if (selectedCftpCourseObj && sigla) {
+      const targetUpper = sigla.trim().toUpperCase();
+      const dates = (selectedCftpCourseObj.moduleSchedule || [])
+        .filter(r => String(r.sigla || '').trim().toUpperCase() === targetUpper)
+        .map(r => normalizeCftpDateToIso(r.data))
+        .filter(Boolean)
+        .sort();
+      if (dates.length > 0) {
+        const firstIso = dates[0];
+        const y = Number(firstIso.slice(0, 4));
+        const m = Number(firstIso.slice(5, 7)) - 1;
+        if (!isNaN(y) && !isNaN(m)) {
+          setSelectedYear(y);
+          setSelectedMonth(m);
+        }
+      }
+    }
   };
 
   const openNewRecordModalForDiscipline = () => {
@@ -1413,31 +1883,73 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          {selectedDiscipline && (
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs font-bold">
             <button
-              onClick={handlePrintPDF}
+              type="button"
+              onClick={() => setCalendarViewMode('cftp')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                calendarViewMode === 'cftp'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Calendário CFTP
+            </button>
+            <button
+              type="button"
+              onClick={() => setCalendarViewMode('legacy')}
+              className={`px-3 py-1.5 rounded-lg transition ${
+                calendarViewMode === 'legacy'
+                  ? 'bg-amber-500 text-slate-950'
+                  : 'text-slate-300 hover:text-white'
+              }`}
+            >
+              Grade Avulsa ({records.length})
+            </button>
+          </div>
+
+          {((calendarViewMode === 'cftp' && selectedCftpCourseObj && cftpSelectedSubject) ||
+            (calendarViewMode === 'legacy' && selectedDiscipline)) && (
+            <button
+              onClick={() => {
+                if (calendarViewMode === 'cftp') {
+                  printWithWindowTitle(
+                    buildStandardDocumentTitle(
+                      'Calendário Curso de Formação',
+                      `${selectedCftpCourseObj?.module || selectedCftpCourseObj?.name || 'CFTP'} - ${cftpSelectedSubject}`,
+                      currentUser?.name || 'ACADEPOL'
+                    )
+                  );
+                } else {
+                  handlePrintPDF();
+                }
+              }}
               className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center space-x-2 transition"
             >
               <Printer className="w-4 h-4" />
-              <span>Imprimir PDF da Disciplina</span>
+              <span>Imprimir PDF</span>
             </button>
           )}
 
-          <button
-            onClick={() => setShowImportModal(true)}
-            className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center space-x-2 transition"
-          >
-            <FileSpreadsheet className="w-4 h-4" />
-            <span>Importar Excel</span>
-          </button>
+          {calendarViewMode === 'legacy' && (
+            <>
+              <button
+                onClick={() => setShowImportModal(true)}
+                className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-indigo-600/20 flex items-center space-x-2 transition"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>Importar Excel</span>
+              </button>
 
-          <button
-            onClick={openNewRecordModalForDiscipline}
-            className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/20 flex items-center space-x-2 transition"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Novo Agendamento</span>
-          </button>
+              <button
+                onClick={openNewRecordModalForDiscipline}
+                className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-black shadow-lg shadow-amber-500/20 flex items-center space-x-2 transition"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Novo Agendamento</span>
+              </button>
+            </>
+          )}
 
           <button
             onClick={loadData}
@@ -1449,75 +1961,662 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
         </div>
       </div>
 
-      {/* STEP 1: SUBJECT / DISCIPLINE SELECTION PANEL (Print: Hidden) */}
-      <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
-          <div className="flex items-center space-x-2">
-            <BookOpen className="w-5 h-5 text-amber-400" />
-            <h3 className="text-sm font-extrabold text-slate-100">
-              1. Seleção da Matéria / Disciplina
-            </h3>
+      {/* MODO CFTP: 1. SELECIONAR CURSO CFTP -> 2. SELECIONAR MATÉRIA -> CALENDÁRIO POR PERÍODOS E HORÁRIOS */}
+      {calendarViewMode === 'cftp' && (
+        <div className="space-y-6">
+          {/* Passo 1: Seleção do Curso de Formação CFTP */}
+          <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <CalendarDays className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-extrabold text-slate-100">
+                  1. Selecione o Curso de Formação (CFTP)
+                </h3>
+              </div>
+              {selectedCftpCourseObj && (
+                <span className="text-xs font-mono text-amber-300">
+                  {selectedCftpCourseObj.module || selectedCftpCourseObj.name} ({selectedCftpCourseObj.code}) •{' '}
+                  {formatIsoToBr((selectedCftpCourseObj.startDate || '').slice(0, 10))} a{' '}
+                  {formatIsoToBr((selectedCftpCourseObj.endDate || '').slice(0, 10))}
+                </span>
+              )}
+            </div>
+
+            {cftpCourses.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800 p-4">
+                Nenhum curso de formação CFTP cadastrado ainda. Cadastre um curso em <strong className="text-amber-400">Curso de Formação → Novo CFTP</strong>.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
+                <div className="md:col-span-8">
+                  <select
+                    value={selectedCftpCourseId}
+                    onChange={(e) => handleSelectCftpCourse(e.target.value)}
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:border-amber-400 focus:outline-none"
+                  >
+                    <option value="">Selecione um Curso de Formação CFTP...</option>
+                    {cftpCourses.map((crs) => {
+                      const sIso = (crs.startDate || '').slice(0, 10);
+                      const eIso = (crs.endDate || '').slice(0, 10);
+                      const modCount = Array.isArray(crs.moduleSchedule) ? crs.moduleSchedule.length : 0;
+                      return (
+                        <option key={crs.id} value={crs.id}>
+                          {crs.module || crs.name} - {crs.code} ({formatIsoToBr(sIso)} a {formatIsoToBr(eIso)}) — {modCount} horário(s)
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+                {selectedCftpCourseObj && (
+                  <div className="md:col-span-4 text-xs text-slate-300 bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center justify-between">
+                    <span>Matérias no horário:</span>
+                    <strong className="text-amber-400 font-mono">{cftpCourseSubjects.length}</strong>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Passo 2: Aparece após selecionar o curso para selecionar a Matéria */}
+            {selectedCftpCourseObj && (
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2">
+                    <BookOpen className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-xs font-extrabold text-slate-100 uppercase tracking-wider">
+                      2. Selecione a Matéria para abrir o Calendário
+                    </h4>
+                  </div>
+                  {cftpSelectedSubject && (
+                    <button
+                      type="button"
+                      onClick={() => setCftpSelectedSubject('')}
+                      className="text-xs font-bold text-amber-400 hover:text-amber-300 underline flex items-center space-x-1 self-start sm:self-auto"
+                    >
+                      <span>Trocar Matéria</span>
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {cftpCourseSubjects.length === 0 ? (
+                  <div className="text-center py-4 text-xs text-slate-400 bg-slate-950/60 rounded-xl border border-slate-800">
+                    Este curso ainda não possui planilha de horários importada. Importe o horário do módulo em <strong className="text-amber-300">Curso de Formação</strong>.
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {cftpCourseSubjects.map((subj) => {
+                      const isSel = cftpSelectedSubject === subj.sigla;
+                      return (
+                        <button
+                          key={subj.sigla}
+                          type="button"
+                          onClick={() => handleSelectCftpSubject(subj.sigla)}
+                          title={`${subj.sigla} - ${subj.nome} (${subj.count} aula${subj.count > 1 ? 's' : ''})`}
+                          className={`px-3 py-2 rounded-lg text-xs font-mono font-bold transition flex items-center space-x-2 border ${
+                            isSel
+                              ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-md'
+                              : 'bg-slate-950 text-amber-300 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/70'
+                          }`}
+                        >
+                          <span>{subj.sigla}</span>
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${isSel ? 'bg-slate-950/20 text-slate-950' : 'bg-slate-800 text-slate-400'}`}>
+                            {subj.count}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
-          {selectedDiscipline && (
-            <button
-              onClick={() => setSelectedDiscipline('')}
-              className="text-xs font-bold text-amber-400 hover:text-amber-300 underline flex items-center space-x-1"
-            >
-              <span>Trocar / Desmarcar Disciplina</span>
-              <X className="w-3.5 h-3.5" />
-            </button>
+          {/* Estado vazio antes de selecionar Curso + Matéria */}
+          {!selectedCftpCourseObj || !cftpSelectedSubject ? (
+            <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-10 text-center space-y-3">
+              <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-xl w-14 h-14 mx-auto flex items-center justify-center text-amber-400">
+                <Calendar className="w-7 h-7" />
+              </div>
+              <h3 className="text-sm font-extrabold text-slate-200">
+                {!selectedCftpCourseObj
+                  ? 'Selecione um Curso de Formação CFTP acima'
+                  : 'Selecione uma Matéria para exibir o calendário'}
+              </h3>
+              <p className="text-xs text-slate-400 max-w-lg mx-auto">
+                Ao selecionar o curso e a matéria, será exibido o calendário padrão separado por períodos (Manhã, Almoço e Tarde) e dias com data, horário, turma e siglas dos professores designados.
+              </p>
+            </div>
+          ) : (
+            /* Calendário Padrão CFTP Aberto */
+            <div className="space-y-4">
+              {/* Barra de Navegação de Mês e Filtros (Oculta na Impressão) */}
+              <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+                  <div className="flex items-center space-x-3">
+                    <span className="px-3 py-1.5 bg-amber-500 text-slate-950 font-black text-sm font-mono rounded-lg">
+                      {cftpSelectedSubject}
+                    </span>
+                    <div>
+                      <h3 className="text-sm font-extrabold text-slate-100">
+                        {cftpCourseSubjects.find(s => s.sigla === cftpSelectedSubject)?.nome || cftpSelectedSubject}
+                      </h3>
+                      <span className="text-[11px] font-mono text-amber-300">
+                        {selectedCftpCourseObj.module || selectedCftpCourseObj.name} • {cftpFilteredItems.length} aula(s) •{' '}
+                        {cftpActiveTimeSlots.filter(s => s.type === 'class').length} horários/dia
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Controles de Mês / Ver Todos os Meses */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCftpShowAllMonths(prev => !prev)}
+                      className={`px-3 py-1.5 rounded-lg border text-xs font-bold transition ${
+                        cftpShowAllMonths
+                          ? 'bg-amber-500 text-slate-950 border-amber-400'
+                          : 'bg-slate-950 border-slate-700 text-slate-200 hover:border-amber-500/50'
+                      }`}
+                    >
+                      {cftpShowAllMonths ? 'Exibindo Todos os Meses' : 'Ver Todos os Meses'}
+                    </button>
+
+                    {!cftpShowAllMonths && (
+                      <div className="flex items-center space-x-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedMonth === 0) {
+                              setSelectedMonth(11);
+                              setSelectedYear(y => y - 1);
+                            } else {
+                              setSelectedMonth(m => m - 1);
+                            }
+                          }}
+                          className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300"
+                        >
+                          <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <select
+                          value={selectedMonth}
+                          onChange={(e) => setSelectedMonth(Number(e.target.value))}
+                          className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-400 focus:outline-none"
+                        >
+                          {MONTH_NAMES.map((name, idx) => (
+                            <option key={name} value={idx}>
+                              {name}
+                            </option>
+                          ))}
+                        </select>
+                        <select
+                          value={selectedYear}
+                          onChange={(e) => setSelectedYear(Number(e.target.value))}
+                          className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-200 focus:outline-none"
+                        >
+                          {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => (
+                            <option key={y} value={y}>
+                              {y}
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedMonth === 11) {
+                              setSelectedMonth(0);
+                              setSelectedYear(y => y + 1);
+                            } else {
+                              setSelectedMonth(m => m + 1);
+                            }
+                          }}
+                          className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 rounded-lg text-slate-300"
+                        >
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Atalhos rápidos de meses com aulas da matéria */}
+                {cftpAvailableMonths.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-800/80 text-xs">
+                    <span className="text-[11px] font-semibold text-slate-400 mr-1">Meses com aulas:</span>
+                    {cftpAvailableMonths.map((mInfo) => {
+                      const active = !cftpShowAllMonths && selectedYear === mInfo.year && selectedMonth === mInfo.month;
+                      return (
+                        <button
+                          key={`${mInfo.year}-${mInfo.month}`}
+                          type="button"
+                          onClick={() => {
+                            setCftpShowAllMonths(false);
+                            setSelectedYear(mInfo.year);
+                            setSelectedMonth(mInfo.month);
+                          }}
+                          className={`px-2.5 py-1 rounded-md border text-[11px] font-mono font-bold transition ${
+                            active
+                              ? 'bg-amber-500 text-slate-950 border-amber-400'
+                              : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-amber-500/50'
+                          }`}
+                        >
+                          {mInfo.label} ({mInfo.count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Filtros Turma / Sala / Busca */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-2 border-t border-slate-800/80 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Turma</label>
+                    <select
+                      value={cftpFilterTurma}
+                      onChange={(e) => setCftpFilterTurma(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="TODAS">Todas as Turmas ({cftpAvailableTurmas.length})</option>
+                      {cftpAvailableTurmas.map(t => (
+                        <option key={t} value={t}>
+                          Turma {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Sala</label>
+                    <select
+                      value={cftpFilterSala}
+                      onChange={(e) => setCftpFilterSala(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-200 focus:border-amber-500 focus:outline-none"
+                    >
+                      <option value="TODAS">Todas as Salas</option>
+                      {cftpAvailableSalas.map(s => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Busca (Turma / Sigla Professor)</label>
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={searchTerm}
+                        onChange={(e) => setSearchTerm(e.target.value)}
+                        placeholder="Ex: DL01, MC, BR..."
+                        className="w-full bg-slate-950 border border-slate-700 rounded-lg pl-8 pr-2.5 py-1.5 text-slate-200 placeholder-slate-500 focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grade Convencional Separada por Períodos e Dias */}
+              <style>{`
+                @media print {
+                  @page { size: A4 portrait; margin: 10mm 8mm; }
+                  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box !important; }
+                  html, body, #root, #root > div, main {
+                    background-color: #ffffff !important; background-image: none !important;
+                    color: #000000 !important; margin: 0 !important; padding: 0 !important;
+                    width: 100% !important; max-width: 100% !important; overflow: visible !important;
+                  }
+                  .print\\:hidden, header, aside, footer, nav, button, input, select { display: none !important; }
+                  .folha-pagina { width: 100% !important; max-width: 100% !important; margin: 0 !important; background: #ffffff !important; border: none !important; padding: 0 !important; box-shadow: none !important; }
+                  .semana-bloco { display: block !important; page-break-inside: avoid !important; break-inside: avoid !important; margin-bottom: 5mm !important; }
+                  .folha-pagina table { width: 100% !important; table-layout: fixed !important; border-collapse: collapse !important; }
+                  tr, td, th { page-break-inside: avoid !important; break-inside: avoid !important; }
+                }
+                .folha-pagina { background: #ffffff !important; color: #000000 !important; font-family: Arial, Helvetica, sans-serif !important; }
+                .folha-pagina table { width: 100% !important; border-collapse: collapse !important; font-size: 9.5px !important; color: #000000 !important; table-layout: fixed !important; }
+                .folha-pagina th, .folha-pagina td { border: 1px solid #000000 !important; padding: 3px 3px !important; text-align: center !important; vertical-align: middle !important; color: #000000 !important; word-wrap: break-word !important; }
+                .bg-dia { background-color: #D9D9D9 !important; font-weight: bold !important; color: #000000 !important; }
+                .bg-manha { background-color: #D9E2F3 !important; font-weight: bold !important; color: #000000 !important; }
+                .bg-tarde { background-color: #FFF2CC !important; font-weight: bold !important; color: #000000 !important; }
+                .bg-noite { background-color: #E8EAF6 !important; font-weight: bold !important; color: #000000 !important; }
+                .bg-almoco { background-color: #FFE699 !important; font-weight: 900 !important; letter-spacing: 1px !important; color: #000000 !important; text-align: center !important; }
+                .bg-hora { background-color: #F2F2F2 !important; font-weight: bold !important; color: #000000 !important; }
+                .bg-seg { background-color: #E2EFDA !important; font-weight: bold !important; color: #000000 !important; }
+              `}</style>
+
+              <div className="folha-pagina bg-white max-w-[1050px] w-full mx-auto shadow-2xl rounded border border-slate-300 print:border-none print:shadow-none print:rounded-none p-4 print:p-0 text-black">
+                <div className="text-center pb-2 border-b border-black mb-3 font-sans">
+                  <span className="text-[11px] font-bold text-slate-800 uppercase font-mono tracking-wider block">
+                    ACADEPOL • {selectedCftpCourseObj.module || selectedCftpCourseObj.name} ({selectedCftpCourseObj.code})
+                  </span>
+                  <h2 className="font-extrabold text-sm uppercase tracking-wide text-black mt-0.5">
+                    {cftpSelectedSubject} — {cftpCourseSubjects.find(s => s.sigla === cftpSelectedSubject)?.nome || cftpSelectedSubject}
+                  </h2>
+                </div>
+
+                {cftpWeeksToRender.length === 0 ? (
+                  <div className="text-center text-slate-600 py-8 text-xs font-mono">
+                    Nenhuma aula encontrada para este filtro no período selecionado.
+                  </div>
+                ) : (
+                  <div className="space-y-4 print:space-y-3">
+                    {cftpWeeksToRender.map((week) => {
+                      const morningCount = cftpActiveTimeSlots.filter(s => s.period === 'MANHÃ').length;
+                      const afternoonCount = cftpActiveTimeSlots.filter(s => s.period === 'TARDE').length;
+
+                      return (
+                        <div key={`${week.weekNum}-${week.days[0]?.dateStr}`} className="semana-bloco">
+                          <div
+                            className="text-center font-black text-[11px] uppercase text-black py-1 mb-1 font-sans border border-black"
+                            style={{ backgroundColor: '#f1f5f9', color: '#000000' }}
+                          >
+                            SEMANA {week.weekNum} ({week.days[0].formattedDate} a {week.days[4].formattedDate})
+                          </div>
+
+                          <table className="w-full border-collapse text-[10px] text-black" style={{ tableLayout: 'fixed' }}>
+                            <thead>
+                              <tr>
+                                <th style={{ width: '8%' }} className="bg-dia">PERÍODO</th>
+                                <th style={{ width: '15%' }} className="bg-dia">DIA / HORÁRIO</th>
+                                {week.days.map((day) => (
+                                  <th key={day.dateStr} className="bg-dia" style={{ width: '15.4%' }}>
+                                    {day.formattedDate}
+                                  </th>
+                                ))}
+                              </tr>
+                              <tr>
+                                <th className="bg-manha">TURNO</th>
+                                <th className="bg-hora">HORA</th>
+                                {week.days.map((day) => (
+                                  <th key={day.dateStr} className="bg-seg">
+                                    {day.dayName}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {cftpActiveTimeSlots.map((slot, sIdx) => {
+                                const isFirstMorning = slot.period === 'MANHÃ' && sIdx === 0;
+                                const isFirstAfternoon = slot.period === 'TARDE' && cftpActiveTimeSlots[sIdx - 1]?.period !== 'TARDE';
+
+                                if (slot.type === 'break') {
+                                  return (
+                                    <tr key={slot.id}>
+                                      <td className="bg-almoco" style={{ fontWeight: 900 }}>
+                                        ALMOÇO
+                                      </td>
+                                      <td className="bg-hora">
+                                        <div className="font-bold leading-tight">{slot.title}</div>
+                                        <div className="font-mono text-[8.5px] text-slate-700 leading-tight">{slot.timeLabel}</div>
+                                      </td>
+                                      {week.days.map((day) => (
+                                        <td key={day.dateStr} className="bg-almoco" style={{ height: '20px' }}>
+                                          HORÁRIO DE ALMOÇO
+                                        </td>
+                                      ))}
+                                    </tr>
+                                  );
+                                }
+
+                                return (
+                                  <tr key={slot.id}>
+                                    {isFirstMorning && (
+                                      <td className="bg-manha" rowSpan={morningCount} style={{ fontWeight: 900 }}>
+                                        MANHÃ
+                                      </td>
+                                    )}
+                                    {isFirstAfternoon && (
+                                      <td className="bg-tarde" rowSpan={afternoonCount} style={{ fontWeight: 900 }}>
+                                        TARDE
+                                      </td>
+                                    )}
+                                    {slot.period === 'NOITE' && (
+                                      <td className="bg-noite" style={{ fontWeight: 900 }}>
+                                        EXTRA
+                                      </td>
+                                    )}
+
+                                    <td className="bg-hora">
+                                      <div className="font-bold leading-tight">{slot.title}</div>
+                                      <div className="font-mono text-[8.5px] text-slate-700 leading-tight">{slot.timeLabel}</div>
+                                    </td>
+
+                                    {week.days.map((day) => {
+                                      const cellItems = cftpFilteredItems.filter(
+                                        item => item.isoDate === day.dateStr && item.slotId === slot.id
+                                      );
+
+                                      return (
+                                        <td key={day.dateStr} className="cell-slot p-1 align-top text-center">
+                                          {cellItems.length === 0 ? (
+                                            <div className="flex items-center justify-center min-h-[34px]">
+                                              <span className="text-slate-400 font-mono text-[9px]">-</span>
+                                            </div>
+                                          ) : (
+                                            <div className="flex flex-col space-y-1 justify-start items-center w-full min-h-[34px]">
+                                              {cellItems.map((ci) => {
+                                                const siglasText = ci.professores.map(p => p.sigla).filter(Boolean).join(' ');
+                                                return (
+                                                  <div
+                                                    key={ci.key}
+                                                    onClick={() =>
+                                                      setCftpDetailCell({
+                                                        isoDate: ci.isoDate,
+                                                        brDate: ci.brDate,
+                                                        slotTitle: slot.title,
+                                                        slotTime: slot.timeLabel,
+                                                        turma: ci.turmaLabel,
+                                                        aulaNumero: ci.aulaNumero,
+                                                        sigla: ci.sigla,
+                                                        disciplina: ci.disciplina,
+                                                        sala: ci.sala,
+                                                        equipeApelido: ci.equipeApelido,
+                                                        professores: ci.professores
+                                                      })
+                                                    }
+                                                    title={`${ci.brDate} | ${slot.title} (${slot.timeLabel}) | Turma ${ci.turmaLabel} (${ci.aulaNumero}ª aula) | ${ci.professores.length > 0 ? ci.professores.map(p => `${p.nome} [${p.sigla}]`).join(', ') : 'Sem equipe designada'}`}
+                                                    className="cursor-pointer hover:bg-amber-100 transition py-0.5 px-1 border border-slate-400 rounded bg-white text-black w-full text-center flex flex-col items-center justify-center leading-tight"
+                                                  >
+                                                    <div className="flex flex-wrap items-center justify-center gap-1 w-full text-[9px] font-mono">
+                                                      <span className="font-black text-black">{ci.turmaLabel}</span>
+                                                      <span className="font-bold text-slate-700">{ci.aulaNumero}ª</span>
+                                                      {siglasText ? (
+                                                        <span className="font-black text-slate-950 uppercase tracking-tight">
+                                                          {siglasText}
+                                                        </span>
+                                                      ) : (
+                                                        <span className="text-[8px] text-slate-500 font-normal">S/Eq</span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
+      )}
 
-        {/* List of Disciplines / Badges (Only Siglas, hover shows full name) */}
-        {uniqueSubjectsMap.length === 0 ? (
-          <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800/80 p-4">
-            Nenhuma disciplina cadastrada no banco. Clique em <strong className="text-amber-400">Novo Agendamento</strong> ou <strong className="text-amber-400">Importar Excel</strong> para adicionar aulas.
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {uniqueSubjectsMap.map((subj) => {
-              const isSelected = selectedDiscipline === subj.sigla;
-              return (
-                <button
-                  key={subj.sigla}
-                  onClick={() => setSelectedDiscipline(subj.sigla)}
-                  title={`${subj.sigla} - ${subj.nome} (${subj.count} aula${subj.count > 1 ? 's' : ''})`}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-mono font-black transition flex items-center space-x-1.5 border shadow-sm ${
-                    isSelected
-                      ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/20 scale-105'
-                      : 'bg-slate-950 text-amber-400 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/60'
-                  }`}
-                >
-                  <span>{subj.sigla}</span>
-                  <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${isSelected ? 'bg-slate-950/20 text-slate-950 font-black' : 'bg-slate-800 text-slate-400'}`}>
-                    {subj.count}
+      {/* MODAL DETALHES DA AULA CFTP */}
+      {cftpDetailCell && (
+        <div className="print:hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-5 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <span className="px-2.5 py-1 bg-amber-500 text-slate-950 font-black text-xs font-mono rounded-lg">
+                  {cftpDetailCell.sigla}
+                </span>
+                <h3 className="text-base font-extrabold text-slate-100">
+                  Detalhes da Aula — {cftpDetailCell.turma}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCftpDetailCell(null)}
+                className="text-slate-400 hover:text-slate-200 p-1"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <div className="text-sm font-bold text-white">{cftpDetailCell.disciplina}</div>
+                <div className="text-amber-400 font-mono font-bold">
+                  Turma {cftpDetailCell.turma} • {cftpDetailCell.aulaNumero}ª Aula sequencial
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 font-mono text-[11px]">
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Data</span>
+                  <span className="text-white font-bold">{cftpDetailCell.brDate}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Horário</span>
+                  <span className="text-amber-300 font-bold">{cftpDetailCell.slotTitle}</span>
+                  <span className="text-slate-400 block text-[10px]">{cftpDetailCell.slotTime}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Turma</span>
+                  <span className="text-white font-bold">{cftpDetailCell.turma}</span>
+                </div>
+                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800">
+                  <span className="text-[10px] text-slate-500 block uppercase font-sans font-bold">Sala / Local</span>
+                  <span className="text-cyan-300 font-bold">{cftpDetailCell.sala || '—'}</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-amber-400 uppercase font-mono font-bold tracking-wider">
+                    Professores Designados
                   </span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                  {cftpDetailCell.equipeApelido && (
+                    <span className="text-[11px] font-bold text-emerald-300">
+                      Equipe {cftpDetailCell.equipeApelido}
+                    </span>
+                  )}
+                </div>
+                {cftpDetailCell.professores.length === 0 ? (
+                  <p className="text-xs text-slate-400">
+                    Nenhuma equipe designada para esta turma neste período. Use <strong className="text-amber-300">Curso de Formação → Designar equipe</strong> para vincular uma equipe.
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {cftpDetailCell.professores.map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between bg-slate-900 px-3 py-1.5 rounded-lg border border-slate-800">
+                        <span className="text-slate-200 font-medium">{p.nome}</span>
+                        <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/40 text-amber-300 font-mono font-bold text-[11px]">
+                          {p.sigla}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
 
-      {/* STATE A: NO DISCIPLINE SELECTED */}
-      {!selectedDiscipline ? (
-        <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-4">
-          <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-full w-16 h-16 mx-auto flex items-center justify-center text-amber-400">
-            <BookOpen className="w-8 h-8" />
-          </div>
-          <div className="max-w-md mx-auto space-y-1">
-            <h3 className="text-base font-extrabold text-slate-200">
-              Selecione uma matéria para iniciar o calendário
-            </h3>
-            <p className="text-xs text-slate-400 leading-relaxed">
-              Clique em uma das siglas acima para visualizar os dias, horários e número das aulas por turma.
-            </p>
+            <div className="flex justify-end pt-2 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => setCftpDetailCell(null)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold"
+              >
+                Fechar
+              </button>
+            </div>
           </div>
         </div>
-      ) : (
-        /* STATE B: DISCIPLINE SELECTED - SHOW CALENDAR GRID */
+      )}
+
+      {/* MODO LEGACY: GRADE AVULSA (CALENDARIO_AULAS) */}
+      {calendarViewMode === 'legacy' && (
+        <>
+          {/* STEP 1: SUBJECT / DISCIPLINE SELECTION PANEL (Print: Hidden) */}
+          <div className="print:hidden bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <BookOpen className="w-5 h-5 text-amber-400" />
+                <h3 className="text-sm font-extrabold text-slate-100">
+                  1. Seleção da Matéria / Disciplina
+                </h3>
+              </div>
+
+              {selectedDiscipline && (
+                <button
+                  onClick={() => setSelectedDiscipline('')}
+                  className="text-xs font-bold text-amber-400 hover:text-amber-300 underline flex items-center space-x-1"
+                >
+                  <span>Trocar / Desmarcar Disciplina</span>
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* List of Disciplines / Badges (Only Siglas, hover shows full name) */}
+            {uniqueSubjectsMap.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800/80 p-4">
+                Nenhuma disciplina cadastrada no banco. Clique em <strong className="text-amber-400">Novo Agendamento</strong> ou <strong className="text-amber-400">Importar Excel</strong> para adicionar aulas.
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {uniqueSubjectsMap.map((subj) => {
+                  const isSelected = selectedDiscipline === subj.sigla;
+                  return (
+                    <button
+                      key={subj.sigla}
+                      onClick={() => setSelectedDiscipline(subj.sigla)}
+                      title={`${subj.sigla} - ${subj.nome} (${subj.count} aula${subj.count > 1 ? 's' : ''})`}
+                      className={`px-3.5 py-2 rounded-xl text-xs font-mono font-black transition flex items-center space-x-1.5 border shadow-sm ${
+                        isSelected
+                          ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 shadow-amber-500/20 scale-105'
+                          : 'bg-slate-950 text-amber-400 border-slate-800 hover:border-amber-500/50 hover:bg-slate-800/60'
+                      }`}
+                    >
+                      <span>{subj.sigla}</span>
+                      <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-mono ${isSelected ? 'bg-slate-950/20 text-slate-950 font-black' : 'bg-slate-800 text-slate-400'}`}>
+                        {subj.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          {/* STATE A: NO DISCIPLINE SELECTED */}
+          {!selectedDiscipline ? (
+            <div className="bg-slate-900/60 border border-dashed border-slate-800 rounded-3xl p-12 text-center space-y-4">
+              <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-full w-16 h-16 mx-auto flex items-center justify-center text-amber-400">
+                <BookOpen className="w-8 h-8" />
+              </div>
+              <div className="max-w-md mx-auto space-y-1">
+                <h3 className="text-base font-extrabold text-slate-200">
+                  Selecione uma matéria para iniciar o calendário
+                </h3>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Clique em uma das siglas acima para visualizar os dias, horários e número das aulas por turma.
+                </p>
+              </div>
+            </div>
+          ) : (
+            /* STATE B: DISCIPLINE SELECTED - SHOW CALENDAR GRID */
         <div className="space-y-6">
           {/* Active Discipline Header Indicator */}
           <div className="print:hidden bg-gradient-to-r from-amber-950/40 via-slate-900 to-slate-900 border border-amber-500/30 rounded-3xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 shadow-lg">
@@ -1928,6 +3027,8 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* MODAL 1: DETALHES DA AULA (CLICKED FROM GRID) */}
