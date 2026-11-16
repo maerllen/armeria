@@ -148,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'iniciar-aula-mobile',
       label: 'Iniciar Aula',
       icon: Smartphone,
-      visible: allowedModules.includes('iniciar-aula-mobile')
+      visible: false
     },
     {
       id: 'cursos',
@@ -160,13 +160,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'ensino-continuado',
       label: 'Ensino Continuado',
       icon: Award,
-      visible: allowedModules.includes('ensino-continuado')
+      visible: false
     },
     {
       id: 'gerencia-cursos',
       label: 'Gerência de Cursos',
       icon: BookOpen,
-      visible: allowedModules.includes('gerencia-cursos')
+      visible: false
     },
     {
       id: 'calendario',

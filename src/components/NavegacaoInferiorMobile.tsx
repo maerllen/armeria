@@ -82,7 +82,9 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
     }
   ];
 
-  const visibleTabs = allQuickTabs.filter(tab => allowedModules.includes(tab.id));
+  const visibleTabs = allQuickTabs.filter(
+    tab => tab.id !== 'iniciar-aula-mobile' && allowedModules.includes(tab.id)
+  );
 
   return (
     <nav

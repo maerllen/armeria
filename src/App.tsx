@@ -126,7 +126,10 @@ export default function App() {
 
   useEffect(() => {
     if (isMobileUrlMode && currentUser?.role === 'Geral') {
-      setActiveModule('iniciar-aula-mobile');
+      const allowed = getAllowedModulesForUser(currentUser);
+      if (allowed.includes('iniciar-aula-mobile')) {
+        setActiveModule('iniciar-aula-mobile');
+      }
     }
   }, [isMobileUrlMode]);
 

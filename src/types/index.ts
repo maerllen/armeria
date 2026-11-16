@@ -1432,10 +1432,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     if (!user.isCourseCoordinator) return modules;
     const coordinatorModules: ModuleType[] = [
       'cursos',
-      'ensino-continuado',
-      'gerencia-cursos',
-      'calendario',
-      'iniciar-aula-mobile'
+      'calendario'
     ];
     const merged = [...modules];
     for (const mod of coordinatorModules) {
@@ -1461,10 +1458,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'cofre',
       'movimentacoes',
       'materiais',
-      'iniciar-aula-mobile',
       'cursos',
-      'ensino-continuado',
-      'gerencia-cursos',
       'calendario',
       'certificados',
       'veterinario',
