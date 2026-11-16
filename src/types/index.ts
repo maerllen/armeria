@@ -1311,6 +1311,41 @@ export interface MovimentacaoVeterinaria {
   createdAt: string;
 }
 
+export type LocalTreinamentoCanil = 'Interno' | 'Externo';
+export type ParticipacaoTreinamentoCanil = 'Sozinho' | 'Coletivo';
+
+export interface ParticipanteTreinamentoCanil {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  signed: boolean;
+  signedAt?: string;
+}
+
+export interface RelatorioTreinamentoCanil {
+  id: string;
+  dataTreinamento: string; // YYYY-MM-DD
+  condutorId: string;
+  condutorNome: string;
+  condutorMasp: string;
+  condutorCargo?: string;
+  cachorroId: string;
+  cachorroNome: string;
+  cachorroRaca?: string;
+  cachorroMicrochip?: string;
+  modalidadeLocal: LocalTreinamentoCanil;
+  modalidadeParticipacao: ParticipacaoTreinamentoCanil;
+  descricao: string; // Máximo 1000 caracteres
+  participantes: ParticipanteTreinamentoCanil[]; // Até 15 participantes adicionais quando Coletivo
+  condutorAssinado: boolean;
+  condutorAssinadoEm?: string;
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 

@@ -11785,6 +11785,303 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
   }
 });
 
+// --- 5. RELATÓRIOS DE TREINAMENTO CANIL K9 ---
+apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_REL_TREINAMENTO as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        CONDUTOR_ID as condutorId,
+        CONDUTOR_NOME as condutorNome,
+        CONDUTOR_MASP as condutorMasp,
+        CONDUTOR_CARGO as condutorCargo,
+        CACHORRO_ID as cachorroId,
+        CACHORRO_NOME as cachorroNome,
+        CACHORRO_RACA as cachorroRaca,
+        CACHORRO_MICROCHIP as cachorroMicrochip,
+        MODALIDADE_LOCAL as modalidadeLocal,
+        MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
+        DESCRICAO as descricao,
+        PARTICIPANTES_JSON as participantesJson,
+        CONDUTOR_ASSINADO as condutorAssinado,
+        DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
+      FROM RELATORIOS_TREINAMENTO_CANIL
+      ORDER BY DATA_TREINAMENTO DESC, DATA_CRIACAO DESC
+    `);
+
+    const mapped = (rows || []).map((r: any) => {
+      let participantes: any[] = [];
+      if (r.participantesJson) {
+        try {
+          const parsed = JSON.parse(r.participantesJson);
+          if (Array.isArray(parsed)) participantes = parsed;
+        } catch {
+          participantes = [];
+        }
+      }
+      return {
+        id: r.id,
+        dataTreinamento: r.dataTreinamento,
+        condutorId: r.condutorId,
+        condutorNome: r.condutorNome,
+        condutorMasp: r.condutorMasp || '',
+        condutorCargo: r.condutorCargo || '',
+        cachorroId: r.cachorroId,
+        cachorroNome: r.cachorroNome,
+        cachorroRaca: r.cachorroRaca || '',
+        cachorroMicrochip: r.cachorroMicrochip || '',
+        modalidadeLocal: r.modalidadeLocal === 'Externo' ? 'Externo' : 'Interno',
+        modalidadeParticipacao: r.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho',
+        descricao: r.descricao || '',
+        participantes,
+        condutorAssinado: Boolean(r.condutorAssinado),
+        condutorAssinadoEm: r.condutorAssinadoEm || undefined,
+        departmentId: r.departmentId || undefined,
+        unitId: r.unitId || undefined,
+        createdAt: r.createdAt || '',
+        updatedAt: r.updatedAt || undefined
+      };
+    });
+
+    return res.json(mapped);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const condutorId = String(body.condutorId || actor.id || '').trim();
+    const condutorNome = String(body.condutorNome || actor.name || '').trim();
+    const condutorMasp = String(body.condutorMasp || actor.masp || '').trim();
+    const condutorCargo = String(body.condutorCargo || actor.cargo || '').trim();
+
+    if (!condutorId || !condutorNome) {
+      return res.status(400).json({ error: 'Condutor responsável é obrigatório.' });
+    }
+    if (!body.cachorroId || !body.cachorroNome) {
+      return res.status(400).json({ error: 'Selecione o cachorro do treinamento.' });
+    }
+
+    const modalidadeLocal = body.modalidadeLocal === 'Externo' ? 'Externo' : 'Interno';
+    const modalidadeParticipacao = body.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho';
+    const descricao = String(body.descricao || '').trim();
+
+    if (!descricao) {
+      return res.status(400).json({ error: 'A descrição do treinamento do dia é obrigatória.' });
+    }
+    if (descricao.length > 1000) {
+      return res.status(400).json({ error: 'A descrição do treinamento deve ter no máximo 1000 caracteres.' });
+    }
+
+    let participantes: any[] = [];
+    if (modalidadeParticipacao === 'Coletivo') {
+      const rawList = Array.isArray(body.participantes) ? body.participantes : [];
+      const seenIds = new Set<string>([condutorId]);
+      for (const p of rawList) {
+        const uid = String(p?.userId || p?.id || '').trim();
+        if (!uid || seenIds.has(uid)) continue;
+        seenIds.add(uid);
+        participantes.push({
+          userId: uid,
+          name: String(p?.name || '').trim(),
+          masp: String(p?.masp || '').trim(),
+          cargo: String(p?.cargo || '').trim(),
+          signed: false,
+          signedAt: null
+        });
+      }
+      if (participantes.length > 15) {
+        return res.status(400).json({ error: 'Em treinamento coletivo, é permitido incluir no máximo 15 usuários além do condutor.' });
+      }
+    }
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const dataTreinamento = /^\d{4}-\d{2}-\d{2}$/.test(String(body.dataTreinamento || ''))
+      ? String(body.dataTreinamento)
+      : todayBr;
+
+    const pool = getPool();
+    const id = `rel-trein-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    const departmentId = body.departmentId || actor.departmentId || null;
+    const unitId = body.unitId || actor.unitId || null;
+
+    await pool.query(
+      `INSERT INTO RELATORIOS_TREINAMENTO_CANIL (
+        ID_REL_TREINAMENTO, DATA_TREINAMENTO, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
+        CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP,
+        MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO, DESCRICAO, PARTICIPANTES_JSON,
+        CONDUTOR_ASSINADO, CONDUTOR_ASSINADO_EM, DEPARTAMENTO_ID, UNIDADE_ID, DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
+      [
+        id,
+        dataTreinamento,
+        condutorId,
+        condutorNome,
+        condutorMasp,
+        condutorCargo || null,
+        String(body.cachorroId),
+        String(body.cachorroNome).trim(),
+        body.cachorroRaca || null,
+        body.cachorroMicrochip || null,
+        modalidadeLocal,
+        modalidadeParticipacao,
+        descricao,
+        JSON.stringify(participantes),
+        departmentId,
+        unitId
+      ]
+    );
+
+    const createdRecord = {
+      id,
+      dataTreinamento,
+      condutorId,
+      condutorNome,
+      condutorMasp,
+      condutorCargo,
+      cachorroId: String(body.cachorroId),
+      cachorroNome: String(body.cachorroNome).trim(),
+      cachorroRaca: body.cachorroRaca || '',
+      cachorroMicrochip: body.cachorroMicrochip || '',
+      modalidadeLocal,
+      modalidadeParticipacao,
+      descricao,
+      participantes,
+      condutorAssinado: true,
+      condutorAssinadoEm: new Date().toISOString(),
+      departmentId: departmentId || undefined,
+      unitId: unitId || undefined,
+      createdAt: new Date().toISOString()
+    };
+
+    await insertAuditLog(
+      'Veterinário',
+      'Relatório de Treinamento Canil',
+      `Criado relatório de treinamento (${modalidadeLocal} / ${modalidadeParticipacao}) do cão "${createdRecord.cachorroNome}" por ${condutorNome}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(createdRecord);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-treinamento-canil/:id/assinar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const signerId = String(req.body?.userId || actor.id || '').trim();
+    if (!signerId) {
+      return res.status(400).json({ error: 'Usuário assinante não identificado.' });
+    }
+
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_TREINAMENTO_CANIL WHERE ID_REL_TREINAMENTO = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de treinamento não encontrado.' });
+    }
+
+    const row = rows[0];
+    let participantes: any[] = [];
+    try {
+      const parsed = JSON.parse(row.PARTICIPANTES_JSON || '[]');
+      if (Array.isArray(parsed)) participantes = parsed;
+    } catch {
+      participantes = [];
+    }
+
+    let updated = false;
+    const nowIso = new Date().toISOString();
+
+    if (row.CONDUTOR_ID === signerId) {
+      await pool.query(
+        'UPDATE RELATORIOS_TREINAMENTO_CANIL SET CONDUTOR_ASSINADO = 1, CONDUTOR_ASSINADO_EM = COALESCE(CONDUTOR_ASSINADO_EM, NOW()) WHERE ID_REL_TREINAMENTO = ?',
+        [id]
+      );
+      updated = true;
+    }
+
+    const nextParticipantes = participantes.map((p: any) => {
+      if (String(p.userId) === signerId) {
+        updated = true;
+        return {
+          ...p,
+          signed: true,
+          signedAt: p.signedAt || nowIso
+        };
+      }
+      return p;
+    });
+
+    if (!updated) {
+      return res.status(403).json({ error: 'Você não está listado como participante ou condutor deste relatório.' });
+    }
+
+    await pool.query(
+      'UPDATE RELATORIOS_TREINAMENTO_CANIL SET PARTICIPANTES_JSON = ? WHERE ID_REL_TREINAMENTO = ?',
+      [JSON.stringify(nextParticipantes), id]
+    );
+
+    await insertAuditLog(
+      'Veterinário',
+      'Assinar Relatório de Treinamento',
+      `Usuário ${actor.name || signerId} assinou o relatório de treinamento ${id} (${row.CACHORRO_NOME})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, participantes: nextParticipantes });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/relatorios-treinamento-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const pool = getPool();
+    const [rows]: any = await pool.query(
+      'SELECT ID_REL_TREINAMENTO, CONDUTOR_ID, CACHORRO_NOME FROM RELATORIOS_TREINAMENTO_CANIL WHERE ID_REL_TREINAMENTO = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório não encontrado.' });
+    }
+    const row = rows[0];
+    const actorRole = actor.activeRole || actor.role;
+    if (actorRole !== 'Geral' && row.CONDUTOR_ID !== actor.id) {
+      return res.status(403).json({ error: 'Apenas o condutor autor ou perfil Geral pode excluir este relatório.' });
+    }
+
+    await pool.query('DELETE FROM RELATORIOS_TREINAMENTO_CANIL WHERE ID_REL_TREINAMENTO = ?', [id]);
+    await insertAuditLog(
+      'Veterinário',
+      'Excluir Relatório de Treinamento',
+      `Excluído relatório de treinamento ${id} do cão ${row.CACHORRO_NOME}`,
+      actor,
+      req.ip
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // =============================================================
 // MODULO: CAUTELA DE ARMAS (ACAUTELAR_ARMAS)
 // =============================================================

@@ -47,6 +47,7 @@ import {
   Cachorro,
   ProdutoVeterinario,
   MovimentacaoVeterinaria,
+  RelatorioTreinamentoCanil,
   CautelaArma,
   CautelaMunicao,
   AmmoTransfer,
@@ -98,6 +99,7 @@ export interface AppState {
   cachorros: Cachorro[];
   produtosVeterinarios: ProdutoVeterinario[];
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
+  relatoriosTreinamentoCanil: RelatorioTreinamentoCanil[];
   cautelasArmas: CautelaArma[];
   cautelasMunicoes: CautelaMunicao[];
   explosivoTransfers: ExplosivoTransfer[];
@@ -150,6 +152,7 @@ class StorageService {
     cachorros: [],
     produtosVeterinarios: [],
     movimentacoesVeterinarias: [],
+    relatoriosTreinamentoCanil: [],
     cautelasArmas: [],
     cautelasMunicoes: [],
     weaponCustodyHistory: []
@@ -213,6 +216,7 @@ class StorageService {
         cachorrosRes,
         produtosVeterinariosRes,
         movimentacoesVeterinariasRes,
+        relatoriosTreinamentoCanilRes,
         cautelasArmasRes,
         cautelasMunicoesRes,
         materialTransfersRes,
@@ -258,6 +262,7 @@ class StorageService {
         fetchSync('/api/cachorros'),
         fetchSync('/api/produtos-veterinarios'),
         fetchSync('/api/movimentacoes-veterinarias'),
+        fetchSync('/api/relatorios-treinamento-canil'),
         fetchSync('/api/cautelas-armas'),
         fetchSync('/api/cautelas-municoes'),
         fetchSync('/api/material-transfers'),
@@ -304,6 +309,7 @@ class StorageService {
       this.state.cachorros = cachorrosRes || [];
       this.state.produtosVeterinarios = produtosVeterinariosRes || [];
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
+      this.state.relatoriosTreinamentoCanil = relatoriosTreinamentoCanilRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
       this.state.weaponCustodyHistory = weaponCustodyHistoryRes || [];
@@ -3661,6 +3667,61 @@ class StorageService {
       if (!res.ok) return { success: false, error: data.error };
       await this.refreshFromServer();
       return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Relatórios de Treinamento Canil K9
+  public getRelatoriosTreinamentoCanil(): RelatorioTreinamentoCanil[] {
+    return this.state.relatoriosTreinamentoCanil || [];
+  }
+
+  public async saveRelatorioTreinamentoCanil(
+    rel: Partial<RelatorioTreinamentoCanil>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: RelatorioTreinamentoCanil }> {
+    try {
+      const res = await fetch('/api/relatorios-treinamento-canil', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao salvar relatório de treinamento.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async assinarRelatorioTreinamentoCanil(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-canil/${id}/assinar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao assinar relatório.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteRelatorioTreinamentoCanil(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-canil/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório.' };
+      await this.refreshFromServer();
+      return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message };
     }
