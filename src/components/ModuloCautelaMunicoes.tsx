@@ -590,10 +590,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   // =========================================================================
 
   // 1. Aba "Minhas Cautelas de Munições" (Policial e Armeiro):
-  // Somente cautelas ATIVAS ('AUTORIZADA') passivas de devolução (seraDevolvida === true) onde o próprio usuário é o solicitante
+  // Todas as cautelas ATIVAS ('AUTORIZADA') onde o próprio usuário é o solicitante (passivas de devolução ou de consumo)
   const minhasCautelasAtivas = useMemo(() => {
     return allCautelas.filter(
-      c => isOwnCautela(c) && c.status === 'AUTORIZADA' && Boolean(c.seraDevolvida)
+      c => isOwnCautela(c) && c.status === 'AUTORIZADA'
     );
   }, [allCautelas, isOwnCautela]);
 
@@ -1645,7 +1645,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 ) : c.seraDevolvida ? (
                   <strong className="text-emerald-300">Passiva de Devolução</strong>
                 ) : (
-                  <strong className="text-orange-300">Consumo (Sem Devolução)</strong>
+                  <strong className="text-orange-300">Consumo (Devolução Opcional)</strong>
                 )}
                 {c.authorizedAt && (
                   <span className="block text-[10px] text-slate-500">
@@ -1711,8 +1711,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
               </button>
             )}
 
-            {/* Botão Devolver em Minhas Cautelas (Policial ou Armeiro devolvendo suas cautelas ativas passivas de devolução) */}
-            {options?.allowReturnByOwner && c.status === 'AUTORIZADA' && c.seraDevolvida && (
+            {/* Botão Devolver em Minhas Cautelas / Meu Histórico (inclusive cautelas não passivas de devolução) */}
+            {options?.allowReturnByOwner && c.status === 'AUTORIZADA' && (
               <button
                 onClick={() => openReturnModal(c)}
                 disabled={loading}
@@ -1722,8 +1722,8 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
               </button>
             )}
 
-            {/* Armeiro também pode baixar diretamente cautela ativa de policial no Histórico Geral */}
-            {!options?.allowReturnByOwner && canAuthorize && c.status === 'AUTORIZADA' && c.seraDevolvida && (
+            {/* Armeiro também pode baixar diretamente qualquer cautela ativa (passiva ou não de devolução) */}
+            {!options?.allowReturnByOwner && canAuthorize && c.status === 'AUTORIZADA' && (
               <button
                 onClick={() => openReturnModal(c)}
                 disabled={loading}
@@ -1989,10 +1989,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
               </div>
               <div>
                 <div className="text-xs font-bold text-slate-100 uppercase tracking-wider">
-                  Munição de Consumo (Não Pode Ser Devolvida)
+                  Munição de Consumo (Não Passiva de Devolução)
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Destinada a consumo definitivo (treinamento / instrução), registrada diretamente no Histórico.
+                  Destinada a consumo (treinamento / instrução), com opção de devolução de sobras ao paiol se necessário.
                 </p>
               </div>
             </button>
@@ -2349,10 +2349,10 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
             <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
               <Disc className="w-10 h-10 text-slate-600 mx-auto" />
               <p className="text-sm font-semibold text-slate-300">
-                Nenhuma cautela de munição ativa passível de devolução encontrada.
+                Nenhuma cautela de munição ativa encontrada.
               </p>
               <p className="text-xs text-slate-500">
-                Munições de consumo e cautelas já devolvidas constam na aba de Histórico.
+                Cautelas já devolvidas ou consumidas constam na aba de Histórico.
               </p>
             </div>
           ) : (
@@ -2494,7 +2494,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
                 </span>
               </h3>
               <span className="text-[11px] text-orange-200/70 hidden sm:inline">
-                Não passíveis de devolução
+                Devolução de sobras disponível
               </span>
             </div>
 
@@ -2505,7 +2505,7 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
             ) : (
               <div className="space-y-3">
                 {filteredPolicialHistoricoAtivasFixas.map(c =>
-                  renderCautelaCard(c, { pinnedActiveBanner: true })
+                  renderCautelaCard(c, { pinnedActiveBanner: true, allowReturnByOwner: true })
                 )}
               </div>
             )}

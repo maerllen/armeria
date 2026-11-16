@@ -453,7 +453,7 @@ export default function App() {
     });
   };
 
-  // Quando o usuário já está dentro do módulo, marca os sinais daquele módulo como vistos/notificados para não sinalizar novamente
+  // Quando o usuário entra diretamente em um dos módulos de cautela/movimentações, silencia imediatamente sua sinalização e toast
   useEffect(() => {
     if (!effectiveUser) return;
     if (activeModule === 'cautela-armas' && weaponSignalKeys.length > 0) {
@@ -467,10 +467,38 @@ export default function App() {
       markKeysToasted(materialSignalKeys);
     } else if (activeModule === 'movimentacoes' && movementSignalKeys.length > 0) {
       markKeysAcknowledged(movementSignalKeys);
-    } else if (activeModule === 'meu-perfil' && readyReceiptSignalKeys.length > 0) {
-      markKeysAcknowledged(readyReceiptSignalKeys);
     }
-  }, [activeModule, effectiveUser, weaponSignalKeys, ammoSignalKeys, materialSignalKeys, movementSignalKeys, readyReceiptSignalKeys]);
+  }, [activeModule, effectiveUser, weaponSignalKeys, ammoSignalKeys, materialSignalKeys, movementSignalKeys]);
+
+  // A sinalização de atividade nos módulos desaparece automaticamente após 3 segundos e é persistida para não repetir
+  useEffect(() => {
+    if (!effectiveUser || !isAppReady) return;
+
+    const unackedKeys = [
+      ...weaponSignalKeys,
+      ...ammoSignalKeys,
+      ...materialSignalKeys,
+      ...movementSignalKeys,
+      ...readyReceiptSignalKeys
+    ].filter(k => !acknowledgedSignalKeys.has(k));
+
+    if (unackedKeys.length === 0) return;
+
+    const timer = setTimeout(() => {
+      markKeysAcknowledged(unackedKeys);
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, [
+    effectiveUser,
+    isAppReady,
+    weaponSignalKeys,
+    ammoSignalKeys,
+    materialSignalKeys,
+    movementSignalKeys,
+    readyReceiptSignalKeys,
+    acknowledgedSignalKeys
+  ]);
 
   // Exibe notificação de atividade em tela por 5 segundos apenas uma única vez para cada nova atividade em cautela de armas, munições e materiais
   useEffect(() => {
