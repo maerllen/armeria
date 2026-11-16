@@ -90,6 +90,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [canManageFormacaoCourses, setCanManageFormacaoCourses] = useState(false);
   const [canManageContinuadoCourses, setCanManageContinuadoCourses] = useState(false);
   const [canCreateAcademyCourses, setCanCreateAcademyCourses] = useState(false);
+  const [canManageCanilAndAnimals, setCanManageCanilAndAnimals] = useState(false);
+  const [canRegisterCanilMeds, setCanRegisterCanilMeds] = useState(false);
+  const [canAdministerCanilMeds, setCanAdministerCanilMeds] = useState(false);
+  const [canViewAllCanilReports, setCanViewAllCanilReports] = useState(false);
   const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
   const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
   const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -222,6 +226,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanManageFormacaoCourses(Boolean(usr.canManageFormacaoCourses));
       setCanManageContinuadoCourses(Boolean(usr.canManageContinuadoCourses));
       setCanCreateAcademyCourses(Boolean(usr.canCreateAcademyCourses));
+      setCanManageCanilAndAnimals(Boolean(usr.canManageCanilAndAnimals));
+      setCanRegisterCanilMeds(Boolean(usr.canRegisterCanilMeds));
+      setCanAdministerCanilMeds(Boolean(usr.canAdministerCanilMeds));
+      setCanViewAllCanilReports(Boolean(usr.canViewAllCanilReports));
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -261,6 +269,10 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanManageFormacaoCourses(false);
       setCanManageContinuadoCourses(false);
       setCanCreateAcademyCourses(false);
+      setCanManageCanilAndAnimals(false);
+      setCanRegisterCanilMeds(false);
+      setCanAdministerCanilMeds(false);
+      setCanViewAllCanilReports(false);
     }
     setShowUserModal(true);
   };
@@ -381,7 +393,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
           coordinatorSubject: finalCoordinatorSubject,
           canManageFormacaoCourses: finalCanManageFormacao,
           canManageContinuadoCourses: finalCanManageContinuado,
-          canCreateAcademyCourses: finalCanCreateCourses
+          canCreateAcademyCourses: finalCanCreateCourses,
+          canManageCanilAndAnimals: selectedRoles.includes('operador_canino') ? canManageCanilAndAnimals : false,
+          canRegisterCanilMeds: selectedRoles.includes('operador_canino') ? canRegisterCanilMeds : false,
+          canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
+          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -406,7 +422,11 @@ export const UserModule: React.FC<UserModuleProps> = ({
           coordinatorSubject: finalCoordinatorSubject,
           canManageFormacaoCourses: finalCanManageFormacao,
           canManageContinuadoCourses: finalCanManageContinuado,
-          canCreateAcademyCourses: finalCanCreateCourses
+          canCreateAcademyCourses: finalCanCreateCourses,
+          canManageCanilAndAnimals: selectedRoles.includes('operador_canino') ? canManageCanilAndAnimals : false,
+          canRegisterCanilMeds: selectedRoles.includes('operador_canino') ? canRegisterCanilMeds : false,
+          canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
+          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -1620,6 +1640,72 @@ export const UserModule: React.FC<UserModuleProps> = ({
                     })}
                   </div>
                 </div>
+
+                {/* Opções de Permissão do Perfil Operador Canino */}
+                {selectedRoles.includes('operador_canino') && (
+                  <div className="md:col-span-2 bg-amber-950/20 border border-amber-500/40 rounded-xl p-4 space-y-3">
+                    <div className="text-xs font-bold text-amber-400 uppercase tracking-wider">
+                      Permissões do Perfil Operador Canino (Canil)
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Criar baias e Animais?
+                        </label>
+                        <select
+                          value={canManageCanilAndAnimals ? 'sim' : 'nao'}
+                          onChange={(e) => setCanManageCanilAndAnimals(e.target.value === 'sim')}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                        >
+                          <option value="nao">NÃO</option>
+                          <option value="sim">SIM</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Cadastrar Medicamentos?
+                        </label>
+                        <select
+                          value={canRegisterCanilMeds ? 'sim' : 'nao'}
+                          onChange={(e) => setCanRegisterCanilMeds(e.target.value === 'sim')}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                        >
+                          <option value="nao">NÃO</option>
+                          <option value="sim">SIM</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Ministrar Medicamentos?
+                        </label>
+                        <select
+                          value={canAdministerCanilMeds ? 'sim' : 'nao'}
+                          onChange={(e) => setCanAdministerCanilMeds(e.target.value === 'sim')}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                        >
+                          <option value="nao">NÃO</option>
+                          <option value="sim">SIM</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Ver Relatórios de todas as Equipes?
+                        </label>
+                        <select
+                          value={canViewAllCanilReports ? 'sim' : 'nao'}
+                          onChange={(e) => setCanViewAllCanilReports(e.target.value === 'sim')}
+                          className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-semibold"
+                        >
+                          <option value="nao">NÃO</option>
+                          <option value="sim">SIM</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Acesso ao Sistema */}
                 <div>

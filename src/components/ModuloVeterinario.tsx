@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   User,
   Department,
@@ -86,6 +86,23 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   const isOperadorCanino = effectiveRole === 'operador_canino';
   const isGeral = effectiveRole === 'Geral';
   const canAccessTrainingTabs = isOperadorCanino || isGeral;
+  const canCreateBaiasEAnimais = isGeral || Boolean(currentUser?.canManageCanilAndAnimals);
+  const canCadastrarMedicamentos = isGeral || Boolean(currentUser?.canRegisterCanilMeds);
+  const canMinistrarMedicamentos = isGeral || Boolean(currentUser?.canAdministerCanilMeds);
+  const canVerRelatoriosTodasEquipes = isGeral || Boolean(currentUser?.canViewAllCanilReports);
+  const showFarmaciaTab = canCadastrarMedicamentos && canMinistrarMedicamentos;
+
+  useEffect(() => {
+    if (
+      (activeTab === 'farmacia' && !showFarmaciaTab) ||
+      (activeTab === 'administracao' && !canMinistrarMedicamentos) ||
+      (activeTab === 'historico' && !canMinistrarMedicamentos) ||
+      (activeTab === 'relatorio-unidade' && (!canAccessTrainingTabs || !canVerRelatoriosTodasEquipes)) ||
+      ((activeTab === 'relatorio-treinamento' || activeTab === 'meus-relatorios') && !canAccessTrainingTabs)
+    ) {
+      setActiveTab('caes');
+    }
+  }, [activeTab, showFarmaciaTab, canMinistrarMedicamentos, canAccessTrainingTabs, canVerRelatoriosTodasEquipes]);
 
   // Data from storage
   const canis = storage.getCanisFisicos();
@@ -239,6 +256,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // HANDLERS: CANIS
   // =========================================================================
   const handleOpenNewCanil = () => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para criar ou editar canis.');
+      return;
+    }
     setEditingCanil(null);
     setCanilForm({
       nome: '',
@@ -254,6 +275,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleEditCanil = (canil: CanilFisico) => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para editar canis.');
+      return;
+    }
     setEditingCanil(canil);
     setCanilForm({
       nome: canil.nome,
@@ -270,6 +295,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   const handleSaveCanil = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para criar ou editar canis.');
+      return;
+    }
     if (!canilForm.nome.trim()) {
       notifyError('O nome do canil é obrigatório.');
       return;
@@ -290,6 +319,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleDeleteCanil = async (canil: CanilFisico) => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para excluir canis.');
+      return;
+    }
     if (!confirm(`Deseja realmente excluir o canil físico "${canil.nome}"?`)) return;
     setIsSubmitting(true);
     const res = await storage.deleteCanilFisico(canil.id);
@@ -306,6 +339,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // HANDLERS: CACHORROS
   // =========================================================================
   const handleOpenNewDog = () => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para cadastrar animais.');
+      return;
+    }
     setEditingDog(null);
     setDogForm({
       nome: '',
@@ -332,6 +369,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleEditDog = (dog: Cachorro) => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para editar animais.');
+      return;
+    }
     setEditingDog(dog);
     setDogForm({
       nome: dog.nome,
@@ -359,6 +400,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   const handleSaveDog = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para cadastrar ou editar animais.');
+      return;
+    }
     if (!dogForm.nome.trim()) {
       notifyError('O nome do cão é obrigatório.');
       return;
@@ -393,6 +438,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleDeleteDog = async (dog: Cachorro) => {
+    if (!canCreateBaiasEAnimais) {
+      notifyError('Você não possui permissão para excluir animais.');
+      return;
+    }
     if (!confirm(`Deseja realmente excluir o cadastro do cão "${dog.nome}"?`)) return;
     setIsSubmitting(true);
     const res = await storage.deleteCachorro(dog.id);
@@ -409,6 +458,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // HANDLERS: PRODUTOS VETERINÁRIOS
   // =========================================================================
   const handleOpenNewProd = (tipo: TipoProdutoVet = 'REMEDIO') => {
+    if (!canCadastrarMedicamentos) {
+      notifyError('Você não possui permissão para cadastrar medicamentos ou insumos.');
+      return;
+    }
     setEditingProd(null);
     setProdForm({
       tipo,
@@ -437,6 +490,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleEditProd = (prod: ProdutoVeterinario) => {
+    if (!canCadastrarMedicamentos) {
+      notifyError('Você não possui permissão para editar medicamentos ou insumos.');
+      return;
+    }
     setEditingProd(prod);
     setProdForm({
       tipo: prod.tipo,
@@ -466,6 +523,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   const handleSaveProd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canCadastrarMedicamentos) {
+      notifyError('Você não possui permissão para cadastrar ou editar medicamentos.');
+      return;
+    }
     if (!prodForm.nome.trim()) {
       notifyError('O nome do produto é obrigatório.');
       return;
@@ -487,6 +548,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleDeleteProd = async (prod: ProdutoVeterinario) => {
+    if (!canCadastrarMedicamentos) {
+      notifyError('Você não possui permissão para excluir medicamentos.');
+      return;
+    }
     if (!confirm(`Deseja realmente excluir o produto "${prod.nome}"?`)) return;
     setIsSubmitting(true);
     const res = await storage.deleteProdutoVeterinario(prod.id);
@@ -503,6 +568,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // HANDLERS: ADMINISTRAÇÃO & BAIXA (DESTINAÇÃO AO CÃO)
   // =========================================================================
   const handleOpenAdminModal = (prod?: ProdutoVeterinario, dog?: Cachorro) => {
+    if (!canMinistrarMedicamentos) {
+      notifyError('Você não possui permissão para ministrar medicamentos.');
+      return;
+    }
     const selectedP = prod || produtos[0] || null;
     setSelectedProdForAdmin(selectedP);
 
@@ -524,6 +593,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   const handleSaveAdministration = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canMinistrarMedicamentos) {
+      notifyError('Você não possui permissão para ministrar medicamentos.');
+      return;
+    }
     if (!adminForm.produtoId) {
       notifyError('Selecione o produto a ser administrado ou baixado.');
       return;
@@ -620,6 +693,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   // Barcode quick search handler
   const handleBarcodeSearch = (code: string) => {
+    if (!canMinistrarMedicamentos) return;
     setBarcodeQuery(code);
     if (!code) return;
     const clean = code.trim().toLowerCase();
@@ -737,7 +811,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           name: userToAdd.name,
           masp: userToAdd.masp || '',
           cargo: userToAdd.cargo || '',
-          signed: false
+          signed: false,
+          cachorros: []
         }
       ]
     }));
@@ -747,6 +822,45 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     setTreinoForm(prev => ({
       ...prev,
       participantes: prev.participantes.filter(p => p.userId !== userId)
+    }));
+  };
+
+  const handleAddDogToParticipant = (userId: string, dogId: string) => {
+    if (!dogId) return;
+    const dog = cachorros.find(c => c.id === dogId);
+    if (!dog) return;
+    setTreinoForm(prev => ({
+      ...prev,
+      participantes: prev.participantes.map(p => {
+        if (p.userId !== userId) return p;
+        const currentDogs = p.cachorros || [];
+        if (currentDogs.some(c => c.id === dog.id)) return p;
+        return {
+          ...p,
+          cachorros: [
+            ...currentDogs,
+            {
+              id: dog.id,
+              nome: dog.nome,
+              raca: dog.raca || '',
+              microchip: dog.microchip || ''
+            }
+          ]
+        };
+      })
+    }));
+  };
+
+  const handleRemoveDogFromParticipant = (userId: string, dogId: string) => {
+    setTreinoForm(prev => ({
+      ...prev,
+      participantes: prev.participantes.map(p => {
+        if (p.userId !== userId) return p;
+        return {
+          ...p,
+          cachorros: (p.cachorros || []).filter(c => c.id !== dogId)
+        };
+      })
     }));
   };
 
@@ -870,13 +984,13 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     });
   }, [relatoriosTreinamento, currentUser, meusRelFilter]);
 
-  // Relatório da Unidade: todos da unidade do usuário + filtros
+  // Relatório da Unidade: todas as equipes/unidades se autorizado
   const unitScopedReports = useMemo(() => {
-    if (!currentUser) return [];
-    const targetUnitId = isGeral ? unidadeFilterUnitId : currentUser.unitId;
+    if (!currentUser || !canVerRelatoriosTodasEquipes) return [];
+    const targetUnitId = canVerRelatoriosTodasEquipes ? unidadeFilterUnitId : currentUser.unitId;
     return relatoriosTreinamento.filter(r => {
       const reportUnitId = r.unitId || '';
-      if (!targetUnitId) return isGeral;
+      if (!targetUnitId) return true;
       if (reportUnitId) return reportUnitId === targetUnitId;
       const condutorUser = selectableUsersForTreino.find(u => u.id === r.condutorId) || (r.condutorId === currentUser.id ? currentUser : undefined);
       if (condutorUser?.unitId) return condutorUser.unitId === targetUnitId;
@@ -884,7 +998,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       if (dog?.unitId) return dog.unitId === targetUnitId;
       return false;
     });
-  }, [relatoriosTreinamento, currentUser, isGeral, unidadeFilterUnitId, selectableUsersForTreino, cachorros]);
+  }, [relatoriosTreinamento, currentUser, canVerRelatoriosTodasEquipes, unidadeFilterUnitId, selectableUsersForTreino, cachorros]);
 
   const unitOfficersForFilter = useMemo(() => {
     const map = new Map<string, { id: string; name: string; masp: string }>();
@@ -899,12 +1013,12 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       }
     }
     for (const u of allUsers) {
-      if ((!currentUser?.unitId || isGeral || u.unitId === currentUser.unitId) && !map.has(u.id)) {
+      if ((!currentUser?.unitId || canVerRelatoriosTodasEquipes || u.unitId === currentUser.unitId) && !map.has(u.id)) {
         map.set(u.id, { id: u.id, name: u.name, masp: u.masp || '' });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [unitScopedReports, allUsers, currentUser, isGeral]);
+  }, [unitScopedReports, allUsers, currentUser, canVerRelatoriosTodasEquipes]);
 
   const filteredUnidadeReports = useMemo(() => {
     return unitScopedReports.filter(r => {
@@ -915,7 +1029,13 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
         const matchesPart = (r.participantes || []).some(p => p.userId === unidadeFilterPolicialId);
         if (!matchesCondutor && !matchesPart) return false;
       }
-      if (unidadeFilterCachorroId && r.cachorroId !== unidadeFilterCachorroId) return false;
+      if (unidadeFilterCachorroId) {
+        const matchesMainDog = r.cachorroId === unidadeFilterCachorroId;
+        const matchesPartDog = (r.participantes || []).some(p =>
+          (p.cachorros || []).some(c => c.id === unidadeFilterCachorroId)
+        );
+        if (!matchesMainDog && !matchesPartDog) return false;
+      }
       if (unidadeFilterLocal !== 'TODOS' && r.modalidadeLocal !== unidadeFilterLocal) return false;
       return true;
     });
@@ -957,14 +1077,19 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
             <div class="sig-meta">${rel.condutorMasp ? `MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))}` : ''}</div>
             <div class="sig-role">Condutor Responsável</div>
           </div>
-          ${(rel.participantes || []).slice(0, 15).map((p, idx) => `
+          ${(rel.participantes || []).slice(0, 15).map((p, idx) => {
+            const dogsText = (p.cachorros && p.cachorros.length > 0)
+              ? p.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}`).join(', ')
+              : 'Sem cachorro';
+            return `
             <div class="sig-box">
               ${p.signed ? `<div class="sig-digital">Assinado eletronicamente${p.signedAt ? ` em ${escapeHtmlText(new Date(p.signedAt).toLocaleString('pt-BR'))}` : ''}</div>` : '<div class="sig-space"></div>'}
               <div class="sig-line">${escapeHtmlText(p.name)}</div>
               <div class="sig-meta">${p.masp ? `MASP: ${escapeHtmlText(formatMasp(p.masp))}` : ''} ${p.cargo ? `• ${escapeHtmlText(p.cargo)}` : ''}</div>
-              <div class="sig-role">Participante ${idx + 1}</div>
+              <div class="sig-role">Participante ${idx + 1} • Cão(s): ${escapeHtmlText(dogsText)}</div>
             </div>
-          `).join('')}
+          `;
+          }).join('')}
         </div>
       `;
 
@@ -1060,24 +1185,36 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
   const handlePrintRelatorioUnidadeConsolidado = () => {
     const unitName =
-      units.find(u => u.id === (isGeral && unidadeFilterUnitId ? unidadeFilterUnitId : currentUser?.unitId))?.name ||
-      'Todas as Unidades';
+      units.find(u => u.id === (canVerRelatoriosTodasEquipes && unidadeFilterUnitId ? unidadeFilterUnitId : currentUser?.unitId))?.name ||
+      'Todas as Unidades / Equipes';
     const docTitle = buildStandardDocumentTitle('Relatório Consolidado de Treinamentos K9 (Canil)', unitName, currentUser?.name || '');
 
     const rowsHtml = filteredUnidadeReports.length === 0
       ? `<tr><td colspan="6" style="text-align:center; padding: 14px; color: #64748b;">Nenhum relatório encontrado para os filtros selecionados.</td></tr>`
       : filteredUnidadeReports
-          .map(
-            r => `
+          .map(r => {
+            const participantsSummary =
+              r.modalidadeParticipacao === 'Coletivo' && (r.participantes || []).length > 0
+                ? `<br/><span style="font-size:9px; color:#475569;">${(r.participantes || [])
+                    .map(p => {
+                      const dogsTxt =
+                        p.cachorros && p.cachorros.length > 0
+                          ? p.cachorros.map(c => c.nome).join(', ')
+                          : 'Sem cachorro';
+                      return `${escapeHtmlText(p.name)} (${escapeHtmlText(dogsTxt)})`;
+                    })
+                    .join('; ')}</span>`
+                : '';
+            return `
             <tr>
               <td style="font-family: monospace; white-space: nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
               <td><strong>${escapeHtmlText(r.condutorNome)}</strong>${r.condutorMasp ? `<br/><span style="font-size:9px; color:#475569;">MASP: ${escapeHtmlText(formatMasp(r.condutorMasp))}</span>` : ''}</td>
-              <td><strong>${escapeHtmlText(r.cachorroNome)}</strong>${r.cachorroRaca ? `<br/><span style="font-size:9px; color:#475569;">${escapeHtmlText(r.cachorroRaca)}</span>` : ''}</td>
+              <td><strong>${escapeHtmlText(r.cachorroNome)}</strong>${r.cachorroRaca ? `<br/><span style="font-size:9px; color:#475569;">${escapeHtmlText(r.cachorroRaca)}</span>` : ''}${participantsSummary}</td>
               <td>${escapeHtmlText(r.modalidadeLocal)}</td>
               <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px; color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
               <td style="white-space: pre-wrap; word-break: break-word;">${escapeHtmlText(r.descricao)}</td>
-            </tr>`
-          )
+            </tr>`;
+          })
           .join('');
 
     const html = `<!DOCTYPE html>
@@ -1155,27 +1292,33 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
           {/* Quick Action Buttons */}
           <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
-            <button
-              onClick={handleOpenNewDog}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl shadow-lg transition text-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>CADASTRAR CÃO K9</span>
-            </button>
-            <button
-              onClick={() => handleOpenNewProd('REMEDIO')}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2.5 rounded-xl shadow-lg transition text-xs"
-            >
-              <Pill className="w-4 h-4" />
-              <span>NOVO MEDICAMENTO</span>
-            </button>
-            <button
-              onClick={() => handleOpenAdminModal()}
-              className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3.5 py-2.5 rounded-xl shadow-lg transition text-xs"
-            >
-              <Syringe className="w-4 h-4" />
-              <span>ADMINISTRAR AO CÃO</span>
-            </button>
+            {canCreateBaiasEAnimais && (
+              <button
+                onClick={handleOpenNewDog}
+                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 rounded-xl shadow-lg transition text-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>CADASTRAR CÃO K9</span>
+              </button>
+            )}
+            {canCadastrarMedicamentos && (
+              <button
+                onClick={() => handleOpenNewProd('REMEDIO')}
+                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2.5 rounded-xl shadow-lg transition text-xs"
+              >
+                <Pill className="w-4 h-4" />
+                <span>NOVO MEDICAMENTO</span>
+              </button>
+            )}
+            {canMinistrarMedicamentos && (
+              <button
+                onClick={() => handleOpenAdminModal()}
+                className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold px-3.5 py-2.5 rounded-xl shadow-lg transition text-xs"
+              >
+                <Syringe className="w-4 h-4" />
+                <span>ADMINISTRAR AO CÃO</span>
+              </button>
+            )}
           </div>
         </div>
 
@@ -1213,22 +1356,24 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       </div>
 
       {/* Barcode Quick Dispatch Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center space-x-2 text-xs text-slate-300 w-full sm:w-auto">
-          <Barcode className="w-5 h-5 text-amber-400 shrink-0" />
-          <span className="font-semibold text-slate-200">Leitor / Busca Rápida por Código de Barras:</span>
+      {canMinistrarMedicamentos && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="flex items-center space-x-2 text-xs text-slate-300 w-full sm:w-auto">
+            <Barcode className="w-5 h-5 text-amber-400 shrink-0" />
+            <span className="font-semibold text-slate-200">Leitor / Busca Rápida por Código de Barras:</span>
+          </div>
+          <div className="relative w-full sm:w-96">
+            <input
+              type="text"
+              value={barcodeQuery}
+              onChange={(e) => handleBarcodeSearch(e.target.value)}
+              placeholder="Passe o leitor ou digite o código de barras (EAN)..."
+              className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+            />
+            <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+          </div>
         </div>
-        <div className="relative w-full sm:w-96">
-          <input
-            type="text"
-            value={barcodeQuery}
-            onChange={(e) => handleBarcodeSearch(e.target.value)}
-            placeholder="Passe o leitor ou digite o código de barras (EAN)..."
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-4 py-2 text-xs text-slate-100 placeholder-slate-500 font-mono focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
-          />
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
-        </div>
-      </div>
+      )}
 
       {/* Main Tabs Navigation */}
       <div className="flex items-center space-x-1 border-b border-slate-800 overflow-x-auto pb-1 text-xs font-semibold">
@@ -1256,41 +1401,47 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           <span>CANIS FÍSICOS & BAIAS ({canis.length})</span>
         </button>
 
-        <button
-          onClick={() => setActiveTab('farmacia')}
-          className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
-            activeTab === 'farmacia'
-              ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-          }`}
-        >
-          <Pill className="w-4 h-4" />
-          <span>FARMÁCIA, REMÉDIOS & RAÇÕES ({produtos.length})</span>
-        </button>
+        {showFarmaciaTab && (
+          <button
+            onClick={() => setActiveTab('farmacia')}
+            className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
+              activeTab === 'farmacia'
+                ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+            }`}
+          >
+            <Pill className="w-4 h-4" />
+            <span>FARMÁCIA, REMÉDIOS & RAÇÕES ({produtos.length})</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('administracao')}
-          className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
-            activeTab === 'administracao'
-              ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-          }`}
-        >
-          <Syringe className="w-4 h-4" />
-          <span>ADMINISTRAÇÃO & BAIXAS</span>
-        </button>
+        {canMinistrarMedicamentos && (
+          <button
+            onClick={() => setActiveTab('administracao')}
+            className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
+              activeTab === 'administracao'
+                ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+            }`}
+          >
+            <Syringe className="w-4 h-4" />
+            <span>ADMINISTRAÇÃO & BAIXAS</span>
+          </button>
+        )}
 
-        <button
-          onClick={() => setActiveTab('historico')}
-          className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
-            activeTab === 'historico'
-              ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
-              : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-          }`}
-        >
-          <FileText className="w-4 h-4" />
-          <span>HISTÓRICO DE APLICAÇÕES ({movimentacoes.length})</span>
-        </button>
+        {canMinistrarMedicamentos && (
+          <button
+            onClick={() => setActiveTab('historico')}
+            className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
+              activeTab === 'historico'
+                ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
+                : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>HISTÓRICO DE APLICAÇÕES ({movimentacoes.length})</span>
+          </button>
+        )}
 
         {canAccessTrainingTabs && (
           <>
@@ -1323,17 +1474,19 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               )}
             </button>
 
-            <button
-              onClick={() => setActiveTab('relatorio-unidade')}
-              className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
-                activeTab === 'relatorio-unidade'
-                  ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
-                  : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
-              }`}
-            >
-              <Building className="w-4 h-4" />
-              <span>RELATÓRIO DA UNIDADE ({unitScopedReports.length})</span>
-            </button>
+            {canVerRelatoriosTodasEquipes && (
+              <button
+                onClick={() => setActiveTab('relatorio-unidade')}
+                className={`flex items-center space-x-2 px-4 py-3 rounded-t-xl transition border-b-2 whitespace-nowrap ${
+                  activeTab === 'relatorio-unidade'
+                    ? 'border-amber-400 text-amber-400 bg-slate-900/60 font-bold'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-900/30'
+                }`}
+              >
+                <Building className="w-4 h-4" />
+                <span>RELATÓRIOS DA UNIDADE ({unitScopedReports.length})</span>
+              </button>
+            )}
           </>
         )}
       </div>
@@ -1379,13 +1532,15 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               <Dog className="w-12 h-12 mx-auto text-slate-600" />
               <p className="font-semibold text-slate-300">Nenhum cão K9 encontrado.</p>
               <p className="text-xs text-slate-500">Cadastre um novo cachorro policial para iniciar o acompanhamento veterinário.</p>
-              <button
-                onClick={handleOpenNewDog}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition inline-flex items-center space-x-2"
-              >
-                <Plus className="w-4 h-4" />
-                <span>CADASTRAR CÃO K9</span>
-              </button>
+              {canCreateBaiasEAnimais && (
+                <button
+                  onClick={handleOpenNewDog}
+                  className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition inline-flex items-center space-x-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>CADASTRAR CÃO K9</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1465,32 +1620,40 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                     </div>
 
                     {/* Actions */}
-                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                      <button
-                        onClick={() => handleOpenAdminModal(undefined, dog)}
-                        className="flex-1 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/40 font-bold py-1.5 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-1.5"
-                        title="Administrar medicamento ou alimento a este cão"
-                      >
-                        <Syringe className="w-3.5 h-3.5" />
-                        <span>Administrar</span>
-                      </button>
+                    {(canMinistrarMedicamentos || canCreateBaiasEAnimais) && (
+                      <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                        {canMinistrarMedicamentos && (
+                          <button
+                            onClick={() => handleOpenAdminModal(undefined, dog)}
+                            className="flex-1 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/40 font-bold py-1.5 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-1.5"
+                            title="Administrar medicamento ou alimento a este cão"
+                          >
+                            <Syringe className="w-3.5 h-3.5" />
+                            <span>Administrar</span>
+                          </button>
+                        )}
 
-                      <button
-                        onClick={() => handleEditDog(dog)}
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                        title="Editar cadastro do cão"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
+                        {canCreateBaiasEAnimais && (
+                          <>
+                            <button
+                              onClick={() => handleEditDog(dog)}
+                              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                              title="Editar cadastro do cão"
+                            >
+                              <Edit className="w-4 h-4" />
+                            </button>
 
-                      <button
-                        onClick={() => handleDeleteDog(dog)}
-                        className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
-                        title="Excluir cão"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                            <button
+                              onClick={() => handleDeleteDog(dog)}
+                              className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
+                              title="Excluir cão"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -1509,13 +1672,15 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               <h2 className="text-sm font-bold text-slate-100 font-mono">ESTRUTURA DE ALOJAMENTO & BAIAS</h2>
               <p className="text-xs text-slate-400">Gerenciamento físico de instalações, boxes, capacidade e lotação.</p>
             </div>
-            <button
-              onClick={handleOpenNewCanil}
-              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center space-x-1.5"
-            >
-              <Plus className="w-4 h-4" />
-              <span>NOVO CANIL / BAIA</span>
-            </button>
+            {canCreateBaiasEAnimais && (
+              <button
+                onClick={handleOpenNewCanil}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center space-x-1.5"
+              >
+                <Plus className="w-4 h-4" />
+                <span>NOVO CANIL / BAIA</span>
+              </button>
+            )}
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1568,20 +1733,22 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                     </div>
                   </div>
 
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2">
-                    <button
-                      onClick={() => handleEditCanil(canil)}
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDeleteCanil(canil)}
-                      className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                  {canCreateBaiasEAnimais && (
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-end space-x-2">
+                      <button
+                        onClick={() => handleEditCanil(canil)}
+                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                      >
+                        <Edit className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCanil(canil)}
+                        className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1592,7 +1759,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       {/* ========================================================================= */}
       {/* TAB 3: FARMÁCIA, REMÉDIOS & RAÇÕES */}
       {/* ========================================================================= */}
-      {activeTab === 'farmacia' && (
+      {showFarmaciaTab && activeTab === 'farmacia' && (
         <div className="space-y-4">
           <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-3">
             <div className="relative w-full md:w-80">
@@ -1619,20 +1786,24 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                 <option value="OUTROS">Outros</option>
               </select>
 
-              <button
-                onClick={() => handleOpenNewProd('REMEDIO')}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition flex items-center space-x-1"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Remédio</span>
-              </button>
-              <button
-                onClick={() => handleOpenNewProd('RACAO')}
-                className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition flex items-center space-x-1"
-              >
-                <Plus className="w-4 h-4" />
-                <span>+ Ração / Insumo</span>
-              </button>
+              {canCadastrarMedicamentos && (
+                <>
+                  <button
+                    onClick={() => handleOpenNewProd('REMEDIO')}
+                    className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition flex items-center space-x-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>+ Remédio</span>
+                  </button>
+                  <button
+                    onClick={() => handleOpenNewProd('RACAO')}
+                    className="bg-amber-600 hover:bg-amber-500 text-white font-bold px-3 py-2 rounded-xl text-xs transition flex items-center space-x-1"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>+ Ração / Insumo</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
 
@@ -1727,29 +1898,37 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
-                    <button
-                      onClick={() => handleOpenAdminModal(prod)}
-                      className="flex-1 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/40 font-bold py-1.5 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-1"
-                    >
-                      <Syringe className="w-3.5 h-3.5" />
-                      <span>Destinar / Baixa</span>
-                    </button>
+                  {(canMinistrarMedicamentos || canCadastrarMedicamentos) && (
+                    <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-2">
+                      {canMinistrarMedicamentos && (
+                        <button
+                          onClick={() => handleOpenAdminModal(prod)}
+                          className="flex-1 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/40 font-bold py-1.5 px-3 rounded-lg text-xs transition flex items-center justify-center space-x-1"
+                        >
+                          <Syringe className="w-3.5 h-3.5" />
+                          <span>Destinar / Baixa</span>
+                        </button>
+                      )}
 
-                    <button
-                      onClick={() => handleEditProd(prod)}
-                      className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
-                    >
-                      <Edit className="w-4 h-4" />
-                    </button>
+                      {canCadastrarMedicamentos && (
+                        <>
+                          <button
+                            onClick={() => handleEditProd(prod)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
 
-                    <button
-                      onClick={() => handleDeleteProd(prod)}
-                      className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
+                          <button
+                            onClick={() => handleDeleteProd(prod)}
+                            className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg transition border border-red-800/40"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1760,7 +1939,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       {/* ========================================================================= */}
       {/* TAB 4: ADMINISTRAÇÃO & BAIXAS (DESTINAÇÃO AO CÃO) */}
       {/* ========================================================================= */}
-      {activeTab === 'administracao' && (
+      {canMinistrarMedicamentos && activeTab === 'administracao' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-6">
           <div className="border-b border-slate-800 pb-4">
             <h2 className="text-lg font-black text-slate-100 font-mono flex items-center space-x-2">
@@ -1948,7 +2127,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       {/* ========================================================================= */}
       {/* TAB 5: HISTÓRICO DE APLICAÇÕES */}
       {/* ========================================================================= */}
-      {activeTab === 'historico' && (
+      {canMinistrarMedicamentos && activeTab === 'historico' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
           <div className="flex items-center justify-between border-b border-slate-800 pb-3">
             <div>
@@ -2180,27 +2359,90 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                 </span>
               </div>
 
-              {/* Usuários já selecionados */}
+              {/* Usuários já selecionados (cada integrante com ou sem cachorro, podendo vincular 1 ou mais cachorros) */}
               {treinoForm.participantes.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {treinoForm.participantes.map((p, idx) => (
-                    <div
-                      key={p.userId}
-                      className="flex items-center space-x-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5"
-                    >
-                      <span className="text-[10px] font-mono text-cyan-400 font-bold">#{idx + 1}</span>
-                      <span className="font-semibold text-slate-100">{p.name}</span>
-                      {p.masp && <span className="text-[10px] font-mono text-slate-400">({formatMasp(p.masp)})</span>}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveParticipant(p.userId)}
-                        className="text-slate-400 hover:text-red-400 transition"
-                        title="Remover participante"
+                <div className="space-y-2.5">
+                  {treinoForm.participantes.map((p, idx) => {
+                    const participantDogs = p.cachorros || [];
+                    const assignedIds = new Set(participantDogs.map(c => c.id));
+                    const availableDogs = cachorros.filter(
+                      d => d.status !== 'Baixado / Óbito' && !assignedIds.has(d.id)
+                    );
+                    return (
+                      <div
+                        key={p.userId}
+                        className="bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2"
                       >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[10px] font-mono text-cyan-400 font-bold">#{idx + 1}</span>
+                            <span className="font-bold text-slate-100">{p.name}</span>
+                            {p.masp && (
+                              <span className="text-[10px] font-mono text-slate-400">
+                                (MASP: {formatMasp(p.masp)})
+                              </span>
+                            )}
+                            {participantDogs.length === 0 ? (
+                              <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-[10px] text-slate-400">
+                                Sem cachorro
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300">
+                                {participantDogs.length} cachorro(s)
+                              </span>
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveParticipant(p.userId)}
+                            className="text-slate-400 hover:text-red-400 transition flex items-center space-x-1 text-[11px]"
+                            title="Remover participante"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Remover</span>
+                          </button>
+                        </div>
+
+                        <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-1 border-t border-slate-800/80">
+                          <div className="flex-1 flex flex-wrap items-center gap-1.5">
+                            {participantDogs.map(dog => (
+                              <span
+                                key={dog.id}
+                                className="inline-flex items-center space-x-1.5 bg-slate-950 border border-amber-500/40 text-amber-300 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                              >
+                                <Dog className="w-3 h-3 text-amber-400" />
+                                <span>{dog.nome}{dog.raca ? ` (${dog.raca})` : ''}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveDogFromParticipant(p.userId, dog.id)}
+                                  className="text-slate-400 hover:text-red-400"
+                                  title="Remover cachorro deste integrante"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => handleAddDogToParticipant(p.userId, e.target.value)}
+                            className="bg-slate-950 border border-slate-700 text-slate-200 rounded-lg px-2.5 py-1.5 text-[11px] focus:outline-none focus:border-amber-500 sm:w-64"
+                          >
+                            <option value="">
+                              {participantDogs.length === 0
+                                ? '+ Vincular cachorro (opcional)...'
+                                : '+ Adicionar outro cachorro...'}
+                            </option>
+                            {availableDogs.map(dog => (
+                              <option key={dog.id} value={dog.id}>
+                                {dog.nome} — {dog.raca}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -2456,7 +2698,11 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                                 : 'bg-slate-950 border-slate-800 text-slate-400'
                             }`}
                           >
-                            {p.name} {p.signed ? '✓ Assinado' : '• Pendente'}
+                            {p.name}
+                            {p.cachorros && p.cachorros.length > 0
+                              ? ` • Cão(s): ${p.cachorros.map(c => c.nome).join(', ')}`
+                              : ' • Sem cachorro'}{' '}
+                            {p.signed ? '✓ Assinado' : '• Pendente'}
                           </span>
                         ))}
                       </div>
@@ -2472,7 +2718,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       {/* ========================================================================= */}
       {/* TAB 8: RELATÓRIO DA UNIDADE (FILTROS: DATA, POLICIAL, CACHORRO, INTERNO/EXTERNO) */}
       {/* ========================================================================= */}
-      {canAccessTrainingTabs && activeTab === 'relatorio-unidade' && (
+      {canAccessTrainingTabs && canVerRelatoriosTodasEquipes && activeTab === 'relatorio-unidade' && (
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2511,15 +2757,15 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
 
             {/* Filters Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs pt-2 border-t border-slate-800">
-              {isGeral && (
+              {canVerRelatoriosTodasEquipes && (
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unidade</label>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unidade / Equipe</label>
                   <select
                     value={unidadeFilterUnitId}
                     onChange={(e) => setUnidadeFilterUnitId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
                   >
-                    <option value="">Todas as Unidades</option>
+                    <option value="">Todas as Unidades / Equipes</option>
                     {units.map(u => (
                       <option key={u.id} value={u.id}>{u.name}</option>
                     ))}
@@ -2657,6 +2903,20 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                         <td className="p-3.5">
                           <p className="font-bold text-slate-100">{rel.cachorroNome}</p>
                           {rel.cachorroRaca && <p className="text-[10px] text-slate-500">{rel.cachorroRaca}</p>}
+                          {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              {rel.participantes.map(p => (
+                                <p key={p.userId} className="text-[10px] text-slate-400">
+                                  • {p.name}:{' '}
+                                  <span className="text-amber-300">
+                                    {p.cachorros && p.cachorros.length > 0
+                                      ? p.cachorros.map(c => c.nome).join(', ')
+                                      : 'Sem cachorro'}
+                                  </span>
+                                </p>
+                              ))}
+                            </div>
+                          )}
                         </td>
                         <td className="p-3.5 whitespace-nowrap">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
@@ -2768,12 +3028,17 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {viewingTreinoReport.participantes.map(p => (
-                      <div key={p.userId} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex items-center justify-between">
+                      <div key={p.userId} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex items-start justify-between gap-2">
                         <div>
                           <p className="font-bold text-slate-200">{p.name}</p>
                           {p.masp && <p className="text-[10px] font-mono text-slate-400">MASP: {formatMasp(p.masp)}</p>}
+                          <p className="text-[10px] text-amber-300 mt-0.5">
+                            {p.cachorros && p.cachorros.length > 0
+                              ? `Cão(s): ${p.cachorros.map(c => c.nome).join(', ')}`
+                              : 'Sem cachorro'}
+                          </p>
                         </div>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
                           p.signed ? 'bg-emerald-500/15 text-emerald-300' : 'bg-amber-500/15 text-amber-300'
                         }`}>
                           {p.signed ? 'Assinado' : 'Pendente'}

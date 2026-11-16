@@ -101,6 +101,10 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
             PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
             PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
+            PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as can_manage_canil_animals,
+            PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
+            PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
+            PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -131,6 +135,10 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             0 as can_manage_formacao,
             0 as can_manage_continuado,
             0 as can_create_academy_courses,
+            0 as can_manage_canil_animals,
+            0 as can_register_canil_meds,
+            0 as can_administer_canil_meds,
+            0 as can_view_all_canil_reports,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -223,6 +231,10 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       canManageFormacaoCourses: Boolean(dbUser.can_manage_formacao),
       canManageContinuadoCourses: Boolean(dbUser.can_manage_continuado),
       canCreateAcademyCourses: Boolean(dbUser.can_create_academy_courses),
+      canManageCanilAndAnimals: Boolean(dbUser.can_manage_canil_animals),
+      canRegisterCanilMeds: Boolean(dbUser.can_register_canil_meds),
+      canAdministerCanilMeds: Boolean(dbUser.can_administer_canil_meds),
+      canViewAllCanilReports: Boolean(dbUser.can_view_all_canil_reports),
       courses: (courses || []).map((c: any) => ({
         courseId: c.courseId,
         completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
@@ -463,6 +475,10 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
           PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
           PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
+          PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as can_manage_canil_animals,
+          PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
+          PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
+          PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -493,6 +509,10 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           0 as can_manage_formacao,
           0 as can_manage_continuado,
           0 as can_create_academy_courses,
+          0 as can_manage_canil_animals,
+          0 as can_register_canil_meds,
+          0 as can_administer_canil_meds,
+          0 as can_view_all_canil_reports,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -543,6 +563,10 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         canManageFormacaoCourses: Boolean(u.can_manage_formacao),
         canManageContinuadoCourses: Boolean(u.can_manage_continuado),
         canCreateAcademyCourses: Boolean(u.can_create_academy_courses),
+        canManageCanilAndAnimals: Boolean(u.can_manage_canil_animals),
+        canRegisterCanilMeds: Boolean(u.can_register_canil_meds),
+        canAdministerCanilMeds: Boolean(u.can_administer_canil_meds),
+        canViewAllCanilReports: Boolean(u.can_view_all_canil_reports),
         courses,
         createdAt: u.created_at
       };
@@ -561,6 +585,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       canMoveAmmunition, canMoveWeapons, hasSystemAccess, isTeacher, teacherSubject,
       professorSigla, professor_sigla,
       isCourseCoordinator, coordinatorSubject, canManageFormacaoCourses, canManageContinuadoCourses, canCreateAcademyCourses,
+      canManageCanilAndAnimals, canRegisterCanilMeds, canAdministerCanilMeds, canViewAllCanilReports,
       courses, actor
     } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
@@ -574,6 +599,11 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     const finalCanManageFormacao = Boolean(canManageFormacaoCourses);
     const finalCanManageContinuado = Boolean(canManageContinuadoCourses);
     const finalCanCreateCourses = Boolean(canCreateAcademyCourses);
+    const hasOperadorCaninoRole = userRoles.includes('operador_canino');
+    const finalCanManageCanilAndAnimals = hasOperadorCaninoRole && Boolean(canManageCanilAndAnimals);
+    const finalCanRegisterCanilMeds = hasOperadorCaninoRole && Boolean(canRegisterCanilMeds);
+    const finalCanAdministerCanilMeds = hasOperadorCaninoRole && Boolean(canAdministerCanilMeds);
+    const finalCanViewAllCanilReports = hasOperadorCaninoRole && Boolean(canViewAllCanilReports);
 
     // Validação estrita: O usuário cadastrador só pode liberar acesso aos perfis e permissões que possui
     if (actor) {
@@ -620,8 +650,10 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           EH_PROFESSOR_USUARIOS, DISCIPLINA_PROFESSOR_USUARIOS, SIGLA_PROFESSOR_USUARIOS,
           COORDENACAO_CURSO_USUARIOS, MATERIA_COORDENACAO_USUARIOS, PODE_GERIR_FORMACAO_USUARIOS,
           PODE_GERIR_CONTINUADO_USUARIOS, PODE_CRIAR_CURSOS_USUARIOS,
+          PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS, PODE_CADASTRAR_MED_CANIL_USUARIOS,
+          PODE_MINISTRAR_MED_CANIL_USUARIOS, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS,
           DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -644,7 +676,11 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           finalCoordinatorSubject,
           finalCanManageFormacao ? 1 : 0,
           finalCanManageContinuado ? 1 : 0,
-          finalCanCreateCourses ? 1 : 0
+          finalCanCreateCourses ? 1 : 0,
+          finalCanManageCanilAndAnimals ? 1 : 0,
+          finalCanRegisterCanilMeds ? 1 : 0,
+          finalCanAdministerCanilMeds ? 1 : 0,
+          finalCanViewAllCanilReports ? 1 : 0
         ]
       );
     } catch {
@@ -708,6 +744,10 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       canManageFormacaoCourses: finalCanManageFormacao,
       canManageContinuadoCourses: finalCanManageContinuado,
       canCreateAcademyCourses: finalCanCreateCourses,
+      canManageCanilAndAnimals: finalCanManageCanilAndAnimals,
+      canRegisterCanilMeds: finalCanRegisterCanilMeds,
+      canAdministerCanilMeds: finalCanAdministerCanilMeds,
+      canViewAllCanilReports: finalCanViewAllCanilReports,
       mustChangePassword: true,
       courses: courses || [],
       createdAt: new Date().toISOString()
@@ -982,6 +1022,10 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
           PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
           PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
+          PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as can_manage_canil_animals,
+          PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
+          PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
+          PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1011,6 +1055,10 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           0 as can_manage_formacao,
           0 as can_manage_continuado,
           0 as can_create_academy_courses,
+          0 as can_manage_canil_animals,
+          0 as can_register_canil_meds,
+          0 as can_administer_canil_meds,
+          0 as can_view_all_canil_reports,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1104,7 +1152,11 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           MATERIA_COORDENACAO_USUARIOS = ?,
           PODE_GERIR_FORMACAO_USUARIOS = COALESCE(?, PODE_GERIR_FORMACAO_USUARIOS),
           PODE_GERIR_CONTINUADO_USUARIOS = COALESCE(?, PODE_GERIR_CONTINUADO_USUARIOS),
-          PODE_CRIAR_CURSOS_USUARIOS = COALESCE(?, PODE_CRIAR_CURSOS_USUARIOS)
+          PODE_CRIAR_CURSOS_USUARIOS = COALESCE(?, PODE_CRIAR_CURSOS_USUARIOS),
+          PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS = COALESCE(?, PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS),
+          PODE_CADASTRAR_MED_CANIL_USUARIOS = COALESCE(?, PODE_CADASTRAR_MED_CANIL_USUARIOS),
+          PODE_MINISTRAR_MED_CANIL_USUARIOS = COALESCE(?, PODE_MINISTRAR_MED_CANIL_USUARIOS),
+          PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS = COALESCE(?, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS)
          WHERE ID_USUARIOS = ?`,
         [
           cleanMasp,
@@ -1127,6 +1179,10 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           updates.canManageFormacaoCourses !== undefined ? (updates.canManageFormacaoCourses ? 1 : 0) : null,
           updates.canManageContinuadoCourses !== undefined ? (updates.canManageContinuadoCourses ? 1 : 0) : null,
           updates.canCreateAcademyCourses !== undefined ? (updates.canCreateAcademyCourses ? 1 : 0) : null,
+          updates.canManageCanilAndAnimals !== undefined ? (updates.canManageCanilAndAnimals ? 1 : 0) : null,
+          updates.canRegisterCanilMeds !== undefined ? (updates.canRegisterCanilMeds ? 1 : 0) : null,
+          updates.canAdministerCanilMeds !== undefined ? (updates.canAdministerCanilMeds ? 1 : 0) : null,
+          updates.canViewAllCanilReports !== undefined ? (updates.canViewAllCanilReports ? 1 : 0) : null,
           id
         ]
       );
@@ -11890,13 +11946,29 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
         const uid = String(p?.userId || p?.id || '').trim();
         if (!uid || seenIds.has(uid)) continue;
         seenIds.add(uid);
+        const rawDogs = Array.isArray(p?.cachorros) ? p.cachorros : [];
+        const seenDogs = new Set<string>();
+        const cachorrosParticipante: any[] = [];
+        for (const c of rawDogs) {
+          const cid = String(c?.id || '').trim();
+          const cnome = String(c?.nome || '').trim();
+          if (!cid || !cnome || seenDogs.has(cid)) continue;
+          seenDogs.add(cid);
+          cachorrosParticipante.push({
+            id: cid,
+            nome: cnome,
+            raca: String(c?.raca || '').trim(),
+            microchip: String(c?.microchip || '').trim()
+          });
+        }
         participantes.push({
           userId: uid,
           name: String(p?.name || '').trim(),
           masp: String(p?.masp || '').trim(),
           cargo: String(p?.cargo || '').trim(),
           signed: false,
-          signedAt: null
+          signedAt: null,
+          cachorros: cachorrosParticipante
         });
       }
       if (participantes.length > 15) {

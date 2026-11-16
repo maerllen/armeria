@@ -72,6 +72,10 @@ export interface User {
   canManageFormacaoCourses?: boolean;
   canManageContinuadoCourses?: boolean;
   canCreateAcademyCourses?: boolean;
+  canManageCanilAndAnimals?: boolean;
+  canRegisterCanilMeds?: boolean;
+  canAdministerCanilMeds?: boolean;
+  canViewAllCanilReports?: boolean;
   createdAt: string;
 }
 
@@ -1314,6 +1318,13 @@ export interface MovimentacaoVeterinaria {
 export type LocalTreinamentoCanil = 'Interno' | 'Externo';
 export type ParticipacaoTreinamentoCanil = 'Sozinho' | 'Coletivo';
 
+export interface ParticipanteTreinamentoCachorro {
+  id: string;
+  nome: string;
+  raca?: string;
+  microchip?: string;
+}
+
 export interface ParticipanteTreinamentoCanil {
   userId: string;
   name: string;
@@ -1321,6 +1332,7 @@ export interface ParticipanteTreinamentoCanil {
   cargo?: string;
   signed: boolean;
   signedAt?: string;
+  cachorros?: ParticipanteTreinamentoCachorro[];
 }
 
 export interface RelatorioTreinamentoCanil {
