@@ -193,6 +193,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     status: 'Ativo / Operacional' as StatusCachorro,
     tipoVinculo: 'SISTEMA' as 'SISTEMA' | 'EXTERNO',
     usuarioInternoId: '',
+    usuarioInterno2Id: '',
     responsavelExternoNome: '',
     responsavelExternoDoc: '',
     responsavelExternoTel: '',
@@ -338,11 +339,40 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // =========================================================================
   // HANDLERS: CACHORROS
   // =========================================================================
+  const eligibleDogHandlers = useMemo(() => {
+    const rawLookup = storage.getAllUsersForLookup();
+    const base = rawLookup.length > 0 ? rawLookup : allUsers;
+    const targetUnitId = currentUser?.unitId || '';
+    return base
+      .filter(u => {
+        if (!u) return false;
+        const isCanino =
+          u.role === 'operador_canino' ||
+          u.activeRole === 'operador_canino' ||
+          (Array.isArray(u.roles) && u.roles.includes('operador_canino'));
+        if (!isCanino) return false;
+        if (targetUnitId && u.unitId !== targetUnitId) return false;
+        return true;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+  }, [allUsers, currentUser]);
+
+  const formatDogHandlersLabel = (dog?: Cachorro | null) => {
+    if (!dog) return '';
+    if (dog.tipoVinculo !== 'SISTEMA') return dog.responsavelExternoNome || 'Responsável Externo';
+    const names = [dog.usuarioInternoNome, dog.usuarioInterno2Nome].filter(Boolean);
+    return names.length > 0 ? names.join(' / ') : 'Policial do Sistema';
+  };
+
   const handleOpenNewDog = () => {
     if (!canCreateBaiasEAnimais) {
       notifyError('Você não possui permissão para cadastrar animais.');
       return;
     }
+    const defaultHandler =
+      eligibleDogHandlers.find(u => u.id === currentUser?.id)?.id ||
+      eligibleDogHandlers[0]?.id ||
+      '';
     setEditingDog(null);
     setDogForm({
       nome: '',
@@ -355,7 +385,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       canilFisicoId: canis[0]?.id || '',
       status: 'Ativo / Operacional',
       tipoVinculo: 'SISTEMA',
-      usuarioInternoId: currentUser?.id || allUsers[0]?.id || '',
+      usuarioInternoId: defaultHandler,
+      usuarioInterno2Id: '',
       responsavelExternoNome: '',
       responsavelExternoDoc: '',
       responsavelExternoTel: '',
@@ -386,6 +417,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       status: dog.status,
       tipoVinculo: dog.tipoVinculo,
       usuarioInternoId: dog.usuarioInternoId || '',
+      usuarioInterno2Id: dog.usuarioInterno2Id || '',
       responsavelExternoNome: dog.responsavelExternoNome || '',
       responsavelExternoDoc: dog.responsavelExternoDoc || '',
       responsavelExternoTel: dog.responsavelExternoTel || '',
@@ -413,18 +445,43 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       return;
     }
 
-    let internalUser: User | undefined;
-    if (dogForm.tipoVinculo === 'SISTEMA' && dogForm.usuarioInternoId) {
-      internalUser = allUsers.find(u => u.id === dogForm.usuarioInternoId);
+    let internalUser1: User | undefined;
+    let internalUser2: User | undefined;
+    if (dogForm.tipoVinculo === 'SISTEMA') {
+      if (!dogForm.usuarioInternoId) {
+        notifyError('Selecione o 1º condutor (Operador Canino) do animal.');
+        return;
+      }
+      if (dogForm.usuarioInterno2Id && dogForm.usuarioInterno2Id === dogForm.usuarioInternoId) {
+        notifyError('O 1º e o 2º condutor não podem ser o mesmo usuário.');
+        return;
+      }
+      internalUser1 = eligibleDogHandlers.find(u => u.id === dogForm.usuarioInternoId);
+      if (!internalUser1) {
+        notifyError('O 1º condutor deve ser um Operador Canino da mesma unidade.');
+        return;
+      }
+      if (dogForm.usuarioInterno2Id) {
+        internalUser2 = eligibleDogHandlers.find(u => u.id === dogForm.usuarioInterno2Id);
+        if (!internalUser2) {
+          notifyError('O 2º condutor deve ser um Operador Canino da mesma unidade.');
+          return;
+        }
+      }
     }
 
     setIsSubmitting(true);
     const res = await storage.saveCachorro({
       id: editingDog?.id,
       ...dogForm,
-      usuarioInternoNome: internalUser?.name,
-      usuarioInternoMasp: internalUser?.masp,
-      usuarioInternoCargo: internalUser?.cargo
+      usuarioInternoId: dogForm.tipoVinculo === 'SISTEMA' ? internalUser1?.id : undefined,
+      usuarioInternoNome: dogForm.tipoVinculo === 'SISTEMA' ? internalUser1?.name : undefined,
+      usuarioInternoMasp: dogForm.tipoVinculo === 'SISTEMA' ? internalUser1?.masp : undefined,
+      usuarioInternoCargo: dogForm.tipoVinculo === 'SISTEMA' ? internalUser1?.cargo : undefined,
+      usuarioInterno2Id: dogForm.tipoVinculo === 'SISTEMA' ? internalUser2?.id : undefined,
+      usuarioInterno2Nome: dogForm.tipoVinculo === 'SISTEMA' ? internalUser2?.name : undefined,
+      usuarioInterno2Masp: dogForm.tipoVinculo === 'SISTEMA' ? internalUser2?.masp : undefined,
+      usuarioInterno2Cargo: dogForm.tipoVinculo === 'SISTEMA' ? internalUser2?.cargo : undefined
     });
     setIsSubmitting(false);
 
@@ -635,7 +692,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       cachorroNome: targetDog?.nome,
       cachorroRaca: targetDog?.raca,
       cachorroMicrochip: targetDog?.microchip,
-      condutorNome: targetDog?.tipoVinculo === 'SISTEMA' ? targetDog?.usuarioInternoNome : targetDog?.responsavelExternoNome,
+      condutorNome: formatDogHandlersLabel(targetDog),
       condutorMasp: targetDog?.tipoVinculo === 'SISTEMA' ? targetDog?.usuarioInternoMasp : undefined,
       dosagemAplicada: adminForm.dosagemAplicada,
       frequenciaAdministrada: adminForm.frequenciaAdministrada,
@@ -674,7 +731,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           cachorroNome: targetDog.nome,
           cachorroRaca: targetDog.raca,
           cachorroMicrochip: targetDog.microchip,
-          condutorNome: targetDog.tipoVinculo === 'SISTEMA' ? targetDog.usuarioInternoNome : targetDog.responsavelExternoNome,
+          condutorNome: formatDogHandlersLabel(targetDog),
           condutorMasp: targetDog.tipoVinculo === 'SISTEMA' ? targetDog.usuarioInternoMasp : undefined,
           dosagemAplicada: adminForm.dosagemAplicada,
           frequenciaAdministrada: adminForm.frequenciaAdministrada,
@@ -736,6 +793,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
         (d.raca || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
         (d.microchip && d.microchip.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (d.usuarioInternoNome && d.usuarioInternoNome.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (d.usuarioInterno2Nome && d.usuarioInterno2Nome.toLowerCase().includes(searchTerm.toLowerCase())) ||
         (d.responsavelExternoNome && d.responsavelExternoNome.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchStatus = filterStatus === 'TODOS' || d.status === filterStatus;
       return matchSearch && matchStatus;
@@ -1611,9 +1669,27 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                         </div>
                         <div className="pt-2 border-t border-slate-800/80 flex items-start space-x-2">
                           <UserCheck className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-bold text-slate-200 truncate">{handlerName}</p>
-                            <p className="text-[10px] text-slate-400 font-mono">{handlerDoc} {dog.tipoVinculo === 'EXTERNO' ? `• ${dog.responsavelExternoOrgao || 'Externo'}` : ''}</p>
+                          <div className="min-w-0 space-y-1">
+                            <div>
+                              <p className="text-[11px] font-bold text-slate-200 truncate">
+                                {dog.tipoVinculo === 'SISTEMA' && dog.usuarioInterno2Nome ? `1º: ${handlerName}` : handlerName}
+                              </p>
+                              <p className="text-[10px] text-slate-400 font-mono">
+                                {handlerDoc} {dog.tipoVinculo === 'EXTERNO' ? `• ${dog.responsavelExternoOrgao || 'Externo'}` : ''}
+                              </p>
+                            </div>
+                            {dog.tipoVinculo === 'SISTEMA' && dog.usuarioInterno2Nome && (
+                              <div>
+                                <p className="text-[11px] font-bold text-slate-200 truncate">
+                                  2º: {dog.usuarioInterno2Nome}
+                                </p>
+                                {dog.usuarioInterno2Masp && (
+                                  <p className="text-[10px] text-slate-400 font-mono">
+                                    MASP: {formatMasp(dog.usuarioInterno2Masp)}
+                                  </p>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </div>
@@ -2008,7 +2084,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                   <option value="">Selecione o cão K9...</option>
                   {cachorros.map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.nome} - {c.raca} (Microchip: {c.microchip || 'N/A'}) - Condutor: {c.tipoVinculo === 'SISTEMA' ? c.usuarioInternoNome : c.responsavelExternoNome}
+                      {c.nome} - {c.raca} (Microchip: {c.microchip || 'N/A'}) - Condutor(es): {formatDogHandlersLabel(c)}
                     </option>
                   ))}
                 </select>
@@ -3241,20 +3317,62 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                 </div>
 
                 {dogForm.tipoVinculo === 'SISTEMA' ? (
-                  <div>
-                    <label className="block text-slate-400 mb-1">Selecione o Policial Condutor</label>
-                    <select
-                      value={dogForm.usuarioInternoId}
-                      onChange={(e) => setDogForm({ ...dogForm, usuarioInternoId: e.target.value })}
-                      className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
-                    >
-                      <option value="">Selecione o policial...</option>
-                      {allUsers.map(u => (
-                        <option key={u.id} value={u.id}>
-                          {u.name} (MASP: {formatMasp(u.masp)}) - Cargo: {u.cargo}
-                        </option>
-                      ))}
-                    </select>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-semibold">
+                          1º Condutor (Operador Canino) *
+                        </label>
+                        <select
+                          value={dogForm.usuarioInternoId}
+                          onChange={(e) => {
+                            const nextId = e.target.value;
+                            setDogForm(prev => ({
+                              ...prev,
+                              usuarioInternoId: nextId,
+                              usuarioInterno2Id: prev.usuarioInterno2Id === nextId ? '' : prev.usuarioInterno2Id
+                            }));
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
+                          required
+                        >
+                          <option value="">Selecione o 1º condutor...</option>
+                          {eligibleDogHandlers.map(u => (
+                            <option key={u.id} value={u.id}>
+                              {u.name} (MASP: {formatMasp(u.masp)})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-slate-400 mb-1 font-semibold">
+                          2º Condutor (Opcional)
+                        </label>
+                        <select
+                          value={dogForm.usuarioInterno2Id}
+                          onChange={(e) => setDogForm({ ...dogForm, usuarioInterno2Id: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl p-2.5 focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">Nenhum (apenas 1 condutor)</option>
+                          {eligibleDogHandlers
+                            .filter(u => u.id !== dogForm.usuarioInternoId)
+                            .map(u => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} (MASP: {formatMasp(u.masp)})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+                    {eligibleDogHandlers.length === 0 && (
+                      <p className="text-[11px] text-amber-400">
+                        Nenhum usuário com perfil Operador Canino encontrado na sua unidade.
+                      </p>
+                    )}
+                    <p className="text-[10px] text-slate-500">
+                      São exibidos apenas usuários com perfil Operador Canino vinculados à mesma unidade do operador logado.
+                    </p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">

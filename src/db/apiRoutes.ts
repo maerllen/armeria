@@ -11381,42 +11381,154 @@ apiRouter.delete('/canis-fisicos/:id', async (req: Request, res: Response) => {
 apiRouter.get('/cachorros', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
-    const [rows]: any = await pool.query(`
-      SELECT 
-        c.ID_CACHORRO as id,
-        c.NOME_CACHORRO as nome,
-        c.RACA_CACHORRO as raca,
-        c.SEXO_CACHORRO as sexo,
-        DATE_FORMAT(c.DATA_NASCIMENTO_CACHORRO, '%Y-%m-%d') as dataNascimento,
-        c.MICROCHIP_CACHORRO as microchip,
-        c.PELAGEM_CACHORRO as pelagem,
-        c.ESPECIALIDADE_CACHORRO as especialidade,
-        c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
-        k.NOME_CANIL as canilFisicoNome,
-        c.STATUS_CACHORRO as status,
-        c.TIPO_VINCULO_CACHORRO as tipoVinculo,
-        c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
-        c.USUARIO_INTERNO_NOME_CACHORRO as usuarioInternoNome,
-        c.USUARIO_INTERNO_MASP_CACHORRO as usuarioInternoMasp,
-        c.USUARIO_INTERNO_CARGO_CACHORRO as usuarioInternoCargo,
-        c.RESPONSAVEL_EXTERNO_NOME_CACHORRO as responsavelExternoNome,
-        c.RESPONSAVEL_EXTERNO_DOC_CACHORRO as responsavelExternoDoc,
-        c.RESPONSAVEL_EXTERNO_TEL_CACHORRO as responsavelExternoTel,
-        c.RESPONSAVEL_EXTERNO_ORGAO_CACHORRO as responsavelExternoOrgao,
-        c.DEPARTAMENTO_ID_CACHORRO as departmentId,
-        c.UNIDADE_ID_CACHORRO as unitId,
-        c.FOTO_URL_CACHORRO as fotoUrl,
-        c.OBSERVACOES_CACHORRO as observacoes,
-        c.DATA_CRIACAO_CACHORRO as createdAt
-      FROM CACHORROS_CANIL c
-      LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
-      ORDER BY c.NOME_CACHORRO ASC
-    `);
-    return res.json(rows || []);
+    try {
+      const [rows]: any = await pool.query(`
+        SELECT 
+          c.ID_CACHORRO as id,
+          c.NOME_CACHORRO as nome,
+          c.RACA_CACHORRO as raca,
+          c.SEXO_CACHORRO as sexo,
+          DATE_FORMAT(c.DATA_NASCIMENTO_CACHORRO, '%Y-%m-%d') as dataNascimento,
+          c.MICROCHIP_CACHORRO as microchip,
+          c.PELAGEM_CACHORRO as pelagem,
+          c.ESPECIALIDADE_CACHORRO as especialidade,
+          c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
+          k.NOME_CANIL as canilFisicoNome,
+          c.STATUS_CACHORRO as status,
+          c.TIPO_VINCULO_CACHORRO as tipoVinculo,
+          c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
+          c.USUARIO_INTERNO_NOME_CACHORRO as usuarioInternoNome,
+          c.USUARIO_INTERNO_MASP_CACHORRO as usuarioInternoMasp,
+          c.USUARIO_INTERNO_CARGO_CACHORRO as usuarioInternoCargo,
+          c.USUARIO_INTERNO_2_ID_CACHORRO as usuarioInterno2Id,
+          c.USUARIO_INTERNO_2_NOME_CACHORRO as usuarioInterno2Nome,
+          c.USUARIO_INTERNO_2_MASP_CACHORRO as usuarioInterno2Masp,
+          c.USUARIO_INTERNO_2_CARGO_CACHORRO as usuarioInterno2Cargo,
+          c.RESPONSAVEL_EXTERNO_NOME_CACHORRO as responsavelExternoNome,
+          c.RESPONSAVEL_EXTERNO_DOC_CACHORRO as responsavelExternoDoc,
+          c.RESPONSAVEL_EXTERNO_TEL_CACHORRO as responsavelExternoTel,
+          c.RESPONSAVEL_EXTERNO_ORGAO_CACHORRO as responsavelExternoOrgao,
+          c.DEPARTAMENTO_ID_CACHORRO as departmentId,
+          c.UNIDADE_ID_CACHORRO as unitId,
+          c.FOTO_URL_CACHORRO as fotoUrl,
+          c.OBSERVACOES_CACHORRO as observacoes,
+          c.DATA_CRIACAO_CACHORRO as createdAt
+        FROM CACHORROS_CANIL c
+        LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
+        ORDER BY c.NOME_CACHORRO ASC
+      `);
+      return res.json(rows || []);
+    } catch (_colErr) {
+      const [rows]: any = await pool.query(`
+        SELECT 
+          c.ID_CACHORRO as id,
+          c.NOME_CACHORRO as nome,
+          c.RACA_CACHORRO as raca,
+          c.SEXO_CACHORRO as sexo,
+          DATE_FORMAT(c.DATA_NASCIMENTO_CACHORRO, '%Y-%m-%d') as dataNascimento,
+          c.MICROCHIP_CACHORRO as microchip,
+          c.PELAGEM_CACHORRO as pelagem,
+          c.ESPECIALIDADE_CACHORRO as especialidade,
+          c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
+          k.NOME_CANIL as canilFisicoNome,
+          c.STATUS_CACHORRO as status,
+          c.TIPO_VINCULO_CACHORRO as tipoVinculo,
+          c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
+          c.USUARIO_INTERNO_NOME_CACHORRO as usuarioInternoNome,
+          c.USUARIO_INTERNO_MASP_CACHORRO as usuarioInternoMasp,
+          c.USUARIO_INTERNO_CARGO_CACHORRO as usuarioInternoCargo,
+          NULL as usuarioInterno2Id,
+          NULL as usuarioInterno2Nome,
+          NULL as usuarioInterno2Masp,
+          NULL as usuarioInterno2Cargo,
+          c.RESPONSAVEL_EXTERNO_NOME_CACHORRO as responsavelExternoNome,
+          c.RESPONSAVEL_EXTERNO_DOC_CACHORRO as responsavelExternoDoc,
+          c.RESPONSAVEL_EXTERNO_TEL_CACHORRO as responsavelExternoTel,
+          c.RESPONSAVEL_EXTERNO_ORGAO_CACHORRO as responsavelExternoOrgao,
+          c.DEPARTAMENTO_ID_CACHORRO as departmentId,
+          c.UNIDADE_ID_CACHORRO as unitId,
+          c.FOTO_URL_CACHORRO as fotoUrl,
+          c.OBSERVACOES_CACHORRO as observacoes,
+          c.DATA_CRIACAO_CACHORRO as createdAt
+        FROM CACHORROS_CANIL c
+        LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
+        ORDER BY c.NOME_CACHORRO ASC
+      `);
+      return res.json(rows || []);
+    }
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
 });
+
+const validateAndResolveDogHandlers = async (pool: any, dog: any) => {
+  const tipoVinculo = dog.tipoVinculo || 'SISTEMA';
+  if (tipoVinculo !== 'SISTEMA') {
+    return {
+      ok: true as const,
+      c1: { id: null, nome: null, masp: null, cargo: null },
+      c2: { id: null, nome: null, masp: null, cargo: null }
+    };
+  }
+
+  const c1Id = String(dog.usuarioInternoId || '').trim();
+  const c2Id = String(dog.usuarioInterno2Id || '').trim();
+  if (!c1Id) {
+    return { ok: false as const, error: 'Selecione o 1º condutor (Operador Canino) do animal.' };
+  }
+  if (c2Id && c2Id === c1Id) {
+    return { ok: false as const, error: 'O 1º e o 2º condutor não podem ser o mesmo usuário.' };
+  }
+
+  const ids = c2Id ? [c1Id, c2Id] : [c1Id];
+  const [userRows]: any = await pool.query(
+    `SELECT ID_USUARIOS as id, NOME_COMPLETO_USUARIOS as name, MASP_USUARIOS as masp, CARGO_USUARIOS as cargo,
+            PERFIL_USUARIOS as role, ROLES_USUARIOS as rolesJson, UNIDADE_ID_USUARIOS as unitId
+     FROM USUARIOS
+     WHERE ID_USUARIOS IN (${ids.map(() => '?').join(',')})`,
+    ids
+  );
+
+  const findUser = (uid: string) => (userRows || []).find((u: any) => u.id === uid);
+  const checkHandler = (u: any, label: string) => {
+    if (!u) return `${label} não encontrado no sistema.`;
+    let parsedRoles: string[] = [u.role];
+    if (u.rolesJson) {
+      try {
+        const arr = typeof u.rolesJson === 'string' ? JSON.parse(u.rolesJson) : u.rolesJson;
+        if (Array.isArray(arr)) parsedRoles = arr;
+      } catch (_) {}
+    }
+    const isCanino = u.role === 'operador_canino' || parsedRoles.includes('operador_canino');
+    if (!isCanino) {
+      return `${label} (${u.name}) deve possuir o perfil Operador Canino.`;
+    }
+    const actorUnitId = dog.actor?.unitId ? String(dog.actor.unitId) : '';
+    if (actorUnitId && u.unitId !== actorUnitId) {
+      return `${label} (${u.name}) deve pertencer à mesma unidade do usuário que está cadastrando o cão.`;
+    }
+    return null;
+  };
+
+  const u1 = findUser(c1Id);
+  const err1 = checkHandler(u1, '1º Condutor');
+  if (err1) return { ok: false as const, error: err1 };
+
+  let u2: any = null;
+  if (c2Id) {
+    u2 = findUser(c2Id);
+    const err2 = checkHandler(u2, '2º Condutor');
+    if (err2) return { ok: false as const, error: err2 };
+  }
+
+  return {
+    ok: true as const,
+    c1: { id: u1.id, nome: u1.name, masp: u1.masp || null, cargo: u1.cargo || null },
+    c2: u2
+      ? { id: u2.id, nome: u2.name, masp: u2.masp || null, cargo: u2.cargo || null }
+      : { id: null, nome: null, masp: null, cargo: null }
+  };
+};
 
 apiRouter.post('/cachorros', async (req: Request, res: Response) => {
   try {
@@ -11425,17 +11537,23 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'O nome do cão é obrigatório.' });
     }
     const pool = getPool();
+    const resolved = await validateAndResolveDogHandlers(pool, dog);
+    if (!resolved.ok) {
+      return res.status(400).json({ error: resolved.error });
+    }
+
     const id = `cao-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
 
     await pool.query(`
       INSERT INTO CACHORROS_CANIL (
         ID_CACHORRO, NOME_CACHORRO, RACA_CACHORRO, SEXO_CACHORRO, DATA_NASCIMENTO_CACHORRO,
         MICROCHIP_CACHORRO, PELAGEM_CACHORRO, ESPECIALIDADE_CACHORRO, CANIL_FISICO_ID_CACHORRO,
-        STATUS_CACHORRO, TIPO_VINCULO_CACHORRO, USUARIO_INTERNO_ID_CACHORRO, USUARIO_INTERNO_NOME_CACHORRO,
-        USUARIO_INTERNO_MASP_CACHORRO, USUARIO_INTERNO_CARGO_CACHORRO, RESPONSAVEL_EXTERNO_NOME_CACHORRO,
-        RESPONSAVEL_EXTERNO_DOC_CACHORRO, RESPONSAVEL_EXTERNO_TEL_CACHORRO, RESPONSAVEL_EXTERNO_ORGAO_CACHORRO,
+        STATUS_CACHORRO, TIPO_VINCULO_CACHORRO,
+        USUARIO_INTERNO_ID_CACHORRO, USUARIO_INTERNO_NOME_CACHORRO, USUARIO_INTERNO_MASP_CACHORRO, USUARIO_INTERNO_CARGO_CACHORRO,
+        USUARIO_INTERNO_2_ID_CACHORRO, USUARIO_INTERNO_2_NOME_CACHORRO, USUARIO_INTERNO_2_MASP_CACHORRO, USUARIO_INTERNO_2_CARGO_CACHORRO,
+        RESPONSAVEL_EXTERNO_NOME_CACHORRO, RESPONSAVEL_EXTERNO_DOC_CACHORRO, RESPONSAVEL_EXTERNO_TEL_CACHORRO, RESPONSAVEL_EXTERNO_ORGAO_CACHORRO,
         DEPARTAMENTO_ID_CACHORRO, UNIDADE_ID_CACHORRO, FOTO_URL_CACHORRO, OBSERVACOES_CACHORRO, DATA_CRIACAO_CACHORRO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
     `, [
       id,
       dog.nome.trim(),
@@ -11448,14 +11566,18 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
       dog.canilFisicoId || null,
       dog.status || 'Ativo / Operacional',
       dog.tipoVinculo || 'SISTEMA',
-      dog.usuarioInternoId || null,
-      dog.usuarioInternoNome || null,
-      dog.usuarioInternoMasp || null,
-      dog.usuarioInternoCargo || null,
-      dog.responsavelExternoNome || null,
-      dog.responsavelExternoDoc || null,
-      dog.responsavelExternoTel || null,
-      dog.responsavelExternoOrgao || null,
+      resolved.c1.id,
+      resolved.c1.nome,
+      resolved.c1.masp,
+      resolved.c1.cargo,
+      resolved.c2.id,
+      resolved.c2.nome,
+      resolved.c2.masp,
+      resolved.c2.cargo,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoNome || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoDoc || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoTel || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoOrgao || null) : null,
       dog.departmentId || null,
       dog.unitId || null,
       dog.fotoUrl || null,
@@ -11474,6 +11596,10 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const dog = req.body;
     const pool = getPool();
+    const resolved = await validateAndResolveDogHandlers(pool, dog);
+    if (!resolved.ok) {
+      return res.status(400).json({ error: resolved.error });
+    }
 
     await pool.query(`
       UPDATE CACHORROS_CANIL SET
@@ -11491,6 +11617,10 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
         USUARIO_INTERNO_NOME_CACHORRO = ?,
         USUARIO_INTERNO_MASP_CACHORRO = ?,
         USUARIO_INTERNO_CARGO_CACHORRO = ?,
+        USUARIO_INTERNO_2_ID_CACHORRO = ?,
+        USUARIO_INTERNO_2_NOME_CACHORRO = ?,
+        USUARIO_INTERNO_2_MASP_CACHORRO = ?,
+        USUARIO_INTERNO_2_CARGO_CACHORRO = ?,
         RESPONSAVEL_EXTERNO_NOME_CACHORRO = ?,
         RESPONSAVEL_EXTERNO_DOC_CACHORRO = ?,
         RESPONSAVEL_EXTERNO_TEL_CACHORRO = ?,
@@ -11511,14 +11641,18 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
       dog.canilFisicoId || null,
       dog.status || null,
       dog.tipoVinculo || null,
-      dog.usuarioInternoId || null,
-      dog.usuarioInternoNome || null,
-      dog.usuarioInternoMasp || null,
-      dog.usuarioInternoCargo || null,
-      dog.responsavelExternoNome || null,
-      dog.responsavelExternoDoc || null,
-      dog.responsavelExternoTel || null,
-      dog.responsavelExternoOrgao || null,
+      resolved.c1.id,
+      resolved.c1.nome,
+      resolved.c1.masp,
+      resolved.c1.cargo,
+      resolved.c2.id,
+      resolved.c2.nome,
+      resolved.c2.masp,
+      resolved.c2.cargo,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoNome || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoDoc || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoTel || null) : null,
+      dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoOrgao || null) : null,
       dog.departmentId || null,
       dog.unitId || null,
       dog.fotoUrl !== undefined ? dog.fotoUrl : null,

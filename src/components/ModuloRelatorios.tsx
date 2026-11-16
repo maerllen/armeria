@@ -1437,7 +1437,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       data.cachorrosCanil.forEach(d => {
         const condutor =
           d.tipoVinculo === 'SISTEMA'
-            ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+            ? [
+                `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`,
+                d.usuarioInterno2Nome ? `${d.usuarioInterno2Nome} (MASP: ${d.usuarioInterno2Masp || '-'})` : ''
+              ]
+                .filter(Boolean)
+                .join(' / ')
             : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`;
         rows.push([
           d.nome,
@@ -2034,7 +2039,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                   ${data.cachorrosCanil.map(d => {
                     const condutor =
                       d.tipoVinculo === 'SISTEMA'
-                        ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+                        ? [
+                            `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`,
+                            d.usuarioInterno2Nome ? `${d.usuarioInterno2Nome} (MASP: ${d.usuarioInterno2Masp || '-'})` : ''
+                          ]
+                            .filter(Boolean)
+                            .join(' / ')
                         : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`;
                     return `
                       <tr>
@@ -3029,7 +3039,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                         <td className="py-2 px-3">{d.canilNome}</td>
                         <td className="py-2 px-3">
                           {d.tipoVinculo === 'SISTEMA'
-                            ? `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`
+                            ? [
+                                `${d.usuarioInternoNome || '-'} (MASP: ${d.usuarioInternoMasp || '-'})`,
+                                d.usuarioInterno2Nome ? `${d.usuarioInterno2Nome} (MASP: ${d.usuarioInterno2Masp || '-'})` : ''
+                              ]
+                                .filter(Boolean)
+                                .join(' / ')
                             : `${d.responsavelExternoNome || '-'} (${d.responsavelExternoOrgao || 'Externo'})`}
                         </td>
                         <td className="py-2 px-3">{d.unitName}</td>

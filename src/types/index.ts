@@ -1231,11 +1231,16 @@ export interface Cachorro {
   canilFisicoNome?: string;
   status: StatusCachorro;
   tipoVinculo: 'SISTEMA' | 'EXTERNO';
-  // Vínculo Interno (Policial do Sistema)
+  // Vínculo Interno 1 (Policial Operador Canino do Sistema)
   usuarioInternoId?: string;
   usuarioInternoNome?: string;
   usuarioInternoMasp?: string;
   usuarioInternoCargo?: string;
+  // Vínculo Interno 2 (Segundo Condutor Opcional - Operador Canino do Sistema)
+  usuarioInterno2Id?: string;
+  usuarioInterno2Nome?: string;
+  usuarioInterno2Masp?: string;
+  usuarioInterno2Cargo?: string;
   // Vínculo Externo (Condutor/Responsável fora do sistema)
   responsavelExternoNome?: string;
   responsavelExternoDoc?: string;
