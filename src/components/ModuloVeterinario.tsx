@@ -15,6 +15,7 @@ import {
   TipoMovimentacaoVet,
   RelatorioTreinamentoCanil,
   ParticipanteTreinamentoCanil,
+  ParticipanteTreinamentoCachorro,
   LocalTreinamentoCanil,
   ParticipacaoTreinamentoCanil
 } from '../types';
@@ -108,20 +109,42 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   const getTodayIsoBr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
   const [treinoForm, setTreinoForm] = useState<{
     dataTreinamento: string;
-    cachorroId: string;
+    cachorros: ParticipanteTreinamentoCachorro[];
     modalidadeLocal: LocalTreinamentoCanil;
     modalidadeParticipacao: ParticipacaoTreinamentoCanil;
     descricao: string;
     participantes: ParticipanteTreinamentoCanil[];
   }>({
     dataTreinamento: getTodayIsoBr(),
-    cachorroId: '',
+    cachorros: [],
     modalidadeLocal: 'Interno',
     modalidadeParticipacao: 'Sozinho',
     descricao: '',
     participantes: []
   });
   const [hasUserChangedMainDog, setHasUserChangedMainDog] = useState(false);
+
+  const toParticipanteDog = (d: Cachorro): ParticipanteTreinamentoCachorro => ({
+    id: d.id,
+    nome: d.nome,
+    raca: d.raca || '',
+    microchip: d.microchip || ''
+  });
+
+  const getRelatorioCondutorDogs = (rel: RelatorioTreinamentoCanil): ParticipanteTreinamentoCachorro[] => {
+    if (rel.cachorros && rel.cachorros.length > 0) return rel.cachorros;
+    if (rel.cachorroId && rel.cachorroNome) {
+      return [
+        {
+          id: rel.cachorroId,
+          nome: rel.cachorroNome,
+          raca: rel.cachorroRaca || '',
+          microchip: rel.cachorroMicrochip || ''
+        }
+      ];
+    }
+    return [];
+  };
 
   const getDefaultDogsForUser = (userId?: string) => {
     if (!userId) return [];
@@ -153,13 +176,13 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   }, [activeTab, showFarmaciaTab, canMinistrarMedicamentos, canAccessTrainingTabs, canVerRelatoriosTodasEquipes]);
 
   useEffect(() => {
-    if (activeTab === 'relatorio-treinamento' && !hasUserChangedMainDog && !treinoForm.cachorroId && currentUser?.id) {
+    if (activeTab === 'relatorio-treinamento' && !hasUserChangedMainDog && treinoForm.cachorros.length === 0 && currentUser?.id) {
       const defaultDogs = getDefaultDogsForUser(currentUser.id);
       if (defaultDogs.length > 0) {
-        setTreinoForm(prev => (prev.cachorroId ? prev : { ...prev, cachorroId: defaultDogs[0].id }));
+        setTreinoForm(prev => (prev.cachorros.length > 0 ? prev : { ...prev, cachorros: [toParticipanteDog(defaultDogs[0])] }));
       }
     }
-  }, [activeTab, currentUser?.id, cachorros, hasUserChangedMainDog, treinoForm.cachorroId]);
+  }, [activeTab, currentUser?.id, cachorros, hasUserChangedMainDog, treinoForm.cachorros.length]);
   const [participantSearch, setParticipantSearch] = useState('');
   const [meusRelFilter, setMeusRelFilter] = useState<'TODOS' | 'CRIADOS' | 'CONJUNTOS_ASSINADOS' | 'PENDENTES'>('TODOS');
   const [unidadeFilterDataInicio, setUnidadeFilterDataInicio] = useState('');
@@ -964,10 +987,32 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     }));
   };
 
+  const handleAddMainDog = (dogId: string) => {
+    if (!dogId) return;
+    const dog = cachorros.find(c => c.id === dogId);
+    if (!dog) return;
+    setHasUserChangedMainDog(true);
+    setTreinoForm(prev => {
+      if (prev.cachorros.some(c => c.id === dog.id)) return prev;
+      return {
+        ...prev,
+        cachorros: [...prev.cachorros, toParticipanteDog(dog)]
+      };
+    });
+  };
+
+  const handleRemoveMainDog = (dogId: string) => {
+    setHasUserChangedMainDog(true);
+    setTreinoForm(prev => ({
+      ...prev,
+      cachorros: prev.cachorros.filter(c => c.id !== dogId)
+    }));
+  };
+
   const handleSaveTreinamento = async (shouldPrintAfter: boolean) => {
     if (!currentUser) return;
-    if (!treinoForm.cachorroId) {
-      notifyError('Selecione o cachorro participante do treinamento.');
+    if (treinoForm.cachorros.length === 0) {
+      notifyError('Selecione ao menos um cachorro participante do treinamento.');
       return;
     }
     const cleanDesc = treinoForm.descricao.trim();
@@ -988,11 +1033,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       return;
     }
 
-    const selectedDog = cachorros.find(c => c.id === treinoForm.cachorroId);
-    if (!selectedDog) {
-      notifyError('Cachorro selecionado não encontrado.');
-      return;
-    }
+    const primaryDogEntry = treinoForm.cachorros[0];
+    const primaryDogRecord = cachorros.find(c => c.id === primaryDogEntry.id);
 
     setIsSubmitting(true);
     const todayDate = getTodayIsoBr();
@@ -1002,16 +1044,17 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       condutorNome: currentUser.name,
       condutorMasp: currentUser.masp || '',
       condutorCargo: currentUser.cargo || '',
-      cachorroId: selectedDog.id,
-      cachorroNome: selectedDog.nome,
-      cachorroRaca: selectedDog.raca || '',
-      cachorroMicrochip: selectedDog.microchip || '',
+      cachorroId: primaryDogEntry.id,
+      cachorroNome: primaryDogEntry.nome,
+      cachorroRaca: primaryDogEntry.raca || '',
+      cachorroMicrochip: primaryDogEntry.microchip || '',
+      cachorros: treinoForm.cachorros,
       modalidadeLocal: treinoForm.modalidadeLocal,
       modalidadeParticipacao: treinoForm.modalidadeParticipacao,
       descricao: cleanDesc,
       participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
-      departmentId: currentUser.departmentId || selectedDog.departmentId || '',
-      unitId: currentUser.unitId || selectedDog.unitId || ''
+      departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
+      unitId: currentUser.unitId || primaryDogRecord?.unitId || ''
     });
     setIsSubmitting(false);
 
@@ -1025,7 +1068,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     setHasUserChangedMainDog(false);
     setTreinoForm({
       dataTreinamento: getTodayIsoBr(),
-      cachorroId: nextDefaultDogs[0]?.id || '',
+      cachorros: nextDefaultDogs.length > 0 ? [toParticipanteDog(nextDefaultDogs[0])] : [],
       modalidadeLocal: 'Interno',
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
@@ -1043,8 +1086,9 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     setIsSubmitting(true);
     const res = await storage.assinarRelatorioTreinamentoCanil(rel.id);
     setIsSubmitting(false);
+    const dogsLabel = getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ') || rel.cachorroNome;
     if (res.success) {
-      notifySuccess(`Relatório de treinamento do cão "${rel.cachorroNome}" assinado com sucesso!`);
+      notifySuccess(`Relatório de treinamento (${dogsLabel}) assinado com sucesso!`);
       onRefresh();
     } else {
       notifyError(res.error || 'Erro ao assinar relatório.');
@@ -1052,7 +1096,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   };
 
   const handleDeleteRelatorioTreino = async (rel: RelatorioTreinamentoCanil) => {
-    if (!confirm(`Deseja excluir o relatório de treinamento do cão "${rel.cachorroNome}" (${formatDateBr(rel.dataTreinamento)})?`)) {
+    const dogsLabel = getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ') || rel.cachorroNome;
+    if (!confirm(`Deseja excluir o relatório de treinamento (${dogsLabel}) de ${formatDateBr(rel.dataTreinamento)}?`)) {
       return;
     }
     setIsSubmitting(true);
@@ -1096,8 +1141,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       if (reportUnitId) return reportUnitId === targetUnitId;
       const condutorUser = selectableUsersForTreino.find(u => u.id === r.condutorId) || (r.condutorId === currentUser.id ? currentUser : undefined);
       if (condutorUser?.unitId) return condutorUser.unitId === targetUnitId;
-      const dog = cachorros.find(d => d.id === r.cachorroId);
-      if (dog?.unitId) return dog.unitId === targetUnitId;
+      const condutorDogs = getRelatorioCondutorDogs(r);
+      if (condutorDogs.some(cd => cachorros.find(d => d.id === cd.id)?.unitId === targetUnitId)) return true;
       return false;
     });
   }, [relatoriosTreinamento, currentUser, canVerRelatoriosTodasEquipes, unidadeFilterUnitId, selectableUsersForTreino, cachorros]);
@@ -1132,7 +1177,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
         if (!matchesCondutor && !matchesPart) return false;
       }
       if (unidadeFilterCachorroId) {
-        const matchesMainDog = r.cachorroId === unidadeFilterCachorroId;
+        const matchesMainDog = getRelatorioCondutorDogs(r).some(c => c.id === unidadeFilterCachorroId);
         const matchesPartDog = (r.participantes || []).some(p =>
           (p.cachorros || []).some(c => c.id === unidadeFilterCachorroId)
         );
@@ -1154,9 +1199,11 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     const unitName = units.find(u => u.id === rel.unitId)?.name || units.find(u => u.id === currentUser?.unitId)?.name || 'Unidade Operacional Canil K9';
     const deptName = departments.find(d => d.id === rel.departmentId)?.name || 'Polícia Civil de Minas Gerais';
     const isSozinho = rel.modalidadeParticipacao === 'Sozinho';
+    const condutorDogs = getRelatorioCondutorDogs(rel);
+    const dogsTitleText = condutorDogs.map(c => c.nome).join(', ') || rel.cachorroNome;
     const docTitle = buildStandardDocumentTitle(
       'Relatório de Treinamento (Canil K9)',
-      `${rel.cachorroNome} - ${formatDateBr(rel.dataTreinamento)}`,
+      `${dogsTitleText} - ${formatDateBr(rel.dataTreinamento)}`,
       rel.condutorNome
     );
 
@@ -1248,8 +1295,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
         <span class="val">${escapeHtmlText(rel.condutorNome)}${rel.condutorMasp ? ` (MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))})` : ''}</span>
       </td>
       <td style="width: 30%;">
-        <span class="lbl">Cão Policial K9</span>
-        <span class="val">${escapeHtmlText(rel.cachorroNome)}${rel.cachorroRaca ? ` (${escapeHtmlText(rel.cachorroRaca)})` : ''}</span>
+        <span class="lbl">${condutorDogs.length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}</span>
+        <span class="val">${condutorDogs.map(c => `${escapeHtmlText(c.nome)}${c.raca ? ` (${escapeHtmlText(c.raca)})` : ''}`).join('<br/>')}</span>
       </td>
     </tr>
     <tr>
@@ -1262,8 +1309,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
         <span class="val">${escapeHtmlText(rel.modalidadeParticipacao)}${!isSozinho ? ` (${1 + (rel.participantes?.length || 0)} participantes)` : ''}</span>
       </td>
       <td>
-        <span class="lbl">Microchip</span>
-        <span class="val" style="font-family: monospace;">${escapeHtmlText(rel.cachorroMicrochip || 'N/A')}</span>
+        <span class="lbl">${condutorDogs.length > 1 ? 'Microchips' : 'Microchip'}</span>
+        <span class="val" style="font-family: monospace;">${escapeHtmlText(condutorDogs.map(c => c.microchip).filter(Boolean).join(', ') || 'N/A')}</span>
       </td>
     </tr>
   </table>
@@ -1295,6 +1342,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       ? `<tr><td colspan="6" style="text-align:center; padding: 14px; color: #64748b;">Nenhum relatório encontrado para os filtros selecionados.</td></tr>`
       : filteredUnidadeReports
           .map(r => {
+            const condutorDogs = getRelatorioCondutorDogs(r);
+            const condutorDogsHtml = condutorDogs
+              .map(c => `<strong>${escapeHtmlText(c.nome)}</strong>${c.raca ? ` <span style="font-size:9px; color:#475569;">(${escapeHtmlText(c.raca)})</span>` : ''}`)
+              .join('<br/>');
             const participantsSummary =
               r.modalidadeParticipacao === 'Coletivo' && (r.participantes || []).length > 0
                 ? `<br/><span style="font-size:9px; color:#475569;">${(r.participantes || [])
@@ -1311,7 +1362,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
             <tr>
               <td style="font-family: monospace; white-space: nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
               <td><strong>${escapeHtmlText(r.condutorNome)}</strong>${r.condutorMasp ? `<br/><span style="font-size:9px; color:#475569;">MASP: ${escapeHtmlText(formatMasp(r.condutorMasp))}</span>` : ''}</td>
-              <td><strong>${escapeHtmlText(r.cachorroNome)}</strong>${r.cachorroRaca ? `<br/><span style="font-size:9px; color:#475569;">${escapeHtmlText(r.cachorroRaca)}</span>` : ''}${participantsSummary}</td>
+              <td>${condutorDogsHtml}${participantsSummary}</td>
               <td>${escapeHtmlText(r.modalidadeLocal)}</td>
               <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px; color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
               <td style="white-space: pre-wrap; word-break: break-word;">${escapeHtmlText(r.descricao)}</td>
@@ -2378,22 +2429,53 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               </div>
             </div>
 
-            {/* Cachorro */}
-            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5">
-              <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1.5">
-                Nome do Cachorro K9 *
-              </label>
+            {/* Cachorro(s) do Condutor */}
+            <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase">
+                  Cachorro(s) K9 *
+                </label>
+                {treinoForm.cachorros.length > 0 && (
+                  <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300">
+                    {treinoForm.cachorros.length} selecionado(s)
+                  </span>
+                )}
+              </div>
+
+              {treinoForm.cachorros.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {treinoForm.cachorros.map(dog => (
+                    <span
+                      key={dog.id}
+                      className="inline-flex items-center space-x-1.5 bg-slate-900 border border-amber-500/40 text-amber-300 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                    >
+                      <Dog className="w-3 h-3 text-amber-400" />
+                      <span>{dog.nome}{dog.raca ? ` (${dog.raca})` : ''}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMainDog(dog.id)}
+                        className="text-slate-400 hover:text-red-400"
+                        title="Remover cachorro"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <select
-                value={treinoForm.cachorroId}
-                onChange={(e) => {
-                  setHasUserChangedMainDog(true);
-                  setTreinoForm({ ...treinoForm, cachorroId: e.target.value });
-                }}
-                className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2.5 text-xs focus:outline-none focus:border-amber-500"
+                value=""
+                onChange={(e) => handleAddMainDog(e.target.value)}
+                className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
               >
-                <option value="">Selecione o cão policial...</option>
+                <option value="">
+                  {treinoForm.cachorros.length === 0
+                    ? 'Selecione o(s) cão(es) policial(is)...'
+                    : '+ Adicionar outro cachorro...'}
+                </option>
                 {cachorros
-                  .filter(d => d.status !== 'Baixado / Óbito')
+                  .filter(d => d.status !== 'Baixado / Óbito' && !treinoForm.cachorros.some(c => c.id === d.id))
                   .map(dog => (
                     <option key={dog.id} value={dog.id}>
                       {dog.nome} — {dog.raca} ({dog.status})
@@ -2730,7 +2812,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                           </span>
                           <span className="font-black text-slate-100 text-sm flex items-center space-x-1.5">
                             <Dog className="w-4 h-4 text-amber-400" />
-                            <span>{rel.cachorroNome}</span>
+                            <span>{getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ')}</span>
                           </span>
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
                             rel.modalidadeLocal === 'Interno'
@@ -3024,8 +3106,14 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                           )}
                         </td>
                         <td className="p-3.5">
-                          <p className="font-bold text-slate-100">{rel.cachorroNome}</p>
-                          {rel.cachorroRaca && <p className="text-[10px] text-slate-500">{rel.cachorroRaca}</p>}
+                          <div className="space-y-0.5">
+                            {getRelatorioCondutorDogs(rel).map(dog => (
+                              <div key={dog.id}>
+                                <p className="font-bold text-slate-100">{dog.nome}</p>
+                                {dog.raca && <p className="text-[10px] text-slate-500">{dog.raca}</p>}
+                              </div>
+                            ))}
+                          </div>
                           {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
                             <div className="mt-1 space-y-0.5">
                               {rel.participantes.map(p => (
@@ -3123,9 +3211,17 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                   )}
                 </div>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Cão Policial K9</span>
-                  <p className="font-bold text-slate-100 text-sm">{viewingTreinoReport.cachorroNome}</p>
-                  <p className="text-slate-400">{viewingTreinoReport.cachorroRaca || 'K9'}</p>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">
+                    {getRelatorioCondutorDogs(viewingTreinoReport).length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}
+                  </span>
+                  <div className="space-y-1 mt-0.5">
+                    {getRelatorioCondutorDogs(viewingTreinoReport).map(dog => (
+                      <div key={dog.id}>
+                        <p className="font-bold text-slate-100 text-sm">{dog.nome}</p>
+                        <p className="text-slate-400">{dog.raca || 'K9'}{dog.microchip ? ` • Chip: ${dog.microchip}` : ''}</p>
+                      </div>
+                    ))}
+                  </div>
                 </div>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                   <span className="text-[10px] text-slate-400 uppercase font-bold">Local</span>

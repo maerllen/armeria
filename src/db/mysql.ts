@@ -1278,6 +1278,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`CACHORRO_NOME\` VARCHAR(255) NOT NULL,
         \`CACHORRO_RACA\` VARCHAR(128) DEFAULT NULL,
         \`CACHORRO_MICROCHIP\` VARCHAR(64) DEFAULT NULL,
+        \`CACHORROS_JSON\` LONGTEXT DEFAULT NULL,
         \`MODALIDADE_LOCAL\` ENUM('Interno', 'Externo') NOT NULL DEFAULT 'Interno',
         \`MODALIDADE_PARTICIPACAO\` ENUM('Sozinho', 'Coletivo') NOT NULL DEFAULT 'Sozinho',
         \`DESCRICAO\` TEXT NOT NULL,

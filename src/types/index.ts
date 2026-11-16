@@ -1351,6 +1351,7 @@ export interface RelatorioTreinamentoCanil {
   cachorroNome: string;
   cachorroRaca?: string;
   cachorroMicrochip?: string;
+  cachorros?: ParticipanteTreinamentoCachorro[];
   modalidadeLocal: LocalTreinamentoCanil;
   modalidadeParticipacao: ParticipacaoTreinamentoCanil;
   descricao: string; // Máximo 1000 caracteres

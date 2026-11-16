@@ -12014,9 +12014,29 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
 });
 
 // --- 5. RELATÓRIOS DE TREINAMENTO CANIL K9 ---
+let relatoriosTreinamentoSchemaEnsured = false;
+async function ensureRelatoriosTreinamentoSchema(pool: any) {
+  if (relatoriosTreinamentoSchemaEnsured) return;
+  try {
+    const [cols]: any = await pool.query(
+      `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_TREINAMENTO_CANIL' AND COLUMN_NAME = 'CACHORROS_JSON'`
+    );
+    if (!cols?.[0]?.cnt) {
+      await pool.query(
+        'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `CACHORROS_JSON` LONGTEXT DEFAULT NULL AFTER `CACHORRO_MICROCHIP`'
+      );
+    }
+    relatoriosTreinamentoSchemaEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar coluna CACHORROS_JSON em RELATORIOS_TREINAMENTO_CANIL:', err);
+  }
+}
+
 apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Response) => {
   try {
     const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
     const [rows]: any = await pool.query(`
       SELECT
         ID_REL_TREINAMENTO as id,
@@ -12029,6 +12049,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         CACHORRO_NOME as cachorroNome,
         CACHORRO_RACA as cachorroRaca,
         CACHORRO_MICROCHIP as cachorroMicrochip,
+        CACHORROS_JSON as cachorrosJson,
         MODALIDADE_LOCAL as modalidadeLocal,
         MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
         DESCRICAO as descricao,
@@ -12053,6 +12074,34 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
           participantes = [];
         }
       }
+      let cachorros: any[] = [];
+      if (r.cachorrosJson) {
+        try {
+          const parsedDogs = JSON.parse(r.cachorrosJson);
+          if (Array.isArray(parsedDogs)) {
+            cachorros = parsedDogs
+              .filter((d: any) => d && d.id && d.nome)
+              .map((d: any) => ({
+                id: String(d.id),
+                nome: String(d.nome),
+                raca: d.raca ? String(d.raca) : '',
+                microchip: d.microchip ? String(d.microchip) : ''
+              }));
+          }
+        } catch {
+          cachorros = [];
+        }
+      }
+      if (cachorros.length === 0 && r.cachorroId && r.cachorroNome) {
+        cachorros = [
+          {
+            id: String(r.cachorroId),
+            nome: String(r.cachorroNome),
+            raca: r.cachorroRaca || '',
+            microchip: r.cachorroMicrochip || ''
+          }
+        ];
+      }
       return {
         id: r.id,
         dataTreinamento: r.dataTreinamento,
@@ -12064,6 +12113,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         cachorroNome: r.cachorroNome,
         cachorroRaca: r.cachorroRaca || '',
         cachorroMicrochip: r.cachorroMicrochip || '',
+        cachorros,
         modalidadeLocal: r.modalidadeLocal === 'Externo' ? 'Externo' : 'Interno',
         modalidadeParticipacao: r.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho',
         descricao: r.descricao || '',
@@ -12095,9 +12145,35 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
     if (!condutorId || !condutorNome) {
       return res.status(400).json({ error: 'Condutor responsável é obrigatório.' });
     }
-    if (!body.cachorroId || !body.cachorroNome) {
-      return res.status(400).json({ error: 'Selecione o cachorro do treinamento.' });
+
+    const condutorCachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> = [];
+    const seenMainDogs = new Set<string>();
+    const rawMainDogs = Array.isArray(body.cachorros) ? body.cachorros : [];
+    for (const c of rawMainDogs) {
+      const cid = String(c?.id || '').trim();
+      const cnome = String(c?.nome || '').trim();
+      if (!cid || !cnome || seenMainDogs.has(cid)) continue;
+      seenMainDogs.add(cid);
+      condutorCachorros.push({
+        id: cid,
+        nome: cnome,
+        raca: String(c?.raca || '').trim(),
+        microchip: String(c?.microchip || '').trim()
+      });
     }
+    if (condutorCachorros.length === 0 && body.cachorroId && body.cachorroNome) {
+      condutorCachorros.push({
+        id: String(body.cachorroId).trim(),
+        nome: String(body.cachorroNome).trim(),
+        raca: String(body.cachorroRaca || '').trim(),
+        microchip: String(body.cachorroMicrochip || '').trim()
+      });
+    }
+
+    if (condutorCachorros.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um cachorro do treinamento.' });
+    }
+    const primaryDog = condutorCachorros[0];
 
     const modalidadeLocal = body.modalidadeLocal === 'Externo' ? 'Externo' : 'Interno';
     const modalidadeParticipacao = body.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho';
@@ -12154,6 +12230,7 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       : todayBr;
 
     const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
     const id = `rel-trein-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const departmentId = body.departmentId || actor.departmentId || null;
     const unitId = body.unitId || actor.unitId || null;
@@ -12161,10 +12238,10 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
     await pool.query(
       `INSERT INTO RELATORIOS_TREINAMENTO_CANIL (
         ID_REL_TREINAMENTO, DATA_TREINAMENTO, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
-        CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP,
+        CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP, CACHORROS_JSON,
         MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO, DESCRICAO, PARTICIPANTES_JSON,
         CONDUTOR_ASSINADO, CONDUTOR_ASSINADO_EM, DEPARTAMENTO_ID, UNIDADE_ID, DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
       [
         id,
         dataTreinamento,
@@ -12172,10 +12249,11 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
         condutorNome,
         condutorMasp,
         condutorCargo || null,
-        String(body.cachorroId),
-        String(body.cachorroNome).trim(),
-        body.cachorroRaca || null,
-        body.cachorroMicrochip || null,
+        primaryDog.id,
+        primaryDog.nome,
+        primaryDog.raca || null,
+        primaryDog.microchip || null,
+        JSON.stringify(condutorCachorros),
         modalidadeLocal,
         modalidadeParticipacao,
         descricao,
@@ -12192,10 +12270,11 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       condutorNome,
       condutorMasp,
       condutorCargo,
-      cachorroId: String(body.cachorroId),
-      cachorroNome: String(body.cachorroNome).trim(),
-      cachorroRaca: body.cachorroRaca || '',
-      cachorroMicrochip: body.cachorroMicrochip || '',
+      cachorroId: primaryDog.id,
+      cachorroNome: primaryDog.nome,
+      cachorroRaca: primaryDog.raca || '',
+      cachorroMicrochip: primaryDog.microchip || '',
+      cachorros: condutorCachorros,
       modalidadeLocal,
       modalidadeParticipacao,
       descricao,
@@ -12207,10 +12286,11 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       createdAt: new Date().toISOString()
     };
 
+    const dogsSummary = condutorCachorros.map(c => c.nome).join(', ');
     await insertAuditLog(
       'Veterinário',
       'Relatório de Treinamento Canil',
-      `Criado relatório de treinamento (${modalidadeLocal} / ${modalidadeParticipacao}) do cão "${createdRecord.cachorroNome}" por ${condutorNome}`,
+      `Criado relatório de treinamento (${modalidadeLocal} / ${modalidadeParticipacao}) do(s) cão(es) "${dogsSummary}" por ${condutorNome}`,
       actor,
       req.ip
     );
