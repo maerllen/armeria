@@ -1871,14 +1871,25 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     } catch (e) {}
   };
 
-  const handleDismissAllRefusals = () => {
+  const handleDismissAllRefusals = useCallback(() => {
     const allIds = myRefusedCautelas.map(c => c.id);
-    const next = Array.from(new Set([...dismissedRefusalIds, ...allIds]));
-    setDismissedRefusalIds(next);
-    try {
-      localStorage.setItem(`pc_dismissed_refusals_${currentUser.id}`, JSON.stringify(next));
-    } catch (e) {}
-  };
+    if (allIds.length === 0) return;
+    setDismissedRefusalIds(prev => {
+      const next = Array.from(new Set([...prev, ...allIds]));
+      try {
+        localStorage.setItem(`pc_dismissed_refusals_${currentUser.id}`, JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  }, [myRefusedCautelas, currentUser.id]);
+
+  useEffect(() => {
+    if (!isPolicial || unreadRefusedCautelas.length === 0) return;
+    const timer = setTimeout(() => {
+      handleDismissAllRefusals();
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [isPolicial, unreadRefusedCautelas.length, handleDismissAllRefusals]);
 
   // Armas disponíveis na unidade (ou departamento para Armeiro com abrangência departamental) para solicitação de cautela: SOMENTE armas com status "No Cofre"
   const userUnitWeapons = useMemo(() => {

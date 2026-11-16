@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback, useEffect } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   User,
   Weapon,
@@ -283,9 +283,18 @@ export const ModuloCautelaMunicoes: React.FC<ModuloCautelaMunicoesProps> = ({
   // Modal de Detalhes / Impressão
   const [detailItem, setDetailItem] = useState<CautelaMunicao | null>(null);
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = (type: 'success' | 'error', text: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setFeedbackMsg({ type, text });
-    setTimeout(() => setFeedbackMsg(null), 5000);
+    toastTimerRef.current = setTimeout(() => setFeedbackMsg(null), 5000);
   };
 
   // Base completa de cautelas de munições excluindo rigorosamente qualquer registro sem munição (quantity <= 0)

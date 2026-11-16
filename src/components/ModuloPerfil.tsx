@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { User, UserCargo, Department, Unit, Course, getSystemLogo, DEFAULT_SYSTEM_LOGO } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
-import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, CheckCircle2 } from 'lucide-react';
+import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, Package, CheckCircle2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -46,7 +46,7 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Notificações de Cautelas Autorizadas para o usuário logado com dismiss no clique
+  // Notificações de Cautelas Autorizadas para o usuário logado (exibidas uma única vez e somem após 5s ou no clique)
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem(`pc_dismissed_alerts_${activeUser.id}`);
@@ -74,10 +74,13 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const userMunicoesCautelas = storage.getCautelasMunicoes().filter(
     c => isProfileUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA' && !dismissedAlertIds.includes(c.id)
   );
-  const totalAutorizadas = userArmasCautelas.length + userMunicoesCautelas.length;
+  const userMateriaisCautelas = storage.getCautelasMateriais().filter(
+    c => isProfileUserMatch(c.usuarioInternoId, c.usuarioInternoMasp, c.usuarioInternoNome) && (c.status === 'AUTORIZADA' || c.status === 'Em Uso') && !dismissedAlertIds.includes(c.id)
+  );
+  const totalAutorizadas = userArmasCautelas.length + userMunicoesCautelas.length + userMateriaisCautelas.length;
 
-  const handleDismissAndNavigate = (targetMod: 'cautela-armas' | 'cautela-municoes', idsToDismiss: string[]) => {
-    const updated = [...dismissedAlertIds, ...idsToDismiss];
+  const handleDismissAndNavigate = (targetMod: 'cautela-armas' | 'cautela-municoes' | 'cautela-materiais', idsToDismiss: string[]) => {
+    const updated = Array.from(new Set([...dismissedAlertIds, ...idsToDismiss]));
     setDismissedAlertIds(updated);
     try {
       localStorage.setItem(`pc_dismissed_alerts_${activeUser.id}`, JSON.stringify(updated));
@@ -89,16 +92,31 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
     }
   };
 
-  const handleDismissAll = () => {
-    const allIds = [...userArmasCautelas.map(c => c.id), ...userMunicoesCautelas.map(c => c.id)];
-    const updated = [...dismissedAlertIds, ...allIds];
-    setDismissedAlertIds(updated);
-    try {
-      localStorage.setItem(`pc_dismissed_alerts_${activeUser.id}`, JSON.stringify(updated));
-    } catch {
-      // ignore
-    }
-  };
+  const handleDismissAll = useCallback(() => {
+    const allIds = [
+      ...userArmasCautelas.map(c => c.id),
+      ...userMunicoesCautelas.map(c => c.id),
+      ...userMateriaisCautelas.map(c => c.id)
+    ];
+    if (allIds.length === 0) return;
+    setDismissedAlertIds(prev => {
+      const updated = Array.from(new Set([...prev, ...allIds]));
+      try {
+        localStorage.setItem(`pc_dismissed_alerts_${activeUser.id}`, JSON.stringify(updated));
+      } catch {
+        // ignore
+      }
+      return updated;
+    });
+  }, [userArmasCautelas, userMunicoesCautelas, userMateriaisCautelas, activeUser.id]);
+
+  useEffect(() => {
+    if (totalAutorizadas <= 0) return;
+    const timer = setTimeout(() => {
+      handleDismissAll();
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [totalAutorizadas, handleDismissAll]);
 
   useEffect(() => {
     if (activeUser) {
@@ -141,7 +159,7 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   return (
     <div className="space-y-6">
       
-      {/* Notificação de Cautelas Autorizadas prontas para impressão de recibo (Some ao clicar) */}
+      {/* Notificação de Cautelas Autorizadas prontas para impressão de recibo (Some ao clicar ou após 5s) */}
       {totalAutorizadas > 0 && (
         <div className="bg-gradient-to-r from-emerald-950/90 to-teal-950/90 border border-emerald-500/50 rounded-2xl p-4 sm:p-5 shadow-lg shadow-emerald-500/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-fade-in relative">
           <div className="flex items-center space-x-3.5 pr-8 sm:pr-0">
@@ -158,7 +176,7 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center space-x-2 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {userArmasCautelas.length > 0 && onNavigateToModule && (
               <button
                 onClick={() => handleDismissAndNavigate('cautela-armas', userArmasCautelas.map(c => c.id))}
@@ -177,6 +195,16 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
               >
                 <Disc className="w-3.5 h-3.5" />
                 <span>Ver Cautela de Munições ({userMunicoesCautelas.length})</span>
+              </button>
+            )}
+            {userMateriaisCautelas.length > 0 && onNavigateToModule && (
+              <button
+                onClick={() => handleDismissAndNavigate('cautela-materiais', userMateriaisCautelas.map(c => c.id))}
+                className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 shadow"
+                title="Abrir Cautela de Materiais (este aviso sumirá após o clique)"
+              >
+                <Package className="w-3.5 h-3.5" />
+                <span>Ver Cautela de Materiais ({userMateriaisCautelas.length})</span>
               </button>
             )}
             <button

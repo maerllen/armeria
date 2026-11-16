@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
 
@@ -10,6 +10,7 @@ export interface TopLayerAlertProps {
   title?: string;
   onClose?: () => void;
   actions?: React.ReactNode;
+  autoHideMs?: number;
 }
 
 interface GlobalAlertItem {
@@ -20,12 +21,13 @@ interface GlobalAlertItem {
 }
 
 const GLOBAL_ALERT_EVENT = 'armeria:top-alert';
+const DEFAULT_AUTO_HIDE_MS = 5000;
 
 export function showTopAlert(
   message: string,
   type: TopAlertType = 'warning',
   title?: string,
-  autoHideMs = 6000
+  autoHideMs = DEFAULT_AUTO_HIDE_MS
 ) {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(
@@ -53,9 +55,12 @@ export const TopLayerAlert: React.FC<TopLayerAlertProps> = ({
   message,
   title,
   onClose,
-  actions
+  actions,
+  autoHideMs = DEFAULT_AUTO_HIDE_MS
 }) => {
   const [host, setHost] = useState<HTMLElement | null>(() => getOrCreateAlertHost());
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const el = getOrCreateAlertHost();
@@ -63,6 +68,14 @@ export const TopLayerAlert: React.FC<TopLayerAlertProps> = ({
       setHost(el);
     }
   }, [host]);
+
+  useEffect(() => {
+    if (!message || !onCloseRef.current || autoHideMs <= 0) return;
+    const timer = setTimeout(() => {
+      onCloseRef.current?.();
+    }, autoHideMs);
+    return () => clearTimeout(timer);
+  }, [message, type, title, autoHideMs]);
 
   if (!message || !host) return null;
 
@@ -153,7 +166,7 @@ export const GlobalAlertHost: React.FC = () => {
       const type = detail.type || 'warning';
       setAlerts(prev => [...prev, { id, type, title: detail.title, message: detail.message }]);
 
-      const timeout = detail.autoHideMs ?? 6000;
+      const timeout = detail.autoHideMs ?? DEFAULT_AUTO_HIDE_MS;
       if (timeout > 0) {
         setTimeout(() => {
           setAlerts(prev => prev.filter(item => item.id !== id));
@@ -173,6 +186,7 @@ export const GlobalAlertHost: React.FC = () => {
           type={item.type}
           title={item.title}
           message={item.message}
+          autoHideMs={0}
           onClose={() => setAlerts(prev => prev.filter(a => a.id !== item.id))}
         />
       ))}

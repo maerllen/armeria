@@ -31,6 +31,7 @@ import { ManualModule } from './components/ModuloManual';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb, Dog } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
 import { usePreloader } from './context/PreloaderContext';
+import { showTopAlert } from './components/TopLayerAlert';
 
 const moduleLabels: Record<ModuleType, string> = {
   'meu-perfil': 'Meu Perfil',
@@ -84,6 +85,7 @@ export default function App() {
   const [preselectedAmmoLinkedWeaponCautelaId, setPreselectedAmmoLinkedWeaponCautelaId] = useState<string | null>(null);
 
   const [loginError, setLoginError] = useState('');
+  const [dataSyncTick, setDataSyncTick] = useState(0);
 
   // Load all app data based on logged in user
   const refreshData = async () => {
@@ -103,6 +105,7 @@ export default function App() {
       setWeapons(storage.getWeapons(freshUser));
       setMovements(storage.getMovements(freshUser));
       setCourses(storage.getCourses());
+      setDataSyncTick(t => t + 1);
     } else {
       setCurrentUser(null);
     }
@@ -222,18 +225,81 @@ export default function App() {
     }
   };
 
-  const [acknowledgedModuleAlerts, setAcknowledgedModuleAlerts] = useState<Record<string, number>>({});
+  const readSignalSet = (storageKey: string): Set<string> => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return new Set<string>();
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed)
+        ? new Set<string>(parsed.filter((v): v is string => typeof v === 'string'))
+        : new Set<string>();
+    } catch {
+      return new Set<string>();
+    }
+  };
+
+  const writeSignalSet = (storageKey: string, keys: Set<string>) => {
+    try {
+      const arr = Array.from(keys);
+      const trimmed = arr.length > 1000 ? arr.slice(arr.length - 1000) : arr;
+      localStorage.setItem(storageKey, JSON.stringify(trimmed));
+    } catch {
+      // ignore
+    }
+  };
+
+  const ackStorageKey = effectiveUser ? `armaria_ack_cautela_signals_${effectiveUser.id}` : '';
+  const toastStorageKey = effectiveUser ? `armaria_toasted_cautela_signals_${effectiveUser.id}` : '';
+
+  const [acknowledgedSignalKeys, setAcknowledgedSignalKeys] = useState<Set<string>>(() =>
+    ackStorageKey ? readSignalSet(ackStorageKey) : new Set<string>()
+  );
+  const [toastedSignalKeys, setToastedSignalKeys] = useState<Set<string>>(() =>
+    toastStorageKey ? readSignalSet(toastStorageKey) : new Set<string>()
+  );
+
+  useEffect(() => {
+    if (!ackStorageKey || !toastStorageKey) {
+      setAcknowledgedSignalKeys(new Set<string>());
+      setToastedSignalKeys(new Set<string>());
+      return;
+    }
+    setAcknowledgedSignalKeys(readSignalSet(ackStorageKey));
+    setToastedSignalKeys(readSignalSet(toastStorageKey));
+  }, [ackStorageKey, toastStorageKey]);
 
   const isArmeiroUser = effectiveUser?.role === 'Armeiro' || effectiveUser?.activeRole === 'Armeiro';
   const isGeralUser = effectiveUser?.role === 'Geral' || effectiveUser?.activeRole === 'Geral';
 
-  const rawPendingMovementsCount = movements.filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo').length;
-  const pendingMovementsCount = Math.max(0, rawPendingMovementsCount - (acknowledgedModuleAlerts['movimentacoes'] || 0));
+  const isRequesterSelfMatch = (requesterId?: string, requesterMasp?: string, requesterName?: string) => {
+    if (!effectiveUser) return false;
+    if (requesterId && requesterId === effectiveUser.id) return true;
+    if (requesterMasp && effectiveUser.masp && requesterMasp.trim().toLowerCase() === effectiveUser.masp.trim().toLowerCase()) return true;
+    const userMaspClean = (effectiveUser.masp || '').replace(/\D/g, '');
+    const reqClean = (requesterMasp || '').replace(/\D/g, '');
+    if (userMaspClean && reqClean && userMaspClean === reqClean) return true;
+    const userNorm = (effectiveUser.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    const reqNorm = (requesterName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    if (userNorm && reqNorm && (userNorm === reqNorm || userNorm.includes(reqNorm) || reqNorm.includes(userNorm))) return true;
+    return false;
+  };
 
-  const rawPendingWeaponCautelasCount = useMemo(() => {
+  const movementSignalKeys = useMemo(() => {
+    return movements
+      .filter(m => m.status === 'Pendente Aprovação' || m.status === 'Pendente Recibo')
+      .map(m => `movimentacoes:${m.id}:${m.status}`);
+  }, [movements]);
+  const pendingMovementsCount = useMemo(
+    () => movementSignalKeys.filter(k => !acknowledgedSignalKeys.has(k)).length,
+    [movementSignalKeys, acknowledgedSignalKeys]
+  );
+
+  const weaponSignalKeys = useMemo(() => {
     const list = storage.getCautelasArmas();
     if (isGeralUser) {
-      return list.filter(c => c.status === 'PENDENTE').length;
+      return list
+        .filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE')
+        .map(c => `cautela-armas:${c.id}:${c.status}`);
     }
     if (isArmeiroUser && effectiveUser) {
       const deptUnits = new Set(
@@ -241,21 +307,37 @@ export default function App() {
           .filter(u => u.departmentId === effectiveUser.departmentId)
           .map(u => u.id)
       );
-      return list.filter(c =>
-        c.status === 'PENDENTE' &&
-        (effectiveUser.managementScope === 'department'
-          ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
-          : c.unitId === effectiveUser.unitId)
-      ).length;
+      return list
+        .filter(c =>
+          (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
+          (effectiveUser.managementScope === 'department'
+            ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
+            : c.unitId === effectiveUser.unitId)
+        )
+        .map(c => `cautela-armas:${c.id}:${c.status}`);
     }
-    return 0;
-  }, [effectiveUser, isArmeiroUser, isGeralUser]);
-  const pendingWeaponCautelasCount = Math.max(0, rawPendingWeaponCautelasCount - (acknowledgedModuleAlerts['cautela-armas'] || 0));
+    if (effectiveUser) {
+      return list
+        .filter(c =>
+          (c.status === 'AUTORIZADA' || c.status === 'RECUSADA') &&
+          c.armorerId !== effectiveUser.id &&
+          isRequesterSelfMatch(c.requesterId, c.requesterMasp, c.requesterName)
+        )
+        .map(c => `cautela-armas:${c.id}:${c.status}`);
+    }
+    return [];
+  }, [effectiveUser, isArmeiroUser, isGeralUser, dataSyncTick]);
+  const pendingWeaponCautelasCount = useMemo(
+    () => weaponSignalKeys.filter(k => !acknowledgedSignalKeys.has(k)).length,
+    [weaponSignalKeys, acknowledgedSignalKeys]
+  );
 
-  const rawPendingAmmoCautelasCount = useMemo(() => {
-    const list = storage.getCautelasMunicoes();
+  const ammoSignalKeys = useMemo(() => {
+    const list = storage.getCautelasMunicoes().filter(c => Number(c.quantity || 0) > 0);
     if (isGeralUser) {
-      return list.filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE').length;
+      return list
+        .filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE')
+        .map(c => `cautela-municoes:${c.id}:${c.status}`);
     }
     if (isArmeiroUser && effectiveUser) {
       const deptUnits = new Set(
@@ -263,21 +345,37 @@ export default function App() {
           .filter(u => u.departmentId === effectiveUser.departmentId)
           .map(u => u.id)
       );
-      return list.filter(c =>
-        (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
-        (effectiveUser.managementScope === 'department'
-          ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
-          : c.unitId === effectiveUser.unitId)
-      ).length;
+      return list
+        .filter(c =>
+          (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
+          (effectiveUser.managementScope === 'department'
+            ? (c.departmentId === effectiveUser.departmentId || (c.unitId ? deptUnits.has(c.unitId) : false))
+            : c.unitId === effectiveUser.unitId)
+        )
+        .map(c => `cautela-municoes:${c.id}:${c.status}`);
     }
-    return 0;
-  }, [effectiveUser, isArmeiroUser, isGeralUser]);
-  const pendingAmmoCautelasCount = Math.max(0, rawPendingAmmoCautelasCount - (acknowledgedModuleAlerts['cautela-municoes'] || 0));
+    if (effectiveUser) {
+      return list
+        .filter(c =>
+          (c.status === 'AUTORIZADA' || c.status === 'RECUSADA') &&
+          c.armorerId !== effectiveUser.id &&
+          isRequesterSelfMatch(c.requesterId, c.requesterMasp, c.requesterName)
+        )
+        .map(c => `cautela-municoes:${c.id}:${c.status}`);
+    }
+    return [];
+  }, [effectiveUser, isArmeiroUser, isGeralUser, dataSyncTick]);
+  const pendingAmmoCautelasCount = useMemo(
+    () => ammoSignalKeys.filter(k => !acknowledgedSignalKeys.has(k)).length,
+    [ammoSignalKeys, acknowledgedSignalKeys]
+  );
 
-  const rawPendingMaterialCautelasCount = useMemo(() => {
+  const materialSignalKeys = useMemo(() => {
     const list = storage.getCautelasMateriais();
     if (isGeralUser) {
-      return list.filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE').length;
+      return list
+        .filter(c => c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE')
+        .map(c => `cautela-materiais:${c.id}:${c.status}`);
     }
     if (isArmeiroUser && effectiveUser) {
       const deptUnits = new Set(
@@ -285,61 +383,150 @@ export default function App() {
           .filter(u => u.departmentId === effectiveUser.departmentId)
           .map(u => u.id)
       );
-      return list.filter(c =>
-        (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
-        (effectiveUser.managementScope === 'department'
-          ? (c.departamentoId === effectiveUser.departmentId || (c.unidadeId ? deptUnits.has(c.unidadeId) : false))
-          : c.unidadeId === effectiveUser.unitId)
-      ).length;
+      return list
+        .filter(c =>
+          (c.status === 'PENDENTE' || c.status === 'DEVOLUCAO_PENDENTE') &&
+          (effectiveUser.managementScope === 'department'
+            ? (c.departamentoId === effectiveUser.departmentId || (c.unidadeId ? deptUnits.has(c.unidadeId) : false))
+            : c.unidadeId === effectiveUser.unitId)
+        )
+        .map(c => `cautela-materiais:${c.id}:${c.status}`);
     }
-    return 0;
-  }, [effectiveUser, isArmeiroUser, isGeralUser]);
-  const pendingMaterialCautelasCount = Math.max(0, rawPendingMaterialCautelasCount - (acknowledgedModuleAlerts['cautela-materiais'] || 0));
+    if (effectiveUser) {
+      return list
+        .filter(c =>
+          (c.status === 'AUTORIZADA' || c.status === 'Em Uso' || c.status === 'RECUSADA') &&
+          c.responsavelEntregaId !== effectiveUser.id &&
+          isRequesterSelfMatch(c.usuarioInternoId, c.usuarioInternoMasp, c.usuarioInternoNome)
+        )
+        .map(c => `cautela-materiais:${c.id}:${c.status}`);
+    }
+    return [];
+  }, [effectiveUser, isArmeiroUser, isGeralUser, dataSyncTick]);
+  const pendingMaterialCautelasCount = useMemo(
+    () => materialSignalKeys.filter(k => !acknowledgedSignalKeys.has(k)).length,
+    [materialSignalKeys, acknowledgedSignalKeys]
+  );
 
-  const rawReadyReceiptsCount = useMemo(() => {
-    if (!effectiveUser) return 0;
-    const userMaspClean = (effectiveUser.masp || '').replace(/\D/g, '');
-    const userNorm = (effectiveUser.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-    const isUserMatch = (requesterId?: string, requesterMasp?: string, requesterName?: string) => {
-      if (requesterId && requesterId === effectiveUser.id) return true;
-      if (requesterMasp && effectiveUser.masp && requesterMasp.trim().toLowerCase() === effectiveUser.masp.trim().toLowerCase()) return true;
-      const reqClean = (requesterMasp || '').replace(/\D/g, '');
-      if (userMaspClean && reqClean && userMaspClean === reqClean) return true;
-      const reqNorm = (requesterName || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
-      if (userNorm && reqNorm && (userNorm === reqNorm || userNorm.includes(reqNorm) || reqNorm.includes(userNorm))) return true;
-      return false;
-    };
-    const armasAutorizadas = storage.getCautelasArmas().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
-    const municoesAutorizadas = storage.getCautelasMunicoes().filter(c => isUserMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA').length;
-    const materiaisAutorizadas = storage.getCautelasMateriais().filter(c => isUserMatch(c.usuarioInternoId, c.usuarioInternoMasp, c.usuarioInternoNome) && (c.status === 'AUTORIZADA' || c.status === 'Em Uso')).length;
-    return armasAutorizadas + municoesAutorizadas + materiaisAutorizadas;
-  }, [effectiveUser]);
-  const readyReceiptsCount = Math.max(0, rawReadyReceiptsCount - (acknowledgedModuleAlerts['meu-perfil'] || 0));
+  const readyReceiptSignalKeys = useMemo(() => {
+    if (!effectiveUser) return [];
+    const armasAutorizadas = storage
+      .getCautelasArmas()
+      .filter(c => isRequesterSelfMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA')
+      .map(c => `meu-perfil:arma:${c.id}:${c.status}`);
+    const municoesAutorizadas = storage
+      .getCautelasMunicoes()
+      .filter(c => Number(c.quantity || 0) > 0 && isRequesterSelfMatch(c.requesterId, c.requesterMasp, c.requesterName) && c.status === 'AUTORIZADA')
+      .map(c => `meu-perfil:municao:${c.id}:${c.status}`);
+    const materiaisAutorizadas = storage
+      .getCautelasMateriais()
+      .filter(c => isRequesterSelfMatch(c.usuarioInternoId, c.usuarioInternoMasp, c.usuarioInternoNome) && (c.status === 'AUTORIZADA' || c.status === 'Em Uso'))
+      .map(c => `meu-perfil:material:${c.id}:${c.status}`);
+    return [...armasAutorizadas, ...municoesAutorizadas, ...materiaisAutorizadas];
+  }, [effectiveUser, dataSyncTick]);
+  const readyReceiptsCount = useMemo(
+    () => readyReceiptSignalKeys.filter(k => !acknowledgedSignalKeys.has(k)).length,
+    [readyReceiptSignalKeys, acknowledgedSignalKeys]
+  );
 
-  // Ajusta acknowledged quando o total diminui
-  useEffect(() => {
-    setAcknowledgedModuleAlerts(prev => {
-      const next = { ...prev };
-      if ((next['cautela-armas'] || 0) > rawPendingWeaponCautelasCount) next['cautela-armas'] = rawPendingWeaponCautelasCount;
-      if ((next['cautela-municoes'] || 0) > rawPendingAmmoCautelasCount) next['cautela-municoes'] = rawPendingAmmoCautelasCount;
-      if ((next['cautela-materiais'] || 0) > rawPendingMaterialCautelasCount) next['cautela-materiais'] = rawPendingMaterialCautelasCount;
-      if ((next['movimentacoes'] || 0) > rawPendingMovementsCount) next['movimentacoes'] = rawPendingMovementsCount;
-      if ((next['meu-perfil'] || 0) > rawReadyReceiptsCount) next['meu-perfil'] = rawReadyReceiptsCount;
+  const markKeysAcknowledged = (keysToAck: string[]) => {
+    if (!ackStorageKey || keysToAck.length === 0) return;
+    setAcknowledgedSignalKeys(prev => {
+      const hasNew = keysToAck.some(k => !prev.has(k));
+      if (!hasNew) return prev;
+      const next = new Set<string>(prev);
+      keysToAck.forEach(k => next.add(k));
+      writeSignalSet(ackStorageKey, next);
       return next;
     });
-  }, [rawPendingWeaponCautelasCount, rawPendingAmmoCautelasCount, rawPendingMaterialCautelasCount, rawPendingMovementsCount, rawReadyReceiptsCount]);
+  };
+
+  const markKeysToasted = (keysToMark: string[]) => {
+    if (!toastStorageKey || keysToMark.length === 0) return;
+    setToastedSignalKeys(prev => {
+      const hasNew = keysToMark.some(k => !prev.has(k));
+      if (!hasNew) return prev;
+      const next = new Set<string>(prev);
+      keysToMark.forEach(k => next.add(k));
+      writeSignalSet(toastStorageKey, next);
+      return next;
+    });
+  };
+
+  // Quando o usuário já está dentro do módulo, marca os sinais daquele módulo como vistos/notificados para não sinalizar novamente
+  useEffect(() => {
+    if (!effectiveUser) return;
+    if (activeModule === 'cautela-armas' && weaponSignalKeys.length > 0) {
+      markKeysAcknowledged(weaponSignalKeys);
+      markKeysToasted(weaponSignalKeys);
+    } else if (activeModule === 'cautela-municoes' && ammoSignalKeys.length > 0) {
+      markKeysAcknowledged(ammoSignalKeys);
+      markKeysToasted(ammoSignalKeys);
+    } else if (activeModule === 'cautela-materiais' && materialSignalKeys.length > 0) {
+      markKeysAcknowledged(materialSignalKeys);
+      markKeysToasted(materialSignalKeys);
+    } else if (activeModule === 'movimentacoes' && movementSignalKeys.length > 0) {
+      markKeysAcknowledged(movementSignalKeys);
+    } else if (activeModule === 'meu-perfil' && readyReceiptSignalKeys.length > 0) {
+      markKeysAcknowledged(readyReceiptSignalKeys);
+    }
+  }, [activeModule, effectiveUser, weaponSignalKeys, ammoSignalKeys, materialSignalKeys, movementSignalKeys, readyReceiptSignalKeys]);
+
+  // Exibe notificação de atividade em tela por 5 segundos apenas uma única vez para cada nova atividade em cautela de armas, munições e materiais
+  useEffect(() => {
+    if (!effectiveUser || !isAppReady) return;
+
+    const newWeaponKeys = activeModule !== 'cautela-armas'
+      ? weaponSignalKeys.filter(k => !toastedSignalKeys.has(k) && !acknowledgedSignalKeys.has(k))
+      : [];
+    const newAmmoKeys = activeModule !== 'cautela-municoes'
+      ? ammoSignalKeys.filter(k => !toastedSignalKeys.has(k) && !acknowledgedSignalKeys.has(k))
+      : [];
+    const newMaterialKeys = activeModule !== 'cautela-materiais'
+      ? materialSignalKeys.filter(k => !toastedSignalKeys.has(k) && !acknowledgedSignalKeys.has(k))
+      : [];
+
+    const allNewKeys = [...newWeaponKeys, ...newAmmoKeys, ...newMaterialKeys];
+    if (allNewKeys.length === 0) return;
+
+    const parts: string[] = [];
+    if (newWeaponKeys.length > 0) {
+      parts.push(`Cautela de Armas (${newWeaponKeys.length})`);
+    }
+    if (newAmmoKeys.length > 0) {
+      parts.push(`Cautela de Munições (${newAmmoKeys.length})`);
+    }
+    if (newMaterialKeys.length > 0) {
+      parts.push(`Cautela de Materiais (${newMaterialKeys.length})`);
+    }
+
+    if (parts.length > 0) {
+      showTopAlert(
+        `Nova atividade registrada em: ${parts.join(', ')}.`,
+        'info',
+        'Notificação de Atividade em Cautela',
+        5000
+      );
+      markKeysToasted(allNewKeys);
+    }
+  }, [effectiveUser, isAppReady, activeModule, weaponSignalKeys, ammoSignalKeys, materialSignalKeys, toastedSignalKeys, acknowledgedSignalKeys]);
 
   const handleSelectModule = (mod: ModuleType) => {
-    // Ao clicar no módulo, limpa a notificação/alerta daquele módulo imediatamente
-    setAcknowledgedModuleAlerts(prev => {
-      let currentVal = 0;
-      if (mod === 'cautela-armas') currentVal = rawPendingWeaponCautelasCount;
-      else if (mod === 'cautela-municoes') currentVal = rawPendingAmmoCautelasCount;
-      else if (mod === 'cautela-materiais') currentVal = rawPendingMaterialCautelasCount;
-      else if (mod === 'movimentacoes') currentVal = rawPendingMovementsCount;
-      else if (mod === 'meu-perfil') currentVal = rawReadyReceiptsCount;
-      return { ...prev, [mod]: currentVal };
-    });
+    // Ao clicar no módulo, registra as chaves atuais como visualizadas permanentemente para sinalizar apenas uma vez
+    if (mod === 'cautela-armas') {
+      markKeysAcknowledged(weaponSignalKeys);
+      markKeysToasted(weaponSignalKeys);
+    } else if (mod === 'cautela-municoes') {
+      markKeysAcknowledged(ammoSignalKeys);
+      markKeysToasted(ammoSignalKeys);
+    } else if (mod === 'cautela-materiais') {
+      markKeysAcknowledged(materialSignalKeys);
+      markKeysToasted(materialSignalKeys);
+    } else if (mod === 'movimentacoes') {
+      markKeysAcknowledged(movementSignalKeys);
+    } else if (mod === 'meu-perfil') {
+      markKeysAcknowledged(readyReceiptSignalKeys);
+    }
 
     if (mod === activeModule) {
       setIsMobileMenuOpen(false);

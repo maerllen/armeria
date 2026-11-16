@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import {
   User,
   Material,
@@ -232,9 +232,18 @@ export const ModuloCautelaMateriais: React.FC<ModuloCautelaMateriaisProps> = ({
   // Modal de Detalhes
   const [detailItem, setDetailItem] = useState<CautelaMaterial | null>(null);
 
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    };
+  }, []);
+
   const showToast = (type: 'success' | 'error', text: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     setFeedbackMsg({ type, text });
-    setTimeout(() => setFeedbackMsg(null), 5000);
+    toastTimerRef.current = setTimeout(() => setFeedbackMsg(null), 5000);
   };
 
   const triggerRefresh = async () => {
