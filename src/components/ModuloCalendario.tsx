@@ -17,7 +17,8 @@ import {
   TurmaCftp
 } from '../types';
 import { storage } from '../services/storage';
-import { buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
+import { buildStandardDocumentTitle, printWithWindowTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
+import { formatMasp, formatPhone } from '../utils/masks';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
   Calendar,
@@ -42,7 +43,8 @@ import {
   Eye,
   BookOpen,
   Award,
-  Users
+  Users,
+  FileText
 } from 'lucide-react';
 
 interface CalendarModuleProps {
@@ -357,13 +359,17 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
   const [designacoesCftpList, setDesignacoesCftpList] = useState<DesignacaoEquipeTurmaCftp[]>([]);
   const [turmasCftpList, setTurmasCftpList] = useState<TurmaCftp[]>([]);
 
-  // Mode: 'cftp' (Calendário por Curso de Formação CFTP) or 'legacy' (Grade Avulsa CALENDARIO_AULAS)
-  const [calendarViewMode, setCalendarViewMode] = useState<'cftp' | 'legacy'>('cftp');
+  // Mode: 'cftp' (Calendário por Curso de Formação CFTP) or 'meu-relatorio' (Meu Relatório de Aulas)
+  const [calendarViewMode, setCalendarViewMode] = useState<'cftp' | 'meu-relatorio' | 'legacy'>('cftp');
   const [selectedCftpCourseId, setSelectedCftpCourseId] = useState<string>('');
   const [cftpSelectedSubject, setCftpSelectedSubject] = useState<string>('');
   const [cftpFilterTurma, setCftpFilterTurma] = useState<string>('TODAS');
   const [cftpFilterSala, setCftpFilterSala] = useState<string>('TODAS');
   const [cftpShowAllMonths, setCftpShowAllMonths] = useState<boolean>(false);
+  const [reportCourseId, setReportCourseId] = useState<string>('');
+  const [reportSubjectFilter, setReportSubjectFilter] = useState<string>('TODAS');
+  const [reportYear, setReportYear] = useState<number>(new Date().getFullYear() > 2020 ? new Date().getFullYear() : 2026);
+  const [reportMonth, setReportMonth] = useState<number>(new Date().getMonth());
   const [cftpDetailCell, setCftpDetailCell] = useState<{
     isoDate: string;
     brDate: string;
@@ -610,6 +616,9 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
       const academyCourses = storage.getAcademyCourses ? storage.getAcademyCourses() : [];
       const onlyFormacao = academyCourses.filter((c: AcademyCourse) => c.type === 'Formação');
       setCftpCourses(onlyFormacao);
+      if (onlyFormacao.length > 0) {
+        setReportCourseId(prev => prev || onlyFormacao[0].id);
+      }
       setEquipesCftpList(storage.getEquipesProfessoresCftp ? storage.getEquipesProfessoresCftp() : []);
       setDesignacoesCftpList(storage.getDesignacoesEquipeCftp ? storage.getDesignacoesEquipeCftp() : []);
       setTurmasCftpList(storage.getTurmasCftp ? storage.getTurmasCftp() : []);
@@ -1821,6 +1830,383 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
     }
   };
 
+  // --- MEU RELATÓRIO (AULAS DO USUÁRIO NO CFTP SELECIONADO: 2 HORAS/AULA POR AULA) ---
+  const selectedReportCourseObj = useMemo(
+    () => cftpCourses.find(c => c.id === reportCourseId) || cftpCourses[0] || null,
+    [cftpCourses, reportCourseId]
+  );
+
+  interface MyReportLessonItem {
+    key: string;
+    isoDate: string;
+    brDate: string;
+    slotOrder: number;
+    slotTitle: string;
+    slotTime: string;
+    turmaLabel: string;
+    sigla: string;
+    disciplina: string;
+    sala: string;
+    equipeApelido?: string;
+    usuarioNome: string;
+    horasAula: number;
+  }
+
+  const myReportAllCourseLessons = useMemo<MyReportLessonItem[]>(() => {
+    if (!selectedReportCourseObj || !currentUser) return [];
+
+    const currentUserId = String(currentUser.id || '').trim();
+    const currentUserNameNorm = String(currentUser.name || '').trim().toLowerCase();
+    const rawRows = Array.isArray(selectedReportCourseObj.moduleSchedule)
+      ? selectedReportCourseObj.moduleSchedule
+      : [];
+
+    const slotById = new Map<string, CftpSlotRowDef>();
+    for (const s of [...CFTP_STANDARD_SLOTS, CFTP_FIFTH_SLOT]) {
+      slotById.set(s.id, s);
+    }
+
+    const turmaLabelMap = new Map<string, string>();
+    for (const t of turmasCftpList.filter(tc => tc.cursoId === selectedReportCourseObj.id)) {
+      const k = normCftpTurmaKey(t.turma);
+      if (k && !turmaLabelMap.has(k)) {
+        turmaLabelMap.set(k, formatCftpTurmaLabel(t.turma) || t.turma);
+      }
+    }
+
+    const seenKeys = new Set<string>();
+    const result: MyReportLessonItem[] = [];
+
+    for (const r of rawRows) {
+      const isoDate = normalizeCftpDateToIso(r.data);
+      if (!isoDate) continue;
+      const sigla = String(r.sigla || '').trim().toUpperCase();
+      if (!sigla) continue;
+
+      const turmaKey = normCftpTurmaKey(r.turma || '');
+      if (!turmaKey) continue;
+
+      const matchedDesigs = designacoesCftpList.filter(d => {
+        if (d.cursoId !== selectedReportCourseObj.id) return false;
+        if (normCftpTurmaKey(d.turma) !== turmaKey) return false;
+        if (String(d.materia || '').trim().toUpperCase() !== sigla) return false;
+        const p = (d.primeiraAula || '').slice(0, 10);
+        const u = (d.ultimaAula || '').slice(0, 10);
+        if (p && isoDate < p) return false;
+        if (u && isoDate > u) return false;
+        return true;
+      });
+
+      if (matchedDesigs.length === 0) continue;
+
+      let matchedTeamApelido: string | undefined;
+      const userIsAssigned = matchedDesigs.some(d => {
+        const eqObj = equipesCftpList.find(e => e.id === d.equipeId);
+        const slots: Array<{ id?: string; nome?: string }> = [
+          { id: eqObj?.equipe01Id, nome: d.equipe01 || eqObj?.equipe01 },
+          { id: eqObj?.equipe02Id, nome: d.equipe02 || eqObj?.equipe02 },
+          { id: eqObj?.equipe03Id, nome: d.equipe03 || eqObj?.equipe03 },
+          { id: eqObj?.equipe04Id, nome: d.equipe04 || eqObj?.equipe04 },
+          { id: eqObj?.equipe05Id, nome: d.equipe05 || eqObj?.equipe05 },
+          { id: eqObj?.equipe06Id, nome: d.equipe06 || eqObj?.equipe06 }
+        ];
+        const found = slots.some(s => {
+          if (currentUserId && s.id && String(s.id).trim() === currentUserId) return true;
+          const slotName = String(s.nome || '').trim().toLowerCase();
+          return Boolean(currentUserNameNorm && slotName && slotName === currentUserNameNorm);
+        });
+        if (found) {
+          matchedTeamApelido = d.apelidoEquipe || eqObj?.apelidoEquipe;
+        }
+        return found;
+      });
+
+      if (!userIsAssigned) continue;
+
+      const slotId = normalizeCftpHorarioKey(r.horario);
+      const slotDef = slotById.get(slotId) || CFTP_STANDARD_SLOTS[0];
+      const dedupKey = `${selectedReportCourseObj.id}|${isoDate}|${slotId}|${turmaKey}|${sigla}`;
+      if (seenKeys.has(dedupKey)) continue;
+      seenKeys.add(dedupKey);
+
+      const turmaLabel = turmaLabelMap.get(turmaKey) || formatCftpTurmaLabel(r.turma || '') || r.turma || '—';
+
+      result.push({
+        key: dedupKey,
+        isoDate,
+        brDate: formatIsoToBr(isoDate),
+        slotOrder: slotDef.order,
+        slotTitle: slotDef.title,
+        slotTime: slotDef.timeLabel,
+        turmaLabel,
+        sigla,
+        disciplina: String(r.disciplina || sigla).trim(),
+        sala: String(r.sala || '').trim(),
+        equipeApelido: matchedTeamApelido,
+        usuarioNome: currentUser.name,
+        horasAula: 2
+      });
+    }
+
+    return result.sort(
+      (a, b) =>
+        a.isoDate.localeCompare(b.isoDate) ||
+        a.slotOrder - b.slotOrder ||
+        a.turmaLabel.localeCompare(b.turmaLabel, 'pt-BR', { numeric: true, sensitivity: 'base' })
+    );
+  }, [selectedReportCourseObj, currentUser, designacoesCftpList, equipesCftpList, turmasCftpList]);
+
+  const myReportAvailableSubjects = useMemo(() => {
+    return Array.from(new Set(myReportAllCourseLessons.map(l => l.sigla))).sort();
+  }, [myReportAllCourseLessons]);
+
+  const myReportFilteredLessons = useMemo(() => {
+    if (reportSubjectFilter === 'TODAS') return myReportAllCourseLessons;
+    return myReportAllCourseLessons.filter(l => l.sigla === reportSubjectFilter);
+  }, [myReportAllCourseLessons, reportSubjectFilter]);
+
+  const myReportMonthlySummary = useMemo(() => {
+    const map = new Map<string, { key: string; year: number; month: number; label: string; aulas: number; horasAula: number }>();
+    for (const l of myReportFilteredLessons) {
+      const y = Number(l.isoDate.slice(0, 4));
+      const m = Number(l.isoDate.slice(5, 7)) - 1;
+      if (isNaN(y) || isNaN(m)) continue;
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.aulas += 1;
+        existing.horasAula += 2;
+      } else {
+        map.set(key, {
+          key,
+          year: y,
+          month: m,
+          label: `${MONTH_NAMES[m]}/${y}`,
+          aulas: 1,
+          horasAula: 2
+        });
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.year - b.year || a.month - b.month);
+  }, [myReportFilteredLessons]);
+
+  const myReportMonthLessons = useMemo(() => {
+    const prefix = `${reportYear}-${String(reportMonth + 1).padStart(2, '0')}`;
+    return myReportFilteredLessons.filter(l => l.isoDate.startsWith(prefix));
+  }, [myReportFilteredLessons, reportYear, reportMonth]);
+
+  const syncReportMonthToAvailable = (courseIdToUse: string) => {
+    const course = cftpCourses.find(c => c.id === courseIdToUse) || selectedReportCourseObj;
+    if (!course || !currentUser) return;
+    const currentUserId = String(currentUser.id || '').trim();
+    const currentUserNameNorm = String(currentUser.name || '').trim().toLowerCase();
+    const dates: string[] = [];
+
+    for (const r of course.moduleSchedule || []) {
+      const isoDate = normalizeCftpDateToIso(r.data);
+      const sigla = String(r.sigla || '').trim().toUpperCase();
+      const turmaKey = normCftpTurmaKey(r.turma || '');
+      if (!isoDate || !sigla || !turmaKey) continue;
+
+      const matched = designacoesCftpList.some(d => {
+        if (d.cursoId !== course.id) return false;
+        if (normCftpTurmaKey(d.turma) !== turmaKey) return false;
+        if (String(d.materia || '').trim().toUpperCase() !== sigla) return false;
+        const p = (d.primeiraAula || '').slice(0, 10);
+        const u = (d.ultimaAula || '').slice(0, 10);
+        if (p && isoDate < p) return false;
+        if (u && isoDate > u) return false;
+        const eqObj = equipesCftpList.find(e => e.id === d.equipeId);
+        const slots = [
+          { id: eqObj?.equipe01Id, nome: d.equipe01 || eqObj?.equipe01 },
+          { id: eqObj?.equipe02Id, nome: d.equipe02 || eqObj?.equipe02 },
+          { id: eqObj?.equipe03Id, nome: d.equipe03 || eqObj?.equipe03 },
+          { id: eqObj?.equipe04Id, nome: d.equipe04 || eqObj?.equipe04 },
+          { id: eqObj?.equipe05Id, nome: d.equipe05 || eqObj?.equipe05 },
+          { id: eqObj?.equipe06Id, nome: d.equipe06 || eqObj?.equipe06 }
+        ];
+        return slots.some(
+          s =>
+            (currentUserId && s.id && String(s.id).trim() === currentUserId) ||
+            (currentUserNameNorm && String(s.nome || '').trim().toLowerCase() === currentUserNameNorm)
+        );
+      });
+
+      if (matched) dates.push(isoDate);
+    }
+
+    if (dates.length > 0) {
+      dates.sort();
+      const firstIso = dates[0];
+      const y = Number(firstIso.slice(0, 4));
+      const m = Number(firstIso.slice(5, 7)) - 1;
+      if (!isNaN(y) && !isNaN(m)) {
+        setReportYear(y);
+        setReportMonth(m);
+      }
+    }
+  };
+
+  const handleOpenMeuRelatorio = () => {
+    const targetCourseId = reportCourseId || selectedCftpCourseId || cftpCourses[0]?.id || '';
+    if (targetCourseId && targetCourseId !== reportCourseId) {
+      setReportCourseId(targetCourseId);
+    }
+    setCalendarViewMode('meu-relatorio');
+    if (targetCourseId) {
+      syncReportMonthToAvailable(targetCourseId);
+    }
+  };
+
+  const handlePrintMyMonthlyReport = (overrideYear?: number, overrideMonth?: number) => {
+    const targetYear = overrideYear ?? reportYear;
+    const targetMonth = overrideMonth ?? reportMonth;
+    const prefix = `${targetYear}-${String(targetMonth + 1).padStart(2, '0')}`;
+    const lessonsToPrint = myReportFilteredLessons.filter(l => l.isoDate.startsWith(prefix));
+
+    const monthName = MONTH_NAMES[targetMonth] || '';
+    const courseTitle = selectedReportCourseObj
+      ? `${selectedReportCourseObj.module || selectedReportCourseObj.name}${selectedReportCourseObj.code ? ` (${selectedReportCourseObj.code})` : ''}`
+      : 'Curso de Formação (CFTP)';
+
+    const userFullName = currentUser?.name || 'Usuário não identificado';
+    const userMasp = formatMasp(currentUser?.masp || '') || '—';
+    const userPhone = formatPhone(currentUser?.phone || '') || currentUser?.phone || '—';
+    const userSigla = (currentUser?.professorSigla || currentUser?.professor_sigla || '').trim().toUpperCase() || '—';
+    const resolvedSubjects =
+      reportSubjectFilter !== 'TODAS'
+        ? reportSubjectFilter
+        : myReportAvailableSubjects.length > 0
+          ? myReportAvailableSubjects.join(', ')
+          : ((currentUser?.teacherSubject || '') || '—');
+
+    const totalMonthAulas = lessonsToPrint.length;
+    const totalMonthHoras = totalMonthAulas * 2;
+    const totalCourseAulas = myReportFilteredLessons.length;
+    const totalCourseHoras = totalCourseAulas * 2;
+
+    const docTitle = buildStandardDocumentTitle(
+      'Meu Relatório Mensal de Aulas',
+      `${monthName}-${targetYear} - ${courseTitle}`,
+      userFullName
+    );
+
+    const rowsHtml =
+      lessonsToPrint.length === 0
+        ? `<tr><td colspan="5" style="text-align:center; padding:18px; color:#475569;">Nenhuma aula cadastrada para este usuário em ${escapeHtmlText(monthName)}/${targetYear}.</td></tr>`
+        : lessonsToPrint
+            .map(
+              (l) => `
+                <tr>
+                  <td style="font-family: monospace; font-weight: bold; text-align: center; white-space: nowrap;">${escapeHtmlText(l.brDate)}</td>
+                  <td style="text-align: center; white-space: nowrap;">${escapeHtmlText(l.slotTime)}</td>
+                  <td style="font-weight: bold; text-align: center; white-space: nowrap;">${escapeHtmlText(l.turmaLabel)}</td>
+                  <td>${escapeHtmlText(l.usuarioNome)}</td>
+                  <td style="min-width: 150px;">&nbsp;</td>
+                </tr>
+              `
+            )
+            .join('');
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtmlText(docTitle)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 14mm 12mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 11px; }
+    .header { text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 12px; }
+    .header .org { font-size: 10px; font-weight: bold; letter-spacing: 0.8px; text-transform: uppercase; color: #334155; }
+    .header h1 { font-size: 15px; margin: 4px 0 2px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .header .sub { font-size: 11px; font-weight: bold; color: #1e293b; }
+    .info-grid { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+    .info-grid td { border: 1px solid #334155; padding: 6px 8px; vertical-align: top; }
+    .info-label { display: block; font-size: 9px; font-weight: bold; text-transform: uppercase; color: #475569; margin-bottom: 2px; }
+    .info-val { font-size: 11px; font-weight: bold; color: #0f172a; }
+    .summary-bar { display: flex; justify-content: space-between; gap: 10px; background: #f8fafc; border: 1px solid #334155; padding: 8px 10px; margin-bottom: 12px; font-size: 11px; }
+    .summary-item strong { color: #0f172a; }
+    table.aulas { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.aulas th { background: #e2e8f0; border: 1px solid #0f172a; padding: 7px 6px; font-size: 10px; text-transform: uppercase; text-align: center; }
+    table.aulas td { border: 1px solid #0f172a; padding: 7px 6px; font-size: 10.5px; height: 28px; }
+    .footer-sign { margin-top: 26px; display: flex; justify-content: space-between; gap: 24px; }
+    .sign-box { flex: 1; text-align: center; }
+    .sign-line { border-top: 1px solid #0f172a; padding-top: 4px; font-size: 10px; font-weight: bold; }
+    .sign-sub { font-size: 9px; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="org">Polícia Civil de Minas Gerais • Academia de Polícia Civil (ACADEPOL)</div>
+    <h1>Folha Mensal de Aulas Ministradas</h1>
+    <div class="sub">${escapeHtmlText(courseTitle)} • Referência: ${escapeHtmlText(monthName)}/${targetYear}</div>
+  </div>
+
+  <table class="info-grid">
+    <tr>
+      <td colspan="2">
+        <span class="info-label">Nome Completo</span>
+        <span class="info-val">${escapeHtmlText(userFullName)}</span>
+      </td>
+      <td>
+        <span class="info-label">MASP</span>
+        <span class="info-val" style="font-family: monospace;">${escapeHtmlText(userMasp)}</span>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <span class="info-label">Matéria</span>
+        <span class="info-val">${escapeHtmlText(resolvedSubjects)}</span>
+      </td>
+      <td>
+        <span class="info-label">Sigla</span>
+        <span class="info-val" style="font-family: monospace;">${escapeHtmlText(userSigla)}</span>
+      </td>
+      <td>
+        <span class="info-label">Celular</span>
+        <span class="info-val" style="font-family: monospace;">${escapeHtmlText(userPhone)}</span>
+      </td>
+    </tr>
+  </table>
+
+  <div class="summary-bar">
+    <div class="summary-item">Aulas no Mês (${escapeHtmlText(monthName)}/${targetYear}): <strong>${totalMonthAulas} aula(s)</strong></div>
+    <div class="summary-item">Carga Horária do Mês: <strong>${totalMonthHoras} horas-aula</strong> (2h/aula)</div>
+    <div class="summary-item">Total no Curso CFTP: <strong>${totalCourseAulas} aula(s) / ${totalCourseHoras} horas-aula</strong></div>
+  </div>
+
+  <table class="aulas">
+    <thead>
+      <tr>
+        <th style="width: 14%;">Data</th>
+        <th style="width: 22%;">Horário</th>
+        <th style="width: 12%;">Turma</th>
+        <th style="width: 30%;">Usuário</th>
+        <th style="width: 22%;">Assinatura</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${rowsHtml}
+    </tbody>
+  </table>
+
+  <div class="footer-sign">
+    <div class="sign-box">
+      <div class="sign-line">${escapeHtmlText(userFullName)}</div>
+      <div class="sign-sub">MASP: ${escapeHtmlText(userMasp)} • Professor / Instrutor (${escapeHtmlText(userSigla)})</div>
+    </div>
+    <div class="sign-box">
+      <div class="sign-line">Coordenação / Direção de Ensino</div>
+      <div class="sign-sub">ACADEPOL • Conferência Mensal</div>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    printDocumentInPage(htmlContent, docTitle);
+  };
+
   const openNewRecordModalForDiscipline = () => {
     const defaultCourse = formacaoCoursesList[0]?.name || 'Curso de Formação de Delegados de Polícia';
     setFormState({
@@ -1897,14 +2283,15 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
             </button>
             <button
               type="button"
-              onClick={() => setCalendarViewMode('legacy')}
-              className={`px-3 py-1.5 rounded-lg transition ${
-                calendarViewMode === 'legacy'
+              onClick={handleOpenMeuRelatorio}
+              className={`px-3 py-1.5 rounded-lg transition flex items-center space-x-1.5 ${
+                calendarViewMode === 'meu-relatorio'
                   ? 'bg-amber-500 text-slate-950'
                   : 'text-slate-300 hover:text-white'
               }`}
             >
-              Grade Avulsa ({records.length})
+              <FileText className="w-3.5 h-3.5" />
+              <span>Meu Relatório</span>
             </button>
           </div>
 
@@ -2541,6 +2928,313 @@ export const CalendarModule: React.FC<CalendarModuleProps> = ({ currentUser }) =
                 Fechar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODO MEU RELATÓRIO: QUANTIDADE DE AULAS E HORAS-AULA DO USUÁRIO LOGADO + IMPRESSÃO MENSAL */}
+      {calendarViewMode === 'meu-relatorio' && (
+        <div className="space-y-5">
+          {/* Seleção do Curso CFTP e Filtro Opcional de Matéria */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-5 shadow-xl space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2">
+                <FileText className="w-5 h-5 text-amber-400" />
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-100">
+                    Meu Relatório de Aulas Ministradas (2 horas-aula por aula)
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Contabilização automática por mês e no curso CFTP selecionado conforme equipes designadas.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePrintMyMonthlyReport()}
+                disabled={!selectedReportCourseObj}
+                className="px-4 py-2.5 bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-lg shadow-cyan-600/20 flex items-center space-x-2 transition self-start md:self-auto"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Folha do Mês ({MONTH_NAMES[reportMonth]}/{reportYear})</span>
+              </button>
+            </div>
+
+            {cftpCourses.length === 0 ? (
+              <div className="text-center py-6 text-slate-400 text-xs bg-slate-950/50 rounded-2xl border border-slate-800 p-4">
+                Nenhum curso de formação CFTP cadastrado ainda.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
+                <div className="md:col-span-6">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    Curso de Formação (CFTP)
+                  </label>
+                  <select
+                    value={selectedReportCourseObj?.id || ''}
+                    onChange={(e) => {
+                      const nextId = e.target.value;
+                      setReportCourseId(nextId);
+                      setReportSubjectFilter('TODAS');
+                      syncReportMonthToAvailable(nextId);
+                    }}
+                    className="w-full bg-slate-950 border border-amber-500/50 rounded-xl px-3 py-2 text-xs text-white font-semibold focus:border-amber-400 focus:outline-none"
+                  >
+                    {cftpCourses.map((crs) => {
+                      const sIso = (crs.startDate || '').slice(0, 10);
+                      const eIso = (crs.endDate || '').slice(0, 10);
+                      return (
+                        <option key={crs.id} value={crs.id}>
+                          {crs.module || crs.name} - {crs.code} ({formatIsoToBr(sIso)} a {formatIsoToBr(eIso)})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    Matéria
+                  </label>
+                  <select
+                    value={reportSubjectFilter}
+                    onChange={(e) => setReportSubjectFilter(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 font-semibold focus:border-amber-400 focus:outline-none"
+                  >
+                    <option value="TODAS">Todas ({myReportAvailableSubjects.length})</option>
+                    {myReportAvailableSubjects.map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    Mês
+                  </label>
+                  <select
+                    value={reportMonth}
+                    onChange={(e) => setReportMonth(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-amber-400 font-bold focus:border-amber-400 focus:outline-none"
+                  >
+                    {MONTH_NAMES.map((name, idx) => (
+                      <option key={name} value={idx}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                    Ano
+                  </label>
+                  <select
+                    value={reportYear}
+                    onChange={(e) => setReportYear(Number(e.target.value))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-200 font-bold focus:border-amber-400 focus:outline-none"
+                  >
+                    {[2024, 2025, 2026, 2027, 2028, 2029, 2030].map(y => (
+                      <option key={y} value={y}>{y}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Dados do Usuário + Totais (Mês e Curso Completo) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+            <div className="lg:col-span-6 bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <div className="text-[11px] font-extrabold text-amber-400 uppercase tracking-wider font-mono border-b border-slate-800 pb-2">
+                Dados do Docente / Usuário
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                <div className="sm:col-span-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold">Nome Completo</span>
+                  <span className="text-slate-100 font-bold">{currentUser?.name || '—'}</span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold">MASP</span>
+                  <span className="text-slate-100 font-mono font-bold">{formatMasp(currentUser?.masp || '') || '—'}</span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold">Celular</span>
+                  <span className="text-slate-100 font-mono font-bold">
+                    {formatPhone(currentUser?.phone || '') || currentUser?.phone || '—'}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold">Matéria</span>
+                  <span className="text-amber-300 font-bold">
+                    {reportSubjectFilter !== 'TODAS'
+                      ? reportSubjectFilter
+                      : myReportAvailableSubjects.length > 0
+                        ? myReportAvailableSubjects.join(', ')
+                        : (currentUser?.teacherSubject || '—')}
+                  </span>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                  <span className="text-[10px] text-slate-400 uppercase block font-bold">Sigla</span>
+                  <span className="text-amber-300 font-mono font-black">
+                    {(currentUser?.professorSigla || currentUser?.professor_sigla || '').trim().toUpperCase() || '—'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3 bg-slate-900/90 border border-amber-500/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400 font-mono block">
+                  No Mês ({MONTH_NAMES[reportMonth]}/{reportYear})
+                </span>
+                <div className="mt-2 flex items-baseline space-x-2">
+                  <span className="text-3xl font-black text-white font-mono">
+                    {myReportMonthLessons.length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">aula(s)</span>
+                </div>
+              </div>
+              <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2">
+                <span className="text-[10px] text-amber-300 uppercase font-bold block">Horas-Aula do Mês</span>
+                <span className="text-lg font-black text-amber-400 font-mono">
+                  {myReportMonthLessons.length * 2} horas-aula
+                </span>
+                <span className="text-[10px] text-slate-400 block">2 horas-aula por aula</span>
+              </div>
+            </div>
+
+            <div className="lg:col-span-3 bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-4 flex flex-col justify-between space-y-3">
+              <div>
+                <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 font-mono block">
+                  Todo o Curso CFTP
+                </span>
+                <div className="mt-2 flex items-baseline space-x-2">
+                  <span className="text-3xl font-black text-white font-mono">
+                    {myReportFilteredLessons.length}
+                  </span>
+                  <span className="text-xs text-slate-400 font-semibold">aula(s)</span>
+                </div>
+              </div>
+              <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2">
+                <span className="text-[10px] text-emerald-300 uppercase font-bold block">Carga Horária Total</span>
+                <span className="text-lg font-black text-emerald-400 font-mono">
+                  {myReportFilteredLessons.length * 2} horas-aula
+                </span>
+                <span className="text-[10px] text-slate-400 block">
+                  {selectedReportCourseObj?.module || selectedReportCourseObj?.name || 'Curso CFTP'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Resumo Separado por Mês */}
+          {myReportMonthlySummary.length > 0 && (
+            <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+              <h4 className="text-xs font-extrabold text-slate-200 uppercase tracking-wider">
+                Distribuição por Mês no Curso Selecionado
+              </h4>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                {myReportMonthlySummary.map((mItem) => {
+                  const isActive = mItem.year === reportYear && mItem.month === reportMonth;
+                  return (
+                    <div
+                      key={mItem.key}
+                      onClick={() => {
+                        setReportYear(mItem.year);
+                        setReportMonth(mItem.month);
+                      }}
+                      className={`cursor-pointer rounded-xl border p-3 transition flex items-center justify-between ${
+                        isActive
+                          ? 'bg-amber-500/15 border-amber-400 text-white'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-amber-500/50'
+                      }`}
+                    >
+                      <div>
+                        <div className="text-xs font-extrabold">{mItem.label}</div>
+                        <div className="text-[11px] font-mono text-amber-300 font-bold">
+                          {mItem.aulas} aula(s) • {mItem.horasAula} h/a
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setReportYear(mItem.year);
+                          setReportMonth(mItem.month);
+                          handlePrintMyMonthlyReport(mItem.year, mItem.month);
+                        }}
+                        title={`Imprimir folha de ${mItem.label}`}
+                        className="p-2 bg-cyan-600/20 hover:bg-cyan-600 text-cyan-300 hover:text-white border border-cyan-500/30 rounded-lg transition"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Tabela de Discriminação das Aulas do Mês */}
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+              <div>
+                <h4 className="text-xs font-extrabold text-slate-100 uppercase tracking-wider">
+                  Aulas do Mês — {MONTH_NAMES[reportMonth]}/{reportYear}
+                </h4>
+                <span className="text-[11px] text-slate-400">
+                  {myReportMonthLessons.length} aula(s) • {myReportMonthLessons.length * 2} horas-aula computadas
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handlePrintMyMonthlyReport()}
+                className="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold flex items-center space-x-1.5 transition self-start sm:self-auto"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Imprimir Folha do Mês</span>
+              </button>
+            </div>
+
+            {myReportMonthLessons.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-400 bg-slate-950/50 rounded-xl border border-slate-800">
+                Nenhuma aula cadastrada para <strong className="text-slate-200">{currentUser?.name}</strong> em{' '}
+                <strong className="text-amber-300">{MONTH_NAMES[reportMonth]}/{reportYear}</strong> neste curso.
+                {myReportMonthlySummary.length > 0 && (
+                  <span className="block mt-1 text-[11px] text-slate-500">
+                    Selecione um dos meses listados acima em &ldquo;Distribuição por Mês&rdquo;.
+                  </span>
+                )}
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-slate-800 text-[10px] uppercase text-slate-400 font-mono">
+                      <th className="py-2.5 px-3">Data</th>
+                      <th className="py-2.5 px-3">Horário</th>
+                      <th className="py-2.5 px-3">Turma</th>
+                      <th className="py-2.5 px-3">Matéria</th>
+                      <th className="py-2.5 px-3">Usuário</th>
+                      <th className="py-2.5 px-3 text-center">Horas-Aula</th>
+                      <th className="py-2.5 px-3">Assinatura</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {myReportMonthLessons.map((l) => (
+                      <tr key={l.key} className="hover:bg-slate-950/60">
+                        <td className="py-2.5 px-3 font-mono font-bold text-slate-100 whitespace-nowrap">{l.brDate}</td>
+                        <td className="py-2.5 px-3 font-mono text-amber-300 whitespace-nowrap">{l.slotTime}</td>
+                        <td className="py-2.5 px-3 font-mono font-black text-white whitespace-nowrap">{l.turmaLabel}</td>
+                        <td className="py-2.5 px-3 font-mono text-cyan-300 font-bold">{l.sigla}</td>
+                        <td className="py-2.5 px-3 text-slate-200 font-medium">{l.usuarioNome}</td>
+                        <td className="py-2.5 px-3 text-center font-mono font-bold text-emerald-400">2 h/a</td>
+                        <td className="py-2.5 px-3 text-slate-500 font-mono text-[10px]">______________________</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}
