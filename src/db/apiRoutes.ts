@@ -3638,6 +3638,26 @@ const sanitizeCftpScheduleRows = (rows: any): Array<{ data: string; horario: str
   }));
 };
 
+const extractCftpScheduleDateRange = (
+  rows: Array<{ data: string }>
+): { firstIso: string; lastIso: string } | null => {
+  const isoDates = rows
+    .map(r => {
+      const raw = String(r?.data || '').trim();
+      const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+      const dashBrMatch = raw.match(/^(\d{2})-(\d{2})-(\d{4})/);
+      if (dashBrMatch) return `${dashBrMatch[3]}-${dashBrMatch[2]}-${dashBrMatch[1]}`;
+      return '';
+    })
+    .filter(Boolean)
+    .sort();
+  if (isoDates.length === 0) return null;
+  return { firstIso: isoDates[0], lastIso: isoDates[isoDates.length - 1] };
+};
+
 const syncHorarioModuloCftpTable = async (
   pool: any,
   courseId: string,
@@ -3833,6 +3853,12 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
       : (career ? String(career).split(',').map(s => s.trim()).filter(Boolean) : []);
     const careerJoined = career ? String(career) : (careersArray.length > 0 ? careersArray.join(', ') : null);
     const sanitizedSchedule = sanitizeCftpScheduleRows(moduleSchedule);
+    const scheduleDateRange = (type || 'Formação') === 'Formação' ? extractCftpScheduleDateRange(sanitizedSchedule) : null;
+    const resolvedStartDate = scheduleDateRange ? scheduleDateRange.firstIso : (startDate || null);
+    const resolvedEndDate = scheduleDateRange ? scheduleDateRange.lastIso : (endDate || null);
+    const resolvedDates = scheduleDateRange
+      ? [scheduleDateRange.firstIso, scheduleDateRange.lastIso]
+      : (dates || []);
 
     const pool = getPool();
     const id = `acad-crs-${Date.now()}`;
@@ -3855,10 +3881,10 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
           careerJoined,
           JSON.stringify(careersArray),
           code.trim(),
-          JSON.stringify(dates || []),
+          JSON.stringify(resolvedDates),
           departmentName ? departmentName.trim() : null,
-          startDate || null,
-          endDate || null,
+          resolvedStartDate,
+          resolvedEndDate,
           moduleNumber || null,
           module || null,
           teachingDepartmentName ? teachingDepartmentName.trim() : null,
@@ -3886,10 +3912,10 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
           type || 'Formação',
           careerJoined ? careerJoined.slice(0, 64) : null,
           code.trim(),
-          JSON.stringify(dates || []),
+          JSON.stringify(resolvedDates),
           departmentName ? departmentName.trim() : null,
-          startDate || null,
-          endDate || null,
+          resolvedStartDate,
+          resolvedEndDate,
           moduleNumber || null,
           module || null,
           lessonCount || 1,
@@ -3912,10 +3938,10 @@ apiRouter.post('/academy-courses', async (req: Request, res: Response) => {
       career: careerJoined,
       careers: careersArray,
       code,
-      dates,
+      dates: resolvedDates,
       departmentName,
-      startDate,
-      endDate,
+      startDate: resolvedStartDate,
+      endDate: resolvedEndDate,
       moduleNumber,
       module,
       teachingDepartmentName,
@@ -3953,6 +3979,12 @@ apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
       : (career ? String(career).split(',').map(s => s.trim()).filter(Boolean) : []);
     const careerJoined = career ? String(career) : (careersArray.length > 0 ? careersArray.join(', ') : null);
     const sanitizedSchedule = sanitizeCftpScheduleRows(moduleSchedule);
+    const scheduleDateRange = (type || 'Formação') === 'Formação' ? extractCftpScheduleDateRange(sanitizedSchedule) : null;
+    const resolvedStartDate = scheduleDateRange ? scheduleDateRange.firstIso : (startDate || null);
+    const resolvedEndDate = scheduleDateRange ? scheduleDateRange.lastIso : (endDate || null);
+    const resolvedDates = scheduleDateRange
+      ? [scheduleDateRange.firstIso, scheduleDateRange.lastIso]
+      : (dates || []);
 
     const pool = getPool();
 
@@ -3989,10 +4021,10 @@ apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
           careerJoined,
           JSON.stringify(careersArray),
           code.trim(),
-          JSON.stringify(dates || []),
+          JSON.stringify(resolvedDates),
           departmentName ? departmentName.trim() : null,
-          startDate || null,
-          endDate || null,
+          resolvedStartDate,
+          resolvedEndDate,
           moduleNumber || null,
           module || null,
           teachingDepartmentName ? teachingDepartmentName.trim() : null,
@@ -4039,10 +4071,10 @@ apiRouter.put('/academy-courses/:id', async (req: Request, res: Response) => {
           type,
           careerJoined ? careerJoined.slice(0, 64) : null,
           code.trim(),
-          JSON.stringify(dates || []),
+          JSON.stringify(resolvedDates),
           departmentName ? departmentName.trim() : null,
-          startDate || null,
-          endDate || null,
+          resolvedStartDate,
+          resolvedEndDate,
           moduleNumber || null,
           module || null,
           teachingDepartmentName ? teachingDepartmentName.trim() : null,

@@ -721,6 +721,32 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     return String(val).trim();
   };
 
+  const parseCftpScheduleDateToIso = (raw?: string): string => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return '';
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (isoMatch) return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+    const brMatch = trimmed.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+    if (brMatch) return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+    const dashBrMatch = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})/);
+    if (dashBrMatch) return `${dashBrMatch[3]}-${dashBrMatch[2]}-${dashBrMatch[1]}`;
+    return '';
+  };
+
+  const extractCftpScheduleDateRange = (
+    rows: CftpModuleScheduleRow[]
+  ): { firstIso: string; lastIso: string } | null => {
+    const isoDates = rows
+      .map(r => parseCftpScheduleDateToIso(r.data))
+      .filter(Boolean)
+      .sort();
+    if (isoDates.length === 0) return null;
+    return {
+      firstIso: isoDates[0],
+      lastIso: isoDates[isoDates.length - 1]
+    };
+  };
+
   const handleCftpExcelUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -776,10 +802,19 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         return;
       }
 
+      const range = extractCftpScheduleDateRange(parsedRows);
       setCftpScheduleRows(parsedRows);
       setCftpScheduleFileName(file.name);
+      if (range) {
+        setCftpStartDate(range.firstIso);
+        setCftpEndDate(range.lastIso);
+      }
       setErrorMsg('');
-      setSuccessMsg(`Horário do módulo importado: ${parsedRows.length} registro(s) carregado(s) do arquivo "${file.name}".`);
+      setSuccessMsg(
+        range
+          ? `Horário do módulo importado: ${parsedRows.length} registro(s) de "${file.name}". Período do curso definido automaticamente pela 1ª e última aula (${formatBrDate(range.firstIso)} a ${formatBrDate(range.lastIso)}).`
+          : `Horário do módulo importado: ${parsedRows.length} registro(s) carregado(s) do arquivo "${file.name}".`
+      );
     } catch (err: any) {
       setErrorMsg(`Erro ao ler arquivo Excel: ${err.message || 'formato inválido'}`);
     } finally {
@@ -823,11 +858,15 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
 
-    if (!cftpStartDate || !cftpEndDate) {
-      setErrorMsg('Informe a Data de início e a Data final do módulo.');
+    const scheduleRange = extractCftpScheduleDateRange(cftpScheduleRows);
+    const resolvedStartDate = scheduleRange ? scheduleRange.firstIso : cftpStartDate;
+    const resolvedEndDate = scheduleRange ? scheduleRange.lastIso : cftpEndDate;
+
+    if (!resolvedStartDate || !resolvedEndDate) {
+      setErrorMsg('Importe o arquivo de horário ou informe a Data de início e a Data final do módulo.');
       return;
     }
-    if (cftpEndDate < cftpStartDate) {
+    if (resolvedEndDate < resolvedStartDate) {
       setErrorMsg('A Data final deve ser igual ou posterior à Data de início.');
       return;
     }
@@ -840,7 +879,7 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
     try {
       const moduleLabel = `Módulo ${cftpModuleRoman}`;
       const moduleIdx = ROMAN_NUMERALS.indexOf(cftpModuleRoman);
-      const yearPart = cftpStartDate.slice(0, 4) || String(new Date().getFullYear());
+      const yearPart = resolvedStartDate.slice(0, 4) || String(new Date().getFullYear());
       const res = await storage.saveAcademyCourse({
         id: cftpEditingId || undefined,
         name: `CFTP - ${moduleLabel}`,
@@ -850,9 +889,9 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
         careers: cftpSelectedCareers,
         module: moduleLabel,
         moduleNumber: moduleIdx >= 0 ? moduleIdx + 1 : 1,
-        startDate: cftpStartDate,
-        endDate: cftpEndDate,
-        dates: [cftpStartDate, cftpEndDate],
+        startDate: resolvedStartDate,
+        endDate: resolvedEndDate,
+        dates: [resolvedStartDate, resolvedEndDate],
         departmentName: 'ACADEPOL',
         moduleSchedule: cftpScheduleRows,
         scheduleFileName: cftpScheduleFileName || undefined
@@ -6061,33 +6100,53 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                 </div>
 
                 <form onSubmit={handleSaveCftpCourse} className="space-y-5 text-xs">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-slate-200 font-semibold mb-1.5">
-                        Data de início <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        value={cftpStartDate}
-                        onChange={(e) => setCftpStartDate(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:border-amber-500 focus:outline-none"
-                        required
-                      />
-                    </div>
+                  {(() => {
+                    const scheduleRange = extractCftpScheduleDateRange(cftpScheduleRows);
+                    const hasScheduleRange = Boolean(scheduleRange);
+                    return (
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Data de início (1ª aula do horário)
+                          </label>
+                          <input
+                            type="date"
+                            value={scheduleRange ? scheduleRange.firstIso : cftpStartDate}
+                            readOnly={hasScheduleRange}
+                            onChange={(e) => setCftpStartDate(e.target.value)}
+                            className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:outline-none ${
+                              hasScheduleRange ? 'border-emerald-500/50 text-emerald-300 cursor-not-allowed' : 'border-slate-700 focus:border-amber-500'
+                            }`}
+                            required
+                          />
+                          {hasScheduleRange && (
+                            <span className="text-[10px] text-emerald-400 block mt-1">
+                              Definida automaticamente pela 1ª aula do arquivo.
+                            </span>
+                          )}
+                        </div>
 
-                    <div>
-                      <label className="block text-slate-200 font-semibold mb-1.5">
-                        Data final <span className="text-red-400">*</span>
-                      </label>
-                      <input
-                        type="date"
-                        value={cftpEndDate}
-                        min={cftpStartDate || undefined}
-                        onChange={(e) => setCftpEndDate(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:border-amber-500 focus:outline-none"
-                        required
-                      />
-                    </div>
+                        <div>
+                          <label className="block text-slate-200 font-semibold mb-1.5">
+                            Data final (última aula do horário)
+                          </label>
+                          <input
+                            type="date"
+                            value={scheduleRange ? scheduleRange.lastIso : cftpEndDate}
+                            min={(scheduleRange ? scheduleRange.firstIso : cftpStartDate) || undefined}
+                            readOnly={hasScheduleRange}
+                            onChange={(e) => setCftpEndDate(e.target.value)}
+                            className={`w-full bg-slate-950 border rounded-lg px-3.5 py-2 text-white font-mono tabular-nums focus:outline-none ${
+                              hasScheduleRange ? 'border-emerald-500/50 text-emerald-300 cursor-not-allowed' : 'border-slate-700 focus:border-amber-500'
+                            }`}
+                            required
+                          />
+                          {hasScheduleRange && (
+                            <span className="text-[10px] text-emerald-400 block mt-1">
+                              Definida automaticamente pela última aula do arquivo.
+                            </span>
+                          )}
+                        </div>
 
                     <div>
                       <label className="block text-slate-200 font-semibold mb-1.5">
@@ -6107,6 +6166,8 @@ export const AcademyModule: React.FC<AcademyModuleProps> = ({
                       </select>
                     </div>
                   </div>
+                    );
+                  })()}
 
                   {/* Carreiras multi-select */}
                   <div className="space-y-2">
