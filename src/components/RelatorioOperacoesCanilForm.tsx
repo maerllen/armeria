@@ -164,9 +164,53 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
   const [confirmDeleteViaturaId, setConfirmDeleteViaturaId] = useState<string | null>(null);
   const [detalhamento, setDetalhamento] = useState<string>('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<{ totalSeconds: number; formatted: string }>(() => {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(new Date());
+    const h = Number(parts.find(p => p.type === 'hour')?.value || 0) % 24;
+    const m = Number(parts.find(p => p.type === 'minute')?.value || 0);
+    const s = Number(parts.find(p => p.type === 'second')?.value || 0);
+    const remaining = Math.max(0, 86400 - (h * 3600 + m * 60 + s));
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return {
+      totalSeconds: remaining,
+      formatted: `${pad(Math.floor(remaining / 3600))}:${pad(Math.floor((remaining % 3600) / 60))}:${pad(remaining % 60)}`
+    };
+  });
 
   const comarcaBoxRef = useRef<HTMLDivElement | null>(null);
   const viaturaBoxRef = useRef<HTMLDivElement | null>(null);
+
+  // Contagem regressiva em tempo real até o fim do dia (23:59:59 - Horário de Brasília)
+  useEffect(() => {
+    if (operacoesHojeEditaveis.length === 0) return;
+    const computeRemaining = () => {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).formatToParts(new Date());
+      const h = Number(parts.find(p => p.type === 'hour')?.value || 0) % 24;
+      const m = Number(parts.find(p => p.type === 'minute')?.value || 0);
+      const s = Number(parts.find(p => p.type === 'second')?.value || 0);
+      const remaining = Math.max(0, 86400 - (h * 3600 + m * 60 + s));
+      const pad = (n: number) => String(n).padStart(2, '0');
+      setCountdown({
+        totalSeconds: remaining,
+        formatted: `${pad(Math.floor(remaining / 3600))}:${pad(Math.floor((remaining % 3600) / 60))}:${pad(remaining % 60)}`
+      });
+    };
+    computeRemaining();
+    const timer = window.setInterval(computeRemaining, 1000);
+    return () => window.clearInterval(timer);
+  }, [operacoesHojeEditaveis.length]);
 
   // Close comarca and viatura dropdowns on click outside
   useEffect(() => {
@@ -679,16 +723,37 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
                 </p>
               </div>
             </div>
-            {editingReport && (
-              <button
-                type="button"
-                onClick={onCancelEdit}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 border border-slate-700 transition self-start sm:self-auto"
+            <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+              <div
+                className={`px-3 py-1.5 rounded-lg border font-mono text-[11px] font-bold flex items-center space-x-1.5 ${
+                  countdown.totalSeconds === 0
+                    ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                    : countdown.totalSeconds <= 1800
+                    ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                    : countdown.totalSeconds <= 7200
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                    : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200'
+                }`}
+                title="Contagem regressiva até o término do dia para editar ou excluir"
               >
-                <Plus className="w-3.5 h-3.5 text-amber-400" />
-                <span>Novo Relatório de Operação</span>
-              </button>
-            )}
+                <Clock className="w-3.5 h-3.5 shrink-0" />
+                <span>
+                  {countdown.totalSeconds > 0
+                    ? `Tempo restante: ${countdown.formatted}`
+                    : 'Prazo encerrado'}
+                </span>
+              </div>
+              {editingReport && (
+                <button
+                  type="button"
+                  onClick={onCancelEdit}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 border border-slate-700 transition"
+                >
+                  <Plus className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Novo Relatório de Operação</span>
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
@@ -703,7 +768,7 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
                       : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
                   }`}
                 >
-                  <div className="min-w-0 text-xs space-y-0.5">
+                  <div className="min-w-0 text-xs space-y-1">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span className="font-bold text-slate-100">{rel.comarca}</span>
                       <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
@@ -721,13 +786,30 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
                     <p className="text-[11px] text-slate-400 truncate">
                       Operadores ({rel.operadores.length}): {rel.operadores.map(o => o.name).join(', ')}
                     </p>
+                    <p
+                      className={`text-[10px] font-mono font-bold flex items-center space-x-1 ${
+                        countdown.totalSeconds <= 1800
+                          ? 'text-red-400'
+                          : countdown.totalSeconds <= 7200
+                          ? 'text-amber-300'
+                          : 'text-cyan-300'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3 shrink-0" />
+                      <span>
+                        {countdown.totalSeconds > 0
+                          ? `Edição/exclusão encerra em ${countdown.formatted}`
+                          : 'Tempo de edição encerrado'}
+                      </span>
+                    </p>
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     <button
                       type="button"
+                      disabled={countdown.totalSeconds === 0}
                       onClick={() => (isBeingEdited ? onCancelEdit() : onStartEdit(rel))}
-                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center space-x-1 transition ${
+                      className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex items-center space-x-1 transition disabled:opacity-50 ${
                         isBeingEdited
                           ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
                           : 'bg-cyan-600 hover:bg-cyan-500 text-white'
@@ -738,8 +820,9 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
                     </button>
                     <button
                       type="button"
+                      disabled={countdown.totalSeconds === 0}
                       onClick={() => onDelete(rel)}
-                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition"
+                      className="p-1.5 bg-red-500/10 hover:bg-red-500/20 disabled:opacity-50 text-red-400 border border-red-500/30 rounded-lg transition"
                       title="Excluir relatório (permitido no dia da confecção)"
                     >
                       <Trash2 className="w-3.5 h-3.5" />
@@ -1190,7 +1273,7 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
             })}
           </div>
 
-          {/* Adicionar novos Operadores Caninos da Unidade */}
+          {/* Adicionar novos Operadores Caninos da Unidade (lista oculta até digitar na busca) */}
           <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
             <label className="block text-[11px] font-bold text-slate-300 uppercase">
               Inserir Outro Operador Canino da Unidade
@@ -1201,14 +1284,29 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
                 type="text"
                 value={operatorSearch}
                 onChange={(e) => setOperatorSearch(e.target.value)}
-                placeholder="Buscar operador canino da unidade por nome, MASP ou cargo..."
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                placeholder="Digite o nome, MASP ou cargo para buscar um operador canino da unidade..."
+                autoComplete="off"
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
               />
+              {operatorSearch && (
+                <button
+                  type="button"
+                  onClick={() => setOperatorSearch('')}
+                  className="absolute right-2.5 top-2 text-slate-500 hover:text-slate-200"
+                  title="Limpar busca"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
             </div>
 
-            {eligibleOperators.length === 0 ? (
+            {operatorSearch.trim().length === 0 ? (
               <p className="text-[11px] text-slate-500 italic">
-                Nenhum outro usuário com perfil Operador Canino disponível na unidade para adicionar.
+                Digite o nome, MASP ou cargo acima para localizar e adicionar operadores caninos da unidade.
+              </p>
+            ) : eligibleOperators.length === 0 ? (
+              <p className="text-[11px] text-slate-500 italic">
+                Nenhum operador canino da unidade encontrado para &quot;{operatorSearch}&quot;.
               </p>
             ) : (
               <div className="max-h-44 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 pt-1">

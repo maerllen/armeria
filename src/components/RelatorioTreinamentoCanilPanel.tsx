@@ -40,7 +40,9 @@ import {
   MapPin,
   ShieldAlert,
   Package,
-  Car
+  Car,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 
 interface RelatorioTreinamentoCanilPanelProps {
@@ -147,6 +149,17 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const [viewingTreinoReport, setViewingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
   const [editingOperacaoReport, setEditingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
   const [viewingOperacaoReport, setViewingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
+
+  // Estado de recolhimento (todos os itens e seções iniciam ocultos em Meus Relatórios e Relatórios da Unidade)
+  const [meusOperacoesSectionOpen, setMeusOperacoesSectionOpen] = useState(false);
+  const [meusTreinamentosSectionOpen, setMeusTreinamentosSectionOpen] = useState(false);
+  const [unidadeOperacoesSectionOpen, setUnidadeOperacoesSectionOpen] = useState(false);
+  const [unidadeTreinamentosSectionOpen, setUnidadeTreinamentosSectionOpen] = useState(false);
+  const [expandedReportIds, setExpandedReportIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpandedReport = (key: string) => {
+    setExpandedReportIds(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   const toParticipanteDog = (d: Cachorro): ParticipanteTreinamentoCachorro => ({
     id: d.id,
@@ -1982,328 +1995,411 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
             )}
           </div>
 
-          {/* SEÇÃO: MEUS RELATÓRIOS DE OPERAÇÕES */}
+          {/* SEÇÃO: MEUS RELATÓRIOS DE OPERAÇÕES (INICIA OCULTA) */}
           {(meusTipoFilter === 'OPERACAO' || meusTipoFilter === 'TODOS') && (
-            <div className="space-y-3">
-              {meusTipoFilter === 'TODOS' && (
-                <div className="flex items-center space-x-2 px-1">
-                  <ShieldAlert className="w-4 h-4 text-emerald-400" />
-                  <h3 className="text-xs font-black text-emerald-300 uppercase font-mono">
-                    Relatórios de Operações ({meusOperacoesList.length})
-                  </h3>
-                </div>
-              )}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+              <button
+                type="button"
+                onClick={() => setMeusOperacoesSectionOpen(v => !v)}
+                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+              >
+                <span className="text-xs font-black text-emerald-300 uppercase font-mono flex items-center space-x-2">
+                  {meusOperacoesSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-emerald-400" />
+                  )}
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Meus Relatórios de Operações ({meusOperacoesList.length})</span>
+                </span>
+                <span className="text-[11px] font-bold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                  {meusOperacoesSectionOpen ? 'Ocultar' : 'Abrir'}
+                </span>
+              </button>
 
-              {meusOperacoesList.length === 0 ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs">
-                  Nenhum relatório de operação encontrado em que você tenha participado.
-                </div>
-              ) : (
-                meusOperacoesList.map(rel => {
-                  const isEditableToday = canEditOrDeleteOperacao(rel);
-                  const solicitacaoTxt =
-                    rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes
-                      ? `Outros: ${rel.solicitacaoOutrosDetalhes}`
-                      : rel.solicitacaoTipo;
+              {meusOperacoesSectionOpen && (
+                <div className="p-3.5 sm:p-4 border-t border-slate-800 space-y-2.5">
+                  {meusOperacoesList.length === 0 ? (
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                      Nenhum relatório de operação encontrado em que você tenha participado.
+                    </div>
+                  ) : (
+                    meusOperacoesList.map(rel => {
+                      const isEditableToday = canEditOrDeleteOperacao(rel);
+                      const isItemOpen = Boolean(expandedReportIds[`meus-op-${rel.id}`]);
+                      const solicitacaoTxt =
+                        rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes
+                          ? `Outros: ${rel.solicitacaoOutrosDetalhes}`
+                          : rel.solicitacaoTipo;
 
-                  return (
-                    <div
-                      key={rel.id}
-                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3"
-                    >
-                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                        <div className="space-y-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase">
-                              Operação
-                            </span>
-                            <span className="font-mono font-bold text-amber-400 text-xs flex items-center space-x-1">
-                              <Calendar className="w-3.5 h-3.5" />
-                              <span>
-                                {formatDateBr(rel.dataOperacao)} • {rel.horaOperacao}
+                      return (
+                        <div
+                          key={rel.id}
+                          className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden"
+                        >
+                          <div className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandedReport(`meus-op-${rel.id}`)}
+                              className="flex-1 text-left flex items-start space-x-2.5 min-w-0 group"
+                            >
+                              <span className="mt-0.5 text-slate-400 group-hover:text-amber-400 transition shrink-0">
+                                {isItemOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                               </span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-100 border border-slate-700 text-[10px] font-bold flex items-center space-x-1">
-                              <MapPin className="w-3 h-3 text-amber-400" />
-                              <span>{rel.comarca}/MG</span>
-                            </span>
-                            <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
-                              Solicitação: {solicitacaoTxt}
-                            </span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                                rel.materialEncontrado
-                                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
-                              }`}
-                            >
-                              Material: {rel.materialEncontrado ? 'SIM' : 'NÃO'}
-                            </span>
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase">
+                                    Operação
+                                  </span>
+                                  <span className="font-mono font-bold text-amber-400 text-xs flex items-center space-x-1">
+                                    <Calendar className="w-3.5 h-3.5" />
+                                    <span>
+                                      {formatDateBr(rel.dataOperacao)} • {rel.horaOperacao}
+                                    </span>
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-100 border border-slate-700 text-[10px] font-bold flex items-center space-x-1">
+                                    <MapPin className="w-3 h-3 text-amber-400" />
+                                    <span>{rel.comarca}/MG</span>
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
+                                    Solicitação: {solicitacaoTxt}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.materialEncontrado
+                                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                    }`}
+                                  >
+                                    Material: {rel.materialEncontrado ? 'SIM' : 'NÃO'}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                  Relator: <strong className="text-slate-200">{rel.criadorNome}</strong> • Operadores:{' '}
+                                  <strong className="text-amber-300">{(rel.operadores || []).length}</strong>
+                                  {(rel.viaturas || []).length > 0 && (
+                                    <>
+                                      {' '}• Viaturas: <strong className="text-cyan-300">{(rel.viaturas || []).length}</strong>
+                                    </>
+                                  )}
+                                </p>
+                              </div>
+                            </button>
+
+                            <div className="flex flex-wrap items-center gap-2 text-xs shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandedReport(`meus-op-${rel.id}`)}
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-semibold rounded-lg transition"
+                              >
+                                {isItemOpen ? 'Recolher' : 'Abrir'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setViewingOperacaoReport(rel)}
+                                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg transition"
+                              >
+                                Ver Detalhes
+                              </button>
+                              {isEditableToday && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditOperacao(rel)}
+                                  className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg flex items-center space-x-1 transition"
+                                  title="Editar relatório (permitido durante o dia da confecção)"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handlePrintRelatorioOperacao(rel)}
+                                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+                              {isEditableToday && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteOperacao(rel)}
+                                  className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition"
+                                  title="Excluir relatório (permitido durante o dia da confecção)"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-xs text-slate-300">
-                            Relator: <strong className="text-slate-100">{rel.criadorNome}</strong> • Operadores:{' '}
-                            <strong className="text-amber-300">{(rel.operadores || []).length}</strong>
-                          </p>
-                        </div>
 
-                        <div className="flex flex-wrap items-center gap-2 text-xs">
-                          <button
-                            type="button"
-                            onClick={() => setViewingOperacaoReport(rel)}
-                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg transition"
-                          >
-                            Ver Detalhes
-                          </button>
-                          {isEditableToday && (
-                            <button
-                              type="button"
-                              onClick={() => handleStartEditOperacao(rel)}
-                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg flex items-center space-x-1 transition"
-                              title="Editar relatório (permitido durante o dia da confecção)"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                              <span>Editar</span>
-                            </button>
+                          {isItemOpen && (
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50">
+                              {(rel.viaturas || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Car className="w-3.5 h-3.5" />
+                                    <span>Viaturas ({(rel.viaturas || []).length}):</span>
+                                  </span>
+                                  {(rel.viaturas || []).map(v => (
+                                    <span
+                                      key={v.id}
+                                      className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
+                                    >
+                                      <span className="font-mono font-black text-amber-300">{v.placa}</span> • {v.descricao}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              {rel.materialEncontrado && (rel.materiaisEncontrados || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-emerald-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Package className="w-3.5 h-3.5" />
+                                    <span>Encontrados:</span>
+                                  </span>
+                                  {rel.materiaisEncontrados.map(m => (
+                                    <span
+                                      key={m.tipo}
+                                      className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold"
+                                    >
+                                      {m.tipo} — Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
+                                {rel.detalhamento}
+                              </div>
+
+                              <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
+                                <span className="text-slate-400 font-semibold mr-1">Operadores ({(rel.operadores || []).length}):</span>
+                                {(rel.operadores || []).map(op => (
+                                  <span
+                                    key={op.userId}
+                                    className="px-2 py-0.5 rounded-lg border bg-slate-950 border-slate-800 text-slate-300"
+                                  >
+                                    {op.name}
+                                    {op.cachorros && op.cachorros.length > 0
+                                      ? ` • Cão(s): ${op.cachorros.map(c => c.nome).join(', ')}`
+                                      : ' • Sem animal'}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
                           )}
-                          <button
-                            type="button"
-                            onClick={() => handlePrintRelatorioOperacao(rel)}
-                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg flex items-center space-x-1 transition"
-                          >
-                            <Printer className="w-3.5 h-3.5" />
-                            <span>Imprimir</span>
-                          </button>
-                          {isEditableToday && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteOperacao(rel)}
-                              className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition"
-                              title="Excluir relatório (permitido durante o dia da confecção)"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                         </div>
-                      </div>
-
-                      {(rel.viaturas || []).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 text-[11px]">
-                          <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
-                            <Car className="w-3.5 h-3.5" />
-                            <span>Viaturas ({(rel.viaturas || []).length}):</span>
-                          </span>
-                          {(rel.viaturas || []).map(v => (
-                            <span
-                              key={v.id}
-                              className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
-                            >
-                              <span className="font-mono font-black text-amber-300">{v.placa}</span> • {v.descricao}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      {rel.materialEncontrado && (rel.materiaisEncontrados || []).length > 0 && (
-                        <div className="flex flex-wrap gap-1.5 text-[11px]">
-                          <span className="text-emerald-400 font-bold flex items-center space-x-1 mr-1">
-                            <Package className="w-3.5 h-3.5" />
-                            <span>Encontrados:</span>
-                          </span>
-                          {rel.materiaisEncontrados.map(m => (
-                            <span
-                              key={m.tipo}
-                              className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold"
-                            >
-                              {m.tipo} — Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-
-                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
-                        {rel.detalhamento}
-                      </div>
-
-                      <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
-                        <span className="text-slate-400 font-semibold mr-1">Operadores ({(rel.operadores || []).length}):</span>
-                        {(rel.operadores || []).map(op => (
-                          <span
-                            key={op.userId}
-                            className="px-2 py-0.5 rounded-lg border bg-slate-950 border-slate-800 text-slate-300"
-                          >
-                            {op.name}
-                            {op.cachorros && op.cachorros.length > 0
-                              ? ` • Cão(s): ${op.cachorros.map(c => c.nome).join(', ')}`
-                              : ' • Sem animal'}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })
+                      );
+                    })
+                  )}
+                </div>
               )}
             </div>
           )}
 
-          {/* SEÇÃO: MEUS RELATÓRIOS DE TREINAMENTO */}
+          {/* SEÇÃO: MEUS RELATÓRIOS DE TREINAMENTO (INICIA OCULTA) */}
           {(meusTipoFilter === 'TREINAMENTO' || meusTipoFilter === 'TODOS') && (
-            <div className="space-y-3">
-              {meusTipoFilter === 'TODOS' && (
-                <div className="flex items-center space-x-2 px-1 pt-2">
-                  <PenTool className="w-4 h-4 text-amber-400" />
-                  <h3 className="text-xs font-black text-amber-300 uppercase font-mono">
-                    Relatórios de Treinamento ({meusRelatoriosList.length})
-                  </h3>
-                </div>
-              )}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+              <button
+                type="button"
+                onClick={() => setMeusTreinamentosSectionOpen(v => !v)}
+                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+              >
+                <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
+                  {meusTreinamentosSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-amber-400" />
+                  )}
+                  <PenTool className="w-4 h-4" />
+                  <span>Meus Relatórios de Treinamento ({meusRelatoriosList.length})</span>
+                  {myPendingSignCount > 0 && (
+                    <span className="ml-1 px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px]">
+                      {myPendingSignCount} pendente(s)
+                    </span>
+                  )}
+                </span>
+                <span className="text-[11px] font-bold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                  {meusTreinamentosSectionOpen ? 'Ocultar' : 'Abrir'}
+                </span>
+              </button>
 
-              {meusRelatoriosList.length === 0 ? (
-                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs">
-                  Nenhum relatório de treinamento encontrado para este filtro.
-                </div>
-              ) : (
-                <div className="space-y-3">
-              {meusRelatoriosList.map(rel => {
-                const isCreator = rel.condutorId === currentUser?.id;
-                const myParticipantEntry = (rel.participantes || []).find(p => p.userId === currentUser?.id);
-                const needsMySignature = !isCreator && Boolean(myParticipantEntry && !myParticipantEntry.signed);
-                const iSignedJoint = !isCreator && Boolean(myParticipantEntry?.signed);
+              {meusTreinamentosSectionOpen && (
+                <div className="p-3.5 sm:p-4 border-t border-slate-800 space-y-2.5">
+                  {meusRelatoriosList.length === 0 ? (
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                      Nenhum relatório de treinamento encontrado para este filtro.
+                    </div>
+                  ) : (
+                    meusRelatoriosList.map(rel => {
+                      const isCreator = rel.condutorId === currentUser?.id;
+                      const myParticipantEntry = (rel.participantes || []).find(p => p.userId === currentUser?.id);
+                      const needsMySignature = !isCreator && Boolean(myParticipantEntry && !myParticipantEntry.signed);
+                      const iSignedJoint = !isCreator && Boolean(myParticipantEntry?.signed);
+                      const isItemOpen = Boolean(expandedReportIds[`meus-tr-${rel.id}`]);
 
-                return (
-                  <div
-                    key={rel.id}
-                    className={`bg-slate-900 border rounded-2xl p-4 sm:p-5 space-y-3 ${
-                      needsMySignature ? 'border-amber-500/60' : 'border-slate-800'
-                    }`}
-                  >
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="px-2.5 py-0.5 rounded bg-slate-950 border border-slate-700 font-mono font-bold text-xs text-amber-400">
-                            {formatDateBr(rel.dataTreinamento)}
-                          </span>
-                          <span className="font-black text-slate-100 text-sm flex items-center space-x-1.5">
-                            <Dog className="w-4 h-4 text-amber-400" />
-                            <span>{getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ')}</span>
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                              rel.modalidadeLocal === 'Interno'
-                                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
-                                : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
-                            }`}
-                          >
-                            {rel.modalidadeLocal}
-                          </span>
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                              rel.modalidadeParticipacao === 'Sozinho'
-                                ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                                : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                            }`}
-                          >
-                            {rel.modalidadeParticipacao}
-                          </span>
-                          {isCreator && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              Autor / Condutor
-                            </span>
-                          )}
-                          {iSignedJoint && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                              Conjunto Assinado por Você
-                            </span>
-                          )}
-                          {needsMySignature && (
-                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                              Aguardando Sua Assinatura
-                            </span>
+                      return (
+                        <div
+                          key={rel.id}
+                          className={`bg-slate-950/60 border rounded-xl overflow-hidden ${
+                            needsMySignature ? 'border-amber-500/60' : 'border-slate-800'
+                          }`}
+                        >
+                          <div className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandedReport(`meus-tr-${rel.id}`)}
+                              className="flex-1 text-left flex items-start space-x-2.5 min-w-0 group"
+                            >
+                              <span className="mt-0.5 text-slate-400 group-hover:text-amber-400 transition shrink-0">
+                                {isItemOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              </span>
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="px-2.5 py-0.5 rounded bg-slate-900 border border-slate-700 font-mono font-bold text-xs text-amber-400">
+                                    {formatDateBr(rel.dataTreinamento)}
+                                  </span>
+                                  <span className="font-black text-slate-100 text-sm flex items-center space-x-1.5">
+                                    <Dog className="w-4 h-4 text-amber-400" />
+                                    <span>{getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ')}</span>
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.modalidadeLocal === 'Interno'
+                                        ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                                        : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                                    }`}
+                                  >
+                                    {rel.modalidadeLocal}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.modalidadeParticipacao === 'Sozinho'
+                                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                                        : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                    }`}
+                                  >
+                                    {rel.modalidadeParticipacao}
+                                  </span>
+                                  {isCreator && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                      Autor / Condutor
+                                    </span>
+                                  )}
+                                  {iSignedJoint && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                                      Conjunto Assinado por Você
+                                    </span>
+                                  )}
+                                  {needsMySignature && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                                      Aguardando Sua Assinatura
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-slate-400">
+                                  Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                  {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
+                                </p>
+                              </div>
+                            </button>
+
+                            <div className="flex flex-wrap items-center gap-2 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandedReport(`meus-tr-${rel.id}`)}
+                                className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-semibold rounded-lg text-xs transition"
+                              >
+                                {isItemOpen ? 'Recolher' : 'Abrir'}
+                              </button>
+                              {needsMySignature && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleAssinarRelatorioTreino(rel)}
+                                  disabled={isSubmitting}
+                                  className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>Assinar Relatório</span>
+                                </button>
+                              )}
+                              {canEditRelatorioTreinamento(rel) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditTreinamento(rel)}
+                                  disabled={isSubmitting}
+                                  className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
+                                  title="Editar relatório (disponível ao longo do dia de hoje)"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setViewingTreinoReport(rel)}
+                                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition"
+                              >
+                                Visualizar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePrintRelatorioTreinamento(rel)}
+                                className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+                              {(isCreator || isGeral) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteRelatorioTreino(rel)}
+                                  disabled={isSubmitting}
+                                  className="p-2 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-xl transition"
+                                  title="Excluir relatório"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {isItemOpen && (
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50">
+                              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
+                                {rel.descricao}
+                              </div>
+
+                              {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
+                                <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-slate-400 font-semibold mr-1">Participantes ({rel.participantes.length}):</span>
+                                  {rel.participantes.map(p => (
+                                    <span
+                                      key={p.userId}
+                                      className={`px-2 py-0.5 rounded-lg border ${
+                                        p.signed
+                                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                          : 'bg-slate-950 border-slate-800 text-slate-400'
+                                      }`}
+                                    >
+                                      {p.name}
+                                      {p.cachorros && p.cachorros.length > 0
+                                        ? ` • Cão(s): ${p.cachorros.map(c => c.nome).join(', ')}`
+                                        : ' • Sem cachorro'}{' '}
+                                      {p.signed ? '✓ Assinado' : '• Pendente'}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           )}
                         </div>
-                        <p className="text-xs text-slate-400">
-                          Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
-                          {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-2">
-                        {needsMySignature && (
-                          <button
-                            onClick={() => handleAssinarRelatorioTreino(rel)}
-                            disabled={isSubmitting}
-                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            <span>Assinar Relatório</span>
-                          </button>
-                        )}
-                        {canEditRelatorioTreinamento(rel) && (
-                          <button
-                            onClick={() => handleStartEditTreinamento(rel)}
-                            disabled={isSubmitting}
-                            className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
-                            title="Editar relatório (disponível ao longo do dia de hoje)"
-                          >
-                            <Edit className="w-3.5 h-3.5" />
-                            <span>Editar</span>
-                          </button>
-                        )}
-                        <button
-                          onClick={() => setViewingTreinoReport(rel)}
-                          className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-xl text-xs transition"
-                        >
-                          Visualizar
-                        </button>
-                        <button
-                          onClick={() => handlePrintRelatorioTreinamento(rel)}
-                          className="px-3 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
-                        >
-                          <Printer className="w-3.5 h-3.5" />
-                          <span>Imprimir</span>
-                        </button>
-                        {(isCreator || isGeral) && (
-                          <button
-                            onClick={() => handleDeleteRelatorioTreino(rel)}
-                            disabled={isSubmitting}
-                            className="p-2 bg-slate-800 hover:bg-red-500/20 text-slate-400 hover:text-red-400 rounded-xl transition"
-                            title="Excluir relatório"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
-                      {rel.descricao}
-                    </div>
-
-                    {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
-                      <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
-                        <span className="text-slate-400 font-semibold mr-1">Participantes ({rel.participantes.length}):</span>
-                        {rel.participantes.map(p => (
-                          <span
-                            key={p.userId}
-                            className={`px-2 py-0.5 rounded-lg border ${
-                              p.signed
-                                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                                : 'bg-slate-950 border-slate-800 text-slate-400'
-                            }`}
-                          >
-                            {p.name}
-                            {p.cachorros && p.cachorros.length > 0
-                              ? ` • Cão(s): ${p.cachorros.map(c => c.nome).join(', ')}`
-                              : ' • Sem cachorro'}{' '}
-                            {p.signed ? '✓ Assinado' : '• Pendente'}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -2531,289 +2627,362 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
             </div>
           </div>
 
-          {/* TABELA DE OPERAÇÕES DA UNIDADE */}
+          {/* SEÇÃO: RELATÓRIOS DE OPERAÇÕES DA UNIDADE (INICIA OCULTA) */}
           {(unidadeTipoFilter === 'OPERACAO' || unidadeTipoFilter === 'TODOS') && (
             <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
-              <div className="px-4 py-3 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setUnidadeOperacoesSectionOpen(v => !v)}
+                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+              >
                 <span className="text-xs font-black text-emerald-300 uppercase font-mono flex items-center space-x-2">
+                  {unidadeOperacoesSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4 text-emerald-400" />
+                  )}
                   <ShieldAlert className="w-4 h-4" />
                   <span>Relatórios de Operações da Unidade ({filteredUnidadeOperacoes.length})</span>
                 </span>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
-                    <tr>
-                      <th className="p-3.5">Data / Hora</th>
-                      <th className="p-3.5">Comarca (MG)</th>
-                      <th className="p-3.5">Solicitação</th>
-                      <th className="p-3.5">Viaturas</th>
-                      <th className="p-3.5">Operadores & Animais</th>
-                      <th className="p-3.5">Material Encontrado</th>
-                      <th className="p-3.5">Detalhamento</th>
-                      <th className="p-3.5 text-right">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/70">
-                    {filteredUnidadeOperacoes.length === 0 ? (
-                      <tr>
-                        <td colSpan={8} className="p-8 text-center text-slate-500 italic">
-                          Nenhum relatório de operação encontrado para os filtros selecionados.
-                        </td>
-                      </tr>
-                    ) : (
-                      filteredUnidadeOperacoes.map(rel => {
-                        const isEditableToday = canEditOrDeleteOperacao(rel);
-                        return (
-                          <tr key={rel.id} className="hover:bg-slate-800/40 transition align-top">
-                            <td className="p-3.5 font-mono text-amber-400 whitespace-nowrap">
-                              <p>{formatDateBr(rel.dataOperacao)}</p>
-                              <p className="text-[10px] text-slate-400">{rel.horaOperacao}</p>
-                            </td>
-                            <td className="p-3.5 whitespace-nowrap">
-                              <p className="font-bold text-slate-100">{rel.comarca}</p>
-                              <p className="text-[10px] text-slate-400">Relator: {rel.criadorNome}</p>
-                            </td>
-                            <td className="p-3.5">
-                              <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
-                                {rel.solicitacaoTipo}
+                <span className="text-[11px] font-bold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                  {unidadeOperacoesSectionOpen ? 'Ocultar' : 'Abrir'}
+                </span>
+              </button>
+
+              {unidadeOperacoesSectionOpen && (
+                <div className="p-3.5 sm:p-4 border-t border-slate-800 space-y-2.5">
+                  {filteredUnidadeOperacoes.length === 0 ? (
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-6 text-center text-slate-500 italic text-xs">
+                      Nenhum relatório de operação encontrado para os filtros selecionados.
+                    </div>
+                  ) : (
+                    filteredUnidadeOperacoes.map(rel => {
+                      const isEditableToday = canEditOrDeleteOperacao(rel);
+                      const isItemOpen = Boolean(expandedReportIds[`unid-op-${rel.id}`]);
+                      const solicitacaoTxt =
+                        rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes
+                          ? `Outros: ${rel.solicitacaoOutrosDetalhes}`
+                          : rel.solicitacaoTipo;
+
+                      return (
+                        <div
+                          key={rel.id}
+                          className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden"
+                        >
+                          <div className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandedReport(`unid-op-${rel.id}`)}
+                              className="flex-1 text-left flex items-start space-x-2.5 min-w-0 group"
+                            >
+                              <span className="mt-0.5 text-slate-400 group-hover:text-emerald-400 transition shrink-0">
+                                {isItemOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                               </span>
-                              {rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes && (
-                                <p className="text-[10px] text-slate-400 mt-1 max-w-[160px] break-words">
-                                  {rel.solicitacaoOutrosDetalhes}
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono font-bold text-amber-400 text-xs">
+                                    {formatDateBr(rel.dataOperacao)} • {rel.horaOperacao}
+                                  </span>
+                                  <span className="font-bold text-slate-100 text-xs flex items-center space-x-1">
+                                    <MapPin className="w-3 h-3 text-amber-400" />
+                                    <span>{rel.comarca}/MG</span>
+                                  </span>
+                                  <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
+                                    {solicitacaoTxt}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.materialEncontrado
+                                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                        : 'bg-slate-800 text-slate-400 border border-slate-700'
+                                    }`}
+                                  >
+                                    Material: {rel.materialEncontrado ? 'SIM' : 'NÃO'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-400">
+                                  Relator: <strong className="text-slate-200">{rel.criadorNome}</strong> • Operadores:{' '}
+                                  <strong className="text-amber-300">{(rel.operadores || []).length}</strong>
+                                  {(rel.viaturas || []).length > 0 && (
+                                    <>
+                                      {' '}• Viaturas: <strong className="text-cyan-300">{(rel.viaturas || []).map(v => v.placa).join(', ')}</strong>
+                                    </>
+                                  )}
                                 </p>
+                              </div>
+                            </button>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandedReport(`unid-op-${rel.id}`)}
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded text-[11px] font-semibold transition"
+                              >
+                                {isItemOpen ? 'Recolher' : 'Abrir'}
+                              </button>
+                              {isEditableToday && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditOperacao(rel)}
+                                  className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                  <span>Editar</span>
+                                </button>
                               )}
-                            </td>
-                            <td className="p-3.5">
-                              {!(rel.viaturas && rel.viaturas.length > 0) ? (
-                                <span className="text-[11px] text-slate-500 italic">-</span>
-                              ) : (
-                                <div className="space-y-1">
-                                  {rel.viaturas.map(v => (
-                                    <div key={v.id} className="text-[11px] text-slate-200">
-                                      <span className="font-mono font-bold text-amber-300">{v.placa}</span>
-                                      <span className="text-slate-400 block text-[10px]">{v.descricao}</span>
-                                    </div>
+                              <button
+                                type="button"
+                                onClick={() => setViewingOperacaoReport(rel)}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
+                              >
+                                Ver
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePrintRelatorioOperacao(rel)}
+                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3 h-3" />
+                                <span>Imprimir</span>
+                              </button>
+                              {isEditableToday && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteOperacao(rel)}
+                                  className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded transition"
+                                  title="Excluir relatório"
+                                >
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {isItemOpen && (
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs">
+                              {(rel.viaturas || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Car className="w-3.5 h-3.5" />
+                                    <span>Viaturas:</span>
+                                  </span>
+                                  {(rel.viaturas || []).map(v => (
+                                    <span
+                                      key={v.id}
+                                      className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
+                                    >
+                                      <span className="font-mono font-black text-amber-300">{v.placa}</span> • {v.descricao}
+                                    </span>
                                   ))}
                                 </div>
                               )}
-                            </td>
-                            <td className="p-3.5">
-                              <div className="space-y-1">
+
+                              {rel.materialEncontrado && (rel.materiaisEncontrados || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-emerald-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Package className="w-3.5 h-3.5" />
+                                    <span>Materiais Encontrados:</span>
+                                  </span>
+                                  {rel.materiaisEncontrados.map(m => (
+                                    <span
+                                      key={m.tipo}
+                                      className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold"
+                                    >
+                                      {m.tipo} — Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
+
+                              <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                <span className="text-slate-400 font-semibold mr-1">Operadores & Animais:</span>
                                 {(rel.operadores || []).map(op => (
-                                  <p key={op.userId} className="text-[11px] text-slate-200">
-                                    <strong>{op.name}</strong>:{' '}
+                                  <span
+                                    key={op.userId}
+                                    className="px-2 py-0.5 rounded-lg border bg-slate-950 border-slate-800 text-slate-300"
+                                  >
+                                    <strong className="text-slate-100">{op.name}</strong>:{' '}
                                     <span className="text-amber-300">
                                       {op.cachorros && op.cachorros.length > 0
                                         ? op.cachorros.map(c => c.nome).join(', ')
                                         : 'Sem animal'}
                                     </span>
-                                  </p>
+                                  </span>
                                 ))}
                               </div>
-                            </td>
-                            <td className="p-3.5">
-                              {!rel.materialEncontrado ? (
-                                <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-bold">
-                                  NÃO
-                                </span>
-                              ) : (
-                                <div className="space-y-1">
-                                  {(rel.materiaisEncontrados || []).map(m => (
-                                    <div
-                                      key={m.tipo}
-                                      className="px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px]"
-                                    >
-                                      <strong className="text-emerald-300">{m.tipo}</strong>
-                                      <span className="text-slate-300 block">
-                                        Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
-                                      </span>
-                                    </div>
-                                  ))}
-                                </div>
-                              )}
-                            </td>
-                            <td className="p-3.5 max-w-sm">
-                              <p className="text-slate-300 line-clamp-2 whitespace-pre-wrap">{rel.detalhamento}</p>
-                            </td>
-                            <td className="p-3.5 text-right whitespace-nowrap">
-                              <div className="inline-flex items-center space-x-1.5">
-                                {isEditableToday && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleStartEditOperacao(rel)}
-                                    className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
-                                  >
-                                    <Edit className="w-3 h-3" />
-                                    <span>Editar</span>
-                                  </button>
-                                )}
-                                <button
-                                  type="button"
-                                  onClick={() => setViewingOperacaoReport(rel)}
-                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
-                                >
-                                  Ver
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handlePrintRelatorioOperacao(rel)}
-                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
-                                >
-                                  <Printer className="w-3 h-3" />
-                                  <span>Imprimir</span>
-                                </button>
-                                {isEditableToday && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteOperacao(rel)}
-                                    className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded transition"
-                                    title="Excluir relatório"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </button>
-                                )}
+
+                              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-slate-200 whitespace-pre-wrap">
+                                {rel.detalhamento}
                               </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
             </div>
           )}
 
-          {/* TABELA DE TREINAMENTOS DA UNIDADE */}
+          {/* SEÇÃO: RELATÓRIOS DE TREINAMENTO DA UNIDADE (INICIA OCULTA) */}
           {(unidadeTipoFilter === 'TREINAMENTO' || unidadeTipoFilter === 'TODOS') && (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
-            <div className="px-4 py-3 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
-              <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
-                <PenTool className="w-4 h-4" />
-                <span>Relatórios de Treinamento da Unidade ({filteredUnidadeReports.length})</span>
-              </span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
-                  <tr>
-                    <th className="p-3.5">Data</th>
-                    <th className="p-3.5">Condutor</th>
-                    <th className="p-3.5">Cachorro K9</th>
-                    <th className="p-3.5">Local</th>
-                    <th className="p-3.5">Participação</th>
-                    <th className="p-3.5">Descrição do Treinamento</th>
-                    <th className="p-3.5 text-right">Ações</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/70">
-                  {filteredUnidadeReports.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="p-10 text-center text-slate-500">
-                        Nenhum relatório de treinamento da unidade encontrado com os filtros aplicados.
-                      </td>
-                    </tr>
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+              <button
+                type="button"
+                onClick={() => setUnidadeTreinamentosSectionOpen(v => !v)}
+                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+              >
+                <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
+                  {unidadeTreinamentosSectionOpen ? (
+                    <ChevronDown className="w-4 h-4 text-amber-400" />
                   ) : (
-                    filteredUnidadeReports.map(rel => (
-                      <tr key={rel.id} className="hover:bg-slate-800/30 transition">
-                        <td className="p-3.5 font-mono font-bold text-amber-400 whitespace-nowrap">
-                          {formatDateBr(rel.dataTreinamento)}
-                        </td>
-                        <td className="p-3.5">
-                          <p className="font-bold text-slate-200">{rel.condutorNome}</p>
-                          {rel.condutorMasp && (
-                            <p className="text-[10px] font-mono text-slate-500">MASP: {formatMasp(rel.condutorMasp)}</p>
-                          )}
-                        </td>
-                        <td className="p-3.5">
-                          <div className="space-y-0.5">
-                            {getRelatorioCondutorDogs(rel).map(dog => (
-                              <div key={dog.id}>
-                                <p className="font-bold text-slate-100">{dog.nome}</p>
-                                {dog.raca && <p className="text-[10px] text-slate-500">{dog.raca}</p>}
-                              </div>
-                            ))}
-                          </div>
-                          {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
-                            <div className="mt-1 space-y-0.5">
-                              {rel.participantes.map(p => (
-                                <p key={p.userId} className="text-[10px] text-slate-400">
-                                  • {p.name}:{' '}
-                                  <span className="text-amber-300">
-                                    {p.cachorros && p.cachorros.length > 0
-                                      ? p.cachorros.map(c => c.nome).join(', ')
-                                      : 'Sem cachorro'}
+                    <ChevronRight className="w-4 h-4 text-amber-400" />
+                  )}
+                  <PenTool className="w-4 h-4" />
+                  <span>Relatórios de Treinamento da Unidade ({filteredUnidadeReports.length})</span>
+                </span>
+                <span className="text-[11px] font-bold text-slate-400 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800">
+                  {unidadeTreinamentosSectionOpen ? 'Ocultar' : 'Abrir'}
+                </span>
+              </button>
+
+              {unidadeTreinamentosSectionOpen && (
+                <div className="p-3.5 sm:p-4 border-t border-slate-800 space-y-2.5">
+                  {filteredUnidadeReports.length === 0 ? (
+                    <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-6 text-center text-slate-500 text-xs">
+                      Nenhum relatório de treinamento da unidade encontrado com os filtros aplicados.
+                    </div>
+                  ) : (
+                    filteredUnidadeReports.map(rel => {
+                      const isItemOpen = Boolean(expandedReportIds[`unid-tr-${rel.id}`]);
+                      return (
+                        <div
+                          key={rel.id}
+                          className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden"
+                        >
+                          <div className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandedReport(`unid-tr-${rel.id}`)}
+                              className="flex-1 text-left flex items-start space-x-2.5 min-w-0 group"
+                            >
+                              <span className="mt-0.5 text-slate-400 group-hover:text-amber-400 transition shrink-0">
+                                {isItemOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                              </span>
+                              <div className="space-y-1 min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <span className="font-mono font-bold text-amber-400 text-xs">
+                                    {formatDateBr(rel.dataTreinamento)}
                                   </span>
+                                  <span className="font-bold text-slate-100 text-xs flex items-center space-x-1">
+                                    <Dog className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>{getRelatorioCondutorDogs(rel).map(d => d.nome).join(', ')}</span>
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.modalidadeLocal === 'Interno'
+                                        ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
+                                        : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
+                                    }`}
+                                  >
+                                    {rel.modalidadeLocal}
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                      rel.modalidadeParticipacao === 'Sozinho'
+                                        ? 'bg-slate-800 text-slate-300 border border-slate-700'
+                                        : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                                    }`}
+                                  >
+                                    {rel.modalidadeParticipacao}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-slate-400">
+                                  Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                  {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
+                                  {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0
+                                    ? ` • +${rel.participantes.length} participante(s)`
+                                    : ''}
                                 </p>
-                              ))}
+                              </div>
+                            </button>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandedReport(`unid-tr-${rel.id}`)}
+                                className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 rounded text-[11px] font-semibold transition"
+                              >
+                                {isItemOpen ? 'Recolher' : 'Abrir'}
+                              </button>
+                              {canEditRelatorioTreinamento(rel) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditTreinamento(rel)}
+                                  className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                                  title="Editar relatório (disponível ao longo do dia de hoje)"
+                                >
+                                  <Edit className="w-3 h-3" />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setViewingTreinoReport(rel)}
+                                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
+                              >
+                                Ver
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handlePrintRelatorioTreinamento(rel)}
+                                className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3 h-3" />
+                                <span>Imprimir</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {isItemOpen && (
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs">
+                              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-slate-200 whitespace-pre-wrap">
+                                {rel.descricao}
+                              </div>
+
+                              {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-slate-400 font-semibold mr-1">Participantes ({rel.participantes.length}):</span>
+                                  {rel.participantes.map(p => (
+                                    <span
+                                      key={p.userId}
+                                      className={`px-2 py-0.5 rounded-lg border ${
+                                        p.signed
+                                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                          : 'bg-slate-950 border-slate-800 text-slate-400'
+                                      }`}
+                                    >
+                                      {p.name}:{' '}
+                                      <span className="text-amber-300">
+                                        {p.cachorros && p.cachorros.length > 0
+                                          ? p.cachorros.map(c => c.nome).join(', ')
+                                          : 'Sem cachorro'}
+                                      </span>{' '}
+                                      {p.signed ? '✓ Assinado' : '• Pendente'}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                           )}
-                        </td>
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                              rel.modalidadeLocal === 'Interno'
-                                ? 'bg-blue-500/15 text-blue-300 border border-blue-500/30'
-                                : 'bg-purple-500/15 text-purple-300 border border-purple-500/30'
-                            }`}
-                          >
-                            {rel.modalidadeLocal}
-                          </span>
-                        </td>
-                        <td className="p-3.5 whitespace-nowrap">
-                          <span
-                            className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                              rel.modalidadeParticipacao === 'Sozinho'
-                                ? 'bg-slate-800 text-slate-300 border border-slate-700'
-                                : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-                            }`}
-                          >
-                            {rel.modalidadeParticipacao}
-                          </span>
-                          {rel.modalidadeParticipacao === 'Coletivo' && (
-                            <p className="text-[10px] text-slate-400 mt-0.5">
-                              +{(rel.participantes || []).length} participante(s)
-                            </p>
-                          )}
-                        </td>
-                        <td className="p-3.5 max-w-md">
-                          <p className="text-slate-300 line-clamp-2 whitespace-pre-wrap">{rel.descricao}</p>
-                        </td>
-                        <td className="p-3.5 text-right whitespace-nowrap">
-                          <div className="inline-flex items-center space-x-1.5">
-                            {canEditRelatorioTreinamento(rel) && (
-                              <button
-                                onClick={() => handleStartEditTreinamento(rel)}
-                                className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
-                                title="Editar relatório (disponível ao longo do dia de hoje)"
-                              >
-                                <Edit className="w-3 h-3" />
-                                <span>Editar</span>
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setViewingTreinoReport(rel)}
-                              className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
-                            >
-                              Ver
-                            </button>
-                            <button
-                              onClick={() => handlePrintRelatorioTreinamento(rel)}
-                              className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
-                            >
-                              <Printer className="w-3 h-3" />
-                              <span>Imprimir</span>
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                        </div>
+                      );
+                    })
                   )}
-                </tbody>
-              </table>
+                </div>
+              )}
             </div>
-          </div>
           )}
         </div>
       )}
