@@ -117,6 +117,47 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
 
   // Relatório de Treinamento state
   const getTodayIsoBr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const computeRemainingEditCountdownBr = () => {
+    try {
+      const parts = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'America/Sao_Paulo',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+      }).formatToParts(new Date());
+      const hh = Number(parts.find(p => p.type === 'hour')?.value || '0') % 24;
+      const mm = Number(parts.find(p => p.type === 'minute')?.value || '0');
+      const ss = Number(parts.find(p => p.type === 'second')?.value || '0');
+      const elapsedSeconds = hh * 3600 + mm * 60 + ss;
+      const remaining = Math.max(0, 86400 - elapsedSeconds);
+      const rH = Math.floor(remaining / 3600);
+      const rM = Math.floor((remaining % 3600) / 60);
+      const rS = remaining % 60;
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return {
+        totalSeconds: remaining,
+        formatted: `${pad(rH)}:${pad(rM)}:${pad(rS)}`
+      };
+    } catch {
+      const now = new Date();
+      const end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+      const remaining = Math.max(0, Math.floor((end.getTime() - now.getTime()) / 1000));
+      const rH = Math.floor(remaining / 3600);
+      const rM = Math.floor((remaining % 3600) / 60);
+      const rS = remaining % 60;
+      const pad = (n: number) => String(n).padStart(2, '0');
+      return {
+        totalSeconds: remaining,
+        formatted: `${pad(rH)}:${pad(rM)}:${pad(rS)}`
+      };
+    }
+  };
+  const [treinoEditCountdown, setTreinoEditCountdown] = useState<{ totalSeconds: number; formatted: string }>(() =>
+    computeRemainingEditCountdownBr()
+  );
+  const [confirmDeleteTodayTreinoId, setConfirmDeleteTodayTreinoId] = useState<string | null>(null);
   const [treinoForm, setTreinoForm] = useState<{
     dataTreinamento: string;
     cachorros: ParticipanteTreinamentoCachorro[];
@@ -255,6 +296,15 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     if (!currentUser?.id) return [];
     return relatoriosTreinamento.filter(r => canEditRelatorioTreinamento(r));
   }, [relatoriosTreinamento, currentUser?.id]);
+
+  useEffect(() => {
+    if (editableTodayReports.length === 0) return;
+    setTreinoEditCountdown(computeRemainingEditCountdownBr());
+    const intervalId = window.setInterval(() => {
+      setTreinoEditCountdown(computeRemainingEditCountdownBr());
+    }, 1000);
+    return () => window.clearInterval(intervalId);
+  }, [editableTodayReports.length]);
 
   const filteredParticipantCandidates = useMemo(() => {
     const q = participantSearch.trim().toLowerCase();
@@ -1424,36 +1474,59 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
                       Relatórios de Hoje Disponíveis para Edição ({editableTodayReports.length})
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Relatórios criados ou assinados por você hoje podem ser modificados ao longo do dia.
+                      Relatórios criados ou assinados por você hoje podem ser modificados ou excluídos ao longo do dia.
                     </p>
                   </div>
                 </div>
-                {editingTreinoReport && (
-                  <button
-                    type="button"
-                    onClick={handleCancelEditTreinamento}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 border border-slate-700 transition self-start sm:self-auto"
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+                  <div
+                    className={`px-3 py-1.5 rounded-lg border font-mono text-[11px] font-bold flex items-center space-x-1.5 ${
+                      treinoEditCountdown.totalSeconds === 0
+                        ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                        : treinoEditCountdown.totalSeconds <= 1800
+                        ? 'bg-red-500/15 border-red-500/40 text-red-300'
+                        : treinoEditCountdown.totalSeconds <= 7200
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200'
+                    }`}
+                    title="Contagem regressiva até o término do dia para editar ou excluir"
                   >
-                    <Plus className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Novo Relatório</span>
-                  </button>
-                )}
+                    <Clock className="w-3.5 h-3.5 shrink-0" />
+                    <span>
+                      {treinoEditCountdown.totalSeconds > 0
+                        ? `Tempo restante: ${treinoEditCountdown.formatted}`
+                        : 'Prazo encerrado'}
+                    </span>
+                  </div>
+                  {editingTreinoReport && (
+                    <button
+                      type="button"
+                      onClick={handleCancelEditTreinamento}
+                      className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 border border-slate-700 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Novo Relatório</span>
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
                 {editableTodayReports.map(rel => {
                   const isBeingEdited = editingTreinoReport?.id === rel.id;
                   const isCreator = rel.condutorId === currentUser?.id;
+                  const canDeleteThis = isCreator || isGeral || effectiveRole === 'Administrador';
                   const dogsText = getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ');
+                  const isConfirmingDelete = confirmDeleteTodayTreinoId === rel.id;
                   return (
                     <div
                       key={rel.id}
-                      className={`rounded-xl p-3 border flex items-center justify-between gap-3 transition ${
+                      className={`rounded-xl p-3 border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition ${
                         isBeingEdited
                           ? 'bg-cyan-500/10 border-cyan-400/60'
                           : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <div className="min-w-0 space-y-0.5">
+                      <div className="min-w-0 space-y-1">
                         <div className="flex flex-wrap items-center gap-1.5">
                           <span className="font-bold text-slate-100 truncate">{dogsText}</span>
                           <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
@@ -1466,28 +1539,94 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
                         <p className="text-[11px] text-slate-400 truncate">
                           Condutor: {rel.condutorNome} — {rel.descricao}
                         </p>
+                        <div
+                          className={`inline-flex items-center space-x-1 font-mono text-[10px] font-bold ${
+                            treinoEditCountdown.totalSeconds === 0
+                              ? 'text-red-400'
+                              : treinoEditCountdown.totalSeconds <= 1800
+                              ? 'text-red-300'
+                              : treinoEditCountdown.totalSeconds <= 7200
+                              ? 'text-amber-300'
+                              : 'text-cyan-300'
+                          }`}
+                        >
+                          <Clock className="w-3 h-3 shrink-0" />
+                          <span>
+                            {treinoEditCountdown.totalSeconds > 0
+                              ? `Edição/exclusão encerra em ${treinoEditCountdown.formatted}`
+                              : 'Prazo de edição/exclusão encerrado'}
+                          </span>
+                        </div>
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => (isBeingEdited ? handleCancelEditTreinamento() : handleStartEditTreinamento(rel))}
-                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-1 shrink-0 transition ${
-                          isBeingEdited
-                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
-                            : 'bg-cyan-600 hover:bg-cyan-500 text-white'
-                        }`}
-                      >
-                        {isBeingEdited ? (
-                          <>
-                            <X className="w-3.5 h-3.5" />
-                            <span>Cancelar</span>
-                          </>
-                        ) : (
-                          <>
-                            <Edit className="w-3.5 h-3.5" />
-                            <span>Editar</span>
-                          </>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          disabled={treinoEditCountdown.totalSeconds === 0 || isSubmitting}
+                          onClick={() => (isBeingEdited ? handleCancelEditTreinamento() : handleStartEditTreinamento(rel))}
+                          className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-1 transition disabled:opacity-40 disabled:cursor-not-allowed ${
+                            isBeingEdited
+                              ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
+                              : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                          }`}
+                        >
+                          {isBeingEdited ? (
+                            <>
+                              <X className="w-3.5 h-3.5" />
+                              <span>Cancelar</span>
+                            </>
+                          ) : (
+                            <>
+                              <Edit className="w-3.5 h-3.5" />
+                              <span>Editar</span>
+                            </>
+                          )}
+                        </button>
+                        {canDeleteThis && (
+                          isConfirmingDelete ? (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                disabled={treinoEditCountdown.totalSeconds === 0 || isSubmitting}
+                                onClick={async () => {
+                                  setConfirmDeleteTodayTreinoId(null);
+                                  setIsSubmitting(true);
+                                  const res = await storage.deleteRelatorioTreinamentoCanil(rel.id);
+                                  setIsSubmitting(false);
+                                  if (res.success) {
+                                    if (editingTreinoReport?.id === rel.id) {
+                                      handleCancelEditTreinamento();
+                                    }
+                                    notifySuccess('Relatório de treinamento excluído.');
+                                    triggerRefresh();
+                                  } else {
+                                    notifyError(res.error || 'Erro ao excluir relatório.');
+                                  }
+                                }}
+                                className="px-2.5 py-1.5 rounded-lg font-bold text-[11px] bg-red-600 hover:bg-red-500 text-white transition disabled:opacity-40"
+                              >
+                                Confirmar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDeleteTodayTreinoId(null)}
+                                className="px-2 py-1.5 rounded-lg font-bold text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                              >
+                                Não
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={treinoEditCountdown.totalSeconds === 0 || isSubmitting}
+                              onClick={() => setConfirmDeleteTodayTreinoId(rel.id)}
+                              className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                              title="Excluir relatório de treinamento"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )
                         )}
-                      </button>
+                      </div>
                     </div>
                   );
                 })}

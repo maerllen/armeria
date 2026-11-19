@@ -2538,23 +2538,10 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                     : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:bg-slate-800 hover:text-slate-100 hover:border-slate-500'
                 }`}
               >
-                {btn.isCoc ? (
-                  <Dog className="w-4 h-4 shrink-0" />
-                ) : (
+                {!btn.isCoc && (
                   <Building2 className="w-4 h-4 shrink-0" />
                 )}
-                <span>{btn.name}</span>
-                {btn.isCoc && (
-                  <span
-                    className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${
-                      isSelected
-                        ? 'bg-slate-950/20 text-slate-950'
-                        : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
-                    }`}
-                  >
-                    Canil K9
-                  </span>
-                )}
+                <span>{btn.isCoc ? 'COC' : btn.name}</span>
                 {isGeral && !btn.isCoc && btn.departmentName && btn.departmentName !== '-' && (
                   <span
                     className={`text-[10px] font-medium ${
@@ -2570,7 +2557,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       </div>
 
-      {/* Sub-navegação COC para perfis gestores (Treinamentos Canil K9 vs Acervo/Farmácia Canil) */}
+      {/* Sub-navegação COC para perfis gestores (Relatórios vs Acervo/Farmácia Canil) */}
       {isCocActive && !isOperadorCanino && (
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
           <button
@@ -2586,7 +2573,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             }`}
           >
             <PenTool className="w-4 h-4" />
-            <span>Relatórios de Treinamento Canil</span>
+            <span>Relatórios</span>
           </button>
           <button
             type="button"
