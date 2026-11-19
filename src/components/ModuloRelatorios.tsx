@@ -31,9 +31,12 @@ import {
   Dog,
   Building,
   Pill,
-  Syringe
+  Syringe,
+  PenTool,
+  Layers
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
+import { RelatorioTreinamentoCanilPanel } from './RelatorioTreinamentoCanilPanel';
 
 interface ReportModuleProps {
   currentUser: User;
@@ -45,9 +48,18 @@ interface ReportModuleProps {
   weapons: Weapon[];
   users: User[];
   vaultSpaces?: VaultSpace[];
+  onRefresh?: () => void;
 }
 
-type ReportTab = 'TODOS' | 'COFRES' | 'ARMAS' | 'MUNICIONAL' | 'MATERIAIS' | 'EXPLOSIVOS' | 'CANIL';
+type ReportTab =
+  | 'TODOS'
+  | 'COFRES'
+  | 'ARMAS'
+  | 'MUNICIONAL'
+  | 'MATERIAIS'
+  | 'EXPLOSIVOS'
+  | 'CANIL'
+  | 'TREINAMENTO_CANIL';
 
 interface SectionSelection {
   cofres: boolean;
@@ -76,21 +88,24 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   calibers = [],
   weapons = [],
   users = [],
-  vaultSpaces = []
+  vaultSpaces = [],
+  onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
+  const isOperadorCanino = effectiveRole === 'operador_canino';
   const isExplosivistaRole =
     effectiveRole === 'Explosivista' ||
     (effectiveRole === 'Policial' && isUserExplosivista(currentUser));
   const allowedModules = useMemo(() => getAllowedModulesForUser(currentUser), [currentUser]);
   const hasCanilAccess = allowedModules.includes('veterinario');
   const isCanilOnly =
-    hasCanilAccess &&
-    !isGeral &&
-    !isExplosivistaRole &&
-    effectiveRole !== 'Armeiro' &&
-    effectiveRole !== 'Administrador';
+    isOperadorCanino ||
+    (hasCanilAccess &&
+      !isGeral &&
+      !isExplosivistaRole &&
+      effectiveRole !== 'Armeiro' &&
+      effectiveRole !== 'Administrador');
   const isDeptScoped =
     !isGeral &&
     (effectiveRole === 'Administrador' ||
@@ -100,6 +115,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
   const [dataVersion, setDataVersion] = useState(0);
   const [activeTab, setActiveTab] = useState<ReportTab>(() => {
+    if (isOperadorCanino) return 'TREINAMENTO_CANIL';
     if (isCanilOnly) return 'CANIL';
     if (isExplosivistaRole) return 'COFRES';
     return 'TODOS';
@@ -2199,15 +2215,23 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       },
       {
         id: 'CANIL',
-        label: `Canil (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
+        label: `Canil — Acervo (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
         icon: <Dog className="w-4 h-4" />,
-        visible: hasCanilAccess
+        visible: hasCanilAccess && !isOperadorCanino
+      },
+      {
+        id: 'TREINAMENTO_CANIL',
+        label: 'Treinamentos Canil K9',
+        icon: <PenTool className="w-4 h-4" />,
+        visible: isOperadorCanino || isGeral
       }
     ];
     return allTabs.filter(t => t.visible);
   }, [
     isExplosivistaRole,
     isCanilOnly,
+    isOperadorCanino,
+    isGeral,
     hasCanilAccess,
     screenData.cofres.length,
     screenData.armas.length,
@@ -2223,72 +2247,178 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   ]);
 
   useEffect(() => {
+    if (isOperadorCanino && activeTab !== 'TREINAMENTO_CANIL') {
+      setActiveTab('TREINAMENTO_CANIL');
+      return;
+    }
     const allowedIds = tabsConfig.map(t => t.id);
     if (allowedIds.length > 0 && !allowedIds.includes(activeTab)) {
       setActiveTab(allowedIds[0]);
     }
-  }, [tabsConfig, activeTab]);
+  }, [tabsConfig, activeTab, isOperadorCanino]);
+
+  const userUnitName = currentUser.unitId
+    ? getUnitName(currentUser.unitId)
+    : isGeral
+    ? 'Todas as Unidades'
+    : 'Unidade não vinculada';
+
+  const userDeptName = currentUser.departmentId
+    ? getDeptName(currentUser.departmentId)
+    : isGeral
+    ? 'Todos os Departamentos'
+    : 'Departamento não vinculado';
+
+  const sectorContext = useMemo(() => {
+    if (isOperadorCanino) {
+      return {
+        sectorName: 'Canil K9 • Operador Canino',
+        description:
+          'Relatórios vinculados à sua unidade e ao setor Canil K9: criação e edição ao longo do dia do Relatório de Treinamento, acompanhamento e assinaturas em Meus Relatórios e consulta de Relatórios da Unidade.'
+      };
+    }
+    if (isExplosivistaRole) {
+      return {
+        sectorName: 'Explosivos / Esquadrão Antibombas',
+        description:
+          'Relatórios vinculados à sua unidade e ao setor de Explosivos: cofres de explosivos, acervo de explosivos e histórico completo de movimentações.'
+      };
+    }
+    if (effectiveRole === 'Armeiro') {
+      return {
+        sectorName: 'Armaria / Material Bélico',
+        description:
+          'Relatórios vinculados à sua unidade e ao setor de Armaria: cofres, armas, munições, materiais, explosivos e histórico completo de movimentações.'
+      };
+    }
+    if (effectiveRole === 'Administrador') {
+      return {
+        sectorName: 'Administração do Departamento / Unidade',
+        description:
+          'Relatórios integrados vinculados ao seu departamento e unidades: cofres, armas, munições, materiais, explosivos e movimentações operacionais.'
+      };
+    }
+    return {
+      sectorName: 'Gestão Geral • Todos os Setores e Unidades',
+      description:
+        'Visão global de todas as unidades e setores, incluindo relatórios gerenciais (Armaria, Cofres, Explosivos, Acervo Canil) e o módulo de Treinamentos do Setor Canil K9.'
+    };
+  }, [isOperadorCanino, isExplosivistaRole, effectiveRole]);
+
+  const isCanilTrainingView = isOperadorCanino || activeTab === 'TREINAMENTO_CANIL';
+
+  const handlePanelRefresh = () => {
+    storage
+      .refreshFromServer()
+      .then(() => {
+        setDataVersion(v => v + 1);
+        if (onRefresh) onRefresh();
+      })
+      .catch(() => {
+        setDataVersion(v => v + 1);
+        if (onRefresh) onRefresh();
+      });
+  };
 
   return (
     <div className="space-y-6">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4 print:hidden">
-        <div className="flex items-center space-x-3">
-          <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl">
-            <FileText className="w-6 h-6" />
+      {/* Header Banner vinculado à Unidade e Setor */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4 print:hidden">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center space-x-3">
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl shrink-0">
+              {isCanilTrainingView ? <Dog className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
+            </div>
+            <div>
+              <h1 className="text-xl font-bold text-slate-100">
+                {isOperadorCanino ? 'Módulo Relatório • Setor Canil K9' : 'Relatórios Gerenciais e Operacionais'}
+              </h1>
+              <p className="text-xs text-slate-400 mt-0.5">{sectorContext.description}</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-100">Relatórios Gerenciais e Operacionais</h1>
-            <p className="text-xs text-slate-400">
-              {isCanilOnly
-                ? 'Canis físicos, cães K9, farmácia veterinária, rações e histórico completo de aplicações do Canil'
-                : isExplosivistaRole
-                ? 'Cofres de explosivos, acervo de explosivos e histórico completo de movimentações por unidade'
-                : 'Cofres, armas, munições, materiais, explosivos e histórico completo de movimentações por unidade'}
-            </p>
-          </div>
+
+          {!isCanilTrainingView && (
+            <div className="flex items-center space-x-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => openActionModal('CSV')}
+                className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
+              >
+                <Download className="w-4 h-4 text-amber-400" />
+                <span>Exportar CSV</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openActionModal('PRINT')}
+                className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Relatório</span>
+              </button>
+            </div>
+          )}
         </div>
 
-        <div className="flex items-center space-x-3">
-          <button
-            type="button"
-            onClick={() => openActionModal('CSV')}
-            className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-          >
-            <Download className="w-4 h-4 text-amber-400" />
-            <span>Exportar CSV</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => openActionModal('PRINT')}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Imprimir Relatório</span>
-          </button>
+        {/* Vínculo Unidade / Departamento / Setor */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-3 border-t border-slate-800/80 text-xs">
+          <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5">
+            <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Departamento</span>
+              <span className="font-bold text-slate-100 truncate block">{userDeptName}</span>
+            </div>
+          </div>
+          <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5">
+            <Building className="w-4 h-4 text-cyan-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Unidade Vinculada</span>
+              <span className="font-bold text-slate-100 truncate block">{userUnitName}</span>
+            </div>
+          </div>
+          <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5">
+            <Layers className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="min-w-0">
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Setor / Lógica Ativa</span>
+              <span className="font-bold text-emerald-300 truncate block">{sectorContext.sectorName}</span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
-        {tabsConfig.map(t => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setActiveTab(t.id)}
-            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
-              activeTab === t.id
-                ? 'bg-amber-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            {t.icon}
-            <span>{t.label}</span>
-          </button>
-        ))}
-      </div>
+      {/* Main Sector Tabs (hidden for Operador Canino since Canil Training sub-tabs are the primary tabs) */}
+      {!isOperadorCanino && (
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
+          {tabsConfig.map(t => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setActiveTab(t.id)}
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+                activeTab === t.id
+                  ? 'bg-amber-500 text-slate-950 shadow'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {t.icon}
+              <span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
+      {/* SETOR CANIL K9: RELATÓRIO DE TREINAMENTO, MEUS RELATÓRIOS E RELATÓRIOS DA UNIDADE */}
+      {isCanilTrainingView ? (
+        <RelatorioTreinamentoCanilPanel
+          currentUser={currentUser}
+          departments={allDepartments}
+          units={allUnits}
+          allUsers={allUsersList}
+          onRefresh={handlePanelRefresh}
+          dataVersion={dataVersion}
+        />
+      ) : (
+        <>
       {/* Advanced Filter Panel */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 print:hidden">
         <div className="flex items-center space-x-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
@@ -3165,6 +3295,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           <span>Armeria PCMG v2.0</span>
         </div>
       </div>
+        </>
+      )}
 
       {/* UNIFIED MODAL FOR PRINT & CSV EXPORT */}
       {actionModalMode && (

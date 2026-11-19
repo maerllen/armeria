@@ -974,6 +974,7 @@ export default function App() {
               weapons={weapons}
               users={allUsers}
               vaultSpaces={vaultSpaces}
+              onRefresh={refreshData}
             />
           )}
 
