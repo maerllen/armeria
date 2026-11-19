@@ -12301,6 +12301,219 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
   }
 });
 
+apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || body.editorId || '').trim();
+
+    if (!actorId) {
+      return res.status(400).json({ error: 'Usuário editor não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_REL_TREINAMENTO as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        CONDUTOR_ID as condutorId,
+        CONDUTOR_NOME as condutorNome,
+        CONDUTOR_MASP as condutorMasp,
+        CONDUTOR_CARGO as condutorCargo,
+        PARTICIPANTES_JSON as participantesJson,
+        CONDUTOR_ASSINADO as condutorAssinado,
+        DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt
+      FROM RELATORIOS_TREINAMENTO_CANIL
+      WHERE ID_REL_TREINAMENTO = ?
+      LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de treinamento não encontrado.' });
+    }
+
+    const existing = rows[0];
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    if (String(existing.dataTreinamento || '').slice(0, 10) !== todayBr) {
+      return res.status(403).json({
+        error: 'O relatório de treinamento só pode ser modificado ao longo do mesmo dia em que foi criado.'
+      });
+    }
+
+    let existingParticipantes: any[] = [];
+    try {
+      const parsed = JSON.parse(existing.participantesJson || '[]');
+      if (Array.isArray(parsed)) existingParticipantes = parsed;
+    } catch {
+      existingParticipantes = [];
+    }
+
+    const isCreator = String(existing.condutorId) === actorId;
+    const isSignedParticipant = existingParticipantes.some(
+      (p: any) => String(p?.userId) === actorId && Boolean(p?.signed)
+    );
+
+    if (!isCreator && !isSignedParticipant) {
+      return res.status(403).json({
+        error: 'Apenas o condutor que gerou o relatório ou participantes que já o assinaram podem modificá-lo.'
+      });
+    }
+
+    const condutorCachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> = [];
+    const seenMainDogs = new Set<string>();
+    const rawMainDogs = Array.isArray(body.cachorros) ? body.cachorros : [];
+    for (const c of rawMainDogs) {
+      const cid = String(c?.id || '').trim();
+      const cnome = String(c?.nome || '').trim();
+      if (!cid || !cnome || seenMainDogs.has(cid)) continue;
+      seenMainDogs.add(cid);
+      condutorCachorros.push({
+        id: cid,
+        nome: cnome,
+        raca: String(c?.raca || '').trim(),
+        microchip: String(c?.microchip || '').trim()
+      });
+    }
+    if (condutorCachorros.length === 0 && body.cachorroId && body.cachorroNome) {
+      condutorCachorros.push({
+        id: String(body.cachorroId).trim(),
+        nome: String(body.cachorroNome).trim(),
+        raca: String(body.cachorroRaca || '').trim(),
+        microchip: String(body.cachorroMicrochip || '').trim()
+      });
+    }
+
+    if (condutorCachorros.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um cachorro do treinamento.' });
+    }
+    const primaryDog = condutorCachorros[0];
+
+    const modalidadeLocal = body.modalidadeLocal === 'Externo' ? 'Externo' : 'Interno';
+    const modalidadeParticipacao = body.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho';
+    const descricao = String(body.descricao || '').trim();
+
+    if (!descricao) {
+      return res.status(400).json({ error: 'A descrição do treinamento do dia é obrigatória.' });
+    }
+    if (descricao.length > 1000) {
+      return res.status(400).json({ error: 'A descrição do treinamento deve ter no máximo 1000 caracteres.' });
+    }
+
+    const existingPartMap = new Map<string, any>();
+    for (const ep of existingParticipantes) {
+      if (ep?.userId) existingPartMap.set(String(ep.userId), ep);
+    }
+
+    let participantes: any[] = [];
+    if (modalidadeParticipacao === 'Coletivo') {
+      const rawList = Array.isArray(body.participantes) ? body.participantes : [];
+      const seenIds = new Set<string>([String(existing.condutorId)]);
+      for (const p of rawList) {
+        const uid = String(p?.userId || p?.id || '').trim();
+        if (!uid || seenIds.has(uid)) continue;
+        seenIds.add(uid);
+        const rawDogs = Array.isArray(p?.cachorros) ? p.cachorros : [];
+        const seenDogs = new Set<string>();
+        const cachorrosParticipante: any[] = [];
+        for (const c of rawDogs) {
+          const cid = String(c?.id || '').trim();
+          const cnome = String(c?.nome || '').trim();
+          if (!cid || !cnome || seenDogs.has(cid)) continue;
+          seenDogs.add(cid);
+          cachorrosParticipante.push({
+            id: cid,
+            nome: cnome,
+            raca: String(c?.raca || '').trim(),
+            microchip: String(c?.microchip || '').trim()
+          });
+        }
+        const prevPart = existingPartMap.get(uid);
+        participantes.push({
+          userId: uid,
+          name: String(p?.name || prevPart?.name || '').trim(),
+          masp: String(p?.masp || prevPart?.masp || '').trim(),
+          cargo: String(p?.cargo || prevPart?.cargo || '').trim(),
+          signed: Boolean(prevPart?.signed),
+          signedAt: prevPart?.signedAt || null,
+          cachorros: cachorrosParticipante
+        });
+      }
+      if (participantes.length > 15) {
+        return res.status(400).json({ error: 'Em treinamento coletivo, é permitido incluir no máximo 15 usuários além do condutor.' });
+      }
+    }
+
+    await pool.query(
+      `UPDATE RELATORIOS_TREINAMENTO_CANIL SET
+        CACHORRO_ID = ?,
+        CACHORRO_NOME = ?,
+        CACHORRO_RACA = ?,
+        CACHORRO_MICROCHIP = ?,
+        CACHORROS_JSON = ?,
+        MODALIDADE_LOCAL = ?,
+        MODALIDADE_PARTICIPACAO = ?,
+        DESCRICAO = ?,
+        PARTICIPANTES_JSON = ?,
+        DATA_ATUALIZACAO = NOW()
+      WHERE ID_REL_TREINAMENTO = ?`,
+      [
+        primaryDog.id,
+        primaryDog.nome,
+        primaryDog.raca || null,
+        primaryDog.microchip || null,
+        JSON.stringify(condutorCachorros),
+        modalidadeLocal,
+        modalidadeParticipacao,
+        descricao,
+        JSON.stringify(participantes),
+        id
+      ]
+    );
+
+    const updatedRecord = {
+      id: existing.id,
+      dataTreinamento: existing.dataTreinamento,
+      condutorId: existing.condutorId,
+      condutorNome: existing.condutorNome,
+      condutorMasp: existing.condutorMasp || '',
+      condutorCargo: existing.condutorCargo || '',
+      cachorroId: primaryDog.id,
+      cachorroNome: primaryDog.nome,
+      cachorroRaca: primaryDog.raca || '',
+      cachorroMicrochip: primaryDog.microchip || '',
+      cachorros: condutorCachorros,
+      modalidadeLocal,
+      modalidadeParticipacao,
+      descricao,
+      participantes,
+      condutorAssinado: Boolean(existing.condutorAssinado),
+      condutorAssinadoEm: existing.condutorAssinadoEm || undefined,
+      departmentId: existing.departmentId || undefined,
+      unitId: existing.unitId || undefined,
+      createdAt: existing.createdAt || '',
+      updatedAt: new Date().toISOString()
+    };
+
+    const dogsSummary = condutorCachorros.map(c => c.nome).join(', ');
+    await insertAuditLog(
+      'Veterinário',
+      'Editar Relatório de Treinamento Canil',
+      `Editado relatório de treinamento ${id} (${modalidadeLocal} / ${modalidadeParticipacao}) do(s) cão(es) "${dogsSummary}" por ${actor.name || actorId}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(updatedRecord);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 apiRouter.put('/relatorios-treinamento-canil/:id/assinar', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;

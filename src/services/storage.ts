@@ -3699,6 +3699,25 @@ class StorageService {
     }
   }
 
+  public async updateRelatorioTreinamentoCanil(
+    id: string,
+    rel: Partial<RelatorioTreinamentoCanil>
+  ): Promise<{ success: boolean; error?: string; data?: RelatorioTreinamentoCanil }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-canil/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar relatório de treinamento.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
   public async assinarRelatorioTreinamentoCanil(id: string): Promise<{ success: boolean; error?: string }> {
     try {
       const res = await fetch(`/api/relatorios-treinamento-canil/${id}/assinar`, {

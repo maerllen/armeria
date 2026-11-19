@@ -175,14 +175,30 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     }
   }, [activeTab, showFarmaciaTab, canMinistrarMedicamentos, canAccessTrainingTabs, canVerRelatoriosTodasEquipes]);
 
+  const [editingTreinoReport, setEditingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
+
+  const canEditRelatorioTreinamento = (rel?: RelatorioTreinamentoCanil | null): boolean => {
+    if (!rel || !currentUser?.id) return false;
+    const todayIso = getTodayIsoBr();
+    if (String(rel.dataTreinamento || '').slice(0, 10) !== todayIso) return false;
+    if (rel.condutorId === currentUser.id) return true;
+    return (rel.participantes || []).some(p => p.userId === currentUser.id && Boolean(p.signed));
+  };
+
   useEffect(() => {
-    if (activeTab === 'relatorio-treinamento' && !hasUserChangedMainDog && treinoForm.cachorros.length === 0 && currentUser?.id) {
+    if (
+      activeTab === 'relatorio-treinamento' &&
+      !editingTreinoReport &&
+      !hasUserChangedMainDog &&
+      treinoForm.cachorros.length === 0 &&
+      currentUser?.id
+    ) {
       const defaultDogs = getDefaultDogsForUser(currentUser.id);
       if (defaultDogs.length > 0) {
         setTreinoForm(prev => (prev.cachorros.length > 0 ? prev : { ...prev, cachorros: [toParticipanteDog(defaultDogs[0])] }));
       }
     }
-  }, [activeTab, currentUser?.id, cachorros, hasUserChangedMainDog, treinoForm.cachorros.length]);
+  }, [activeTab, currentUser?.id, cachorros, hasUserChangedMainDog, treinoForm.cachorros.length, editingTreinoReport]);
   const [participantSearch, setParticipantSearch] = useState('');
   const [meusRelFilter, setMeusRelFilter] = useState<'TODOS' | 'CRIADOS' | 'CONJUNTOS_ASSINADOS' | 'PENDENTES'>('TODOS');
   const [unidadeFilterDataInicio, setUnidadeFilterDataInicio] = useState('');
@@ -881,15 +897,21 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   const selectableUsersForTreino = useMemo(() => {
     const rawLookup = storage.getAllUsersForLookup();
     const base = rawLookup.length > 0 ? rawLookup : allUsers;
+    const ownerId = editingTreinoReport?.condutorId || currentUser?.id;
     return base
-      .filter(u => u && u.id !== currentUser?.id && (isGeral || u.role !== 'Geral'))
+      .filter(u => u && u.id !== ownerId && (isGeral || u.role !== 'Geral'))
       .sort((a, b) => {
         const aSameUnit = a.unitId === currentUser?.unitId ? 0 : 1;
         const bSameUnit = b.unitId === currentUser?.unitId ? 0 : 1;
         if (aSameUnit !== bSameUnit) return aSameUnit - bSameUnit;
         return (a.name || '').localeCompare(b.name || '', 'pt-BR');
       });
-  }, [allUsers, currentUser, isGeral]);
+  }, [allUsers, currentUser, isGeral, editingTreinoReport?.condutorId]);
+
+  const editableTodayReports = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return relatoriosTreinamento.filter(r => canEditRelatorioTreinamento(r));
+  }, [relatoriosTreinamento, currentUser?.id]);
 
   const filteredParticipantCandidates = useMemo(() => {
     const q = participantSearch.trim().toLowerCase();
@@ -1009,6 +1031,47 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     }));
   };
 
+  const handleStartEditTreinamento = (rel: RelatorioTreinamentoCanil) => {
+    if (!canEditRelatorioTreinamento(rel)) {
+      notifyError('Este relatório só pode ser modificado no mesmo dia em que foi criado pelo condutor autor ou por participantes que já assinaram.');
+      return;
+    }
+    setEditingTreinoReport(rel);
+    setHasUserChangedMainDog(true);
+    setTreinoForm({
+      dataTreinamento: rel.dataTreinamento,
+      cachorros: getRelatorioCondutorDogs(rel),
+      modalidadeLocal: rel.modalidadeLocal,
+      modalidadeParticipacao: rel.modalidadeParticipacao,
+      descricao: rel.descricao || '',
+      participantes: (rel.participantes || []).map(p => ({
+        ...p,
+        cachorros: (p.cachorros || []).map(c => ({ ...c }))
+      }))
+    });
+    setParticipantSearch('');
+    setViewingTreinoReport(null);
+    setActiveTab('relatorio-treinamento');
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  };
+
+  const handleCancelEditTreinamento = () => {
+    setEditingTreinoReport(null);
+    const nextDefaultDogs = currentUser ? getDefaultDogsForUser(currentUser.id) : [];
+    setHasUserChangedMainDog(false);
+    setTreinoForm({
+      dataTreinamento: getTodayIsoBr(),
+      cachorros: nextDefaultDogs.length > 0 ? [toParticipanteDog(nextDefaultDogs[0])] : [],
+      modalidadeLocal: 'Interno',
+      modalidadeParticipacao: 'Sozinho',
+      descricao: '',
+      participantes: []
+    });
+    setParticipantSearch('');
+  };
+
   const handleSaveTreinamento = async (shouldPrintAfter: boolean) => {
     if (!currentUser) return;
     if (treinoForm.cachorros.length === 0) {
@@ -1025,7 +1088,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       return;
     }
     if (treinoForm.modalidadeParticipacao === 'Coletivo' && treinoForm.participantes.length === 0) {
-      notifyError('Em treinamento coletivo, selecione ao menos 1 usuário participante junto com você (ou altere para Sozinho).');
+      notifyError('Em treinamento coletivo, selecione ao menos 1 usuário participante junto com o condutor (ou altere para Sozinho).');
       return;
     }
     if (treinoForm.modalidadeParticipacao === 'Coletivo' && treinoForm.participantes.length > 15) {
@@ -1037,25 +1100,40 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     const primaryDogRecord = cachorros.find(c => c.id === primaryDogEntry.id);
 
     setIsSubmitting(true);
-    const todayDate = getTodayIsoBr();
-    const res = await storage.saveRelatorioTreinamentoCanil({
-      dataTreinamento: todayDate,
-      condutorId: currentUser.id,
-      condutorNome: currentUser.name,
-      condutorMasp: currentUser.masp || '',
-      condutorCargo: currentUser.cargo || '',
-      cachorroId: primaryDogEntry.id,
-      cachorroNome: primaryDogEntry.nome,
-      cachorroRaca: primaryDogEntry.raca || '',
-      cachorroMicrochip: primaryDogEntry.microchip || '',
-      cachorros: treinoForm.cachorros,
-      modalidadeLocal: treinoForm.modalidadeLocal,
-      modalidadeParticipacao: treinoForm.modalidadeParticipacao,
-      descricao: cleanDesc,
-      participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
-      departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
-      unitId: currentUser.unitId || primaryDogRecord?.unitId || ''
-    });
+    let res: { success: boolean; error?: string; data?: RelatorioTreinamentoCanil };
+    if (editingTreinoReport) {
+      res = await storage.updateRelatorioTreinamentoCanil(editingTreinoReport.id, {
+        cachorroId: primaryDogEntry.id,
+        cachorroNome: primaryDogEntry.nome,
+        cachorroRaca: primaryDogEntry.raca || '',
+        cachorroMicrochip: primaryDogEntry.microchip || '',
+        cachorros: treinoForm.cachorros,
+        modalidadeLocal: treinoForm.modalidadeLocal,
+        modalidadeParticipacao: treinoForm.modalidadeParticipacao,
+        descricao: cleanDesc,
+        participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : []
+      });
+    } else {
+      const todayDate = getTodayIsoBr();
+      res = await storage.saveRelatorioTreinamentoCanil({
+        dataTreinamento: todayDate,
+        condutorId: currentUser.id,
+        condutorNome: currentUser.name,
+        condutorMasp: currentUser.masp || '',
+        condutorCargo: currentUser.cargo || '',
+        cachorroId: primaryDogEntry.id,
+        cachorroNome: primaryDogEntry.nome,
+        cachorroRaca: primaryDogEntry.raca || '',
+        cachorroMicrochip: primaryDogEntry.microchip || '',
+        cachorros: treinoForm.cachorros,
+        modalidadeLocal: treinoForm.modalidadeLocal,
+        modalidadeParticipacao: treinoForm.modalidadeParticipacao,
+        descricao: cleanDesc,
+        participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
+        departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
+        unitId: currentUser.unitId || primaryDogRecord?.unitId || ''
+      });
+    }
     setIsSubmitting(false);
 
     if (!res.success) {
@@ -1063,7 +1141,12 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       return;
     }
 
-    notifySuccess('Relatório de treinamento salvo com sucesso!');
+    notifySuccess(
+      editingTreinoReport
+        ? 'Relatório de treinamento atualizado com sucesso!'
+        : 'Relatório de treinamento salvo com sucesso!'
+    );
+    setEditingTreinoReport(null);
     const nextDefaultDogs = getDefaultDogsForUser(currentUser.id);
     setHasUserChangedMainDog(false);
     setTreinoForm({
@@ -1104,6 +1187,9 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     const res = await storage.deleteRelatorioTreinamentoCanil(rel.id);
     setIsSubmitting(false);
     if (res.success) {
+      if (editingTreinoReport?.id === rel.id) {
+        handleCancelEditTreinamento();
+      }
       notifySuccess('Relatório de treinamento excluído.');
       onRefresh();
     } else {
@@ -2387,25 +2473,134 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
       {/* TAB 6: RELATÓRIO DE TREINAMENTO (OPERADOR CANINO / CANIL) */}
       {/* ========================================================================= */}
       {canAccessTrainingTabs && activeTab === 'relatorio-treinamento' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 shadow-xl space-y-6">
+        <div className="space-y-4">
+          {editableTodayReports.length > 0 && (
+            <div className="bg-slate-900 border border-cyan-500/30 rounded-2xl p-4 shadow-lg space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center space-x-2">
+                  <Clock className="w-4 h-4 text-cyan-400" />
+                  <div>
+                    <h3 className="text-xs font-black text-cyan-300 uppercase tracking-wide font-mono">
+                      Relatórios de Hoje Disponíveis para Edição ({editableTodayReports.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-400">
+                      Relatórios criados ou assinados por você hoje podem ser modificados ao longo do dia.
+                    </p>
+                  </div>
+                </div>
+                {editingTreinoReport && (
+                  <button
+                    type="button"
+                    onClick={handleCancelEditTreinamento}
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-[11px] flex items-center space-x-1.5 border border-slate-700 transition self-start sm:self-auto"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Novo Relatório</span>
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 text-xs">
+                {editableTodayReports.map(rel => {
+                  const isBeingEdited = editingTreinoReport?.id === rel.id;
+                  const isCreator = rel.condutorId === currentUser?.id;
+                  const dogsText = getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ');
+                  return (
+                    <div
+                      key={rel.id}
+                      className={`rounded-xl p-3 border flex items-center justify-between gap-3 transition ${
+                        isBeingEdited
+                          ? 'bg-cyan-500/10 border-cyan-400/60'
+                          : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-slate-100 truncate">{dogsText}</span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
+                            {rel.modalidadeLocal} • {rel.modalidadeParticipacao}
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold">
+                            {isCreator ? 'Criado por você' : 'Assinado por você'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 truncate">
+                          Condutor: {rel.condutorNome} — {rel.descricao}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => (isBeingEdited ? handleCancelEditTreinamento() : handleStartEditTreinamento(rel))}
+                        className={`px-3 py-1.5 rounded-lg font-bold text-[11px] flex items-center space-x-1 shrink-0 transition ${
+                          isBeingEdited
+                            ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600'
+                            : 'bg-cyan-600 hover:bg-cyan-500 text-white'
+                        }`}
+                      >
+                        {isBeingEdited ? (
+                          <>
+                            <X className="w-3.5 h-3.5" />
+                            <span>Cancelar</span>
+                          </>
+                        ) : (
+                          <>
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>Editar</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+        <div className={`bg-slate-900 border rounded-2xl p-5 sm:p-6 shadow-xl space-y-6 ${
+          editingTreinoReport ? 'border-cyan-500/60' : 'border-slate-800'
+        }`}>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
             <div className="flex items-center space-x-3">
-              <div className="bg-amber-500/10 p-2.5 rounded-xl border border-amber-500/30 text-amber-400">
-                <PenTool className="w-5 h-5" />
+              <div className={`p-2.5 rounded-xl border ${
+                editingTreinoReport
+                  ? 'bg-cyan-500/10 border-cyan-500/30 text-cyan-400'
+                  : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+              }`}>
+                {editingTreinoReport ? <Edit className="w-5 h-5" /> : <PenTool className="w-5 h-5" />}
               </div>
               <div>
-                <h2 className="text-base sm:text-lg font-black text-slate-100 uppercase tracking-wide font-mono">
-                  Relatório de Treinamento do Dia
-                </h2>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base sm:text-lg font-black text-slate-100 uppercase tracking-wide font-mono">
+                    {editingTreinoReport ? 'Editando Relatório de Treinamento do Dia' : 'Relatório de Treinamento do Dia'}
+                  </h2>
+                  {editingTreinoReport && (
+                    <span className="px-2 py-0.5 rounded bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 text-[10px] font-bold uppercase">
+                      Modo Edição
+                    </span>
+                  )}
+                </div>
                 <p className="text-xs text-slate-400">
-                  Registre o treinamento diário do cão K9 com condutor, modalidade, descrição e assinaturas.
+                  {editingTreinoReport
+                    ? 'As assinaturas já registradas serão preservadas. Alterações são permitidas ao longo do dia de hoje.'
+                    : 'Registre o treinamento diário do cão K9 com condutor, modalidade, descrição e assinaturas.'}
                 </p>
               </div>
             </div>
-            <div className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs font-mono">
-              <Calendar className="w-4 h-4 text-amber-400" />
-              <span className="text-slate-400">Data de Criação:</span>
-              <span className="font-bold text-slate-100">{formatDateBr(treinoForm.dataTreinamento)}</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {editingTreinoReport && (
+                <button
+                  type="button"
+                  onClick={handleCancelEditTreinamento}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-xl text-xs flex items-center space-x-1.5 border border-slate-700 transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Cancelar Edição</span>
+                </button>
+              )}
+              <div className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs font-mono">
+                <Calendar className="w-4 h-4 text-amber-400" />
+                <span className="text-slate-400">Data de Criação:</span>
+                <span className="font-bold text-slate-100">{formatDateBr(treinoForm.dataTreinamento)}</span>
+              </div>
             </div>
           </div>
 
@@ -2415,15 +2610,26 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
                 Condutor Responsável
               </label>
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between gap-2">
                 <div>
-                  <p className="font-bold text-sm text-slate-100">{currentUser?.name || 'Policial'}</p>
-                  <p className="text-[11px] font-mono text-slate-400">
-                    MASP: {currentUser?.masp ? formatMasp(currentUser.masp) : 'N/A'}
-                    {currentUser?.cargo ? ` • ${currentUser.cargo}` : ''}
+                  <p className="font-bold text-sm text-slate-100">
+                    {editingTreinoReport ? editingTreinoReport.condutorNome : (currentUser?.name || 'Policial')}
                   </p>
+                  <p className="text-[11px] font-mono text-slate-400">
+                    MASP: {(editingTreinoReport ? editingTreinoReport.condutorMasp : currentUser?.masp)
+                      ? formatMasp((editingTreinoReport ? editingTreinoReport.condutorMasp : currentUser?.masp) || '')
+                      : 'N/A'}
+                    {(editingTreinoReport ? editingTreinoReport.condutorCargo : currentUser?.cargo)
+                      ? ` • ${editingTreinoReport ? editingTreinoReport.condutorCargo : currentUser?.cargo}`
+                      : ''}
+                  </p>
+                  {editingTreinoReport && editingTreinoReport.condutorId !== currentUser?.id && (
+                    <p className="text-[10px] text-cyan-300 mt-1 font-semibold">
+                      Editando como participante assinante: {currentUser?.name}
+                    </p>
+                  )}
                 </div>
-                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold">
+                <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 text-[10px] font-bold shrink-0">
                   CONDUTOR
                 </span>
               </div>
@@ -2550,7 +2756,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                     <span>Usuários Participantes para Assinatura Conjunta</span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Adicione até 15 usuários junto com você ({currentUser?.name}) para constar e assinar este relatório.
+                    Adicione até 15 usuários junto com {editingTreinoReport ? editingTreinoReport.condutorNome : currentUser?.name} para constar e assinar este relatório.
                   </p>
                 </div>
                 <span
@@ -2579,7 +2785,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                         className="bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2"
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex items-center space-x-2">
+                          <div className="flex flex-wrap items-center gap-2">
                             <span className="text-[10px] font-mono text-cyan-400 font-bold">#{idx + 1}</span>
                             <span className="font-bold text-slate-100">{p.name}</span>
                             {p.masp && (
@@ -2594,6 +2800,15 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                             ) : (
                               <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-[10px] font-bold text-amber-300">
                                 {participantDogs.length} cachorro(s)
+                              </span>
+                            )}
+                            {editingTreinoReport && (
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                p.signed
+                                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                  : 'bg-slate-800 border-slate-700 text-slate-400'
+                              }`}>
+                                {p.signed ? '✓ Assinado' : 'Assinatura Pendente'}
                               </span>
                             )}
                           </div>
@@ -2725,6 +2940,17 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center justify-end gap-3 pt-2 border-t border-slate-800">
+            {editingTreinoReport && (
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={handleCancelEditTreinamento}
+                className="px-4 py-2.5 bg-slate-950 hover:bg-slate-800 text-slate-300 font-bold rounded-xl text-xs flex items-center space-x-2 border border-slate-700 transition"
+              >
+                <X className="w-4 h-4" />
+                <span>Cancelar Edição</span>
+              </button>
+            )}
             <button
               type="button"
               disabled={isSubmitting}
@@ -2732,7 +2958,7 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-100 font-bold rounded-xl text-xs flex items-center space-x-2 border border-slate-700 transition"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-              <span>Salvar Relatório</span>
+              <span>{editingTreinoReport ? 'Salvar Alterações' : 'Salvar Relatório'}</span>
             </button>
             <button
               type="button"
@@ -2741,9 +2967,10 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
               className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-2 shadow-lg transition"
             >
               <Printer className="w-4 h-4" />
-              <span>Salvar e Imprimir Relatório</span>
+              <span>{editingTreinoReport ? 'Salvar Alterações e Imprimir' : 'Salvar e Imprimir Relatório'}</span>
             </button>
           </div>
+        </div>
         </div>
       )}
 
@@ -2859,6 +3086,17 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             <span>Assinar Relatório</span>
+                          </button>
+                        )}
+                        {canEditRelatorioTreinamento(rel) && (
+                          <button
+                            onClick={() => handleStartEditTreinamento(rel)}
+                            disabled={isSubmitting}
+                            className="px-3 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
+                            title="Editar relatório (disponível ao longo do dia de hoje)"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>Editar</span>
                           </button>
                         )}
                         <button
@@ -3157,6 +3395,16 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                         </td>
                         <td className="p-3.5 text-right whitespace-nowrap">
                           <div className="inline-flex items-center space-x-1.5">
+                            {canEditRelatorioTreinamento(rel) && (
+                              <button
+                                onClick={() => handleStartEditTreinamento(rel)}
+                                className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                                title="Editar relatório (disponível ao longo do dia de hoje)"
+                              >
+                                <Edit className="w-3 h-3" />
+                                <span>Editar</span>
+                              </button>
+                            )}
                             <button
                               onClick={() => setViewingTreinoReport(rel)}
                               className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
@@ -3268,13 +3516,22 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                 </div>
               )}
 
-              <div className="flex justify-end space-x-2 pt-2 border-t border-slate-800">
+              <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-800">
                 <button
                   onClick={() => setViewingTreinoReport(null)}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition"
                 >
                   Fechar
                 </button>
+                {canEditRelatorioTreinamento(viewingTreinoReport) && (
+                  <button
+                    onClick={() => handleStartEditTreinamento(viewingTreinoReport)}
+                    className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl flex items-center space-x-1.5 transition"
+                  >
+                    <Edit className="w-4 h-4" />
+                    <span>Editar Relatório</span>
+                  </button>
+                )}
                 <button
                   onClick={() => handlePrintRelatorioTreinamento(viewingTreinoReport)}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 transition"
