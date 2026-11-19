@@ -138,3 +138,43 @@ export function formatTimestamp(isoString: string): string {
 
   return `${day}/${month}/${year} às ${hours}:${minutes}`;
 }
+
+/**
+ * Formats vehicle license plate strictly following the mask "AAA-XAXX":
+ * - "A" accepts uppercase letters A-Z only (lowercase is auto-uppercased)
+ * - "X" accepts digits 0-9 only
+ * - Hyphen "-" is inserted automatically after the 3rd letter
+ * Example: "abc1d23" -> "ABC-1D23"
+ */
+export function formatPlacaViatura(raw: string): string {
+  if (!raw) return '';
+  const cleaned = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+
+  let core = '';
+  for (let i = 0; i < cleaned.length && core.length < 7; i++) {
+    const ch = cleaned[i];
+    const pos = core.length;
+    const expectsLetter = pos === 0 || pos === 1 || pos === 2 || pos === 4;
+    if (expectsLetter) {
+      if (ch >= 'A' && ch <= 'Z') core += ch;
+    } else {
+      if (ch >= '0' && ch <= '9') core += ch;
+    }
+  }
+
+  if (core.length <= 3) return core;
+  return `${core.slice(0, 3)}-${core.slice(3)}`;
+}
+
+/**
+ * Validates whether a license plate strictly matches the "AAA-XAXX" mask.
+ */
+export function isValidPlacaViatura(placa: string): boolean {
+  if (!placa) return false;
+  return /^[A-Z]{3}-[0-9][A-Z][0-9]{2}$/.test(placa.trim());
+}
+

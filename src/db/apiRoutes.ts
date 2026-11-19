@@ -12620,6 +12620,909 @@ apiRouter.delete('/relatorios-treinamento-canil/:id', async (req: Request, res: 
 });
 
 // =============================================================
+// MODULO: RELATORIOS DE OPERACOES CANIL K9
+// =============================================================
+let relatoriosOperacoesTableEnsured = false;
+async function ensureRelatoriosOperacoesCanilTable(pool: any): Promise<void> {
+  if (relatoriosOperacoesTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_OPERACOES_CANIL\` (
+        \`ID_REL_OPERACAO\` VARCHAR(64) NOT NULL,
+        \`DATA_OPERACAO\` VARCHAR(10) NOT NULL,
+        \`HORA_OPERACAO\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`COMARCA\` VARCHAR(160) NOT NULL,
+        \`SOLICITACAO_TIPO\` ENUM('CEPOLC', 'SEI', 'Outros') NOT NULL DEFAULT 'CEPOLC',
+        \`SOLICITACAO_OUTROS_DETALHES\` VARCHAR(255) DEFAULT NULL,
+        \`MATERIAL_ENCONTRADO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`MATERIAIS_ENCONTRADOS_JSON\` LONGTEXT DEFAULT NULL,
+        \`OPERADORES_JSON\` LONGTEXT NOT NULL,
+        \`VIATURAS_JSON\` LONGTEXT DEFAULT NULL,
+        \`DETALHAMENTO\` TEXT NOT NULL,
+        \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
+        \`CRIADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`CRIADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`CRIADOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_REL_OPERACAO\`),
+        KEY \`idx_rel_op_data\` (\`DATA_OPERACAO\`),
+        KEY \`idx_rel_op_comarca\` (\`COMARCA\`),
+        KEY \`idx_rel_op_criador\` (\`CRIADOR_ID\`),
+        KEY \`idx_rel_op_unit\` (\`UNIDADE_ID\`),
+        KEY \`idx_rel_op_criacao\` (\`DATA_CRIACAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    const [colRows]: any = await pool.query(
+      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_OPERACOES_CANIL' AND COLUMN_NAME = 'VIATURAS_JSON'`
+    );
+    if (!colRows || colRows.length === 0) {
+      await pool.query(
+        'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `VIATURAS_JSON` LONGTEXT DEFAULT NULL AFTER `OPERADORES_JSON`'
+      );
+    }
+    relatoriosOperacoesTableEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar tabela RELATORIOS_OPERACOES_CANIL:', err);
+  }
+}
+
+const VALID_SOLICITACAO_OPERACAO = new Set(['CEPOLC', 'SEI', 'Outros']);
+const VALID_MATERIAIS_OPERACAO = new Set(['Droga', 'Arma', 'Munição', 'Explosivos']);
+
+function formatDateBrIso(value: unknown): string {
+  const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' });
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return fmt.format(value);
+  }
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const parsed = new Date(str.includes('T') ? str : str.replace(' ', 'T'));
+  if (!Number.isNaN(parsed.getTime())) {
+    return fmt.format(parsed);
+  }
+  return str.slice(0, 10);
+}
+
+function sanitizeOperadoresOperacao(raw: any): any[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const op of raw) {
+    if (!op || !op.userId || !op.name) continue;
+    const uid = String(op.userId).trim();
+    if (!uid || seen.has(uid)) continue;
+    seen.add(uid);
+    const dogsRaw = Array.isArray(op.cachorros) ? op.cachorros : [];
+    const seenDogs = new Set<string>();
+    const dogs: any[] = [];
+    for (const d of dogsRaw) {
+      if (!d || !d.id || !d.nome) continue;
+      const did = String(d.id).trim();
+      if (!did || seenDogs.has(did)) continue;
+      seenDogs.add(did);
+      dogs.push({
+        id: did,
+        nome: String(d.nome).trim(),
+        raca: String(d.raca || '').trim(),
+        microchip: String(d.microchip || '').trim()
+      });
+    }
+    out.push({
+      userId: uid,
+      name: String(op.name).trim(),
+      masp: String(op.masp || '').trim(),
+      cargo: String(op.cargo || '').trim(),
+      isCreator: Boolean(op.isCreator),
+      cachorros: dogs
+    });
+  }
+  return out;
+}
+
+function sanitizeMateriaisOperacao(raw: any, validDogMap: Map<string, any>): any[] {
+  if (!Array.isArray(raw)) return [];
+  const seenTypes = new Set<string>();
+  const out: any[] = [];
+  for (const item of raw) {
+    if (!item || !VALID_MATERIAIS_OPERACAO.has(String(item.tipo || ''))) continue;
+    const tipo = String(item.tipo);
+    if (seenTypes.has(tipo)) continue;
+    seenTypes.add(tipo);
+    const dogsRaw = Array.isArray(item.cachorros) ? item.cachorros : [];
+    const seenDogs = new Set<string>();
+    const dogs: any[] = [];
+    for (const d of dogsRaw) {
+      const did = String(d?.id || '').trim();
+      if (!did || seenDogs.has(did)) continue;
+      const matched = validDogMap.get(did);
+      if (matched) {
+        seenDogs.add(did);
+        dogs.push(matched);
+      } else if (d?.nome) {
+        seenDogs.add(did);
+        dogs.push({
+          id: did,
+          nome: String(d.nome).trim(),
+          raca: String(d.raca || '').trim(),
+          microchip: String(d.microchip || '').trim()
+        });
+      }
+    }
+    out.push({ tipo, cachorros: dogs });
+  }
+  return out;
+}
+
+function formatPlacaViaturaServer(raw: unknown): string {
+  const cleaned = String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  let core = '';
+  for (let i = 0; i < cleaned.length && core.length < 7; i++) {
+    const ch = cleaned[i];
+    const pos = core.length;
+    const expectsLetter = pos === 0 || pos === 1 || pos === 2 || pos === 4;
+    if (expectsLetter) {
+      if (ch >= 'A' && ch <= 'Z') core += ch;
+    } else {
+      if (ch >= '0' && ch <= '9') core += ch;
+    }
+  }
+  if (core.length <= 3) return core;
+  return `${core.slice(0, 3)}-${core.slice(3)}`;
+}
+
+const PLACA_VIATURA_REGEX = /^[A-Z]{3}-[0-9][A-Z][0-9]{2}$/;
+
+function sanitizeViaturasOperacao(raw: any): any[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const v of raw) {
+    if (!v) continue;
+    const vid = String(v.id || '').trim();
+    const placa = formatPlacaViaturaServer(v.placa || '');
+    const descricao = String(v.descricao || '').trim().slice(0, 160);
+    if (!vid || !placa || !descricao) continue;
+    if (seen.has(vid)) continue;
+    seen.add(vid);
+    out.push({ id: vid, placa, descricao });
+  }
+  return out;
+}
+
+function mapOperacaoRow(r: any) {
+  let operadores: any[] = [];
+  let materiaisEncontrados: any[] = [];
+  let viaturas: any[] = [];
+  try {
+    operadores = r.OPERADORES_JSON ? JSON.parse(r.OPERADORES_JSON) : [];
+    if (!Array.isArray(operadores)) operadores = [];
+  } catch {
+    operadores = [];
+  }
+  try {
+    materiaisEncontrados = r.MATERIAIS_ENCONTRADOS_JSON ? JSON.parse(r.MATERIAIS_ENCONTRADOS_JSON) : [];
+    if (!Array.isArray(materiaisEncontrados)) materiaisEncontrados = [];
+  } catch {
+    materiaisEncontrados = [];
+  }
+  try {
+    viaturas = r.VIATURAS_JSON ? JSON.parse(r.VIATURAS_JSON) : [];
+    if (!Array.isArray(viaturas)) viaturas = [];
+  } catch {
+    viaturas = [];
+  }
+  return {
+    id: r.ID_REL_OPERACAO,
+    dataOperacao: r.DATA_OPERACAO,
+    horaOperacao: r.HORA_OPERACAO || '06:00',
+    comarca: r.COMARCA,
+    solicitacaoTipo: r.SOLICITACAO_TIPO,
+    solicitacaoOutrosDetalhes: r.SOLICITACAO_OUTROS_DETALHES || '',
+    materialEncontrado: Boolean(r.MATERIAL_ENCONTRADO),
+    materiaisEncontrados,
+    operadores,
+    viaturas,
+    detalhamento: r.DETALHAMENTO || '',
+    criadorId: r.CRIADOR_ID,
+    criadorNome: r.CRIADOR_NOME,
+    criadorMasp: r.CRIADOR_MASP || '',
+    criadorCargo: r.CRIADOR_CARGO || '',
+    departmentId: r.DEPARTAMENTO_ID || '',
+    unitId: r.UNIDADE_ID || '',
+    createdAt: r.DATA_CRIACAO ? new Date(r.DATA_CRIACAO).toISOString() : new Date().toISOString(),
+    updatedAt: r.DATA_ATUALIZACAO ? new Date(r.DATA_ATUALIZACAO).toISOString() : undefined
+  };
+}
+
+apiRouter.get('/relatorios-operacoes-canil', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCanilTable(pool);
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_REL_OPERACAO,
+        DATA_OPERACAO,
+        HORA_OPERACAO,
+        COMARCA,
+        SOLICITACAO_TIPO,
+        SOLICITACAO_OUTROS_DETALHES,
+        MATERIAL_ENCONTRADO,
+        MATERIAIS_ENCONTRADOS_JSON,
+        OPERADORES_JSON,
+        VIATURAS_JSON,
+        DETALHAMENTO,
+        CRIADOR_ID,
+        CRIADOR_NOME,
+        CRIADOR_MASP,
+        CRIADOR_CARGO,
+        DEPARTAMENTO_ID,
+        UNIDADE_ID,
+        DATA_CRIACAO,
+        DATA_ATUALIZACAO
+      FROM RELATORIOS_OPERACOES_CANIL
+      ORDER BY DATA_OPERACAO DESC, HORA_OPERACAO DESC, DATA_CRIACAO DESC
+    `);
+    return res.json((rows || []).map(mapOperacaoRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const criadorId = String(b.criadorId || actor.id || '').trim();
+    const criadorNome = String(b.criadorNome || actor.name || '').trim();
+    const criadorMasp = String(b.criadorMasp || actor.masp || '').trim();
+    const criadorCargo = String(b.criadorCargo || actor.cargo || '').trim();
+
+    if (!criadorId || !criadorNome) {
+      return res.status(400).json({ error: 'Usuário criador não identificado.' });
+    }
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const dataOperacao = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dataOperacao || '').trim())
+      ? String(b.dataOperacao).trim()
+      : todayBr;
+    const horaOperacao = /^\d{2}:\d{2}$/.test(String(b.horaOperacao || '').trim())
+      ? String(b.horaOperacao).trim()
+      : '06:00';
+    const comarca = String(b.comarca || '').trim();
+    if (!comarca) {
+      return res.status(400).json({ error: 'Informe a Comarca (município mineiro) da operação.' });
+    }
+
+    const solicitacaoTipo = String(b.solicitacaoTipo || 'CEPOLC').trim();
+    if (!VALID_SOLICITACAO_OPERACAO.has(solicitacaoTipo)) {
+      return res.status(400).json({ error: 'Tipo de solicitação inválido. Use CEPOLC, SEI ou Outros.' });
+    }
+    const solicitacaoOutrosDetalhes =
+      solicitacaoTipo === 'Outros' ? String(b.solicitacaoOutrosDetalhes || '').trim().slice(0, 255) : '';
+    if (solicitacaoTipo === 'Outros' && !solicitacaoOutrosDetalhes) {
+      return res.status(400).json({ error: 'Informe brevemente o detalhe da solicitação em Outros.' });
+    }
+
+    const operadores = sanitizeOperadoresOperacao(b.operadores);
+    if (operadores.length === 0) {
+      return res.status(400).json({ error: 'Informe pelo menos um operador na operação.' });
+    }
+
+    const reportDogsMap = new Map<string, any>();
+    for (const op of operadores) {
+      for (const dog of op.cachorros || []) {
+        if (!reportDogsMap.has(dog.id)) reportDogsMap.set(dog.id, dog);
+      }
+    }
+
+    const materialEncontrado = Boolean(b.materialEncontrado);
+    const materiaisEncontrados = materialEncontrado
+      ? sanitizeMateriaisOperacao(b.materiaisEncontrados, reportDogsMap)
+      : [];
+
+    if (materialEncontrado) {
+      if (materiaisEncontrados.length === 0) {
+        return res.status(400).json({ error: 'Selecione pelo menos um tipo de material encontrado (Droga, Arma, Munição ou Explosivos).' });
+      }
+      const missingDogMat = materiaisEncontrados.find(m => !m.cachorros || m.cachorros.length === 0);
+      if (missingDogMat) {
+        return res.status(400).json({
+          error: `Informe qual(is) animal(is) encontrou(ram) o material: ${missingDogMat.tipo}.`
+        });
+      }
+    }
+
+    const detalhamento = String(b.detalhamento || '').trim();
+    if (!detalhamento) {
+      return res.status(400).json({ error: 'O detalhamento da operação é obrigatório.' });
+    }
+    if (detalhamento.length > 1000) {
+      return res.status(400).json({ error: 'O detalhamento da operação deve ter no máximo 1000 caracteres.' });
+    }
+
+    const viaturas = sanitizeViaturasOperacao(b.viaturas);
+
+    const id = String(b.id || `ROP-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+    const departmentId = String(b.departmentId || actor.departmentId || '').trim() || null;
+    const unitId = String(b.unitId || actor.unitId || '').trim() || null;
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCanilTable(pool);
+
+    await pool.query(
+      `INSERT INTO RELATORIOS_OPERACOES_CANIL (
+        ID_REL_OPERACAO, DATA_OPERACAO, HORA_OPERACAO, COMARCA,
+        SOLICITACAO_TIPO, SOLICITACAO_OUTROS_DETALHES,
+        MATERIAL_ENCONTRADO, MATERIAIS_ENCONTRADOS_JSON,
+        OPERADORES_JSON, VIATURAS_JSON, DETALHAMENTO,
+        CRIADOR_ID, CRIADOR_NOME, CRIADOR_MASP, CRIADOR_CARGO,
+        DEPARTAMENTO_ID, UNIDADE_ID
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        dataOperacao,
+        horaOperacao,
+        comarca,
+        solicitacaoTipo,
+        solicitacaoOutrosDetalhes || null,
+        materialEncontrado ? 1 : 0,
+        JSON.stringify(materiaisEncontrados),
+        JSON.stringify(operadores),
+        JSON.stringify(viaturas),
+        detalhamento,
+        criadorId,
+        criadorNome,
+        criadorMasp,
+        criadorCargo || null,
+        departmentId,
+        unitId
+      ]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Criar Relatório de Operação Canil',
+      `Relatório de operação ${id} em ${comarca} (${dataOperacao} ${horaOperacao}) com ${operadores.length} operador(es) e ${viaturas.length} viatura(s)`,
+      actor,
+      req.ip
+    );
+
+    const [createdRows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_OPERACOES_CANIL WHERE ID_REL_OPERACAO = ? LIMIT 1',
+      [id]
+    );
+    return res.status(201).json(
+      createdRows && createdRows[0]
+        ? mapOperacaoRow(createdRows[0])
+        : {
+            id,
+            dataOperacao,
+            horaOperacao,
+            comarca,
+            solicitacaoTipo,
+            solicitacaoOutrosDetalhes,
+            materialEncontrado,
+            materiaisEncontrados,
+            operadores,
+            viaturas,
+            detalhamento,
+            criadorId,
+            criadorNome,
+            criadorMasp,
+            criadorCargo,
+            departmentId: departmentId || '',
+            unitId: unitId || '',
+            createdAt: new Date().toISOString()
+          }
+    );
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(400).json({ error: 'Usuário responsável pela alteração não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCanilTable(pool);
+    const [rows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_OPERACOES_CANIL WHERE ID_REL_OPERACAO = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+    }
+    const existing = rows[0];
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const createdDayBr = formatDateBrIso(existing.DATA_CRIACAO);
+    if (createdDayBr !== todayBr) {
+      return res.status(403).json({
+        error: 'Este relatório só pode ser editado durante o dia da sua confecção.'
+      });
+    }
+
+    let existingOperadores: any[] = [];
+    try {
+      existingOperadores = existing.OPERADORES_JSON ? JSON.parse(existing.OPERADORES_JSON) : [];
+      if (!Array.isArray(existingOperadores)) existingOperadores = [];
+    } catch {
+      existingOperadores = [];
+    }
+
+    const isCited =
+      existing.CRIADOR_ID === actorId ||
+      existingOperadores.some((op: any) => op && String(op.userId) === actorId);
+    if (!isCited) {
+      return res.status(403).json({
+        error: 'Apenas usuários citados neste relatório podem editá-lo.'
+      });
+    }
+
+    const dataOperacao = /^\d{4}-\d{2}-\d{2}$/.test(String(b.dataOperacao || '').trim())
+      ? String(b.dataOperacao).trim()
+      : existing.DATA_OPERACAO;
+    const horaOperacao = /^\d{2}:\d{2}$/.test(String(b.horaOperacao || '').trim())
+      ? String(b.horaOperacao).trim()
+      : existing.HORA_OPERACAO || '06:00';
+    const comarca = String(b.comarca || '').trim();
+    if (!comarca) {
+      return res.status(400).json({ error: 'Informe a Comarca (município mineiro) da operação.' });
+    }
+
+    const solicitacaoTipo = String(b.solicitacaoTipo || existing.SOLICITACAO_TIPO || 'CEPOLC').trim();
+    if (!VALID_SOLICITACAO_OPERACAO.has(solicitacaoTipo)) {
+      return res.status(400).json({ error: 'Tipo de solicitação inválido. Use CEPOLC, SEI ou Outros.' });
+    }
+    const solicitacaoOutrosDetalhes =
+      solicitacaoTipo === 'Outros' ? String(b.solicitacaoOutrosDetalhes || '').trim().slice(0, 255) : '';
+    if (solicitacaoTipo === 'Outros' && !solicitacaoOutrosDetalhes) {
+      return res.status(400).json({ error: 'Informe brevemente o detalhe da solicitação em Outros.' });
+    }
+
+    const operadores = sanitizeOperadoresOperacao(b.operadores);
+    if (operadores.length === 0) {
+      return res.status(400).json({ error: 'Informe pelo menos um operador na operação.' });
+    }
+
+    const reportDogsMap = new Map<string, any>();
+    for (const op of operadores) {
+      for (const dog of op.cachorros || []) {
+        if (!reportDogsMap.has(dog.id)) reportDogsMap.set(dog.id, dog);
+      }
+    }
+
+    const materialEncontrado = Boolean(b.materialEncontrado);
+    const materiaisEncontrados = materialEncontrado
+      ? sanitizeMateriaisOperacao(b.materiaisEncontrados, reportDogsMap)
+      : [];
+
+    if (materialEncontrado) {
+      if (materiaisEncontrados.length === 0) {
+        return res.status(400).json({ error: 'Selecione pelo menos um tipo de material encontrado (Droga, Arma, Munição ou Explosivos).' });
+      }
+      const missingDogMat = materiaisEncontrados.find(m => !m.cachorros || m.cachorros.length === 0);
+      if (missingDogMat) {
+        return res.status(400).json({
+          error: `Informe qual(is) animal(is) encontrou(ram) o material: ${missingDogMat.tipo}.`
+        });
+      }
+    }
+
+    const detalhamento = String(b.detalhamento || '').trim();
+    if (!detalhamento) {
+      return res.status(400).json({ error: 'O detalhamento da operação é obrigatório.' });
+    }
+    if (detalhamento.length > 1000) {
+      return res.status(400).json({ error: 'O detalhamento da operação deve ter no máximo 1000 caracteres.' });
+    }
+
+    const viaturas = sanitizeViaturasOperacao(b.viaturas);
+
+    await pool.query(
+      `UPDATE RELATORIOS_OPERACOES_CANIL SET
+        DATA_OPERACAO = ?,
+        HORA_OPERACAO = ?,
+        COMARCA = ?,
+        SOLICITACAO_TIPO = ?,
+        SOLICITACAO_OUTROS_DETALHES = ?,
+        MATERIAL_ENCONTRADO = ?,
+        MATERIAIS_ENCONTRADOS_JSON = ?,
+        OPERADORES_JSON = ?,
+        VIATURAS_JSON = ?,
+        DETALHAMENTO = ?
+      WHERE ID_REL_OPERACAO = ?`,
+      [
+        dataOperacao,
+        horaOperacao,
+        comarca,
+        solicitacaoTipo,
+        solicitacaoOutrosDetalhes || null,
+        materialEncontrado ? 1 : 0,
+        JSON.stringify(materiaisEncontrados),
+        JSON.stringify(operadores),
+        JSON.stringify(viaturas),
+        detalhamento,
+        id
+      ]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Editar Relatório de Operação Canil',
+      `Usuário ${actor.name || actorId} editou o relatório de operação ${id} (${comarca} • ${dataOperacao} ${horaOperacao})`,
+      actor,
+      req.ip
+    );
+
+    const [updatedRows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_OPERACOES_CANIL WHERE ID_REL_OPERACAO = ? LIMIT 1',
+      [id]
+    );
+    return res.json(updatedRows && updatedRows[0] ? mapOperacaoRow(updatedRows[0]) : { success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/relatorios-operacoes-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(400).json({ error: 'Usuário responsável pela exclusão não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCanilTable(pool);
+    const [rows]: any = await pool.query(
+      'SELECT ID_REL_OPERACAO, CRIADOR_ID, COMARCA, DATA_OPERACAO, OPERADORES_JSON, DATA_CRIACAO FROM RELATORIOS_OPERACOES_CANIL WHERE ID_REL_OPERACAO = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+    }
+    const existing = rows[0];
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const createdDayBr = formatDateBrIso(existing.DATA_CRIACAO);
+    if (createdDayBr !== todayBr) {
+      return res.status(403).json({
+        error: 'Este relatório só pode ser excluído durante o dia da sua confecção.'
+      });
+    }
+
+    let existingOperadores: any[] = [];
+    try {
+      existingOperadores = existing.OPERADORES_JSON ? JSON.parse(existing.OPERADORES_JSON) : [];
+      if (!Array.isArray(existingOperadores)) existingOperadores = [];
+    } catch {
+      existingOperadores = [];
+    }
+
+    const isCited =
+      existing.CRIADOR_ID === actorId ||
+      existingOperadores.some((op: any) => op && String(op.userId) === actorId);
+    if (!isCited) {
+      return res.status(403).json({
+        error: 'Apenas usuários citados neste relatório podem excluí-lo.'
+      });
+    }
+
+    await pool.query('DELETE FROM RELATORIOS_OPERACOES_CANIL WHERE ID_REL_OPERACAO = ?', [id]);
+    await insertAuditLog(
+      'Relatórios',
+      'Excluir Relatório de Operação Canil',
+      `Excluído relatório de operação ${id} (${existing.COMARCA} • ${existing.DATA_OPERACAO})`,
+      actor,
+      req.ip
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================
+// MODULO: VIATURAS DA UNIDADE (CADASTRO POR ADMINISTRADOR)
+// =============================================================
+let viaturasUnidadeTableEnsured = false;
+async function ensureViaturasUnidadeTable(pool: any): Promise<void> {
+  if (viaturasUnidadeTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`VIATURAS_UNIDADE\` (
+        \`ID_VIATURA\` VARCHAR(64) NOT NULL,
+        \`PLACA_VIATURA\` VARCHAR(8) NOT NULL,
+        \`DESCRICAO_VIATURA\` VARCHAR(160) NOT NULL,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) NOT NULL,
+        \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_VIATURA\`),
+        UNIQUE KEY \`uk_viatura_placa_unidade\` (\`PLACA_VIATURA\`, \`UNIDADE_ID\`),
+        KEY \`idx_viatura_unidade\` (\`UNIDADE_ID\`),
+        KEY \`idx_viatura_placa\` (\`PLACA_VIATURA\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    viaturasUnidadeTableEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar tabela VIATURAS_UNIDADE:', err);
+  }
+}
+
+function getActorRolesSet(actor: any): Set<string> {
+  const set = new Set<string>();
+  if (!actor) return set;
+  if (actor.activeRole) set.add(String(actor.activeRole));
+  if (actor.role) set.add(String(actor.role));
+  if (Array.isArray(actor.roles)) {
+    for (const r of actor.roles) {
+      if (r) set.add(String(r));
+    }
+  }
+  return set;
+}
+
+function mapViaturaRow(r: any) {
+  return {
+    id: r.ID_VIATURA,
+    placa: r.PLACA_VIATURA,
+    descricao: r.DESCRICAO_VIATURA,
+    departmentId: r.DEPARTAMENTO_ID || '',
+    unitId: r.UNIDADE_ID || '',
+    criadoPorId: r.CRIADO_POR_ID || '',
+    criadoPorNome: r.CRIADO_POR_NOME || '',
+    createdAt: r.DATA_CRIACAO ? new Date(r.DATA_CRIACAO).toISOString() : undefined,
+    updatedAt: r.DATA_ATUALIZACAO ? new Date(r.DATA_ATUALIZACAO).toISOString() : undefined
+  };
+}
+
+apiRouter.get('/viaturas', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureViaturasUnidadeTable(pool);
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_VIATURA,
+        PLACA_VIATURA,
+        DESCRICAO_VIATURA,
+        DEPARTAMENTO_ID,
+        UNIDADE_ID,
+        CRIADO_POR_ID,
+        CRIADO_POR_NOME,
+        DATA_CRIACAO,
+        DATA_ATUALIZACAO
+      FROM VIATURAS_UNIDADE
+      ORDER BY PLACA_VIATURA ASC, DESCRICAO_VIATURA ASC
+    `);
+    return res.json((rows || []).map(mapViaturaRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/viaturas', async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const roles = getActorRolesSet(actor);
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+
+    if (!isGeral && !isAdmin) {
+      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem cadastrar viaturas.' });
+    }
+
+    const placa = formatPlacaViaturaServer(b.placa || '');
+    if (!PLACA_VIATURA_REGEX.test(placa)) {
+      return res.status(400).json({
+        error: 'Placa inválida. Utilize o padrão AAA-XAXX (ex.: ABC-1D23), com letras maiúsculas e números nas posições corretas.'
+      });
+    }
+
+    const descricao = String(b.descricao || '').trim().slice(0, 160);
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição (marca e modelo) da viatura.' });
+    }
+
+    const actorUnitId = String(actor.unitId || '').trim();
+    const requestedUnitId = String(b.unitId || '').trim();
+    const unitId = isGeral ? (requestedUnitId || actorUnitId) : actorUnitId;
+    if (!unitId) {
+      return res.status(400).json({ error: 'Usuário Administrador precisa estar vinculado a uma unidade para cadastrar viaturas.' });
+    }
+    if (!isGeral && requestedUnitId && requestedUnitId !== actorUnitId) {
+      return res.status(403).json({ error: 'Administradores só podem cadastrar viaturas na unidade em que estão vinculados.' });
+    }
+
+    const departmentId = String(b.departmentId || actor.departmentId || '').trim() || null;
+    const id = String(b.id || `VTR-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
+
+    const pool = getPool();
+    await ensureViaturasUnidadeTable(pool);
+
+    const [dup]: any = await pool.query(
+      'SELECT ID_VIATURA FROM VIATURAS_UNIDADE WHERE PLACA_VIATURA = ? AND UNIDADE_ID = ? LIMIT 1',
+      [placa, unitId]
+    );
+    if (dup && dup.length > 0) {
+      return res.status(409).json({ error: `Já existe uma viatura cadastrada com a placa ${placa} nesta unidade.` });
+    }
+
+    await pool.query(
+      `INSERT INTO VIATURAS_UNIDADE (
+        ID_VIATURA, PLACA_VIATURA, DESCRICAO_VIATURA,
+        DEPARTAMENTO_ID, UNIDADE_ID, CRIADO_POR_ID, CRIADO_POR_NOME
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [id, placa, descricao, departmentId, unitId, actor.id || null, actor.name || null]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Cadastrar Viatura',
+      `Viatura ${placa} (${descricao}) cadastrada na unidade ${unitId}`,
+      actor,
+      req.ip
+    );
+
+    const [createdRows]: any = await pool.query(
+      'SELECT * FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
+      [id]
+    );
+    return res.status(201).json(
+      createdRows && createdRows[0]
+        ? mapViaturaRow(createdRows[0])
+        : {
+            id,
+            placa,
+            descricao,
+            departmentId: departmentId || '',
+            unitId,
+            criadoPorId: actor.id || '',
+            criadoPorNome: actor.name || ''
+          }
+    );
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const roles = getActorRolesSet(actor);
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+
+    if (!isGeral && !isAdmin) {
+      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem editar viaturas.' });
+    }
+
+    const pool = getPool();
+    await ensureViaturasUnidadeTable(pool);
+
+    const [existingRows]: any = await pool.query(
+      'SELECT * FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Viatura não encontrada.' });
+    }
+    const existing = existingRows[0];
+
+    const actorUnitId = String(actor.unitId || '').trim();
+    if (!isGeral && existing.UNIDADE_ID !== actorUnitId) {
+      return res.status(403).json({ error: 'Administradores só podem editar viaturas da unidade em que estão vinculados.' });
+    }
+
+    const placa = formatPlacaViaturaServer(b.placa || '');
+    if (!PLACA_VIATURA_REGEX.test(placa)) {
+      return res.status(400).json({
+        error: 'Placa inválida. Utilize o padrão AAA-XAXX (ex.: ABC-1D23), com letras maiúsculas e números nas posições corretas.'
+      });
+    }
+
+    const descricao = String(b.descricao || '').trim().slice(0, 160);
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição (marca e modelo) da viatura.' });
+    }
+
+    const [dup]: any = await pool.query(
+      'SELECT ID_VIATURA FROM VIATURAS_UNIDADE WHERE PLACA_VIATURA = ? AND UNIDADE_ID = ? AND ID_VIATURA <> ? LIMIT 1',
+      [placa, existing.UNIDADE_ID, id]
+    );
+    if (dup && dup.length > 0) {
+      return res.status(409).json({ error: `Já existe outra viatura com a placa ${placa} nesta unidade.` });
+    }
+
+    await pool.query(
+      'UPDATE VIATURAS_UNIDADE SET PLACA_VIATURA = ?, DESCRICAO_VIATURA = ? WHERE ID_VIATURA = ?',
+      [placa, descricao, id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Editar Viatura',
+      `Viatura ${id} atualizada para ${placa} (${descricao})`,
+      actor,
+      req.ip
+    );
+
+    const [updatedRows]: any = await pool.query(
+      'SELECT * FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
+      [id]
+    );
+    return res.json(updatedRows && updatedRows[0] ? mapViaturaRow(updatedRows[0]) : { success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/viaturas/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const roles = getActorRolesSet(actor);
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+
+    if (!isGeral && !isAdmin) {
+      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem excluir viaturas.' });
+    }
+
+    const pool = getPool();
+    await ensureViaturasUnidadeTable(pool);
+
+    const [existingRows]: any = await pool.query(
+      'SELECT ID_VIATURA, PLACA_VIATURA, DESCRICAO_VIATURA, UNIDADE_ID FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Viatura não encontrada.' });
+    }
+    const existing = existingRows[0];
+
+    const actorUnitId = String(actor.unitId || '').trim();
+    if (!isGeral && existing.UNIDADE_ID !== actorUnitId) {
+      return res.status(403).json({ error: 'Administradores só podem excluir viaturas da unidade em que estão vinculados.' });
+    }
+
+    await pool.query('DELETE FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ?', [id]);
+    await insertAuditLog(
+      'Relatórios',
+      'Excluir Viatura',
+      `Viatura ${existing.PLACA_VIATURA} (${existing.DESCRICAO_VIATURA}) excluída da unidade ${existing.UNIDADE_ID}`,
+      actor,
+      req.ip
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================
 // MODULO: CAUTELA DE ARMAS (ACAUTELAR_ARMAS)
 // =============================================================
 

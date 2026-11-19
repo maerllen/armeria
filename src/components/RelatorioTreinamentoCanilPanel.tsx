@@ -8,12 +8,19 @@ import {
   ParticipanteTreinamentoCanil,
   ParticipanteTreinamentoCachorro,
   LocalTreinamentoCanil,
-  ParticipacaoTreinamentoCanil
+  ParticipacaoTreinamentoCanil,
+  RelatorioOperacaoCanil,
+  SolicitacaoOperacaoCanil,
+  MaterialEncontradoOperacaoCanil,
+  OperadorOperacaoCanil,
+  ViaturaOperacaoCanil
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
+import { normalizeCitySearch } from '../data/municipiosMG';
 import { TopLayerAlert } from './TopLayerAlert';
+import { RelatorioOperacoesCanilForm } from './RelatorioOperacoesCanilForm';
 import {
   Dog,
   Search,
@@ -30,7 +37,10 @@ import {
   X,
   ClipboardList,
   PenTool,
-  MapPin
+  MapPin,
+  ShieldAlert,
+  Package,
+  Car
 } from 'lucide-react';
 
 interface RelatorioTreinamentoCanilPanelProps {
@@ -43,7 +53,11 @@ interface RelatorioTreinamentoCanilPanelProps {
   defaultUnitId?: string;
 }
 
-type CanilTrainingTab = 'relatorio-treinamento' | 'meus-relatorios' | 'relatorio-unidade';
+type CanilTrainingTab =
+  | 'relatorio-treinamento'
+  | 'relatorio-operacoes'
+  | 'meus-relatorios'
+  | 'relatorio-unidade';
 
 export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilPanelProps> = ({
   currentUser,
@@ -66,6 +80,14 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const cachorros = useMemo(() => storage.getCachorros(), [dataVersion, localVersion]);
   const relatoriosTreinamento = useMemo(
     () => storage.getRelatoriosTreinamentoCanil(),
+    [dataVersion, localVersion]
+  );
+  const relatoriosOperacoes = useMemo(
+    () => storage.getRelatoriosOperacoesCanil(),
+    [dataVersion, localVersion]
+  );
+  const viaturas = useMemo(
+    () => storage.getViaturas(),
     [dataVersion, localVersion]
   );
 
@@ -111,14 +133,20 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const [hasUserChangedMainDog, setHasUserChangedMainDog] = useState(false);
   const [editingTreinoReport, setEditingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
   const [participantSearch, setParticipantSearch] = useState('');
+  const [meusTipoFilter, setMeusTipoFilter] = useState<'TODOS' | 'TREINAMENTO' | 'OPERACAO'>('TODOS');
   const [meusRelFilter, setMeusRelFilter] = useState<'TODOS' | 'CRIADOS' | 'CONJUNTOS_ASSINADOS' | 'PENDENTES'>('TODOS');
+  const [unidadeTipoFilter, setUnidadeTipoFilter] = useState<'TODOS' | 'TREINAMENTO' | 'OPERACAO'>('TODOS');
   const [unidadeFilterDataInicio, setUnidadeFilterDataInicio] = useState('');
   const [unidadeFilterDataFim, setUnidadeFilterDataFim] = useState('');
   const [unidadeFilterPolicialId, setUnidadeFilterPolicialId] = useState('');
   const [unidadeFilterCachorroId, setUnidadeFilterCachorroId] = useState('');
   const [unidadeFilterLocal, setUnidadeFilterLocal] = useState<'TODOS' | 'Interno' | 'Externo'>('TODOS');
+  const [unidadeFilterComarca, setUnidadeFilterComarca] = useState('');
+  const [unidadeFilterMaterial, setUnidadeFilterMaterial] = useState<'TODOS' | 'SIM' | 'NAO'>('TODOS');
   const [unidadeFilterUnitId, setUnidadeFilterUnitId] = useState<string>('');
   const [viewingTreinoReport, setViewingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
+  const [editingOperacaoReport, setEditingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
+  const [viewingOperacaoReport, setViewingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
 
   const toParticipanteDog = (d: Cachorro): ParticipanteTreinamentoCachorro => ({
     id: d.id,
@@ -547,13 +575,25 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         }
       }
     }
+    const targetUnitId = canVerRelatoriosTodasEquipes ? unidadeFilterUnitId : currentUser?.unitId;
+    for (const opRel of relatoriosOperacoes) {
+      if (targetUnitId && opRel.unitId && opRel.unitId !== targetUnitId) continue;
+      if (opRel.criadorId && !map.has(opRel.criadorId)) {
+        map.set(opRel.criadorId, { id: opRel.criadorId, name: opRel.criadorNome, masp: opRel.criadorMasp || '' });
+      }
+      for (const op of opRel.operadores || []) {
+        if (op.userId && !map.has(op.userId)) {
+          map.set(op.userId, { id: op.userId, name: op.name, masp: op.masp || '' });
+        }
+      }
+    }
     for (const u of allUsers) {
       if ((!currentUser?.unitId || canVerRelatoriosTodasEquipes || u.unitId === currentUser.unitId) && !map.has(u.id)) {
         map.set(u.id, { id: u.id, name: u.name, masp: u.masp || '' });
       }
     }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [unitScopedReports, allUsers, currentUser, canVerRelatoriosTodasEquipes]);
+  }, [unitScopedReports, relatoriosOperacoes, unidadeFilterUnitId, allUsers, currentUser, canVerRelatoriosTodasEquipes]);
 
   const filteredUnidadeReports = useMemo(() => {
     return unitScopedReports.filter(r => {
@@ -806,6 +846,458 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     printDocumentInPage(html, docTitle);
   };
 
+  // =========================================================================
+  // RELATÓRIO DE OPERAÇÕES CANIL K9: PERMISSÕES, FILTROS, CRUD E IMPRESSÃO
+  // =========================================================================
+  const getIsoDayBr = (value?: string): string => {
+    if (!value) return '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+    const d = new Date(value);
+    if (!Number.isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+    }
+    return String(value).slice(0, 10);
+  };
+
+  const canEditOrDeleteOperacao = (rel?: RelatorioOperacaoCanil | null): boolean => {
+    if (!rel || !currentUser?.id) return false;
+    const todayIso = getTodayIsoBr();
+    const createdDay = getIsoDayBr(rel.createdAt) || String(rel.dataOperacao || '').slice(0, 10);
+    if (createdDay !== todayIso) return false;
+    if (rel.criadorId === currentUser.id) return true;
+    return (rel.operadores || []).some(op => op.userId === currentUser.id);
+  };
+
+  const allUsersLookupForOperacoes = useMemo(() => {
+    const rawLookup = storage.getAllUsersForLookup();
+    return rawLookup.length > 0 ? rawLookup : allUsers;
+  }, [allUsers, dataVersion, localVersion]);
+
+  const operacoesHojeEditaveis = useMemo(() => {
+    return relatoriosOperacoes.filter(r => canEditOrDeleteOperacao(r));
+  }, [relatoriosOperacoes, currentUser?.id]);
+
+  const meusOperacoesList = useMemo(() => {
+    if (!currentUser?.id) return [];
+    return relatoriosOperacoes.filter(
+      r => r.criadorId === currentUser.id || (r.operadores || []).some(op => op.userId === currentUser.id)
+    );
+  }, [relatoriosOperacoes, currentUser?.id]);
+
+  const meusTreinamentosTotalCount = useMemo(() => {
+    if (!currentUser?.id) return 0;
+    return relatoriosTreinamento.filter(
+      r => r.condutorId === currentUser.id || (r.participantes || []).some(p => p.userId === currentUser.id)
+    ).length;
+  }, [relatoriosTreinamento, currentUser?.id]);
+
+  const unitScopedOperacoes = useMemo(() => {
+    if (!currentUser || !canVerRelatoriosTodasEquipes) return [];
+    const targetUnitId = canVerRelatoriosTodasEquipes ? unidadeFilterUnitId : currentUser.unitId;
+    return relatoriosOperacoes.filter(r => {
+      if (!targetUnitId) return true;
+      if (r.unitId) return r.unitId === targetUnitId;
+      const creatorUser = allUsersLookupForOperacoes.find(u => u.id === r.criadorId);
+      if (creatorUser?.unitId) return creatorUser.unitId === targetUnitId;
+      if ((r.operadores || []).some(op => allUsersLookupForOperacoes.find(u => u.id === op.userId)?.unitId === targetUnitId)) {
+        return true;
+      }
+      return false;
+    });
+  }, [relatoriosOperacoes, currentUser, canVerRelatoriosTodasEquipes, unidadeFilterUnitId, allUsersLookupForOperacoes]);
+
+  const filteredUnidadeOperacoes = useMemo(() => {
+    const comarcaQ = normalizeCitySearch(unidadeFilterComarca);
+    return unitScopedOperacoes.filter(r => {
+      if (unidadeFilterDataInicio && r.dataOperacao < unidadeFilterDataInicio) return false;
+      if (unidadeFilterDataFim && r.dataOperacao > unidadeFilterDataFim) return false;
+      if (unidadeFilterPolicialId) {
+        const matchesCreator = r.criadorId === unidadeFilterPolicialId;
+        const matchesOp = (r.operadores || []).some(op => op.userId === unidadeFilterPolicialId);
+        if (!matchesCreator && !matchesOp) return false;
+      }
+      if (unidadeFilterCachorroId) {
+        const matchesOpDog = (r.operadores || []).some(op =>
+          (op.cachorros || []).some(c => c.id === unidadeFilterCachorroId)
+        );
+        const matchesMatDog = (r.materiaisEncontrados || []).some(m =>
+          (m.cachorros || []).some(c => c.id === unidadeFilterCachorroId)
+        );
+        if (!matchesOpDog && !matchesMatDog) return false;
+      }
+      if (comarcaQ && !normalizeCitySearch(r.comarca).includes(comarcaQ)) return false;
+      if (unidadeFilterMaterial === 'SIM' && !r.materialEncontrado) return false;
+      if (unidadeFilterMaterial === 'NAO' && r.materialEncontrado) return false;
+      return true;
+    });
+  }, [
+    unitScopedOperacoes,
+    unidadeFilterDataInicio,
+    unidadeFilterDataFim,
+    unidadeFilterPolicialId,
+    unidadeFilterCachorroId,
+    unidadeFilterComarca,
+    unidadeFilterMaterial
+  ]);
+
+  const handlePrintRelatorioOperacao = (rel: RelatorioOperacaoCanil) => {
+    const unitName =
+      units.find(u => u.id === rel.unitId)?.name ||
+      units.find(u => u.id === currentUser?.unitId)?.name ||
+      'COC • Canil K9';
+    const deptName =
+      departments.find(d => d.id === rel.departmentId)?.name ||
+      departments.find(d => d.id === currentUser?.departmentId)?.name ||
+      'Polícia Civil de Minas Gerais';
+
+    const docTitle = buildStandardDocumentTitle(
+      'Relatório de Operação Canil K9',
+      `${rel.comarca} - ${formatDateBr(rel.dataOperacao)} ${rel.horaOperacao}`,
+      rel.criadorNome
+    );
+
+    const solicitacaoTexto =
+      rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes
+        ? `Outros (${rel.solicitacaoOutrosDetalhes})`
+        : rel.solicitacaoTipo;
+
+    const materiaisHtml = !rel.materialEncontrado
+      ? '<span style="color:#475569;">Não houve material encontrado.</span>'
+      : (rel.materiaisEncontrados || [])
+          .map(m => {
+            const dogsTxt =
+              m.cachorros && m.cachorros.length > 0
+                ? m.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}`).join(', ')
+                : 'Não informado';
+            return `<div style="margin-bottom:4px;"><strong>${escapeHtmlText(m.tipo)}</strong> — Localizado por: ${escapeHtmlText(dogsTxt)}</div>`;
+          })
+          .join('');
+
+    const operadoresRowsHtml = (rel.operadores || [])
+      .map((op, idx) => {
+        const dogsTxt =
+          op.cachorros && op.cachorros.length > 0
+            ? op.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}`).join(', ')
+            : 'Sem animal';
+        return `
+          <tr>
+            <td style="text-align:center;">${idx + 1}</td>
+            <td><strong>${escapeHtmlText(op.name)}</strong>${op.isCreator ? ' <span style="font-size:9px; color:#334155;">(Relator)</span>' : ''}</td>
+            <td style="font-family:monospace;">${escapeHtmlText(op.masp ? formatMasp(op.masp) : '-')}</td>
+            <td>${escapeHtmlText(op.cargo || '-')}</td>
+            <td>${escapeHtmlText(dogsTxt)}</td>
+          </tr>`;
+      })
+      .join('');
+
+    const signaturesHtml = (rel.operadores || [])
+      .map(
+        op => `
+        <div class="sig-box">
+          <div class="sig-space"></div>
+          <div class="sig-line">${escapeHtmlText(op.name)}</div>
+          <div class="sig-meta">${op.masp ? `MASP: ${escapeHtmlText(formatMasp(op.masp))}` : ''} ${op.cargo ? `• ${escapeHtmlText(op.cargo)}` : ''}</div>
+          <div class="sig-role">${op.isCreator ? 'Operador Canino (Relator)' : 'Operador Canino'}</div>
+        </div>`
+      )
+      .join('');
+
+    const viaturasHtml =
+      rel.viaturas && rel.viaturas.length > 0
+        ? rel.viaturas
+            .map(
+              v =>
+                `<span style="display:inline-block; border:1px solid #cbd5e1; background:#f8fafc; border-radius:4px; padding:3px 7px; margin:0 6px 5px 0;"><strong style="font-family:monospace;">${escapeHtmlText(v.placa)}</strong> — ${escapeHtmlText(v.descricao)}</span>`
+            )
+            .join('')
+        : '<span style="color:#64748b;">Nenhuma viatura informada.</span>';
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtmlText(docTitle)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 14mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; font-size: 11px; line-height: 1.45; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 10px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .org { font-size: 10px; font-weight: 700; text-transform: uppercase; color: #334155; }
+    .unit { font-size: 12px; font-weight: 800; text-transform: uppercase; margin-top: 2px; }
+    .title { font-size: 16px; font-weight: 900; text-transform: uppercase; letter-spacing: 0.4px; margin-top: 6px; }
+    .doc-id { font-family: monospace; font-size: 10px; color: #475569; text-align: right; }
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+    .info-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px 10px; background: #f8fafc; }
+    .info-card .lbl { font-size: 9px; text-transform: uppercase; font-weight: 700; color: #64748b; display: block; margin-bottom: 2px; }
+    .info-card .val { font-size: 11.5px; font-weight: 700; color: #0f172a; }
+    .section-box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
+    .section-title { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #334155; border-bottom: 1px solid #e2e8f0; padding-bottom: 5px; margin-bottom: 8px; }
+    .desc-text { white-space: pre-wrap; word-break: break-word; min-height: 60px; font-size: 11px; }
+    table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 7px; text-align: left; vertical-align: top; }
+    th { background: #e2e8f0; text-transform: uppercase; font-size: 9px; font-weight: 800; }
+    .signatures-title { font-size: 10px; font-weight: 800; text-transform: uppercase; color: #334155; margin: 14px 0 6px; }
+    .signatures-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 24px; }
+    .sig-box { text-align: center; page-break-inside: avoid; }
+    .sig-space { height: 28px; }
+    .sig-line { border-top: 1px solid #0f172a; padding-top: 4px; font-weight: 700; font-size: 10.5px; }
+    .sig-meta { font-size: 9px; color: #475569; margin-top: 1px; }
+    .sig-role { font-size: 8.5px; font-weight: 700; text-transform: uppercase; color: #334155; margin-top: 2px; }
+    .footer { margin-top: 18px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div class="org">Polícia Civil do Estado de Minas Gerais • ${escapeHtmlText(deptName)}</div>
+      <div class="unit">${escapeHtmlText(unitName)} • Seção de Canil K9</div>
+      <div class="title">Relatório de Operação Policial K9</div>
+    </div>
+    <div class="doc-id">Registro: ${escapeHtmlText(rel.id)}</div>
+  </div>
+
+  <div class="info-grid">
+    <div class="info-card">
+      <span class="lbl">Data e Hora da Operação</span>
+      <span class="val" style="font-family: monospace;">${escapeHtmlText(formatDateBr(rel.dataOperacao))} às ${escapeHtmlText(rel.horaOperacao)}</span>
+    </div>
+    <div class="info-card">
+      <span class="lbl">Comarca (MG)</span>
+      <span class="val">${escapeHtmlText(rel.comarca)} / MG</span>
+    </div>
+    <div class="info-card">
+      <span class="lbl">Solicitação</span>
+      <span class="val">${escapeHtmlText(solicitacaoTexto)}</span>
+    </div>
+    <div class="info-card">
+      <span class="lbl">Material Encontrado?</span>
+      <span class="val">${rel.materialEncontrado ? 'SIM' : 'NÃO'}</span>
+    </div>
+  </div>
+
+  <div class="section-box">
+    <div class="section-title">Viaturas Utilizadas na Operação (${(rel.viaturas || []).length})</div>
+    <div>${viaturasHtml}</div>
+  </div>
+
+  <div class="section-box">
+    <div class="section-title">Materiais Encontrados e Animais Responsáveis</div>
+    <div>${materiaisHtml}</div>
+  </div>
+
+  <div class="section-box">
+    <div class="section-title">Operadores Caninos e Animais Empregados (${(rel.operadores || []).length})</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width:6%; text-align:center;">#</th>
+          <th style="width:32%;">Operador</th>
+          <th style="width:16%;">MASP</th>
+          <th style="width:18%;">Cargo</th>
+          <th style="width:28%;">Animal(is) K9</th>
+        </tr>
+      </thead>
+      <tbody>${operadoresRowsHtml}</tbody>
+    </table>
+  </div>
+
+  <div class="section-box">
+    <div class="section-title">Detalhamento da Operação</div>
+    <div class="desc-text">${escapeHtmlText(rel.detalhamento)}</div>
+  </div>
+
+  <div class="signatures-title">Assinaturas dos Operadores (${(rel.operadores || []).length})</div>
+  <div class="signatures-grid">${signaturesHtml}</div>
+
+  <div class="footer">
+    <span>Sistema de Gestão Integrada — Polícia Civil de Minas Gerais</span>
+    <span>Impresso em: ${escapeHtmlText(new Date().toLocaleString('pt-BR'))}</span>
+  </div>
+</body>
+</html>`;
+
+    printDocumentInPage(html, docTitle);
+  };
+
+  const handlePrintRelatorioUnidadeOperacoesConsolidado = () => {
+    const unitName =
+      units.find(u => u.id === (canVerRelatoriosTodasEquipes && unidadeFilterUnitId ? unidadeFilterUnitId : currentUser?.unitId))?.name ||
+      'COC • Canil K9';
+    const docTitle = buildStandardDocumentTitle('Relatório de Operações da Unidade Canil K9', unitName, currentUser?.name || '');
+
+    const rowsHtml =
+      filteredUnidadeOperacoes.length === 0
+        ? `<tr><td colspan="7" style="text-align:center; color:#64748b; padding:16px;">Nenhum relatório de operação encontrado para os filtros aplicados.</td></tr>`
+        : filteredUnidadeOperacoes
+            .map(r => {
+              const opsHtml = (r.operadores || [])
+                .map(op => {
+                  const dogsTxt = op.cachorros && op.cachorros.length > 0 ? op.cachorros.map(c => c.nome).join(', ') : 'Sem animal';
+                  return `<div><strong>${escapeHtmlText(op.name)}</strong> (${escapeHtmlText(dogsTxt)})</div>`;
+                })
+                .join('');
+              const vtrsHtml =
+                r.viaturas && r.viaturas.length > 0
+                  ? r.viaturas
+                      .map(v => `<div><strong style="font-family:monospace;">${escapeHtmlText(v.placa)}</strong> — ${escapeHtmlText(v.descricao)}</div>`)
+                      .join('')
+                  : '-';
+              const matHtml = !r.materialEncontrado
+                ? 'Não'
+                : (r.materiaisEncontrados || [])
+                    .map(m => `${escapeHtmlText(m.tipo)} (${escapeHtmlText((m.cachorros || []).map(c => c.nome).join(', ') || '-')})`)
+                    .join('<br/>');
+              const solTxt =
+                r.solicitacaoTipo === 'Outros' && r.solicitacaoOutrosDetalhes
+                  ? `Outros: ${r.solicitacaoOutrosDetalhes}`
+                  : r.solicitacaoTipo;
+              return `
+                <tr>
+                  <td style="font-family:monospace; white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataOperacao))}<br/>${escapeHtmlText(r.horaOperacao)}</td>
+                  <td><strong>${escapeHtmlText(r.comarca)}</strong></td>
+                  <td>${escapeHtmlText(solTxt)}</td>
+                  <td>${vtrsHtml}</td>
+                  <td>${matHtml}</td>
+                  <td>${opsHtml}</td>
+                  <td style="white-space:pre-wrap; word-break:break-word;">${escapeHtmlText(r.detalhamento)}</td>
+                </tr>`;
+            })
+            .join('');
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtmlText(docTitle)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; font-size: 10px; }
+    .header { border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end; }
+    .title { font-size: 15px; font-weight: 900; text-transform: uppercase; }
+    .meta { font-size: 10px; color: #475569; margin-bottom: 10px; display: flex; justify-content: space-between; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #cbd5e1; padding: 6px 7px; text-align: left; vertical-align: top; }
+    th { background: #e2e8f0; text-transform: uppercase; font-size: 9px; font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <div style="font-size:10px; font-weight:700; text-transform:uppercase; color:#475569;">Polícia Civil do Estado de Minas Gerais • Canil K9</div>
+      <div class="title">Relatório Consolidado de Operações da Unidade</div>
+    </div>
+    <div style="font-size:10px; color:#334155;">Unidade: ${escapeHtmlText(unitName)}</div>
+  </div>
+  <div class="meta">
+    <span>Total de operações listadas: <strong>${filteredUnidadeOperacoes.length}</strong></span>
+    <span>Emitido em: ${escapeHtmlText(new Date().toLocaleString('pt-BR'))}</span>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th style="width:8%;">Data/Hora</th>
+        <th style="width:11%;">Comarca</th>
+        <th style="width:10%;">Solicitação</th>
+        <th style="width:14%;">Viaturas</th>
+        <th style="width:14%;">Material Encontrado</th>
+        <th style="width:18%;">Operadores & Animais</th>
+        <th style="width:25%;">Detalhamento</th>
+      </tr>
+    </thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+</body>
+</html>`;
+
+    printDocumentInPage(html, docTitle);
+  };
+
+  const handleSaveOperacao = async (
+    payload: {
+      dataOperacao: string;
+      horaOperacao: string;
+      comarca: string;
+      solicitacaoTipo: SolicitacaoOperacaoCanil;
+      solicitacaoOutrosDetalhes: string;
+      materialEncontrado: boolean;
+      materiaisEncontrados: MaterialEncontradoOperacaoCanil[];
+      operadores: OperadorOperacaoCanil[];
+      viaturas: ViaturaOperacaoCanil[];
+      detalhamento: string;
+    },
+    andPrint: boolean
+  ): Promise<boolean> => {
+    setIsSubmitting(true);
+    let res: { success: boolean; error?: string; id?: string; data?: RelatorioOperacaoCanil };
+    if (editingOperacaoReport) {
+      res = await storage.updateRelatorioOperacaoCanil(editingOperacaoReport.id, payload);
+    } else {
+      res = await storage.saveRelatorioOperacaoCanil({
+        ...payload,
+        criadorId: currentUser.id,
+        criadorNome: currentUser.name,
+        criadorMasp: currentUser.masp || '',
+        criadorCargo: currentUser.cargo || '',
+        departmentId: currentUser.departmentId || '',
+        unitId: currentUser.unitId || defaultUnitId || ''
+      });
+    }
+    setIsSubmitting(false);
+
+    if (!res.success) {
+      notifyError(res.error || 'Erro ao salvar relatório de operação.');
+      return false;
+    }
+
+    notifySuccess(
+      editingOperacaoReport
+        ? 'Relatório de operação atualizado com sucesso!'
+        : 'Relatório de operação salvo com sucesso!'
+    );
+    setEditingOperacaoReport(null);
+    triggerRefresh();
+
+    if (andPrint && res.data) {
+      handlePrintRelatorioOperacao(res.data);
+    }
+    return true;
+  };
+
+  const handleStartEditOperacao = (rel: RelatorioOperacaoCanil) => {
+    if (!canEditOrDeleteOperacao(rel)) {
+      notifyError('Este relatório só pode ser editado durante o dia da sua confecção por usuários citados.');
+      return;
+    }
+    setViewingOperacaoReport(null);
+    setEditingOperacaoReport(rel);
+    setActiveTab('relatorio-operacoes');
+  };
+
+  const handleDeleteOperacao = async (rel: RelatorioOperacaoCanil) => {
+    if (!canEditOrDeleteOperacao(rel)) {
+      notifyError('Este relatório só pode ser excluído durante o dia da sua confecção por usuários citados.');
+      return;
+    }
+    if (
+      !confirm(
+        `Deseja excluir o relatório de operação em ${rel.comarca} (${formatDateBr(rel.dataOperacao)} às ${rel.horaOperacao})?`
+      )
+    ) {
+      return;
+    }
+    setIsSubmitting(true);
+    const res = await storage.deleteRelatorioOperacaoCanil(rel.id);
+    setIsSubmitting(false);
+    if (res.success) {
+      if (editingOperacaoReport?.id === rel.id) setEditingOperacaoReport(null);
+      if (viewingOperacaoReport?.id === rel.id) setViewingOperacaoReport(null);
+      notifySuccess('Relatório de operação excluído com sucesso.');
+      triggerRefresh();
+    } else {
+      notifyError(res.error || 'Erro ao excluir relatório de operação.');
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Notifications */}
@@ -829,6 +1321,19 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
 
         <button
           type="button"
+          onClick={() => setActiveTab('relatorio-operacoes')}
+          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'relatorio-operacoes'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <ShieldAlert className="w-4 h-4" />
+          <span>RELATÓRIO DE OPERAÇÕES</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('meus-relatorios')}
           className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
             activeTab === 'meus-relatorios'
@@ -837,7 +1342,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
           }`}
         >
           <ClipboardList className="w-4 h-4" />
-          <span>MEUS RELATÓRIOS ({meusRelatoriosList.length})</span>
+          <span>MEUS RELATÓRIOS ({meusTreinamentosTotalCount + meusOperacoesList.length})</span>
           {myPendingSignCount > 0 && (
             <span
               className={`ml-1 px-1.5 py-0.5 rounded-full text-[10px] font-black ${
@@ -862,10 +1367,34 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
             }`}
           >
             <Building className="w-4 h-4" />
-            <span>RELATÓRIOS DA UNIDADE ({unitScopedReports.length})</span>
+            <span>RELATÓRIOS DA UNIDADE ({unitScopedReports.length + unitScopedOperacoes.length})</span>
           </button>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB 1B: RELATÓRIO DE OPERAÇÕES (OPERADOR CANINO / COC) */}
+      {/* ========================================================================= */}
+      {activeTab === 'relatorio-operacoes' && (
+        <RelatorioOperacoesCanilForm
+          currentUser={currentUser}
+          allUsers={allUsersLookupForOperacoes}
+          units={units}
+          cachorros={cachorros}
+          viaturas={viaturas}
+          defaultUnitId={defaultUnitId}
+          operacoesHojeEditaveis={operacoesHojeEditaveis}
+          editingReport={editingOperacaoReport}
+          isSubmitting={isSubmitting}
+          onStartEdit={handleStartEditOperacao}
+          onCancelEdit={() => setEditingOperacaoReport(null)}
+          onDelete={handleDeleteOperacao}
+          onViaturasChanged={triggerRefresh}
+          onSave={handleSaveOperacao}
+          formatDateBr={formatDateBr}
+          getTodayIsoBr={getTodayIsoBr}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1: RELATÓRIO DE TREINAMENTO */}
@@ -1382,45 +1911,258 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       {/* ========================================================================= */}
       {activeTab === 'meus-relatorios' && (
         <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-black text-slate-100 uppercase font-mono flex items-center space-x-2">
-                <ClipboardList className="w-4 h-4 text-amber-400" />
-                <span>Meus Relatórios de Treinamento</span>
-              </h2>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Relatórios criados por você ou treinamentos conjuntos em que outros condutores o incluíram para assinatura.
-              </p>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black text-slate-100 uppercase font-mono flex items-center space-x-2">
+                  <ClipboardList className="w-4 h-4 text-amber-400" />
+                  <span>Meus Relatórios</span>
+                </h2>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Visualize seus relatórios de treinamento e de operações separados por filtro.
+                </p>
+              </div>
+
+              {/* Filtro Principal: Separar Treinamentos vs Operações */}
+              <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                {[
+                  {
+                    key: 'TODOS',
+                    label: `Todos (${meusTreinamentosTotalCount + meusOperacoesList.length})`
+                  },
+                  {
+                    key: 'TREINAMENTO',
+                    label: `Treinamentos (${meusTreinamentosTotalCount})`
+                  },
+                  {
+                    key: 'OPERACAO',
+                    label: `Operações (${meusOperacoesList.length})`
+                  }
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setMeusTipoFilter(opt.key as any)}
+                    className={`px-3.5 py-1.5 rounded-lg font-bold transition border ${
+                      meusTipoFilter === opt.key
+                        ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              {[
-                { key: 'TODOS', label: 'Todos' },
-                { key: 'CRIADOS', label: 'Criados por Mim' },
-                { key: 'CONJUNTOS_ASSINADOS', label: 'Conjuntos Assinados' },
-                { key: 'PENDENTES', label: `Pendentes (${myPendingSignCount})` }
-              ].map(opt => (
-                <button
-                  key={opt.key}
-                  onClick={() => setMeusRelFilter(opt.key as any)}
-                  className={`px-3 py-1.5 rounded-lg font-bold transition border ${
-                    meusRelFilter === opt.key
-                      ? 'bg-amber-500 text-slate-950 border-amber-400'
-                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
+            {/* Sub-filtros específicos dos Relatórios de Treinamento */}
+            {meusTipoFilter !== 'OPERACAO' && (
+              <div className="flex flex-wrap items-center gap-1.5 text-xs pt-2 border-t border-slate-800/80">
+                <span className="text-[10px] font-bold uppercase text-slate-500 mr-1">Treinamentos:</span>
+                {[
+                  { key: 'TODOS', label: 'Todos' },
+                  { key: 'CRIADOS', label: 'Criados por Mim' },
+                  { key: 'CONJUNTOS_ASSINADOS', label: 'Conjuntos Assinados' },
+                  { key: 'PENDENTES', label: `Pendentes (${myPendingSignCount})` }
+                ].map(opt => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setMeusRelFilter(opt.key as any)}
+                    className={`px-3 py-1 rounded-lg font-bold transition border text-[11px] ${
+                      meusRelFilter === opt.key
+                        ? 'bg-cyan-600 text-white border-cyan-500'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
 
-          {meusRelatoriosList.length === 0 ? (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center text-slate-500 text-xs">
-              Nenhum relatório de treinamento encontrado para este filtro.
-            </div>
-          ) : (
+          {/* SEÇÃO: MEUS RELATÓRIOS DE OPERAÇÕES */}
+          {(meusTipoFilter === 'OPERACAO' || meusTipoFilter === 'TODOS') && (
             <div className="space-y-3">
+              {meusTipoFilter === 'TODOS' && (
+                <div className="flex items-center space-x-2 px-1">
+                  <ShieldAlert className="w-4 h-4 text-emerald-400" />
+                  <h3 className="text-xs font-black text-emerald-300 uppercase font-mono">
+                    Relatórios de Operações ({meusOperacoesList.length})
+                  </h3>
+                </div>
+              )}
+
+              {meusOperacoesList.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs">
+                  Nenhum relatório de operação encontrado em que você tenha participado.
+                </div>
+              ) : (
+                meusOperacoesList.map(rel => {
+                  const isEditableToday = canEditOrDeleteOperacao(rel);
+                  const solicitacaoTxt =
+                    rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes
+                      ? `Outros: ${rel.solicitacaoOutrosDetalhes}`
+                      : rel.solicitacaoTipo;
+
+                  return (
+                    <div
+                      key={rel.id}
+                      className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-3"
+                    >
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase">
+                              Operação
+                            </span>
+                            <span className="font-mono font-bold text-amber-400 text-xs flex items-center space-x-1">
+                              <Calendar className="w-3.5 h-3.5" />
+                              <span>
+                                {formatDateBr(rel.dataOperacao)} • {rel.horaOperacao}
+                              </span>
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-100 border border-slate-700 text-[10px] font-bold flex items-center space-x-1">
+                              <MapPin className="w-3 h-3 text-amber-400" />
+                              <span>{rel.comarca}/MG</span>
+                            </span>
+                            <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
+                              Solicitação: {solicitacaoTxt}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                rel.materialEncontrado
+                                  ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                                  : 'bg-slate-800 text-slate-400 border border-slate-700'
+                              }`}
+                            >
+                              Material: {rel.materialEncontrado ? 'SIM' : 'NÃO'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-300">
+                            Relator: <strong className="text-slate-100">{rel.criadorNome}</strong> • Operadores:{' '}
+                            <strong className="text-amber-300">{(rel.operadores || []).length}</strong>
+                          </p>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <button
+                            type="button"
+                            onClick={() => setViewingOperacaoReport(rel)}
+                            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold rounded-lg transition"
+                          >
+                            Ver Detalhes
+                          </button>
+                          {isEditableToday && (
+                            <button
+                              type="button"
+                              onClick={() => handleStartEditOperacao(rel)}
+                              className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg flex items-center space-x-1 transition"
+                              title="Editar relatório (permitido durante o dia da confecção)"
+                            >
+                              <Edit className="w-3.5 h-3.5" />
+                              <span>Editar</span>
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handlePrintRelatorioOperacao(rel)}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg flex items-center space-x-1 transition"
+                          >
+                            <Printer className="w-3.5 h-3.5" />
+                            <span>Imprimir</span>
+                          </button>
+                          {isEditableToday && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteOperacao(rel)}
+                              className="p-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition"
+                              title="Excluir relatório (permitido durante o dia da confecção)"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {(rel.viaturas || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 text-[11px]">
+                          <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
+                            <Car className="w-3.5 h-3.5" />
+                            <span>Viaturas ({(rel.viaturas || []).length}):</span>
+                          </span>
+                          {(rel.viaturas || []).map(v => (
+                            <span
+                              key={v.id}
+                              className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
+                            >
+                              <span className="font-mono font-black text-amber-300">{v.placa}</span> • {v.descricao}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {rel.materialEncontrado && (rel.materiaisEncontrados || []).length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 text-[11px]">
+                          <span className="text-emerald-400 font-bold flex items-center space-x-1 mr-1">
+                            <Package className="w-3.5 h-3.5" />
+                            <span>Encontrados:</span>
+                          </span>
+                          {rel.materiaisEncontrados.map(m => (
+                            <span
+                              key={m.tipo}
+                              className="px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold"
+                            >
+                              {m.tipo} — Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
+                        {rel.detalhamento}
+                      </div>
+
+                      <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
+                        <span className="text-slate-400 font-semibold mr-1">Operadores ({(rel.operadores || []).length}):</span>
+                        {(rel.operadores || []).map(op => (
+                          <span
+                            key={op.userId}
+                            className="px-2 py-0.5 rounded-lg border bg-slate-950 border-slate-800 text-slate-300"
+                          >
+                            {op.name}
+                            {op.cachorros && op.cachorros.length > 0
+                              ? ` • Cão(s): ${op.cachorros.map(c => c.nome).join(', ')}`
+                              : ' • Sem animal'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* SEÇÃO: MEUS RELATÓRIOS DE TREINAMENTO */}
+          {(meusTipoFilter === 'TREINAMENTO' || meusTipoFilter === 'TODOS') && (
+            <div className="space-y-3">
+              {meusTipoFilter === 'TODOS' && (
+                <div className="flex items-center space-x-2 px-1 pt-2">
+                  <PenTool className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-xs font-black text-amber-300 uppercase font-mono">
+                    Relatórios de Treinamento ({meusRelatoriosList.length})
+                  </h3>
+                </div>
+              )}
+
+              {meusRelatoriosList.length === 0 ? (
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 text-center text-slate-500 text-xs">
+                  Nenhum relatório de treinamento encontrado para este filtro.
+                </div>
+              ) : (
+                <div className="space-y-3">
               {meusRelatoriosList.map(rel => {
                 const isCreator = rel.condutorId === currentUser?.id;
                 const myParticipantEntry = (rel.participantes || []).find(p => p.userId === currentUser?.id);
@@ -1562,6 +2304,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
               })}
             </div>
           )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1575,34 +2319,82 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
               <div>
                 <h2 className="text-sm font-black text-slate-100 uppercase font-mono flex items-center space-x-2">
                   <Building className="w-4 h-4 text-amber-400" />
-                  <span>Relatório de Treinamentos da Unidade</span>
+                  <span>Relatórios da Unidade (Treinamentos e Operações)</span>
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Consulte e filtre todos os relatórios de treinamento da unidade por data, policial, cachorro ou local.
+                  Consulte, separe por tipo e filtre todos os relatórios de treinamento e operações da unidade.
                 </p>
               </div>
-              <div className="flex items-center space-x-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
+                  type="button"
                   onClick={() => {
                     setUnidadeFilterDataInicio('');
                     setUnidadeFilterDataFim('');
                     setUnidadeFilterPolicialId('');
                     setUnidadeFilterCachorroId('');
                     setUnidadeFilterLocal('TODOS');
+                    setUnidadeFilterComarca('');
+                    setUnidadeFilterMaterial('TODOS');
                     setUnidadeFilterUnitId('');
                   }}
                   className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold rounded-xl text-xs transition"
                 >
                   Limpar Filtros
                 </button>
-                <button
-                  onClick={handlePrintRelatorioUnidadeConsolidado}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Imprimir Relatório da Unidade</span>
-                </button>
+                {unidadeTipoFilter !== 'OPERACAO' && (
+                  <button
+                    type="button"
+                    onClick={handlePrintRelatorioUnidadeConsolidado}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Imprimir Treinamentos</span>
+                  </button>
+                )}
+                {unidadeTipoFilter !== 'TREINAMENTO' && (
+                  <button
+                    type="button"
+                    onClick={handlePrintRelatorioUnidadeOperacoesConsolidado}
+                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Imprimir Operações</span>
+                  </button>
+                )}
               </div>
+            </div>
+
+            {/* Filtro de Tipo na Unidade: Separar Treinamentos vs Operações */}
+            <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-800 text-xs">
+              <span className="text-[10px] font-bold uppercase text-slate-400 mr-1">Tipo de Relatório:</span>
+              {[
+                {
+                  key: 'TODOS',
+                  label: `Todos (${filteredUnidadeReports.length + filteredUnidadeOperacoes.length})`
+                },
+                {
+                  key: 'TREINAMENTO',
+                  label: `Treinamentos (${filteredUnidadeReports.length})`
+                },
+                {
+                  key: 'OPERACAO',
+                  label: `Operações (${filteredUnidadeOperacoes.length})`
+                }
+              ].map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setUnidadeTipoFilter(opt.key as any)}
+                  className={`px-3.5 py-1.5 rounded-lg font-bold transition border ${
+                    unidadeTipoFilter === opt.key
+                      ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
+                      : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs pt-2 border-t border-slate-800">
@@ -1641,7 +2433,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Policial (Condutor / Participante)</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Policial (Condutor / Operador)</label>
                 <select
                   value={unidadeFilterPolicialId}
                   onChange={(e) => setUnidadeFilterPolicialId(e.target.value)}
@@ -1672,47 +2464,236 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
                 </select>
               </div>
 
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Interno ou Externo</label>
-                <select
-                  value={unidadeFilterLocal}
-                  onChange={(e) => setUnidadeFilterLocal(e.target.value as any)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
-                >
-                  <option value="TODOS">Todos (Interno e Externo)</option>
-                  <option value="Interno">Interno</option>
-                  <option value="Externo">Externo</option>
-                </select>
-              </div>
+              {unidadeTipoFilter !== 'OPERACAO' && (
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Treino: Interno / Externo</label>
+                  <select
+                    value={unidadeFilterLocal}
+                    onChange={(e) => setUnidadeFilterLocal(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="TODOS">Todos (Interno e Externo)</option>
+                    <option value="Interno">Interno</option>
+                    <option value="Externo">Externo</option>
+                  </select>
+                </div>
+              )}
+
+              {unidadeTipoFilter !== 'TREINAMENTO' && (
+                <>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Operação: Comarca</label>
+                    <input
+                      type="text"
+                      value={unidadeFilterComarca}
+                      onChange={(e) => setUnidadeFilterComarca(e.target.value)}
+                      placeholder="Filtrar município MG..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Operação: Material?</label>
+                    <select
+                      value={unidadeFilterMaterial}
+                      onChange={(e) => setUnidadeFilterMaterial(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="TODOS">Todos</option>
+                      <option value="SIM">Com Material Encontrado</option>
+                      <option value="NAO">Sem Material Encontrado</option>
+                    </select>
+                  </div>
+                </>
+              )}
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs font-mono">
               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] font-sans text-slate-400 uppercase">Relatórios Filtrados</span>
-                <p className="text-lg font-black text-slate-100">{filteredUnidadeReports.length}</p>
+                <span className="text-[10px] font-sans text-amber-400 uppercase">Treinamentos Filtrados</span>
+                <p className="text-lg font-black text-amber-300">{filteredUnidadeReports.length}</p>
               </div>
               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] font-sans text-blue-400 uppercase">Internos</span>
-                <p className="text-lg font-black text-blue-400">
-                  {filteredUnidadeReports.filter(r => r.modalidadeLocal === 'Interno').length}
+                <span className="text-[10px] font-sans text-emerald-400 uppercase">Operações Filtradas</span>
+                <p className="text-lg font-black text-emerald-300">{filteredUnidadeOperacoes.length}</p>
+              </div>
+              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
+                <span className="text-[10px] font-sans text-cyan-400 uppercase">Operações c/ Material</span>
+                <p className="text-lg font-black text-cyan-300">
+                  {filteredUnidadeOperacoes.filter(r => r.materialEncontrado).length}
                 </p>
               </div>
               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] font-sans text-purple-400 uppercase">Externos</span>
-                <p className="text-lg font-black text-purple-400">
-                  {filteredUnidadeReports.filter(r => r.modalidadeLocal === 'Externo').length}
-                </p>
-              </div>
-              <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
-                <span className="text-[10px] font-sans text-cyan-400 uppercase">Coletivos</span>
-                <p className="text-lg font-black text-cyan-400">
+                <span className="text-[10px] font-sans text-blue-400 uppercase">Treinos Coletivos</span>
+                <p className="text-lg font-black text-blue-300">
                   {filteredUnidadeReports.filter(r => r.modalidadeParticipacao === 'Coletivo').length}
                 </p>
               </div>
             </div>
           </div>
 
+          {/* TABELA DE OPERAÇÕES DA UNIDADE */}
+          {(unidadeTipoFilter === 'OPERACAO' || unidadeTipoFilter === 'TODOS') && (
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+              <div className="px-4 py-3 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+                <span className="text-xs font-black text-emerald-300 uppercase font-mono flex items-center space-x-2">
+                  <ShieldAlert className="w-4 h-4" />
+                  <span>Relatórios de Operações da Unidade ({filteredUnidadeOperacoes.length})</span>
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs text-slate-300">
+                  <thead className="bg-slate-950/80 text-slate-400 uppercase font-mono text-[11px] border-b border-slate-800">
+                    <tr>
+                      <th className="p-3.5">Data / Hora</th>
+                      <th className="p-3.5">Comarca (MG)</th>
+                      <th className="p-3.5">Solicitação</th>
+                      <th className="p-3.5">Viaturas</th>
+                      <th className="p-3.5">Operadores & Animais</th>
+                      <th className="p-3.5">Material Encontrado</th>
+                      <th className="p-3.5">Detalhamento</th>
+                      <th className="p-3.5 text-right">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/70">
+                    {filteredUnidadeOperacoes.length === 0 ? (
+                      <tr>
+                        <td colSpan={8} className="p-8 text-center text-slate-500 italic">
+                          Nenhum relatório de operação encontrado para os filtros selecionados.
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredUnidadeOperacoes.map(rel => {
+                        const isEditableToday = canEditOrDeleteOperacao(rel);
+                        return (
+                          <tr key={rel.id} className="hover:bg-slate-800/40 transition align-top">
+                            <td className="p-3.5 font-mono text-amber-400 whitespace-nowrap">
+                              <p>{formatDateBr(rel.dataOperacao)}</p>
+                              <p className="text-[10px] text-slate-400">{rel.horaOperacao}</p>
+                            </td>
+                            <td className="p-3.5 whitespace-nowrap">
+                              <p className="font-bold text-slate-100">{rel.comarca}</p>
+                              <p className="text-[10px] text-slate-400">Relator: {rel.criadorNome}</p>
+                            </td>
+                            <td className="p-3.5">
+                              <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
+                                {rel.solicitacaoTipo}
+                              </span>
+                              {rel.solicitacaoTipo === 'Outros' && rel.solicitacaoOutrosDetalhes && (
+                                <p className="text-[10px] text-slate-400 mt-1 max-w-[160px] break-words">
+                                  {rel.solicitacaoOutrosDetalhes}
+                                </p>
+                              )}
+                            </td>
+                            <td className="p-3.5">
+                              {!(rel.viaturas && rel.viaturas.length > 0) ? (
+                                <span className="text-[11px] text-slate-500 italic">-</span>
+                              ) : (
+                                <div className="space-y-1">
+                                  {rel.viaturas.map(v => (
+                                    <div key={v.id} className="text-[11px] text-slate-200">
+                                      <span className="font-mono font-bold text-amber-300">{v.placa}</span>
+                                      <span className="text-slate-400 block text-[10px]">{v.descricao}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3.5">
+                              <div className="space-y-1">
+                                {(rel.operadores || []).map(op => (
+                                  <p key={op.userId} className="text-[11px] text-slate-200">
+                                    <strong>{op.name}</strong>:{' '}
+                                    <span className="text-amber-300">
+                                      {op.cachorros && op.cachorros.length > 0
+                                        ? op.cachorros.map(c => c.nome).join(', ')
+                                        : 'Sem animal'}
+                                    </span>
+                                  </p>
+                                ))}
+                              </div>
+                            </td>
+                            <td className="p-3.5">
+                              {!rel.materialEncontrado ? (
+                                <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-400 border border-slate-700 text-[10px] font-bold">
+                                  NÃO
+                                </span>
+                              ) : (
+                                <div className="space-y-1">
+                                  {(rel.materiaisEncontrados || []).map(m => (
+                                    <div
+                                      key={m.tipo}
+                                      className="px-2 py-1 rounded bg-emerald-500/10 border border-emerald-500/30 text-[10px]"
+                                    >
+                                      <strong className="text-emerald-300">{m.tipo}</strong>
+                                      <span className="text-slate-300 block">
+                                        Cão(s): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3.5 max-w-sm">
+                              <p className="text-slate-300 line-clamp-2 whitespace-pre-wrap">{rel.detalhamento}</p>
+                            </td>
+                            <td className="p-3.5 text-right whitespace-nowrap">
+                              <div className="inline-flex items-center space-x-1.5">
+                                {isEditableToday && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleStartEditOperacao(rel)}
+                                    className="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                                  >
+                                    <Edit className="w-3 h-3" />
+                                    <span>Editar</span>
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => setViewingOperacaoReport(rel)}
+                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-[11px] font-semibold transition"
+                                >
+                                  Ver
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handlePrintRelatorioOperacao(rel)}
+                                  className="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded text-[11px] font-bold inline-flex items-center space-x-1 transition"
+                                >
+                                  <Printer className="w-3 h-3" />
+                                  <span>Imprimir</span>
+                                </button>
+                                {isEditableToday && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteOperacao(rel)}
+                                    className="p-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded transition"
+                                    title="Excluir relatório"
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TABELA DE TREINAMENTOS DA UNIDADE */}
+          {(unidadeTipoFilter === 'TREINAMENTO' || unidadeTipoFilter === 'TODOS') && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+            <div className="px-4 py-3 bg-slate-950/70 border-b border-slate-800 flex items-center justify-between">
+              <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
+                <PenTool className="w-4 h-4" />
+                <span>Relatórios de Treinamento da Unidade ({filteredUnidadeReports.length})</span>
+              </span>
+            </div>
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="bg-slate-950 text-slate-400 uppercase font-mono text-[10px] border-b border-slate-800">
@@ -1833,6 +2814,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
               </table>
             </div>
           </div>
+          )}
         </div>
       )}
 
@@ -1945,6 +2927,165 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
                 )}
                 <button
                   onClick={() => handlePrintRelatorioTreinamento(viewingTreinoReport)}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 transition"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir Relatório</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: DETALHES DO RELATÓRIO DE OPERAÇÃO */}
+      {viewingOperacaoReport && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto my-auto text-xs">
+            <div className="p-4 bg-slate-950/80 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <ShieldAlert className="w-5 h-5 text-emerald-400" />
+                <h3 className="font-black text-slate-100 font-mono text-sm uppercase">
+                  Relatório de Operação • {viewingOperacaoReport.comarca}/MG ({formatDateBr(viewingOperacaoReport.dataOperacao)} às {viewingOperacaoReport.horaOperacao})
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewingOperacaoReport(null)}
+                className="p-1 text-slate-400 hover:text-slate-100 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Data e Hora</span>
+                  <p className="font-bold text-slate-100 font-mono text-sm">
+                    {formatDateBr(viewingOperacaoReport.dataOperacao)} às {viewingOperacaoReport.horaOperacao}
+                  </p>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Comarca</span>
+                  <p className="font-bold text-slate-100 text-sm">{viewingOperacaoReport.comarca} / MG</p>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Solicitação</span>
+                  <p className="font-bold text-slate-100">
+                    {viewingOperacaoReport.solicitacaoTipo}
+                    {viewingOperacaoReport.solicitacaoTipo === 'Outros' && viewingOperacaoReport.solicitacaoOutrosDetalhes
+                      ? ` — ${viewingOperacaoReport.solicitacaoOutrosDetalhes}`
+                      : ''}
+                  </p>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Material Encontrado?</span>
+                  <p className={`font-bold ${viewingOperacaoReport.materialEncontrado ? 'text-emerald-400' : 'text-slate-300'}`}>
+                    {viewingOperacaoReport.materialEncontrado ? 'SIM' : 'NÃO'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                <span className="text-[10px] text-cyan-400 uppercase font-bold flex items-center space-x-1.5">
+                  <Car className="w-3.5 h-3.5" />
+                  <span>Viaturas Utilizadas ({(viewingOperacaoReport.viaturas || []).length})</span>
+                </span>
+                {(viewingOperacaoReport.viaturas || []).length === 0 ? (
+                  <p className="text-slate-500 italic text-[11px]">Nenhuma viatura informada nesta operação.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {(viewingOperacaoReport.viaturas || []).map(v => (
+                      <span
+                        key={v.id}
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 border border-cyan-500/30 text-slate-200 text-xs font-semibold"
+                      >
+                        <strong className="font-mono text-amber-300">{v.placa}</strong> • {v.descricao}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {viewingOperacaoReport.materialEncontrado && (viewingOperacaoReport.materiaisEncontrados || []).length > 0 && (
+                <div className="bg-slate-950 border border-emerald-500/30 rounded-xl p-3.5 space-y-2">
+                  <span className="text-[10px] text-emerald-400 uppercase font-bold block">
+                    Materiais Encontrados e Animais Responsáveis
+                  </span>
+                  <div className="space-y-2">
+                    {viewingOperacaoReport.materiaisEncontrados.map(m => (
+                      <div key={m.tipo} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-bold text-emerald-300">{m.tipo}</span>
+                        <span className="text-amber-300 font-semibold">
+                          Animal(is): {(m.cachorros || []).map(c => c.nome).join(', ') || '-'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block">
+                  Operadores da Operação ({(viewingOperacaoReport.operadores || []).length})
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {(viewingOperacaoReport.operadores || []).map(op => (
+                    <div key={op.userId} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2">
+                      <p className="font-bold text-slate-100">
+                        {op.name}
+                        {op.isCreator ? ' (Relator)' : ''}
+                      </p>
+                      {op.masp && <p className="text-[10px] font-mono text-slate-400">MASP: {formatMasp(op.masp)}</p>}
+                      <p className="text-[10px] text-amber-300 mt-0.5">
+                        {op.cachorros && op.cachorros.length > 0
+                          ? `Animal(is): ${op.cachorros.map(c => c.nome).join(', ')}`
+                          : 'Sem animal'}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1.5">
+                  Detalhamento da Operação
+                </span>
+                <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">{viewingOperacaoReport.detalhamento}</p>
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setViewingOperacaoReport(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition"
+                >
+                  Fechar
+                </button>
+                {canEditOrDeleteOperacao(viewingOperacaoReport) && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOperacao(viewingOperacaoReport)}
+                      className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/40 font-bold rounded-xl flex items-center space-x-1.5 transition"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      <span>Excluir</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleStartEditOperacao(viewingOperacaoReport)}
+                      className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-xl flex items-center space-x-1.5 transition"
+                    >
+                      <Edit className="w-4 h-4" />
+                      <span>Editar Relatório</span>
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => handlePrintRelatorioOperacao(viewingOperacaoReport)}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl flex items-center space-x-1.5 transition"
                 >
                   <Printer className="w-4 h-4" />

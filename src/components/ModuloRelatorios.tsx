@@ -2392,7 +2392,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       return {
         sectorName: `${activeUnitDisplayName} • Lógica Integral do Canil K9`,
         description:
-          'Unidade COC com lógica integral dos relatórios do Canil: criação e edição ao longo do dia do Relatório de Treinamento, acompanhamento e assinaturas em Meus Relatórios e consulta filtrada em Relatórios da Unidade.'
+          'Unidade COC com lógica integral dos relatórios do Canil: criação e edição ao longo do dia de Relatório de Treinamento e Relatório de Operações, acompanhamento em Meus Relatórios e consulta filtrada em Relatórios da Unidade.'
       };
     }
     if (isExplosivistaRole) {

@@ -48,6 +48,8 @@ import {
   ProdutoVeterinario,
   MovimentacaoVeterinaria,
   RelatorioTreinamentoCanil,
+  RelatorioOperacaoCanil,
+  ViaturaUnidade,
   CautelaArma,
   CautelaMunicao,
   AmmoTransfer,
@@ -100,6 +102,8 @@ export interface AppState {
   produtosVeterinarios: ProdutoVeterinario[];
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
   relatoriosTreinamentoCanil: RelatorioTreinamentoCanil[];
+  relatoriosOperacoesCanil: RelatorioOperacaoCanil[];
+  viaturas: ViaturaUnidade[];
   cautelasArmas: CautelaArma[];
   cautelasMunicoes: CautelaMunicao[];
   explosivoTransfers: ExplosivoTransfer[];
@@ -153,6 +157,8 @@ class StorageService {
     produtosVeterinarios: [],
     movimentacoesVeterinarias: [],
     relatoriosTreinamentoCanil: [],
+    relatoriosOperacoesCanil: [],
+    viaturas: [],
     cautelasArmas: [],
     cautelasMunicoes: [],
     weaponCustodyHistory: []
@@ -217,6 +223,8 @@ class StorageService {
         produtosVeterinariosRes,
         movimentacoesVeterinariasRes,
         relatoriosTreinamentoCanilRes,
+        relatoriosOperacoesCanilRes,
+        viaturasRes,
         cautelasArmasRes,
         cautelasMunicoesRes,
         materialTransfersRes,
@@ -263,6 +271,8 @@ class StorageService {
         fetchSync('/api/produtos-veterinarios'),
         fetchSync('/api/movimentacoes-veterinarias'),
         fetchSync('/api/relatorios-treinamento-canil'),
+        fetchSync('/api/relatorios-operacoes-canil'),
+        fetchSync('/api/viaturas'),
         fetchSync('/api/cautelas-armas'),
         fetchSync('/api/cautelas-municoes'),
         fetchSync('/api/material-transfers'),
@@ -310,6 +320,8 @@ class StorageService {
       this.state.produtosVeterinarios = produtosVeterinariosRes || [];
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
       this.state.relatoriosTreinamentoCanil = relatoriosTreinamentoCanilRes || [];
+      this.state.relatoriosOperacoesCanil = relatoriosOperacoesCanilRes || [];
+      this.state.viaturas = viaturasRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
       this.state.weaponCustodyHistory = weaponCustodyHistoryRes || [];
@@ -3743,6 +3755,122 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Relatórios de Operações Canil K9
+  public getRelatoriosOperacoesCanil(): RelatorioOperacaoCanil[] {
+    return this.state.relatoriosOperacoesCanil || [];
+  }
+
+  public async saveRelatorioOperacaoCanil(
+    rel: Partial<RelatorioOperacaoCanil>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: RelatorioOperacaoCanil }> {
+    try {
+      const res = await fetch('/api/relatorios-operacoes-canil', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao salvar relatório de operação.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateRelatorioOperacaoCanil(
+    id: string,
+    rel: Partial<RelatorioOperacaoCanil>
+  ): Promise<{ success: boolean; error?: string; data?: RelatorioOperacaoCanil }> {
+    try {
+      const res = await fetch(`/api/relatorios-operacoes-canil/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar relatório de operação.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteRelatorioOperacaoCanil(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-operacoes-canil/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório de operação.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Viaturas da Unidade
+  public getViaturas(): ViaturaUnidade[] {
+    return this.state.viaturas || [];
+  }
+
+  public async saveViatura(
+    viatura: Partial<ViaturaUnidade>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: ViaturaUnidade }> {
+    try {
+      const res = await fetch('/api/viaturas', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...viatura, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao cadastrar viatura.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateViatura(
+    id: string,
+    viatura: Partial<ViaturaUnidade>
+  ): Promise<{ success: boolean; error?: string; data?: ViaturaUnidade }> {
+    try {
+      const res = await fetch(`/api/viaturas/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...viatura, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar viatura.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteViatura(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/viaturas/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir viatura.' };
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {

@@ -1364,6 +1364,63 @@ export interface RelatorioTreinamentoCanil {
   updatedAt?: string;
 }
 
+export type SolicitacaoOperacaoCanil = 'CEPOLC' | 'SEI' | 'Outros';
+export type TipoMaterialEncontradoCanil = 'Droga' | 'Arma' | 'Munição' | 'Explosivos';
+
+export interface MaterialEncontradoOperacaoCanil {
+  tipo: TipoMaterialEncontradoCanil;
+  cachorros: ParticipanteTreinamentoCachorro[];
+}
+
+export interface OperadorOperacaoCanil {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  isCreator?: boolean;
+  cachorros: ParticipanteTreinamentoCachorro[];
+}
+
+export interface ViaturaUnidade {
+  id: string;
+  placa: string; // Máscara AAA-XAXX
+  descricao: string; // Marca e modelo da viatura
+  departmentId?: string;
+  unitId: string;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface ViaturaOperacaoCanil {
+  id: string;
+  placa: string;
+  descricao: string;
+}
+
+export interface RelatorioOperacaoCanil {
+  id: string;
+  dataOperacao: string; // YYYY-MM-DD
+  horaOperacao: string; // HH:mm (padrão 06:00)
+  comarca: string; // Município de Minas Gerais
+  solicitacaoTipo: SolicitacaoOperacaoCanil;
+  solicitacaoOutrosDetalhes?: string;
+  materialEncontrado: boolean;
+  materiaisEncontrados: MaterialEncontradoOperacaoCanil[];
+  operadores: OperadorOperacaoCanil[];
+  viaturas?: ViaturaOperacaoCanil[];
+  detalhamento: string; // Máximo 1000 caracteres
+  criadorId: string;
+  criadorNome: string;
+  criadorMasp: string;
+  criadorCargo?: string;
+  departmentId?: string;
+  unitId?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 
