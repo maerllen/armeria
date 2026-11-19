@@ -38,7 +38,12 @@ import {
   ScreenCautelaMaterialSolicitarCOE,
   ScreenCautelaMaterialDevolverCOE
 } from './ManualSystemScreens';
-import { buildStandardDocumentFilename, buildStandardDocumentTitle, printWithWindowTitle } from '../utils/printHelper';
+import {
+  buildStandardDocumentFilename,
+  buildStandardDocumentTitle,
+  generateUniquePrintCode,
+  printWithWindowTitle
+} from '../utils/printHelper';
 import { storage } from '../services/storage';
 import { showTopAlert } from './TopLayerAlert';
 
@@ -130,6 +135,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
       }
 
       const pdf = new jsPDF('p', 'mm', 'a4');
+      const uniquePrintCode = generateUniquePrintCode();
       const pageW = pdf.internal.pageSize.getWidth(); // 210mm
       const pageH = pdf.internal.pageSize.getHeight(); // 297mm
       const marginX = 8;
@@ -162,14 +168,14 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
         if (i > 0) pdf.addPage();
         pdf.addImage(imgData, 'JPEG', offsetX, marginTop, renderW, renderH);
 
-        // Rodapé institucional em vetor nítido
+        // Rodapé institucional em vetor nítido com código único irrepetível
         pdf.setDrawColor(203, 213, 225);
         pdf.line(marginX, pageH - 8.5, pageW - marginX, pageH - 8.5);
         pdf.setFont('helvetica', 'normal');
-        pdf.setFontSize(7.5);
+        pdf.setFontSize(7.2);
         pdf.setTextColor(71, 85, 105);
         pdf.text(
-          `PCMG • Sistema de Armaria — Manual do Usuário Policial (${ctx.unitName})`,
+          `PCMG • Armaria — Manual do Policial (${ctx.unitName}) • Cód. Único: ${uniquePrintCode}`,
           marginX,
           pageH - 4.5
         );

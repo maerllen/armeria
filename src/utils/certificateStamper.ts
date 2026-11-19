@@ -1,5 +1,6 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
+import { generateUniquePrintCode } from './printHelper';
 
 export interface StampOptions {
   authCode: string;
@@ -173,8 +174,68 @@ export async function stampPdfWithQrCode(
   };
 }
 
+async function stampUniquePrintCodeOnPdfBytes(byteArray: Uint8Array): Promise<Uint8Array> {
+  try {
+    const printCode = generateUniquePrintCode();
+    const issuedAt = new Date().toLocaleString('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit'
+    });
+    const pdfDoc = await PDFDocument.load(byteArray, { ignoreEncryption: true });
+    const fontBold = await pdfDoc.embedFont(StandardFonts.CourierBold);
+    const fontRegular = await pdfDoc.embedFont(StandardFonts.Helvetica);
+    const labelText = `COD. UNICO IMPRESSAO: ${printCode}`;
+    const metaText = `Emissao: ${issuedAt} | Sistema ARMARIA PCMG`;
+
+    for (const page of pdfDoc.getPages()) {
+      const { width } = page.getSize();
+      const boxW = Math.min(275, Math.max(180, width - 36));
+      const boxH = 16;
+      const boxX = 16;
+      const boxY = 4;
+
+      page.drawRectangle({
+        x: boxX,
+        y: boxY,
+        width: boxW,
+        height: boxH,
+        color: rgb(0.98, 0.99, 1),
+        borderColor: rgb(0.35, 0.42, 0.52),
+        borderWidth: 0.6,
+        opacity: 0.96
+      });
+
+      page.drawText(labelText, {
+        x: boxX + 5,
+        y: boxY + 9.2,
+        size: 6.5,
+        font: fontBold,
+        color: rgb(0.05, 0.08, 0.14)
+      });
+
+      page.drawText(metaText, {
+        x: boxX + 5,
+        y: boxY + 2.6,
+        size: 5.2,
+        font: fontRegular,
+        color: rgb(0.3, 0.36, 0.45)
+      });
+    }
+
+    return await pdfDoc.save();
+  } catch (err) {
+    console.warn('Não foi possível carimbar código único no PDF antes da impressão:', err);
+    return byteArray;
+  }
+}
+
 /**
- * Utility to print a PDF by opening or loading it into a temporary iframe
+ * Utility to print a PDF by stamping a non-repeating unique code and loading it into a temporary iframe
  */
 export function printPdfFromBase64(base64Data: string, title?: string) {
   const safeTitle = String(title ?? '')
@@ -182,78 +243,73 @@ export function printPdfFromBase64(base64Data: string, title?: string) {
     .replace(/\s+/g, ' ')
     .trim();
 
-  try {
-    const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
-    const byteCharacters = atob(cleanBase64);
-    const byteNumbers = new Array(byteCharacters.length);
-    for (let i = 0; i < byteCharacters.length; i++) {
-      byteNumbers[i] = byteCharacters.charCodeAt(i);
-    }
-    const byteArray = new Uint8Array(byteNumbers);
-    const blob = new Blob([byteArray], { type: 'application/pdf' });
-    const blobUrl = URL.createObjectURL(blob);
-
-    // Try printing with a hidden iframe
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.src = blobUrl;
-
-    const previousTitle = typeof document !== 'undefined' ? document.title : '';
-    let restored = false;
-    const cleanup = () => {
-      if (!restored) {
-        restored = true;
-        if (typeof document !== 'undefined') {
-          document.title = previousTitle;
-        }
+  void (async () => {
+    try {
+      const cleanBase64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
+      const byteCharacters = atob(cleanBase64);
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
-      setTimeout(() => {
-        try {
-          if (iframe.parentNode) {
-            document.body.removeChild(iframe);
+      const rawByteArray = new Uint8Array(byteNumbers);
+      const stampedBytes = await stampUniquePrintCodeOnPdfBytes(rawByteArray);
+      const pdfBytes = new Uint8Array(stampedBytes);
+      const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      // Try printing with a hidden iframe
+      const iframe = document.createElement('iframe');
+      iframe.style.position = 'fixed';
+      iframe.style.right = '0';
+      iframe.style.bottom = '0';
+      iframe.style.width = '0';
+      iframe.style.height = '0';
+      iframe.style.border = '0';
+      iframe.src = blobUrl;
+
+      const previousTitle = typeof document !== 'undefined' ? document.title : '';
+      let restored = false;
+      const cleanup = () => {
+        if (!restored) {
+          restored = true;
+          if (typeof document !== 'undefined') {
+            document.title = previousTitle;
           }
-          URL.revokeObjectURL(blobUrl);
-        } catch {
-          // cleanup ignore
         }
-      }, 500);
-    };
-
-    iframe.onload = () => {
-      setTimeout(() => {
-        try {
-          if (typeof document !== 'undefined' && safeTitle) {
-            document.title = safeTitle;
+        setTimeout(() => {
+          try {
+            if (iframe.parentNode) {
+              document.body.removeChild(iframe);
+            }
+            URL.revokeObjectURL(blobUrl);
+          } catch {
+            // cleanup ignore
           }
-          iframe.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
-          window.addEventListener('afterprint', cleanup, { once: true });
-          iframe.focus();
-          iframe.contentWindow?.print();
-        } catch {
-          cleanup();
-          // Fallback to window open if iframe print fails
-          window.open(blobUrl, '_blank');
-        }
-      }, 300);
-    };
+        }, 500);
+      };
 
-    document.body.appendChild(iframe);
+      iframe.onload = () => {
+        setTimeout(() => {
+          try {
+            if (typeof document !== 'undefined' && safeTitle) {
+              document.title = safeTitle;
+            }
+            iframe.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
+            window.addEventListener('afterprint', cleanup, { once: true });
+            iframe.focus();
+            iframe.contentWindow?.print();
+          } catch (printErr) {
+            console.error('Error triggering PDF iframe print:', printErr);
+            cleanup();
+          }
+        }, 300);
+      };
 
-    setTimeout(cleanup, 60000);
-  } catch (err) {
-    console.error('Error printing PDF:', err);
-    // Fallback direct open
-    const win = window.open();
-    if (win) {
-      win.document.write(
-        `<iframe src="data:application/pdf;base64,${base64Data}" frameborder="0" style="border:0; top:0px; left:0px; bottom:0px; right:0px; width:100%; height:100%;" allowfullscreen></iframe>`
-      );
-      win.document.title = safeTitle || 'Certificado';
+      document.body.appendChild(iframe);
+
+      setTimeout(cleanup, 60000);
+    } catch (err) {
+      console.error('Error printing PDF:', err);
     }
-  }
+  })();
 }
