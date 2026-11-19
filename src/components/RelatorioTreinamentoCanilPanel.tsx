@@ -40,6 +40,7 @@ interface RelatorioTreinamentoCanilPanelProps {
   allUsers: User[];
   onRefresh?: () => void;
   dataVersion?: number;
+  defaultUnitId?: string;
 }
 
 type CanilTrainingTab = 'relatorio-treinamento' | 'meus-relatorios' | 'relatorio-unidade';
@@ -50,14 +51,16 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   units,
   allUsers,
   onRefresh,
-  dataVersion = 0
+  dataVersion = 0,
+  defaultUnitId
 }) => {
   const [activeTab, setActiveTab] = useState<CanilTrainingTab>('relatorio-treinamento');
   const [localVersion, setLocalVersion] = useState(0);
 
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
-  const canVerRelatoriosTodasEquipes = isGeral || Boolean(currentUser.canViewAllCanilReports);
+  const canVerRelatoriosTodasEquipes =
+    isGeral || effectiveRole === 'Administrador' || Boolean(currentUser.canViewAllCanilReports);
 
   // Storage collections
   const cachorros = useMemo(() => storage.getCachorros(), [dataVersion, localVersion]);
@@ -430,7 +433,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         descricao: cleanDesc,
         participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
         departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
-        unitId: currentUser.unitId || primaryDogRecord?.unitId || ''
+        unitId: currentUser.unitId || defaultUnitId || primaryDogRecord?.unitId || ''
       });
     }
     setIsSubmitting(false);

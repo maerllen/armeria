@@ -79,6 +79,32 @@ const DEFAULT_SECTIONS: SectionSelection = {
   canil: true
 };
 
+const VIRTUAL_COC_BUTTON_ID = '__COC_CANIL__';
+
+interface ReportUnitButton {
+  id: string;
+  name: string;
+  departmentId: string;
+  departmentName: string;
+  isCoc: boolean;
+  realUnitId?: string;
+}
+
+const isCocUnitRecord = (unit?: Unit | null): boolean => {
+  if (!unit?.name) return false;
+  const norm = unit.name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+  return (
+    norm === 'COC' ||
+    /\bCOC\b/.test(norm) ||
+    norm.includes('OPERACOES COM CAES') ||
+    norm.includes('CANIL')
+  );
+};
+
 export const ReportModule: React.FC<ReportModuleProps> = ({
   currentUser,
   movements = [],
@@ -114,6 +140,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const isUnitOnly = !isGeral && !isDeptScoped;
 
   const [dataVersion, setDataVersion] = useState(0);
+  const [activeUnitButtonId, setActiveUnitButtonId] = useState<string>('');
+  const [cocSubView, setCocSubView] = useState<'TREINAMENTO' | 'ACERVO'>('TREINAMENTO');
   const [activeTab, setActiveTab] = useState<ReportTab>(() => {
     if (isOperadorCanino) return 'TREINAMENTO_CANIL';
     if (isCanilOnly) return 'CANIL';
@@ -130,7 +158,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     isGeral ? 'ALL' : currentUser.departmentId || 'ALL'
   );
   const [selectedUnit, setSelectedUnit] = useState<string>(() =>
-    isUnitOnly ? currentUser.unitId || 'ALL' : 'ALL'
+    currentUser.unitId || 'ALL'
   );
   const [recipientScope, setRecipientScope] = useState<'ALL' | 'SISTEMA' | 'FORA_DO_SISTEMA'>('ALL');
   const [reasonFilter, setReasonFilter] = useState('ALL');
@@ -150,20 +178,6 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       active = false;
     };
   }, [currentUser.id, effectiveRole]);
-
-  useEffect(() => {
-    if (isUnitOnly) {
-      setSelectedDept(currentUser.departmentId || 'ALL');
-      setSelectedUnit(currentUser.unitId || 'ALL');
-    } else if (isDeptScoped) {
-      setSelectedDept(currentUser.departmentId || 'ALL');
-      setSelectedUnit(prev => {
-        if (prev === 'ALL') return 'ALL';
-        const valid = units.some(u => u.id === prev && u.departmentId === currentUser.departmentId);
-        return valid ? prev : 'ALL';
-      });
-    }
-  }, [currentUser.id, currentUser.departmentId, currentUser.unitId, effectiveRole, isUnitOnly, isDeptScoped, units]);
 
   // Complete Lookup & Domain Collections synced with storage
   const allDepartments = useMemo(() => {
@@ -220,12 +234,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const allProdutosVet = useMemo(() => storage.getProdutosVeterinarios(), [dataVersion]);
   const allMovsVet = useMemo(() => storage.getMovimentacoesVeterinarias(), [dataVersion]);
 
-  // Allowed Departments and Units for Dropdowns
-  const allowedDepartments = useMemo(() => {
-    if (isGeral) return allDepartments;
-    return allDepartments.filter(d => d.id === currentUser.departmentId);
-  }, [allDepartments, isGeral, currentUser.departmentId]);
-
+  // Allowed Units for Modals
   const allowedUnits = useMemo(() => {
     if (isUnitOnly) {
       return allUnits.filter(u => u.id === currentUser.unitId);
@@ -256,6 +265,121 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
   const getDeptName = (deptId?: string | null) =>
     (deptId && allDepartments.find(d => d.id === deptId)?.name) || deptId || '-';
+
+  // Botões de Unidade: COC (lógica integral dos relatórios do Canil) + 1 botão para cada unidade acessível
+  const reportUnitButtons = useMemo<ReportUnitButton[]>(() => {
+    const accessibleRaw = isGeral
+      ? allUnits
+      : isDeptScoped
+      ? allUnits.filter(u => u.departmentId === currentUser.departmentId)
+      : allUnits.filter(u => u.id === currentUser.unitId);
+
+    const mapped: ReportUnitButton[] = accessibleRaw.map(u => ({
+      id: u.id,
+      name: u.name,
+      departmentId: u.departmentId || '',
+      departmentName: getDeptName(u.departmentId),
+      isCoc: isCocUnitRecord(u),
+      realUnitId: u.id
+    }));
+
+    const hasCocInAccessible = mapped.some(b => b.isCoc);
+    const canSeeCocButton = hasCocInAccessible || isOperadorCanino || isGeral || hasCanilAccess;
+
+    if (canSeeCocButton && !hasCocInAccessible) {
+      mapped.unshift({
+        id: VIRTUAL_COC_BUTTON_ID,
+        name: 'COC',
+        departmentId: currentUser.departmentId || '',
+        departmentName: currentUser.departmentId ? getDeptName(currentUser.departmentId) : 'Setor Canil K9',
+        isCoc: true,
+        realUnitId: undefined
+      });
+    }
+
+    return mapped.sort((a, b) => {
+      if (a.isCoc !== b.isCoc) return a.isCoc ? -1 : 1;
+      return a.name.localeCompare(b.name, 'pt-BR');
+    });
+  }, [
+    allUnits,
+    allDepartments,
+    isGeral,
+    isDeptScoped,
+    isOperadorCanino,
+    hasCanilAccess,
+    currentUser.departmentId,
+    currentUser.unitId
+  ]);
+
+  const activeUnitButton = useMemo<ReportUnitButton | undefined>(() => {
+    if (reportUnitButtons.length === 0) return undefined;
+    const found = reportUnitButtons.find(b => b.id === activeUnitButtonId);
+    if (found) return found;
+    if (isOperadorCanino) {
+      return reportUnitButtons.find(b => b.isCoc) || reportUnitButtons[0];
+    }
+    const ownUnitBtn = currentUser.unitId
+      ? reportUnitButtons.find(b => b.realUnitId === currentUser.unitId)
+      : undefined;
+    return ownUnitBtn || reportUnitButtons[0];
+  }, [reportUnitButtons, activeUnitButtonId, isOperadorCanino, currentUser.unitId]);
+
+  const isCocActive = Boolean(activeUnitButton?.isCoc);
+  const isCocAcervoView = isCocActive && !isOperadorCanino && cocSubView === 'ACERVO';
+  const isCanilTrainingView = isCocActive && !isCocAcervoView;
+  const canRenderCanilSection = hasCanilAccess || isCocActive;
+
+  const handleSelectUnitButton = (btn: ReportUnitButton) => {
+    setActiveUnitButtonId(btn.id);
+    setSelectedVaultSpace('ALL');
+    if (btn.isCoc) {
+      setCocSubView('TREINAMENTO');
+      setSelectedDept(btn.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
+      setSelectedUnit(btn.realUnitId || 'ALL');
+      setActiveTab('TREINAMENTO_CANIL');
+    } else {
+      setSelectedDept(btn.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
+      setSelectedUnit(btn.realUnitId || btn.id);
+      setActiveTab(prev =>
+        prev === 'TREINAMENTO_CANIL' || prev === 'CANIL'
+          ? isCanilOnly
+            ? 'CANIL'
+            : isExplosivistaRole
+            ? 'COFRES'
+            : 'TODOS'
+          : prev
+      );
+    }
+  };
+
+  useEffect(() => {
+    if (!activeUnitButton) return;
+    if (activeUnitButtonId !== activeUnitButton.id) {
+      setActiveUnitButtonId(activeUnitButton.id);
+    }
+    if (activeUnitButton.isCoc) {
+      setSelectedDept(activeUnitButton.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
+      setSelectedUnit(activeUnitButton.realUnitId || 'ALL');
+      if (isOperadorCanino || cocSubView === 'TREINAMENTO') {
+        if (activeTab !== 'TREINAMENTO_CANIL') setActiveTab('TREINAMENTO_CANIL');
+      } else if (activeTab !== 'CANIL') {
+        setActiveTab('CANIL');
+      }
+    } else {
+      const targetDept = activeUnitButton.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL');
+      const targetUnit = activeUnitButton.realUnitId || activeUnitButton.id;
+      if (selectedDept !== targetDept) setSelectedDept(targetDept);
+      if (selectedUnit !== targetUnit) setSelectedUnit(targetUnit);
+    }
+  }, [
+    activeUnitButton,
+    activeUnitButtonId,
+    cocSubView,
+    isGeral,
+    isOperadorCanino,
+    currentUser.departmentId
+  ]);
 
   // Core Data Computation Engine (shared identically by Screen, Print, and CSV)
   const buildUnitScopeData = (unitFilterId: string, applyScreenFilters: boolean) => {
@@ -1052,13 +1176,15 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   // Open shared modal for Print OR CSV
   const openActionModal = (mode: 'PRINT' | 'CSV') => {
     setActionModalMode(mode);
-    if (isUnitOnly) {
+    if (activeUnitButton?.realUnitId) {
+      setModalUnitId(activeUnitButton.realUnitId);
+    } else if (isUnitOnly) {
       setModalUnitId(currentUser.unitId || 'ALL');
     } else {
       setModalUnitId(selectedUnit || 'ALL');
     }
     setModalScopeMode('FULL_UNIT');
-    if (isCanilOnly) {
+    if (isCocAcervoView || isCanilOnly) {
       setModalSections({
         cofres: false,
         armas: false,
@@ -1125,12 +1251,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     ];
 
     const safeSections: SectionSelection = {
-      cofres: Boolean(sections.cofres && !isCanilOnly),
-      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly),
-      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly),
-      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly),
-      explosivos: Boolean(sections.explosivos && !isCanilOnly),
-      canil: Boolean(sections.canil && hasCanilAccess)
+      cofres: Boolean(sections.cofres && !isCanilOnly && !isCocAcervoView),
+      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      explosivos: Boolean(sections.explosivos && !isCanilOnly && !isCocAcervoView),
+      canil: Boolean(sections.canil && canRenderCanilSection)
     };
 
     if (safeSections.cofres) {
@@ -1567,16 +1693,16 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       `<div class="empty-box">${escapeHtml(msg)}</div>`;
 
     const safeSections: SectionSelection = {
-      cofres: Boolean(sections.cofres && !isCanilOnly),
-      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly),
-      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly),
-      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly),
-      explosivos: Boolean(sections.explosivos && !isCanilOnly),
-      canil: Boolean(sections.canil && hasCanilAccess)
+      cofres: Boolean(sections.cofres && !isCanilOnly && !isCocAcervoView),
+      armas: Boolean(sections.armas && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      municoes: Boolean(sections.municoes && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      materiais: Boolean(sections.materiais && !isExplosivistaRole && !isCanilOnly && !isCocAcervoView),
+      explosivos: Boolean(sections.explosivos && !isCanilOnly && !isCocAcervoView),
+      canil: Boolean(sections.canil && canRenderCanilSection)
     };
 
     const summaryCardsHtml = (() => {
-      if (isCanilOnly) {
+      if (isCanilOnly || isCocAcervoView) {
         return `
           <div class="summary-bar">
             <div class="sum-card"><label>Canis / Baias</label><span>${data.canisFisicos.length}</span></div>
@@ -1596,13 +1722,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         `;
       }
       return `
-        <div class="summary-bar" style="grid-template-columns: repeat(${hasCanilAccess ? 6 : 5}, 1fr);">
+        <div class="summary-bar" style="grid-template-columns: repeat(${safeSections.canil ? 6 : 5}, 1fr);">
           <div class="sum-card"><label>Cofres da Unidade</label><span>${data.cofres.length}</span></div>
           <div class="sum-card"><label>Armas / Movim.</label><span>${data.armas.length} / ${data.armaHistorico.length}</span></div>
           <div class="sum-card"><label>Munições (un) / Mov.</label><span>${data.municoesEstoque.reduce((a, s) => a + Number(s.quantity || 0), 0)} / ${data.municaoHistorico.length}</span></div>
           <div class="sum-card"><label>Materiais / Mov.</label><span>${data.materiais.length} / ${data.materialHistorico.length}</span></div>
           <div class="sum-card"><label>Explosivos / Mov.</label><span>${data.explosivos.length} / ${data.explosivoHistorico.length}</span></div>
-          ${hasCanilAccess ? `<div class="sum-card"><label>Canil (Cães / Mov.)</label><span>${data.cachorrosCanil.length} / ${data.movimentacoesCanil.length}</span></div>` : ''}
+          ${safeSections.canil ? `<div class="sum-card"><label>Canil (Cães / Mov.)</label><span>${data.cachorrosCanil.length} / ${data.movimentacoesCanil.length}</span></div>` : ''}
         </div>
       `;
     })();
@@ -2217,22 +2343,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         id: 'CANIL',
         label: `Canil — Acervo (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
         icon: <Dog className="w-4 h-4" />,
-        visible: hasCanilAccess && !isOperadorCanino
-      },
-      {
-        id: 'TREINAMENTO_CANIL',
-        label: 'Treinamentos Canil K9',
-        icon: <PenTool className="w-4 h-4" />,
-        visible: isOperadorCanino || isGeral
+        visible: isCanilOnly
       }
     ];
     return allTabs.filter(t => t.visible);
   }, [
     isExplosivistaRole,
     isCanilOnly,
-    isOperadorCanino,
-    isGeral,
-    hasCanilAccess,
     screenData.cofres.length,
     screenData.armas.length,
     screenData.armaHistorico.length,
@@ -2247,65 +2364,64 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   ]);
 
   useEffect(() => {
-    if (isOperadorCanino && activeTab !== 'TREINAMENTO_CANIL') {
-      setActiveTab('TREINAMENTO_CANIL');
-      return;
-    }
+    if (isCocActive) return;
     const allowedIds = tabsConfig.map(t => t.id);
     if (allowedIds.length > 0 && !allowedIds.includes(activeTab)) {
       setActiveTab(allowedIds[0]);
     }
-  }, [tabsConfig, activeTab, isOperadorCanino]);
+  }, [tabsConfig, activeTab, isCocActive]);
 
-  const userUnitName = currentUser.unitId
+  const activeUnitDisplayName = activeUnitButton
+    ? activeUnitButton.name
+    : currentUser.unitId
     ? getUnitName(currentUser.unitId)
     : isGeral
     ? 'Todas as Unidades'
     : 'Unidade não vinculada';
 
-  const userDeptName = currentUser.departmentId
+  const activeDeptDisplayName = activeUnitButton?.departmentId
+    ? getDeptName(activeUnitButton.departmentId)
+    : currentUser.departmentId
     ? getDeptName(currentUser.departmentId)
     : isGeral
     ? 'Todos os Departamentos'
     : 'Departamento não vinculado';
 
   const sectorContext = useMemo(() => {
-    if (isOperadorCanino) {
+    if (isCocActive) {
       return {
-        sectorName: 'Canil K9 • Operador Canino',
+        sectorName: `${activeUnitDisplayName} • Lógica Integral do Canil K9`,
         description:
-          'Relatórios vinculados à sua unidade e ao setor Canil K9: criação e edição ao longo do dia do Relatório de Treinamento, acompanhamento e assinaturas em Meus Relatórios e consulta de Relatórios da Unidade.'
+          'Unidade COC com lógica integral dos relatórios do Canil: criação e edição ao longo do dia do Relatório de Treinamento, acompanhamento e assinaturas em Meus Relatórios e consulta filtrada em Relatórios da Unidade.'
       };
     }
     if (isExplosivistaRole) {
       return {
         sectorName: 'Explosivos / Esquadrão Antibombas',
         description:
-          'Relatórios vinculados à sua unidade e ao setor de Explosivos: cofres de explosivos, acervo de explosivos e histórico completo de movimentações.'
+          `Relatórios da unidade ${activeUnitDisplayName} vinculados ao setor de Explosivos: cofres de explosivos, acervo de explosivos e histórico completo de movimentações.`
       };
     }
     if (effectiveRole === 'Armeiro') {
       return {
         sectorName: 'Armaria / Material Bélico',
         description:
-          'Relatórios vinculados à sua unidade e ao setor de Armaria: cofres, armas, munições, materiais, explosivos e histórico completo de movimentações.'
+          `Relatórios da unidade ${activeUnitDisplayName} vinculados ao setor de Armaria: cofres, armas, munições, materiais, explosivos e histórico completo de movimentações.`
       };
     }
     if (effectiveRole === 'Administrador') {
       return {
-        sectorName: 'Administração do Departamento / Unidade',
+        sectorName: 'Administração da Unidade / Departamento',
         description:
-          'Relatórios integrados vinculados ao seu departamento e unidades: cofres, armas, munições, materiais, explosivos e movimentações operacionais.'
+          `Relatórios integrados da unidade ${activeUnitDisplayName}: cofres, armas, munições, materiais, explosivos e movimentações operacionais.`
       };
     }
     return {
-      sectorName: 'Gestão Geral • Todos os Setores e Unidades',
+      sectorName: `Gestão Geral • Unidade ${activeUnitDisplayName}`,
       description:
-        'Visão global de todas as unidades e setores, incluindo relatórios gerenciais (Armaria, Cofres, Explosivos, Acervo Canil) e o módulo de Treinamentos do Setor Canil K9.'
+        `Relatórios gerenciais e operacionais separados por unidade. Exibindo dados exclusivos da unidade ${activeUnitDisplayName}.`
     };
-  }, [isOperadorCanino, isExplosivistaRole, effectiveRole]);
-
-  const isCanilTrainingView = isOperadorCanino || activeTab === 'TREINAMENTO_CANIL';
+  }, [isCocActive, isExplosivistaRole, effectiveRole, activeUnitDisplayName]);
 
   const handlePanelRefresh = () => {
     storage
@@ -2327,11 +2443,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="flex items-center space-x-3">
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 text-amber-400 rounded-xl shrink-0">
-              {isCanilTrainingView ? <Dog className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
+              {isCocActive ? <Dog className="w-6 h-6" /> : <FileText className="w-6 h-6" />}
             </div>
             <div>
               <h1 className="text-xl font-bold text-slate-100">
-                {isOperadorCanino ? 'Módulo Relatório • Setor Canil K9' : 'Relatórios Gerenciais e Operacionais'}
+                {isCocActive
+                  ? `Módulo Relatório • ${activeUnitDisplayName} (Canil K9)`
+                  : `Módulo Relatório • ${activeUnitDisplayName}`}
               </h1>
               <p className="text-xs text-slate-400 mt-0.5">{sectorContext.description}</p>
             </div>
@@ -2366,14 +2484,18 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             <Building2 className="w-4 h-4 text-amber-400 shrink-0" />
             <div className="min-w-0">
               <span className="block text-[10px] uppercase font-bold text-slate-400">Departamento</span>
-              <span className="font-bold text-slate-100 truncate block">{userDeptName}</span>
+              <span className="font-bold text-slate-100 truncate block">{activeDeptDisplayName}</span>
             </div>
           </div>
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5">
-            <Building className="w-4 h-4 text-cyan-400 shrink-0" />
+            {isCocActive ? (
+              <Dog className="w-4 h-4 text-amber-400 shrink-0" />
+            ) : (
+              <Building className="w-4 h-4 text-cyan-400 shrink-0" />
+            )}
             <div className="min-w-0">
-              <span className="block text-[10px] uppercase font-bold text-slate-400">Unidade Vinculada</span>
-              <span className="font-bold text-slate-100 truncate block">{userUnitName}</span>
+              <span className="block text-[10px] uppercase font-bold text-slate-400">Unidade Selecionada</span>
+              <span className="font-bold text-slate-100 truncate block">{activeUnitDisplayName}</span>
             </div>
           </div>
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5 flex items-center space-x-2.5">
@@ -2386,8 +2508,106 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       </div>
 
-      {/* Main Sector Tabs (hidden for Operador Canino since Canil Training sub-tabs are the primary tabs) */}
-      {!isOperadorCanino && (
+      {/* SELETOR DE RELATÓRIOS POR UNIDADE (BOTÕES COM O NOME DE CADA UNIDADE + COC CANIL) */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-sm space-y-3 print:hidden">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div className="flex items-center space-x-2">
+            <Building className="w-4 h-4 text-amber-400" />
+            <span className="text-xs font-bold uppercase tracking-wider text-slate-200">
+              Relatórios por Unidade ({reportUnitButtons.length})
+            </span>
+          </div>
+          <span className="text-[11px] text-slate-400">
+            Clique no botão da unidade desejada para acessar os relatórios vinculados
+          </span>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {reportUnitButtons.map(btn => {
+            const isSelected = activeUnitButton?.id === btn.id;
+            return (
+              <button
+                key={btn.id}
+                type="button"
+                onClick={() => handleSelectUnitButton(btn)}
+                className={`px-4 py-2.5 rounded-xl border text-xs font-bold transition flex items-center space-x-2 ${
+                  isSelected
+                    ? 'bg-amber-500 text-slate-950 border-amber-400 shadow-lg shadow-amber-500/20'
+                    : btn.isCoc
+                    ? 'bg-slate-950/90 text-amber-300 border-amber-500/40 hover:bg-amber-500/10 hover:border-amber-400'
+                    : 'bg-slate-950/80 text-slate-300 border-slate-700 hover:bg-slate-800 hover:text-slate-100 hover:border-slate-500'
+                }`}
+              >
+                {btn.isCoc ? (
+                  <Dog className="w-4 h-4 shrink-0" />
+                ) : (
+                  <Building2 className="w-4 h-4 shrink-0" />
+                )}
+                <span>{btn.name}</span>
+                {btn.isCoc && (
+                  <span
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-black uppercase ${
+                      isSelected
+                        ? 'bg-slate-950/20 text-slate-950'
+                        : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
+                    }`}
+                  >
+                    Canil K9
+                  </span>
+                )}
+                {isGeral && !btn.isCoc && btn.departmentName && btn.departmentName !== '-' && (
+                  <span
+                    className={`text-[10px] font-medium ${
+                      isSelected ? 'text-slate-900/80' : 'text-slate-500'
+                    }`}
+                  >
+                    • {btn.departmentName}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Sub-navegação COC para perfis gestores (Treinamentos Canil K9 vs Acervo/Farmácia Canil) */}
+      {isCocActive && !isOperadorCanino && (
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
+          <button
+            type="button"
+            onClick={() => {
+              setCocSubView('TREINAMENTO');
+              setActiveTab('TREINAMENTO_CANIL');
+            }}
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+              cocSubView === 'TREINAMENTO'
+                ? 'bg-amber-500 text-slate-950 shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <PenTool className="w-4 h-4" />
+            <span>Relatórios de Treinamento Canil</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setCocSubView('ACERVO');
+              setActiveTab('CANIL');
+            }}
+            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+              cocSubView === 'ACERVO'
+                ? 'bg-amber-500 text-slate-950 shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Dog className="w-4 h-4" />
+            <span>Acervo Canil — Cães, Baias & Farmácia ({screenData.cachorrosCanil.length} / {screenData.movimentacoesCanil.length})</span>
+          </button>
+        </div>
+      )}
+
+      {/* Main Sector Tabs (for non-COC units) */}
+      {!isCocActive && (
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
           {tabsConfig.map(t => (
             <button
@@ -2407,7 +2627,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       )}
 
-      {/* SETOR CANIL K9: RELATÓRIO DE TREINAMENTO, MEUS RELATÓRIOS E RELATÓRIOS DA UNIDADE */}
+      {/* UNIDADE COC: LÓGICA INTEGRAL DOS RELATÓRIOS DO CANIL (TREINAMENTO, MEUS RELATÓRIOS E RELATÓRIOS DA UNIDADE) */}
       {isCanilTrainingView ? (
         <RelatorioTreinamentoCanilPanel
           currentUser={currentUser}
@@ -2416,6 +2636,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           allUsers={allUsersList}
           onRefresh={handlePanelRefresh}
           dataVersion={dataVersion}
+          defaultUnitId={activeUnitButton?.realUnitId}
         />
       ) : (
         <>
@@ -2423,51 +2644,24 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 print:hidden">
         <div className="flex items-center space-x-2 text-amber-400 text-xs font-bold uppercase tracking-wider">
           <Filter className="w-4 h-4" />
-          <span>Filtros do Relatório (Unidade, Departamento, Cofre, Calibre, Período, Usuário e Motivo)</span>
+          <span>Filtros do Relatório ({activeUnitDisplayName} • Cofre, Calibre, Período, Usuário e Motivo)</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4 text-xs">
-          {/* Dept Filter */}
+          {/* Dept Filter (vinculado à unidade selecionada) */}
           <div>
             <label className="block text-slate-400 mb-1 font-semibold">Departamento</label>
-            <select
-              value={selectedDept}
-              disabled={!isGeral}
-              onChange={(e) => {
-                setSelectedDept(e.target.value);
-                setSelectedUnit('ALL');
-                setSelectedVaultSpace('ALL');
-              }}
-              className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 ${
-                !isGeral ? 'opacity-60 cursor-not-allowed' : ''
-              }`}
-            >
-              {isGeral && <option value="ALL">Todos os Departamentos</option>}
-              {allowedDepartments.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
+            <div className="w-full bg-slate-950/70 border border-slate-800 rounded-xl px-3 py-2 text-slate-200 font-semibold truncate">
+              {activeDeptDisplayName}
+            </div>
           </div>
 
-          {/* Unit Filter */}
+          {/* Unit Filter (vinculado ao botão da unidade selecionada) */}
           <div>
-            <label className="block text-slate-400 mb-1 font-semibold">Unidade</label>
-            <select
-              value={selectedUnit}
-              disabled={isUnitOnly}
-              onChange={(e) => {
-                setSelectedUnit(e.target.value);
-                setSelectedVaultSpace('ALL');
-              }}
-              className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 ${
-                isUnitOnly ? 'opacity-60 cursor-not-allowed' : ''
-              }`}
-            >
-              {!isUnitOnly && <option value="ALL">Todas as Unidades</option>}
-              {allowedUnits.map(u => (
-                <option key={u.id} value={u.id}>{u.name}</option>
-              ))}
-            </select>
+            <label className="block text-slate-400 mb-1 font-semibold">Unidade Ativa</label>
+            <div className="w-full bg-slate-950/70 border border-amber-500/40 rounded-xl px-3 py-2 text-amber-300 font-bold truncate">
+              {activeUnitDisplayName}
+            </div>
           </div>
 
           {/* Vault Space Filter */}
@@ -2587,8 +2781,6 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                 setSelectedUser('ALL');
                 setSelectedCaliber('ALL');
                 setSelectedVaultSpace('ALL');
-                if (isGeral) setSelectedDept('ALL');
-                if (!isUnitOnly) setSelectedUnit('ALL');
                 setRecipientScope('ALL');
                 setReasonFilter('ALL');
               }}
@@ -3062,7 +3254,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         )}
 
         {/* SECTION 6: CANIL */}
-        {hasCanilAccess && (activeTab === 'CANIL' || activeTab === 'TODOS') && (
+        {canRenderCanilSection && (activeTab === 'CANIL' || isCocAcervoView) && (
           <div className="space-y-5 pt-4 border-t border-slate-800">
             <h3 className="text-xs font-bold text-amber-400 uppercase tracking-wider font-mono flex items-center space-x-1.5">
               <Dog className="w-4 h-4" />
@@ -3445,10 +3637,10 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
                     },
                     {
                       key: 'canil',
-                      label: isCanilOnly
+                      label: isCanilOnly || isCocAcervoView
                         ? '1. Canil K9 (Canis físicos, Cães, Farmácia e Aplicações)'
                         : '6. Canil K9 (Canis físicos, Cães, Farmácia e Aplicações)',
-                      visible: hasCanilAccess
+                      visible: canRenderCanilSection
                     }
                   ]
                     .filter(item => item.visible)
