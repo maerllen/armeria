@@ -21007,6 +21007,8 @@ async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
         \`MUNICIPIO_OPERACAO\` VARCHAR(160) NOT NULL,
         \`APENAS_UM_MUNICIPIO\` TINYINT(1) NOT NULL DEFAULT 1,
         \`OUTROS_MUNICIPIOS_JSON\` LONGTEXT DEFAULT NULL,
+        \`APOIO_OUTRO_DEPARTAMENTO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DEPARTAMENTOS_APOIO_JSON\` LONGTEXT DEFAULT NULL,
         \`AERONAVES_JSON\` LONGTEXT DEFAULT NULL,
         \`HORAS_TOTAIS_VOO\` VARCHAR(16) NOT NULL DEFAULT '00:00',
         \`VIATURAS_JSON\` LONGTEXT DEFAULT NULL,
@@ -21051,6 +21053,8 @@ async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
     `);
     const extraCols: Array<[string, string]> = [
       ['HORARIO_SAIDA_BASE', 'VARCHAR(5) DEFAULT NULL'],
+      ['APOIO_OUTRO_DEPARTAMENTO', 'TINYINT(1) NOT NULL DEFAULT 0'],
+      ['DEPARTAMENTOS_APOIO_JSON', 'LONGTEXT DEFAULT NULL'],
       ['TEVE_OBITO', 'TINYINT(1) NOT NULL DEFAULT 0'],
       ['QTD_OBITOS', 'INT NOT NULL DEFAULT 0'],
       ['MESMO_DETALHAMENTO_OBITOS', 'TINYINT(1) NOT NULL DEFAULT 1'],
@@ -21185,11 +21189,79 @@ function sanitizeCatOpTripulantes(raw: any, origem: 'CAT' | 'COE') {
   return out;
 }
 
+const CAT_OP_ALLOWED_ORIGENS_DRONE = new Set<string>([
+  'VIATURA',
+  'CAT',
+  'COE',
+  'EXTERNO',
+  'DESCONHECIDO'
+]);
+
+function sanitizeCatOpDepartamentosApoio(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const val = String(item || '').trim().slice(0, 120);
+    if (!val) continue;
+    const key = val.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(val);
+    if (out.length >= 40) break;
+  }
+  return out;
+}
+
 function sanitizeCatOpEquipeSolo(raw: any) {
   if (!Array.isArray(raw)) return [];
   const seen = new Set<string>();
   const out: any[] = [];
-  for (const s of raw) {
+  for (let i = 0; i < raw.length && out.length < 50; i++) {
+    const s = raw[i];
+    const rawOrigem = String(s?.origemDrone || '').trim().toUpperCase();
+    const origemDrone = CAT_OP_ALLOWED_ORIGENS_DRONE.has(rawOrigem) ? rawOrigem : undefined;
+    const isDesconhecido = origemDrone === 'DESCONHECIDO' || Boolean(s?.desconhecido);
+    const isExterno = !isDesconhecido && origemDrone === 'EXTERNO';
+    const itemId = String(s?.id || '').trim().slice(0, 64);
+
+    if (isDesconhecido) {
+      const dedupKey = 'DESCONHECIDO';
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      out.push({
+        id: itemId || `drone-desc-${Date.now()}-${i}`,
+        userId: '',
+        name: 'DESCONHECIDO',
+        masp: '',
+        cargo: '',
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'DESCONHECIDO',
+        desconhecido: true
+      });
+      continue;
+    }
+
+    if (isExterno) {
+      const name = String(s?.name || '').trim().slice(0, 255);
+      const masp = String(s?.masp || '').trim().slice(0, 32);
+      if (!name) continue;
+      const dedupKey = `EXT:${name.toLowerCase()}|${masp.toLowerCase()}`;
+      if (seen.has(dedupKey)) continue;
+      seen.add(dedupKey);
+      out.push({
+        id: itemId || `drone-ext-${Date.now()}-${i}`,
+        userId: '',
+        name,
+        masp,
+        cargo: String(s?.cargo || '').trim().slice(0, 128),
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'EXTERNO',
+        desconhecido: false
+      });
+      continue;
+    }
+
     const userId = String(s?.userId || '').trim().slice(0, 64);
     const name = String(s?.name || '').trim().slice(0, 255);
     const opSolo = String(s?.operacaoSolo || '').trim();
@@ -21199,6 +21271,7 @@ function sanitizeCatOpEquipeSolo(raw: any) {
       : 'Piloto de aeronave não tripulada';
     seen.add(userId);
     out.push({
+      ...(itemId ? { id: itemId } : {}),
       userId,
       name,
       masp: String(s?.masp || '').trim().slice(0, 32),
@@ -21207,9 +21280,13 @@ function sanitizeCatOpEquipeSolo(raw: any) {
       apoioLogisticoDescricao:
         validOpSolo === 'Apoio logístico'
           ? String(s?.apoioLogisticoDescricao || '').trim().slice(0, 300)
-          : undefined
+          : undefined,
+      ...(origemDrone ? { origemDrone } : {}),
+      ...(s?.viaturaPlaca ? { viaturaPlaca: String(s.viaturaPlaca).trim().toUpperCase().slice(0, 16) } : {}),
+      ...(s?.unitId ? { unitId: String(s.unitId).trim().slice(0, 64) } : {}),
+      ...(s?.unitName ? { unitName: String(s.unitName).trim().slice(0, 255) } : {}),
+      desconhecido: false
     });
-    if (out.length >= 50) break;
   }
   return out;
 }
@@ -21457,14 +21534,20 @@ function buildCatOpSignatureRoster(
     if (t.userId && t.name) candidates.push(t);
   }
   for (const s of payload.equipeSolo || []) {
-    if (s.userId && s.name) {
+    if (
+      !s.desconhecido &&
+      s.origemDrone !== 'EXTERNO' &&
+      s.origemDrone !== 'DESCONHECIDO' &&
+      s.userId &&
+      s.name
+    ) {
       candidates.push({
         userId: s.userId,
         name: s.name,
         masp: s.masp || '',
         cargo: s.cargo || '',
-        unitId: creator.unitId || '',
-        unitName: creator.unitName || ''
+        unitId: s.unitId || creator.unitId || '',
+        unitName: s.unitName || creator.unitName || ''
       });
     }
   }
@@ -21520,6 +21603,10 @@ function mapCatOpRow(r: any) {
     municipioOperacao: r.municipioOperacao || '',
     apenasUmMunicipio: Boolean(r.apenasUmMunicipio),
     outrosMunicipios: Array.isArray(safeParse(r.outrosMunicipiosJson, [])) ? safeParse(r.outrosMunicipiosJson, []) : [],
+    apoioOutroDepartamento: Boolean(r.apoioOutroDepartamento),
+    departamentosApoio: Array.isArray(safeParse(r.departamentosApoioJson, []))
+      ? safeParse(r.departamentosApoioJson, [])
+      : [],
     aeronaves: Array.isArray(safeParse(r.aeronavesJson, [])) ? safeParse(r.aeronavesJson, []) : [],
     horasTotaisVoo: r.horasTotaisVoo || '00:00',
     viaturas: Array.isArray(safeParse(r.viaturasJson, [])) ? safeParse(r.viaturasJson, []) : [],
@@ -21579,6 +21666,8 @@ const CAT_OP_SELECT_COLS = `
   MUNICIPIO_OPERACAO as municipioOperacao,
   APENAS_UM_MUNICIPIO as apenasUmMunicipio,
   OUTROS_MUNICIPIOS_JSON as outrosMunicipiosJson,
+  APOIO_OUTRO_DEPARTAMENTO as apoioOutroDepartamento,
+  DEPARTAMENTOS_APOIO_JSON as departamentosApoioJson,
   AERONAVES_JSON as aeronavesJson,
   HORAS_TOTAIS_VOO as horasTotaisVoo,
   VIATURAS_JSON as viaturasJson,
@@ -21681,6 +21770,15 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
       ? String(body.horarioSaidaBase).trim()
       : horarioDecolagem;
 
+    if (
+      comEmpregoAeronave &&
+      parseHHMMToClockMinutesServer(horarioVooOperacao) < parseHHMMToClockMinutesServer(horarioDecolagem)
+    ) {
+      return res.status(400).json({
+        error: 'O Horário do Término da Operação não pode ser menor que o Horário do Início da Operação.'
+      });
+    }
+
     const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
     if (!VALID_UFS_BR.has(estadoOperacao)) {
       return res.status(400).json({ error: 'Estado da operação inválido.' });
@@ -21693,6 +21791,15 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
     const outrosMunicipios = apenasUmMunicipio
       ? []
       : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+    const apoioOutroDepartamento = Boolean(body.apoioOutroDepartamento);
+    const departamentosApoio = apoioOutroDepartamento
+      ? sanitizeCatOpDepartamentosApoio(body.departamentosApoio)
+      : [];
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      return res.status(400).json({
+        error: 'Selecione ao menos um departamento de apoio ou marque "Não" em Apoio a outro departamento.'
+      });
+    }
 
     const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
     if (comEmpregoAeronave && aeronaves.length === 0) {
@@ -21832,7 +21939,8 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
       `INSERT INTO RELATORIOS_OPERACOES_CAT (
         ID_REL_OP_CAT, COM_EMPREGO_AERONAVE, DATA_SAIDA_BASE, HORARIO_SAIDA_BASE, DATA_OPERACAO,
         HORARIO_DECOLAGEM, HORARIO_VOO_OPERACAO, ESTADO_OPERACAO, MUNICIPIO_OPERACAO,
-        APENAS_UM_MUNICIPIO, OUTROS_MUNICIPIOS_JSON, AERONAVES_JSON, HORAS_TOTAIS_VOO,
+        APENAS_UM_MUNICIPIO, OUTROS_MUNICIPIOS_JSON, APOIO_OUTRO_DEPARTAMENTO, DEPARTAMENTOS_APOIO_JSON,
+        AERONAVES_JSON, HORAS_TOTAIS_VOO,
         VIATURAS_JSON, TIPO_VOO, TIPO_VOO_OUTROS_DESC,
         TEVE_TRIPULANTE_OPERACIONAL, QTD_TRIPULANTES_OPERACIONAIS, TRIPULANTES_OPERACIONAIS_JSON,
         TEVE_TRIPULANTE_OUTRA_UNIDADE, TRIPULANTES_OUTRA_UNIDADE_JSON,
@@ -21844,7 +21952,7 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
         SINOPSE_VOO, OPERADORES_JSON,
         CRIADOR_ID, CRIADOR_NOME, CRIADOR_MASP, CRIADOR_CARGO,
         DEPARTAMENTO_ID, UNIDADE_ID, UNIDADE_NOME
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         comEmpregoAeronave ? 1 : 0,
@@ -21857,6 +21965,8 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
         municipioOperacao,
         apenasUmMunicipio ? 1 : 0,
         JSON.stringify(outrosMunicipios),
+        apoioOutroDepartamento ? 1 : 0,
+        JSON.stringify(departamentosApoio),
         JSON.stringify(aeronaves),
         horasTotaisVoo,
         JSON.stringify(viaturas),
@@ -21979,6 +22089,15 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
       ? String(body.horarioSaidaBase).trim()
       : row.HORARIO_SAIDA_BASE || horarioDecolagem;
 
+    if (
+      comEmpregoAeronave &&
+      parseHHMMToClockMinutesServer(horarioVooOperacao) < parseHHMMToClockMinutesServer(horarioDecolagem)
+    ) {
+      return res.status(400).json({
+        error: 'O Horário do Término da Operação não pode ser menor que o Horário do Início da Operação.'
+      });
+    }
+
     const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
     if (!VALID_UFS_BR.has(estadoOperacao)) {
       return res.status(400).json({ error: 'Estado da operação inválido.' });
@@ -21991,6 +22110,15 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
     const outrosMunicipios = apenasUmMunicipio
       ? []
       : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+    const apoioOutroDepartamento = Boolean(body.apoioOutroDepartamento);
+    const departamentosApoio = apoioOutroDepartamento
+      ? sanitizeCatOpDepartamentosApoio(body.departamentosApoio)
+      : [];
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      return res.status(400).json({
+        error: 'Selecione ao menos um departamento de apoio ou marque "Não" em Apoio a outro departamento.'
+      });
+    }
 
     const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
     if (comEmpregoAeronave && aeronaves.length === 0) {
@@ -22150,6 +22278,8 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
         MUNICIPIO_OPERACAO = ?,
         APENAS_UM_MUNICIPIO = ?,
         OUTROS_MUNICIPIOS_JSON = ?,
+        APOIO_OUTRO_DEPARTAMENTO = ?,
+        DEPARTAMENTOS_APOIO_JSON = ?,
         AERONAVES_JSON = ?,
         HORAS_TOTAIS_VOO = ?,
         VIATURAS_JSON = ?,
@@ -22187,6 +22317,8 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
         municipioOperacao,
         apenasUmMunicipio ? 1 : 0,
         JSON.stringify(outrosMunicipios),
+        apoioOutroDepartamento ? 1 : 0,
+        JSON.stringify(departamentosApoio),
         JSON.stringify(aeronaves),
         horasTotaisVoo,
         JSON.stringify(viaturas),

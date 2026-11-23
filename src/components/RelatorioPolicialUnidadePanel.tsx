@@ -39,7 +39,9 @@ import {
 import {
   RelatorioOperacoesCatForm,
   printRelatorioOperacaoCat,
-  sumFlightHoursHHMM
+  sumFlightHoursHHMM,
+  getCatOpSignerRoleLabel,
+  formatDronePilotOriginLabel
 } from './RelatorioOperacoesCatForm';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
@@ -620,6 +622,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       }
     }
     for (const rel of unitScopedCatOpReports) {
+      for (const da of rel.departamentosApoio || []) {
+        const clean = String(da || '').trim();
+        if (!clean || seenNames.has(normalizeText(clean))) continue;
+        seenNames.add(normalizeText(clean));
+        options.push({ value: `APOIO:${clean}`, label: `${clean} (Apoio)`, deptName: clean });
+      }
       for (const emb of rel.embarcadosExternos || []) {
         const clean = String(emb.departmentName || '').trim();
         if (!clean || seenNames.has(normalizeText(clean))) continue;
@@ -870,12 +878,16 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
         const unitDeptId = rel.departmentId || units.find(u => u.id === rel.unitId)?.departmentId || effectiveDeptId;
         const deptNameNorm = normalizeText(selectedUnitDeptOpt.deptName);
         const matchesMainDept = Boolean(selectedUnitDeptOpt.deptId && unitDeptId === selectedUnitDeptOpt.deptId);
+        const matchesApoio = (rel.departamentosApoio || []).some(da => {
+          const daNorm = normalizeText(da);
+          return daNorm === deptNameNorm || daNorm.includes(deptNameNorm) || deptNameNorm.includes(daNorm);
+        });
         const matchesEmb = (rel.embarcadosExternos || []).some(
           e =>
             (selectedUnitDeptOpt.deptId && e.departmentId === selectedUnitDeptOpt.deptId) ||
             (e.departmentName && normalizeText(e.departmentName) === deptNameNorm)
         );
-        if (!matchesMainDept && !matchesEmb) return false;
+        if (!matchesMainDept && !matchesApoio && !matchesEmb) return false;
       }
       if (unitEstadoFilter) {
         const matchUf =
@@ -919,11 +931,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       }
       if (q) {
         const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
+        const deptApoio = (rel.departamentosApoio || []).join(' ');
         const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
         const aeroText = (rel.aeronaves || []).map(a => `${a.tipo} ${a.prefixo} ${a.pilotoNome || ''} ${a.copilotoNome || ''}`).join(' ');
         const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao} ${v.tipoApoio}`).join(' ');
         const hay = normalizeText(
-          `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoVoo || ''} ${rel.criadorNome} ${opNames} ${aeroText} ${vtrText} ${rel.sinopseVoo}`
+          `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${deptApoio} ${rel.tipoVoo || ''} ${rel.criadorNome} ${opNames} ${aeroText} ${vtrText} ${rel.sinopseVoo}`
         );
         if (!hay.includes(q)) return false;
       }
@@ -1139,10 +1152,16 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                     rel.teveObito ? ` • <strong>Óbitos: ${Number(rel.quantidadeObitos || 0)}</strong>` : ''
                   }</div>`
                 : '';
+              const catDeptApoioTxt =
+                rel.apoioOutroDepartamento && (rel.departamentosApoio || []).length > 0
+                  ? `<div style="font-size:9px;color:#475569;margin-top:2px;">Apoio: ${escapeHtmlText(
+                      (rel.departamentosApoio || []).join(', ')
+                    )}</div>`
+                  : '';
               return `
                 <tr>
                   <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(rel.dataOperacao))}<br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.horarioDecolagem)}–${escapeHtmlText(rel.horarioVooOperacao)}</span></td>
-                  <td>${muns.map(m => escapeHtmlText(m)).join('<br/>')}</td>
+                  <td>${muns.map(m => escapeHtmlText(m)).join('<br/>')}${catDeptApoioTxt}</td>
                   <td><strong>${rel.comEmpregoAeronave ? 'Com Aeronave' : 'Sem Aeronave'}</strong>${
                     rel.comEmpregoAeronave && rel.tipoVoo
                       ? `<br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.tipoVoo)}</span>`
@@ -4905,6 +4924,17 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                           </span>
                         </div>
                       )}
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:col-span-2">
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">
+                          Apoio a Outro(s) Departamento(s)
+                        </span>
+                        <span className="font-bold text-amber-200 block mt-0.5">
+                          {viewModalCatOpReport.apoioOutroDepartamento &&
+                          (viewModalCatOpReport.departamentosApoio || []).length > 0
+                            ? (viewModalCatOpReport.departamentosApoio || []).join(' • ')
+                            : 'Não'}
+                        </span>
+                      </div>
                     </div>
 
                     {(() => {
@@ -5016,13 +5046,13 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                   <div className="font-mono font-bold">
                                     {v.placa} {v.descricao ? `— ${v.descricao}` : ''}
                                   </div>
-                                  <div className="text-[11px] text-slate-300">
-                                    Integrante(s):{' '}
-                                    {(v.operadores || []).length > 0
-                                      ? (v.operadores || []).map((o, idx) => (
-                                          <React.Fragment key={o.userId || idx}>
-                                            {idx > 0 ? ', ' : ''}
-                                            {o.name}
+                                  <div className="text-[11px] text-slate-300 space-y-0.5 mt-1">
+                                    <div className="font-semibold text-slate-400">Integrante(s):</div>
+                                    {(v.operadores || []).length > 0 ? (
+                                      <div className="pl-3 space-y-0.5">
+                                        {(v.operadores || []).map((o, idx) => (
+                                          <div key={o.userId || idx}>
+                                            • {o.name}
                                             {o.masp ? ` (MASP ${formatMasp(o.masp)})` : ''}
                                             {viewModalCatOpReport.comEmpregoAeronave &&
                                               vantPilotIds.has(o.userId) && (
@@ -5033,17 +5063,50 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                                   </strong>
                                                 </>
                                               )}
-                                          </React.Fragment>
-                                        ))
-                                      : 'Não informado'}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="pl-3 text-slate-400">Não informado</div>
+                                    )}
                                   </div>
-                                  <div className="text-[11px] text-slate-400">
+                                  <div className="text-[11px] text-slate-400 mt-1">
                                     Apoio: {v.tipoApoio || '-'}
                                   </div>
                                 </div>
                               ))}
                             </div>
                           )}
+
+                          {viewModalCatOpReport.comEmpregoAeronave &&
+                            viewModalCatOpReport.teveEquipeSolo &&
+                            (viewModalCatOpReport.equipeSolo || []).length > 0 && (
+                              <div className="bg-slate-950 border border-cyan-500/30 rounded-xl p-3.5 space-y-1.5">
+                                <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                                  Apoio de Aeronave Não Tripulada — Piloto de Drone (
+                                  {viewModalCatOpReport.equipeSolo.length})
+                                </span>
+                                {viewModalCatOpReport.equipeSolo.map((s, idx) => (
+                                  <div
+                                    key={s.id || s.userId || `drone-view-${idx}`}
+                                    className="text-[11px] text-slate-200"
+                                  >
+                                    {s.desconhecido || s.origemDrone === 'DESCONHECIDO' ? (
+                                      <strong className="text-amber-300">DESCONHECIDO</strong>
+                                    ) : (
+                                      <>
+                                        <strong>{s.name}</strong>
+                                        {s.masp ? ` (MASP: ${formatMasp(s.masp)})` : ''}
+                                      </>
+                                    )}{' '}
+                                    — <strong className="text-cyan-200">Piloto de aeronave não tripulada</strong>{' '}
+                                    <span className="text-slate-400">
+                                      [{formatDronePilotOriginLabel(s)}]
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
 
                           {viewModalCatOpReport.comEmpregoAeronave && desembarcados.length > 0 && (
                             <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
@@ -5214,7 +5277,9 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                             >
                               <div>
                                 <p className="font-bold text-slate-100">{op.name}</p>
-                                <p className="text-[11px] text-slate-300">{op.cargo || 'Policial Civil'}</p>
+                                <p className="text-[11px] text-amber-200 font-semibold">
+                                  {getCatOpSignerRoleLabel(viewModalCatOpReport, op.userId, op.cargo)}
+                                </p>
                                 <p className="text-[10px] text-slate-400 font-mono">
                                   MASP: {op.masp ? formatMasp(op.masp) : 'N/A'}
                                 </p>

@@ -1768,13 +1768,26 @@ export interface TripulanteOperacionalCat {
   desembarcou?: boolean;
 }
 
+export type OrigemPilotoDroneCat =
+  | 'VIATURA'
+  | 'CAT'
+  | 'COE'
+  | 'EXTERNO'
+  | 'DESCONHECIDO';
+
 export interface EquipeSoloOperacaoCat {
+  id?: string;
   userId: string;
   name: string;
   masp: string;
   cargo?: string;
   operacaoSolo: TipoOperacaoSoloCat;
   apoioLogisticoDescricao?: string; // Máx 300 caracteres
+  origemDrone?: OrigemPilotoDroneCat;
+  viaturaPlaca?: string;
+  unitId?: string;
+  unitName?: string;
+  desconhecido?: boolean;
 }
 
 export type TipoEmbarcadoExternoCat = 'SISTEMA' | 'FORA_SISTEMA' | 'CHEFIA_VIP';
@@ -1823,6 +1836,8 @@ export interface RelatorioOperacaoCat {
   municipioOperacao: string;
   apenasUmMunicipio: boolean;
   outrosMunicipios: MunicipioOperacaoPolicial[];
+  apoioOutroDepartamento?: boolean;
+  departamentosApoio?: string[];
   aeronaves: AeronaveOperacaoCat[];
   horasTotaisVoo: string; // HH:mm somado
   viaturas: ViaturaOperacaoCat[];

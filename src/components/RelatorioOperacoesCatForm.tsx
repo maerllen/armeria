@@ -6,6 +6,7 @@ import {
   TipoAeronave,
   TipoVooCat,
   TipoOperacaoSoloCat,
+  OrigemPilotoDroneCat,
   TipoCapturaLocalizacaoCat,
   AeronaveOperacaoCat,
   ViaturaOperacaoCat,
@@ -25,6 +26,7 @@ import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import {
   ESTADOS_BR,
+  DEPARTAMENTOS_APOIO_OPERACAO,
   getCachedMunicipiosPorUF,
   fetchMunicipiosPorUF
 } from '../data/estadosMunicipiosBR';
@@ -219,6 +221,90 @@ export const sumFlightHoursHHMM = (aeronaves: AeronaveOperacaoCat[]): string => 
   return formatMinutesToHHMM(totalMin);
 };
 
+export const formatDronePilotOriginLabel = (s: EquipeSoloOperacaoCat): string => {
+  if (s.desconhecido || s.origemDrone === 'DESCONHECIDO') return 'Desconhecido';
+  if (s.origemDrone === 'VIATURA') {
+    return s.viaturaPlaca ? `Componente da viatura (${s.viaturaPlaca})` : 'Componente da viatura de apoio';
+  }
+  if (s.origemDrone === 'CAT') return 'Integrante da CAT';
+  if (s.origemDrone === 'COE') {
+    return `COE${s.unitName ? ` — ${s.unitName}` : ''}`;
+  }
+  if (s.origemDrone === 'EXTERNO') return 'Policial externo';
+  return 'Piloto de aeronave não tripulada';
+};
+
+export const getCatOpSignerRoleLabel = (
+  rel: RelatorioOperacaoCat,
+  userId: string,
+  fallbackCargo?: string
+): string => {
+  const roles: string[] = [];
+  const addRole = (label: string) => {
+    if (label && !roles.includes(label)) roles.push(label);
+  };
+
+  if (rel.comEmpregoAeronave) {
+    if ((rel.aeronaves || []).some(a => a.pilotoId === userId)) {
+      addRole('PILOTO');
+    }
+    if ((rel.aeronaves || []).some(a => a.copilotoId === userId)) {
+      addRole('COPILOTO');
+    }
+    const isOpAeroCat =
+      rel.teveTripulanteOperacional &&
+      (rel.tripulantesOperacionais || []).some(t => t.userId === userId);
+    const isOpAeroCoe =
+      rel.teveTripulanteOutraUnidade &&
+      (rel.tripulantesOutraUnidade || []).some(t => t.userId === userId);
+    if (isOpAeroCat || isOpAeroCoe) {
+      addRole('OPERADOR AEROTÁTICO');
+    }
+  }
+
+  if (
+    rel.teveEquipeSolo &&
+    (rel.equipeSolo || []).some(
+      s =>
+        !s.desconhecido &&
+        s.userId &&
+        s.userId === userId &&
+        (rel.comEmpregoAeronave || s.operacaoSolo === 'Piloto de aeronave não tripulada')
+    )
+  ) {
+    addRole('PILOTO DE DRONE');
+  }
+
+  for (const v of rel.viaturas || []) {
+    if ((v.operadores || []).some(o => o.userId === userId)) {
+      addRole(`INTEGRANTE VIATURA (${v.placa})`);
+    }
+  }
+
+  if (
+    !rel.comEmpregoAeronave &&
+    rel.teveEquipeSolo &&
+    (rel.equipeSolo || []).some(s => s.userId === userId && s.operacaoSolo === 'Apoio logístico')
+  ) {
+    addRole('APOIO LOGÍSTICO');
+  }
+
+  if (
+    rel.comEmpregoAeronave &&
+    rel.teveEmbarcadoExterno &&
+    (rel.embarcadosExternos || []).some(e => e.userId === userId)
+  ) {
+    addRole('EMBARCADO EXTERNO');
+  }
+
+  if (roles.length === 0) {
+    if (userId === rel.criadorId) return 'OPERADOR DIGITADOR';
+    return (fallbackCargo || 'POLICIAL CIVIL').toUpperCase();
+  }
+
+  return roles.join(' / ');
+};
+
 export function printRelatorioOperacaoCat(
   rel: RelatorioOperacaoCat,
   units: Unit[],
@@ -248,7 +334,12 @@ export function printRelatorioOperacaoCat(
   );
 
   const vantPilotIds = new Set<string>(
-    rel.teveEquipeSolo ? (rel.equipeSolo || []).map(s => s.userId).filter(Boolean) : []
+    rel.teveEquipeSolo
+      ? (rel.equipeSolo || [])
+          .filter(s => !s.desconhecido && s.origemDrone !== 'EXTERNO' && s.origemDrone !== 'DESCONHECIDO')
+          .map(s => s.userId)
+          .filter(Boolean)
+      : []
   );
   const formatVantSuffix = (userId?: string): string =>
     rel.comEmpregoAeronave && userId && vantPilotIds.has(userId)
@@ -333,21 +424,44 @@ export function printRelatorioOperacaoCat(
       <ul class="clean-list">
         ${(rel.viaturas || [])
           .map(v => {
-            const opsText = (v.operadores || [])
-              .map(
-                o =>
-                  `${escapeHtmlText(o.name)}${
-                    o.masp ? ` (MASP ${escapeHtmlText(formatMasp(o.masp))})` : ''
-                  }${formatVantSuffix(o.userId)}`
-              )
-              .join(', ');
+            const opsListHtml =
+              (v.operadores || []).length > 0
+                ? `<div style="margin-left:10px;margin-top:2px;">${(v.operadores || [])
+                    .map(
+                      o =>
+                        `<div style="margin:1px 0;">• ${escapeHtmlText(o.name)}${
+                          o.masp ? ` (MASP ${escapeHtmlText(formatMasp(o.masp))})` : ''
+                        }${formatVantSuffix(o.userId)}</div>`
+                    )
+                    .join('')}</div>`
+                : ' <span>Não informado</span>';
             return `
               <li>
-                <strong>${escapeHtmlText(v.placa)}</strong>${v.descricao ? ` — ${escapeHtmlText(v.descricao)}` : ''}<br/>
-                <span style="font-size:11px;color:#334155;"><strong>Integrante(s):</strong> ${opsText || 'Não informado'}</span><br/>
-                <span style="font-size:11px;color:#334155;"><strong>Tipo de Apoio:</strong> ${escapeHtmlText(v.tipoApoio || 'Não informado')}</span>
+                <strong>${escapeHtmlText(v.placa)}</strong>${v.descricao ? ` — ${escapeHtmlText(v.descricao)}` : ''}
+                <div style="font-size:11px;color:#334155;margin-top:2px;"><strong>Integrante(s):</strong>${opsListHtml}</div>
+                <div style="font-size:11px;color:#334155;margin-top:2px;"><strong>Tipo de Apoio:</strong> ${escapeHtmlText(v.tipoApoio || 'Não informado')}</div>
               </li>
             `;
+          })
+          .join('')}
+      </ul>
+    `
+      : '';
+
+  const dronePilotsHtml =
+    rel.comEmpregoAeronave && rel.teveEquipeSolo && (rel.equipeSolo || []).length > 0
+      ? `
+      <div class="section-title">Apoio de Aeronave Não Tripulada (Piloto de Drone)</div>
+      <ul class="clean-list">
+        ${(rel.equipeSolo || [])
+          .map(s => {
+            if (s.desconhecido || s.origemDrone === 'DESCONHECIDO') {
+              return `<li><strong>DESCONHECIDO</strong> — <strong>Piloto de aeronave não tripulada</strong></li>`;
+            }
+            const origemTxt = formatDronePilotOriginLabel(s);
+            return `<li><strong>${escapeHtmlText(s.name)}</strong>${
+              s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
+            } — <strong>Piloto de aeronave não tripulada</strong> <span style="color:#475569;">[${escapeHtmlText(origemTxt)}]</span></li>`;
           })
           .join('')}
       </ul>
@@ -535,11 +649,12 @@ export function printRelatorioOperacaoCat(
               ? '✓ Assinado (automático — prazo de 30 dias)'
               : `✓ Assinado eletronicamente${op.signedAt ? ` em ${escapeHtmlText(formatDateTimeBr(op.signedAt))}` : ''}`
             : 'Pendente de assinatura (prazo de 30 dias)';
+          const roleLabel = getCatOpSignerRoleLabel(rel, op.userId, op.cargo);
           return `
             <div class="sig-card">
               <div class="sig-line"></div>
               <div class="sig-name">${escapeHtmlText(op.name)}</div>
-              <div class="sig-cargo">${escapeHtmlText(op.cargo || 'Policial Civil')}</div>
+              <div class="sig-cargo">${escapeHtmlText(roleLabel)}</div>
               <div class="sig-masp">MASP: ${escapeHtmlText(op.masp ? formatMasp(op.masp) : 'N/A')}</div>
               <div class="sig-status ${eff.signed ? 'signed' : 'pending'}">${statusText}</div>
             </div>
@@ -615,6 +730,14 @@ export function printRelatorioOperacaoCat(
           <div class="info-label">Município(s) da Operação</div>
           <div class="info-value">${municipiosTodos.map(m => escapeHtmlText(m)).join(' • ')}</div>
         </div>
+        <div class="info-box full">
+          <div class="info-label">Apoio a Outro(s) Departamento(s)</div>
+          <div class="info-value">${
+            rel.apoioOutroDepartamento && (rel.departamentosApoio || []).length > 0
+              ? (rel.departamentosApoio || []).map(d => escapeHtmlText(d)).join(' • ')
+              : 'NÃO'
+          }</div>
+        </div>
         ${
           rel.comEmpregoAeronave
             ? `
@@ -633,6 +756,7 @@ export function printRelatorioOperacaoCat(
 
       ${aeronavesHtml}
       ${viaturasHtml}
+      ${dronePilotsHtml}
       ${equipeExtraSectionHtml}
       ${embarcadosHtml}
       ${atuacaoAereaHtml}
@@ -701,6 +825,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     MG: getCachedMunicipiosPorUF('MG')
   }));
   const [loadingUf, setLoadingUf] = useState<Record<string, boolean>>({});
+  const [apoioOutroDepartamento, setApoioOutroDepartamento] = useState<boolean>(false);
+  const [departamentosApoio, setDepartamentosApoio] = useState<string[]>([]);
 
   // 4. Aeronave (máximo 1 por relatório) e Viaturas
   const [aeronaveTipoDraft, setAeronaveTipoDraft] = useState<TipoAeronave | ''>('');
@@ -719,6 +845,14 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
   const [teveEquipeSolo, setTeveEquipeSolo] = useState<boolean>(false);
   const [equipeSolo, setEquipeSolo] = useState<EquipeSoloOperacaoCat[]>([]);
+  const [droneEhComponenteViatura, setDroneEhComponenteViatura] = useState<boolean>(true);
+  const [droneEhDaCat, setDroneEhDaCat] = useState<boolean>(true);
+  const [droneEhDaCoe, setDroneEhDaCoe] = useState<boolean>(true);
+  const [droneCoeUnitDraft, setDroneCoeUnitDraft] = useState<string>('');
+  const [droneCoeUserDraft, setDroneCoeUserDraft] = useState<string>('');
+  const [droneNomeExternoDraft, setDroneNomeExternoDraft] = useState<string>('');
+  const [droneMaspExternoDraft, setDroneMaspExternoDraft] = useState<string>('');
+  const [droneDesconhecidoDraft, setDroneDesconhecidoDraft] = useState<boolean>(false);
 
   // 6. Tipo de Voo
   const [tipoVoo, setTipoVoo] = useState<TipoVooCat>('APOIO OPERACIONAL');
@@ -897,13 +1031,16 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       .sort((a, b) => a.placa.localeCompare(b.placa, 'pt-BR'));
   }, [viaturasSelecionadas, effectiveUnitId, dataVersion]);
 
-  // Ocupantes inseridos nas viaturas selecionadas
-  const viaturaOcupantes = useMemo(() => {
-    const map = new Map<string, { userId: string; name: string; masp: string; cargo?: string }>();
+  // Ocupantes inseridos nas viaturas selecionadas (com placa da viatura)
+  const viaturaOcupantesComPlaca = useMemo(() => {
+    const map = new Map<
+      string,
+      { userId: string; name: string; masp: string; cargo?: string; viaturaPlaca: string }
+    >();
     for (const v of viaturasSelecionadas) {
       for (const op of v.operadores || []) {
         if (op.userId && !map.has(op.userId)) {
-          map.set(op.userId, op);
+          map.set(op.userId, { ...op, viaturaPlaca: v.placa });
         }
       }
     }
@@ -926,39 +1063,40 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     return list;
   }, [comEmpregoAeronave, teveTripulanteOperacional, tripulantesOpSlots, allUsers]);
 
-  // Candidatos a Piloto de aeronave não tripulada (Integrantes da viatura OU Operadores Aerotáticos)
-  const vantCandidates = useMemo(() => {
-    const map = new Map<
-      string,
-      { userId: string; name: string; masp: string; cargo?: string; origens: string[] }
-    >();
-    for (const op of viaturaOcupantes) {
-      map.set(op.userId, { ...op, origens: ['Integrante da viatura'] });
-    }
-    for (const op of selectedOperadoresAerotaticos) {
-      const existing = map.get(op.userId);
-      if (existing) {
-        if (!existing.origens.includes('Operador Aerotático')) {
-          existing.origens.push('Operador Aerotático');
-        }
-      } else {
-        map.set(op.userId, { ...op, origens: ['Operador Aerotático'] });
-      }
-    }
-    return Array.from(map.values())
-      .map(item => ({ ...item, origemLabel: item.origens.join(' / ') }))
-      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [viaturaOcupantes, selectedOperadoresAerotaticos]);
+  // Departamentos de apoio disponíveis (excluindo os já selecionados)
+  const availableDeptsApoio = useMemo(() => {
+    const selected = new Set(departamentosApoio);
+    return DEPARTAMENTOS_APOIO_OPERACAO.filter(d => !selected.has(d));
+  }, [departamentosApoio]);
 
-  // Sincroniza "Piloto de aeronave não tripulada" caso integrantes/operadores sejam removidos
+  // Usuários disponíveis da unidade COE selecionada para Piloto de Drone
+  const droneCoeUsersForSelectedUnit = useMemo(() => {
+    if (!droneCoeUnitDraft) return [];
+    const alreadyIds = new Set(equipeSolo.map(s => s.userId).filter(Boolean));
+    return allUsers
+      .filter(u => u?.id && u.unitId === droneCoeUnitDraft && !alreadyIds.has(u.id))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'pt-BR'));
+  }, [allUsers, droneCoeUnitDraft, equipeSolo]);
+
+  const isHorarioTerminoMenor = useMemo(() => {
+    if (!comEmpregoAeronave || !horarioDecolagem || !horarioVooOperacao) return false;
+    return parseHHMMToClockMinutes(horarioVooOperacao) < parseHHMMToClockMinutes(horarioDecolagem);
+  }, [comEmpregoAeronave, horarioDecolagem, horarioVooOperacao]);
+
+  // Sincroniza pilotos de drone marcados como "Componente da viatura" caso a viatura/integrante seja removido
   useEffect(() => {
     if (!comEmpregoAeronave) return;
-    const validIds = new Set(vantCandidates.map(o => o.userId));
+    const validViaturaIds = new Set(viaturaOcupantesComPlaca.map(o => o.userId));
     setEquipeSolo(prev => {
-      const next = prev.filter(item => validIds.has(item.userId));
+      const next = prev.filter(item => {
+        if (item.origemDrone === 'VIATURA') {
+          return validViaturaIds.has(item.userId);
+        }
+        return true;
+      });
       return next.length === prev.length ? prev : next;
     });
-  }, [comEmpregoAeronave, vantCandidates]);
+  }, [comEmpregoAeronave, viaturaOcupantesComPlaca]);
 
   // Sincroniza operadores que desembarcaram caso algum Operador Aerotático seja removido
   useEffect(() => {
@@ -1077,6 +1215,9 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setMunicipioOperacao(rel.municipioOperacao || '');
     setApenasUmMunicipio(Boolean(rel.apenasUmMunicipio));
     setOutrosMunicipios(Array.isArray(rel.outrosMunicipios) ? rel.outrosMunicipios : []);
+    const relDeptsApoio = Array.isArray(rel.departamentosApoio) ? rel.departamentosApoio : [];
+    setApoioOutroDepartamento(Boolean(rel.apoioOutroDepartamento) && relDeptsApoio.length > 0);
+    setDepartamentosApoio(relDeptsApoio);
     setAeronaveTipoDraft('');
     setAeronavesSelecionadas(
       Array.isArray(rel.aeronaves) && rel.aeronaves.length > 0 ? [rel.aeronaves[0]] : []
@@ -1157,6 +1298,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setOutrosMunicipios([]);
     setExtraUfDraft('MG');
     setExtraMunDraft('');
+    setApoioOutroDepartamento(false);
+    setDepartamentosApoio([]);
     setAeronaveTipoDraft('');
     setAeronavesSelecionadas([]);
     setViaturasSelecionadas([]);
@@ -1169,6 +1312,14 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setTripulantesOutraUnidade([]);
     setTeveEquipeSolo(false);
     setEquipeSolo([]);
+    setDroneEhComponenteViatura(true);
+    setDroneEhDaCat(true);
+    setDroneEhDaCoe(true);
+    setDroneCoeUnitDraft('');
+    setDroneCoeUserDraft('');
+    setDroneNomeExternoDraft('');
+    setDroneMaspExternoDraft('');
+    setDroneDesconhecidoDraft(false);
     setTipoVoo('APOIO OPERACIONAL');
     setTipoVooOutrosDescricao('');
     setTeveEmbarcadoExterno(false);
@@ -1365,15 +1516,13 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   const handleAddEquipeSolo = (userId: string) => {
     if (!userId) return;
     if (equipeSolo.some(s => s.userId === userId)) return;
-    const u = comEmpregoAeronave
-      ? vantCandidates.find(op => op.userId === userId)
-      : catUnitUsers.find(usr => usr.id === userId);
+    const u = catUnitUsers.find(usr => usr.id === userId);
     if (!u) return;
-    const resolvedId = 'userId' in u ? u.userId : u.id;
     setEquipeSolo(prev => [
       ...prev,
       {
-        userId: resolvedId,
+        id: `solo-${u.id}`,
+        userId: u.id,
         name: u.name,
         masp: u.masp || '',
         cargo: u.cargo || '',
@@ -1381,6 +1530,145 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         apoioLogisticoDescricao: ''
       }
     ]);
+  };
+
+  const handleAddDroneFromViatura = (userId: string) => {
+    if (!userId) return;
+    if (equipeSolo.some(s => s.userId === userId)) {
+      setFeedback({ type: 'error', message: 'Este integrante já foi adicionado como piloto de drone.' });
+      return;
+    }
+    const found = viaturaOcupantesComPlaca.find(o => o.userId === userId);
+    if (!found) return;
+    setEquipeSolo(prev => [
+      ...prev,
+      {
+        id: `drone-vtr-${found.userId}`,
+        userId: found.userId,
+        name: found.name,
+        masp: found.masp || '',
+        cargo: found.cargo || '',
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'VIATURA' as OrigemPilotoDroneCat,
+        viaturaPlaca: found.viaturaPlaca,
+        unitId: effectiveUnitId,
+        unitName: activeUnitName,
+        desconhecido: false
+      }
+    ]);
+    setFeedback(null);
+  };
+
+  const handleAddDroneFromCat = (userId: string) => {
+    if (!userId) return;
+    if (equipeSolo.some(s => s.userId === userId)) {
+      setFeedback({ type: 'error', message: 'Este integrante da CAT já foi adicionado como piloto de drone.' });
+      return;
+    }
+    const u = catUnitUsers.find(usr => usr.id === userId);
+    if (!u) return;
+    setEquipeSolo(prev => [
+      ...prev,
+      {
+        id: `drone-cat-${u.id}`,
+        userId: u.id,
+        name: u.name,
+        masp: u.masp || '',
+        cargo: u.cargo || '',
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'CAT' as OrigemPilotoDroneCat,
+        unitId: effectiveUnitId,
+        unitName: activeUnitName,
+        desconhecido: false
+      }
+    ]);
+    setFeedback(null);
+  };
+
+  const handleAddDroneFromCoe = () => {
+    if (!droneCoeUnitDraft || !droneCoeUserDraft) {
+      setFeedback({ type: 'error', message: 'Selecione a unidade da COE e o policial piloto de drone.' });
+      return;
+    }
+    if (equipeSolo.some(s => s.userId === droneCoeUserDraft)) {
+      setFeedback({ type: 'error', message: 'Este policial da COE já foi adicionado como piloto de drone.' });
+      return;
+    }
+    const u = allUsers.find(usr => usr.id === droneCoeUserDraft);
+    const unitObj = units.find(un => un.id === droneCoeUnitDraft);
+    if (!u) return;
+    setEquipeSolo(prev => [
+      ...prev,
+      {
+        id: `drone-coe-${u.id}`,
+        userId: u.id,
+        name: u.name,
+        masp: u.masp || '',
+        cargo: u.cargo || '',
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'COE' as OrigemPilotoDroneCat,
+        unitId: unitObj?.id || u.unitId || '',
+        unitName: unitObj?.name || '',
+        desconhecido: false
+      }
+    ]);
+    setDroneCoeUserDraft('');
+    setFeedback(null);
+  };
+
+  const handleAddDroneExternoOuDesconhecido = () => {
+    if (droneDesconhecidoDraft) {
+      if (equipeSolo.some(s => s.desconhecido || s.origemDrone === 'DESCONHECIDO')) {
+        setFeedback({ type: 'error', message: 'A opção "DESCONHECIDO" já foi adicionada.' });
+        return;
+      }
+      setEquipeSolo(prev => [
+        ...prev,
+        {
+          id: `drone-desc-${Date.now()}`,
+          userId: '',
+          name: 'DESCONHECIDO',
+          masp: '',
+          cargo: '',
+          operacaoSolo: 'Piloto de aeronave não tripulada',
+          origemDrone: 'DESCONHECIDO' as OrigemPilotoDroneCat,
+          desconhecido: true
+        }
+      ]);
+      setDroneDesconhecidoDraft(false);
+      setFeedback(null);
+      return;
+    }
+
+    const nome = droneNomeExternoDraft.trim();
+    const masp = droneMaspExternoDraft.trim();
+    if (!nome || !masp) {
+      setFeedback({
+        type: 'error',
+        message: 'Informe o nome completo e o MASP do policial ou marque a opção "DESCONHECIDO".'
+      });
+      return;
+    }
+    setEquipeSolo(prev => [
+      ...prev,
+      {
+        id: `drone-ext-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        userId: '',
+        name: nome,
+        masp,
+        cargo: '',
+        operacaoSolo: 'Piloto de aeronave não tripulada',
+        origemDrone: 'EXTERNO' as OrigemPilotoDroneCat,
+        desconhecido: false
+      }
+    ]);
+    setDroneNomeExternoDraft('');
+    setDroneMaspExternoDraft('');
+    setFeedback(null);
+  };
+
+  const handleRemoveEquipeSoloAt = (idxToRemove: number) => {
+    setEquipeSolo(prev => prev.filter((_, idx) => idx !== idxToRemove));
   };
 
   const handleChangeQuantidadeObitos = (newQtyRaw: number) => {
@@ -1588,6 +1876,16 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       setFeedback({ type: 'error', message: 'Informe todos os horários da operação.' });
       return;
     }
+    if (
+      comEmpregoAeronave &&
+      parseHHMMToClockMinutes(horarioVooOperacao) < parseHHMMToClockMinutes(horarioDecolagem)
+    ) {
+      setFeedback({
+        type: 'error',
+        message: 'O Horário do Término da Operação não pode ser menor que o Horário do Início da Operação.'
+      });
+      return;
+    }
     if (!estadoOperacao || !municipioOperacao) {
       setFeedback({ type: 'error', message: 'Selecione o estado e o município principal da operação.' });
       return;
@@ -1596,6 +1894,13 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       setFeedback({
         type: 'error',
         message: 'Adicione ao menos um município adicional ou marque que a operação ocorreu apenas em um município.'
+      });
+      return;
+    }
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      setFeedback({
+        type: 'error',
+        message: 'Selecione ao menos um departamento de apoio ou marque "Não" em Apoio a outro departamento.'
       });
       return;
     }
@@ -1741,7 +2046,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         setFeedback({
           type: 'error',
           message: comEmpregoAeronave
-            ? 'Selecione ao menos um Integrante da viatura ou Operador Aerotático como Piloto de aeronave não tripulada ou marque "Não".'
+            ? 'Informe ao menos um Piloto de aeronave não tripulada ou marque "Não".'
             : 'Selecione ao menos um operador em EQUIPE CAT SOLO ou marque "Não".'
         });
         return;
@@ -1827,6 +2132,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       municipioOperacao,
       apenasUmMunicipio,
       outrosMunicipios: apenasUmMunicipio ? [] : outrosMunicipios,
+      apoioOutroDepartamento,
+      departamentosApoio: apoioOutroDepartamento ? departamentosApoio : [],
       aeronaves: comEmpregoAeronave ? aeronavesSelecionadas.slice(0, 1) : [],
       horasTotaisVoo: comEmpregoAeronave ? horasTotaisVooCalculado : '00:00',
       viaturas: viaturasSelecionadas,
@@ -2184,7 +2491,21 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                 <input
                   type="time"
                   value={horarioDecolagem}
-                  onChange={e => setHorarioDecolagem(e.target.value)}
+                  onChange={e => {
+                    const nextStart = e.target.value;
+                    setHorarioDecolagem(nextStart);
+                    if (
+                      nextStart &&
+                      horarioVooOperacao &&
+                      parseHHMMToClockMinutes(horarioVooOperacao) < parseHHMMToClockMinutes(nextStart)
+                    ) {
+                      setFeedback({
+                        type: 'error',
+                        message:
+                          'O Horário do Término da Operação não pode ser menor que o Horário do Início da Operação.'
+                      });
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                 />
               </div>
@@ -2194,10 +2515,32 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                 </label>
                 <input
                   type="time"
+                  min={horarioDecolagem || undefined}
                   value={horarioVooOperacao}
-                  onChange={e => setHorarioVooOperacao(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  onChange={e => {
+                    const nextEnd = e.target.value;
+                    setHorarioVooOperacao(nextEnd);
+                    if (
+                      nextEnd &&
+                      horarioDecolagem &&
+                      parseHHMMToClockMinutes(nextEnd) < parseHHMMToClockMinutes(horarioDecolagem)
+                    ) {
+                      setFeedback({
+                        type: 'error',
+                        message:
+                          'O Horário do Término da Operação não pode ser menor que o Horário do Início da Operação.'
+                      });
+                    }
+                  }}
+                  className={`w-full bg-slate-950 border ${
+                    isHorarioTerminoMenor ? 'border-red-500 text-red-200' : 'border-slate-700 text-slate-100'
+                  } rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500`}
                 />
+                {isHorarioTerminoMenor && (
+                  <p className="text-[10px] text-red-400 mt-1 font-semibold">
+                    Não pode ser menor que o Horário do Início ({horarioDecolagem}).
+                  </p>
+                )}
               </div>
             </div>
           ) : (
@@ -2394,6 +2737,74 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
               )}
             </div>
           )}
+
+          {/* Apoio a outro departamento? (mesma lógica das demais unidades) */}
+          <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Apoio a outro departamento?
+                </label>
+                <select
+                  value={apoioOutroDepartamento ? 'SIM' : 'NAO'}
+                  onChange={e => {
+                    const yes = e.target.value === 'SIM';
+                    setApoioOutroDepartamento(yes);
+                    if (!yes) setDepartamentosApoio([]);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                >
+                  <option value="NAO">Não</option>
+                  <option value="SIM">Sim</option>
+                </select>
+              </div>
+
+              {apoioOutroDepartamento && (
+                <div>
+                  <label className="block text-[10px] font-bold uppercase text-amber-300 mb-1">
+                    Departamento(s) do Estado Apoiado(s) (pode selecionar mais de um) *
+                  </label>
+                  <select
+                    value=""
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (val && !departamentosApoio.includes(val)) {
+                        setDepartamentosApoio(prev => [...prev, val]);
+                      }
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">+ Selecionar departamento de apoio...</option>
+                    {availableDeptsApoio.map(dept => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {apoioOutroDepartamento && departamentosApoio.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {departamentosApoio.map(d => (
+                  <span
+                    key={d}
+                    className="inline-flex items-center space-x-1.5 bg-amber-500/15 border border-amber-500/40 text-amber-200 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                  >
+                    <span>{d}</span>
+                    <button
+                      type="button"
+                      onClick={() => setDepartamentosApoio(prev => prev.filter(x => x !== d))}
+                      className="hover:text-red-400"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* =============================================================== */}
@@ -2992,58 +3403,320 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
             </div>
 
             {teveEquipeSolo && comEmpregoAeronave && (
-              <div className="space-y-3">
-                {vantCandidates.length === 0 ? (
-                  <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-                    Nenhum integrante de viatura ou operador aerotático informado ainda. Adicione integrantes em uma viatura ou selecione operadores aerotáticos acima para escolher o Piloto de aeronave não tripulada.
-                  </p>
-                ) : (
-                  <>
-                    <div className="sm:w-[28rem]">
+              <div className="space-y-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3.5">
+                {/* Passo 1: Componente da viatura de apoio ou policial de fora da viatura */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                      O piloto de aeronave não tripulada é componente da viatura de apoio? *
+                    </label>
+                    <select
+                      value={droneEhComponenteViatura ? 'SIM' : 'NAO'}
+                      onChange={e => {
+                        const isVtr = e.target.value === 'SIM';
+                        setDroneEhComponenteViatura(isVtr);
+                        if (isVtr) {
+                          setDroneEhDaCat(true);
+                          setDroneEhDaCoe(true);
+                          setDroneCoeUnitDraft('');
+                          setDroneCoeUserDraft('');
+                          setDroneNomeExternoDraft('');
+                          setDroneMaspExternoDraft('');
+                          setDroneDesconhecidoDraft(false);
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="SIM">
+                        {viaturasSelecionadas.length > 0
+                          ? `Sim — Componente da viatura de apoio (${viaturasSelecionadas
+                              .map(v => v.placa)
+                              .join(', ')})`
+                          : 'Sim — Componente da viatura de apoio (nenhuma viatura selecionada)'}
+                      </option>
+                      <option value="NAO">Não — Policial de fora da viatura</option>
+                    </select>
+                  </div>
+
+                  {/* Ramo SIM: Selecionar somente entre os componentes da(s) viatura(s) selecionada(s) */}
+                  {droneEhComponenteViatura && (
+                    <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                        Selecionar Piloto de aeronave não tripulada (Integrante da viatura ou Operador Aerotático) *
+                        Selecionar componente da viatura de apoio{' '}
+                        {viaturasSelecionadas.length > 0
+                          ? `(${viaturasSelecionadas.map(v => v.placa).join(', ')})`
+                          : ''}{' '}
+                        *
+                      </label>
+                      {viaturaOcupantesComPlaca.length === 0 ? (
+                        <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                          {viaturasSelecionadas.length === 0
+                            ? 'Nenhuma viatura selecionada acima. Adicione uma viatura e seus componentes ou selecione "Não — Policial de fora da viatura".'
+                            : 'Nenhum componente selecionado na(s) viatura(s) acima. Informe os usuários da viatura primeiro.'}
+                        </p>
+                      ) : (
+                        <select
+                          value=""
+                          onChange={e => handleAddDroneFromViatura(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">Selecione o componente da viatura...</option>
+                          {viaturaOcupantesComPlaca
+                            .filter(op => !equipeSolo.some(s => s.userId === op.userId))
+                            .map(op => (
+                              <option key={op.userId} value={op.userId}>
+                                {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''} — Viatura{' '}
+                                {op.viaturaPlaca}
+                              </option>
+                            ))}
+                        </select>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Ramo NÃO (fora da viatura): Pergunta se é da CAT */}
+                  {!droneEhComponenteViatura && (
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        O policial é da CAT? *
                       </label>
                       <select
-                        value=""
-                        onChange={e => handleAddEquipeSolo(e.target.value)}
+                        value={droneEhDaCat ? 'SIM' : 'NAO'}
+                        onChange={e => {
+                          const isCat = e.target.value === 'SIM';
+                          setDroneEhDaCat(isCat);
+                          if (isCat) {
+                            setDroneEhDaCoe(true);
+                            setDroneCoeUnitDraft('');
+                            setDroneCoeUserDraft('');
+                            setDroneNomeExternoDraft('');
+                            setDroneMaspExternoDraft('');
+                            setDroneDesconhecidoDraft(false);
+                          }
+                        }}
                         className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                       >
-                        <option value="">Selecione um integrante da viatura ou operador aerotático...</option>
-                        {vantCandidates
-                          .filter(op => !equipeSolo.some(s => s.userId === op.userId))
-                          .map(op => (
-                            <option key={op.userId} value={op.userId}>
-                              {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''} — {op.origemLabel}
-                            </option>
-                          ))}
+                        <option value="SIM">Sim — Integrante da unidade CAT</option>
+                        <option value="NAO">Não — Policial de fora da CAT</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {/* Ramo fora da viatura + É DA CAT */}
+                {!droneEhComponenteViatura && droneEhDaCat && (
+                  <div className="sm:w-[28rem]">
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                      Selecionar integrante da CAT *
+                    </label>
+                    <select
+                      value=""
+                      onChange={e => handleAddDroneFromCat(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="">Selecione um integrante da unidade CAT...</option>
+                      {catUnitUsers
+                        .filter(u => !equipeSolo.some(s => s.userId === u.id))
+                        .map(u => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                )}
+
+                {/* Ramo fora da viatura + NÃO É DA CAT -> Pergunta se é da COE */}
+                {!droneEhComponenteViatura && !droneEhDaCat && (
+                  <div className="space-y-3 pt-2 border-t border-slate-800/80">
+                    <div className="sm:w-96">
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        O policial é da COE? *
+                      </label>
+                      <select
+                        value={droneEhDaCoe ? 'SIM' : 'NAO'}
+                        onChange={e => {
+                          const isCoe = e.target.value === 'SIM';
+                          setDroneEhDaCoe(isCoe);
+                          if (isCoe) {
+                            setDroneNomeExternoDraft('');
+                            setDroneMaspExternoDraft('');
+                            setDroneDesconhecidoDraft(false);
+                          } else {
+                            setDroneCoeUnitDraft('');
+                            setDroneCoeUserDraft('');
+                          }
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="SIM">Sim — Vinculado ao Departamento COE</option>
+                        <option value="NAO">Não — Informar manualmente ou Desconhecido</option>
                       </select>
                     </div>
 
-                    {equipeSolo.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {equipeSolo.map(s => (
-                          <span
-                            key={s.userId}
-                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px]"
+                    {/* É da COE: Unidade COE + Usuário da unidade selecionada */}
+                    {droneEhDaCoe ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Unidade vinculada à COE *
+                          </label>
+                          <select
+                            value={droneCoeUnitDraft}
+                            onChange={e => {
+                              setDroneCoeUnitDraft(e.target.value);
+                              setDroneCoeUserDraft('');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                           >
-                            <span>
-                              {s.name} {s.masp ? `(MASP ${formatMasp(s.masp)})` : ''} —{' '}
-                              <strong className="font-bold text-white">Piloto de aeronave não tripulada</strong>
-                            </span>
+                            <option value="">Selecione a unidade da COE...</option>
+                            {coeOtherUnits.map(un => (
+                              <option key={un.id} value={un.id}>
+                                {un.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Policial da Unidade Selecionada (COE) *
+                          </label>
+                          <select
+                            value={droneCoeUserDraft}
+                            onChange={e => setDroneCoeUserDraft(e.target.value)}
+                            disabled={!droneCoeUnitDraft}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                          >
+                            <option value="">Selecione o policial...</option>
+                            {droneCoeUsersForSelectedUnit.map(u => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleAddDroneFromCoe}
+                          disabled={!droneCoeUserDraft}
+                          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 disabled:opacity-40"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar Piloto</span>
+                        </button>
+                      </div>
+                    ) : (
+                      /* NÃO é da COE: Nome e MASP ou checkbox DESCONHECIDO */
+                      <div className="space-y-3">
+                        <label className="inline-flex items-center space-x-2 cursor-pointer select-none px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 hover:border-amber-500/50">
+                          <input
+                            type="checkbox"
+                            checked={droneDesconhecidoDraft}
+                            onChange={e => {
+                              const checked = e.target.checked;
+                              setDroneDesconhecidoDraft(checked);
+                              if (checked) {
+                                setDroneNomeExternoDraft('');
+                                setDroneMaspExternoDraft('');
+                              }
+                            }}
+                            className="w-4 h-4 rounded accent-amber-500"
+                          />
+                          <span className="text-xs font-bold uppercase text-amber-300">
+                            DESCONHECIDO
+                          </span>
+                        </label>
+
+                        {!droneDesconhecidoDraft ? (
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                Nome do Policial *
+                              </label>
+                              <input
+                                type="text"
+                                maxLength={200}
+                                value={droneNomeExternoDraft}
+                                onChange={e => setDroneNomeExternoDraft(e.target.value)}
+                                placeholder="Nome completo do policial..."
+                                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                MASP do Policial *
+                              </label>
+                              <input
+                                type="text"
+                                maxLength={32}
+                                value={droneMaspExternoDraft}
+                                onChange={e => setDroneMaspExternoDraft(e.target.value)}
+                                placeholder="Ex.: 1234567-8"
+                                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                              />
+                            </div>
                             <button
                               type="button"
-                              onClick={() =>
-                                setEquipeSolo(prev => prev.filter(item => item.userId !== s.userId))
-                              }
-                              className="hover:text-red-300"
+                              onClick={handleAddDroneExternoOuDesconhecido}
+                              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5"
                             >
-                              <X className="w-3.5 h-3.5" />
+                              <Plus className="w-4 h-4" />
+                              <span>Adicionar Piloto</span>
                             </button>
-                          </span>
-                        ))}
+                          </div>
+                        ) : (
+                          <div>
+                            <button
+                              type="button"
+                              onClick={handleAddDroneExternoOuDesconhecido}
+                              className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs inline-flex items-center space-x-1.5"
+                            >
+                              <Plus className="w-4 h-4" />
+                              <span>Adicionar Piloto como DESCONHECIDO</span>
+                            </button>
+                          </div>
+                        )}
                       </div>
                     )}
-                  </>
+                  </div>
+                )}
+
+                {/* Lista de Pilotos de Drone selecionados */}
+                {equipeSolo.length > 0 && (
+                  <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                    <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                      Piloto(s) de Aeronave Não Tripulada Selecionado(s) ({equipeSolo.length})
+                    </span>
+                    <div className="flex flex-wrap gap-1.5">
+                      {equipeSolo.map((s, idx) => (
+                        <span
+                          key={s.id || s.userId || `drone-${idx}`}
+                          className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px]"
+                        >
+                          <span>
+                            {s.desconhecido || s.origemDrone === 'DESCONHECIDO' ? (
+                              <strong className="font-bold text-amber-300">DESCONHECIDO</strong>
+                            ) : (
+                              <>
+                                {s.name} {s.masp ? `(MASP ${formatMasp(s.masp)})` : ''}
+                              </>
+                            )}{' '}
+                            — <strong className="font-bold text-white">Piloto de aeronave não tripulada</strong>{' '}
+                            <span className="text-slate-300">[{formatDronePilotOriginLabel(s)}]</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveEquipeSoloAt(idx)}
+                            className="hover:text-red-300"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 )}
               </div>
             )}
