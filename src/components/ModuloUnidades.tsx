@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { User, Department, Unit, ViaturaUnidade, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../types';
+import { User, Department, Unit, ViaturaUnidade, AeronaveUnidade, TipoAeronave, isCatUnitName, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../types';
 import { storage } from '../services/storage';
 import { formatPlacaViatura, isValidPlacaViatura } from '../utils/masks';
-import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info, Car } from 'lucide-react';
+import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info, Car, Plane } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -24,10 +24,12 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
   const [showViaturaModal, setShowViaturaModal] = useState(false);
+  const [showAeronaveModal, setShowAeronaveModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
   const [editingViatura, setEditingViatura] = useState<ViaturaUnidade | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'unit' | 'viatura'; item: any; name: string } | null>(null);
+  const [editingAeronave, setEditingAeronave] = useState<AeronaveUnidade | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'unit' | 'viatura' | 'aeronave'; item: any; name: string } | null>(null);
 
   // Form states
   const [deptName, setDeptName] = useState('');
@@ -43,6 +45,13 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [viaturaUnitId, setViaturaUnitId] = useState('');
   const [selectedUnitIdForViaturas, setSelectedUnitIdForViaturas] = useState<string | null>(null);
   const [savingViatura, setSavingViatura] = useState(false);
+
+  // Aeronave form states (exclusivo unidade CAT)
+  const [aeronaveTipo, setAeronaveTipo] = useState<'' | TipoAeronave>('');
+  const [aeronavePrefixo, setAeronavePrefixo] = useState('');
+  const [aeronaveDescricao, setAeronaveDescricao] = useState('');
+  const [aeronaveUnitId, setAeronaveUnitId] = useState('');
+  const [savingAeronave, setSavingAeronave] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -246,6 +255,90 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     });
   };
 
+  const handleOpenAeronaveModal = (aeronave?: AeronaveUnidade, presetUnitId?: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (aeronave) {
+      setEditingAeronave(aeronave);
+      setAeronaveTipo(aeronave.tipo);
+      setAeronavePrefixo(aeronave.prefixo || '');
+      setAeronaveDescricao(aeronave.descricao || '');
+      setAeronaveUnitId(aeronave.unitId || '');
+    } else {
+      setEditingAeronave(null);
+      setAeronaveTipo('');
+      setAeronavePrefixo('');
+      setAeronaveDescricao('');
+      setAeronaveUnitId(presetUnitId || selectedUnitIdForViaturas || '');
+    }
+    setShowAeronaveModal(true);
+  };
+
+  const handleSaveAeronave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!aeronaveTipo) {
+      setErrorMsg('Selecione o tipo da aeronave (AVIÃO ou HELICÓPTERO).');
+      return;
+    }
+    const cleanPrefixo = aeronavePrefixo
+      .toUpperCase()
+      .replace(/[^A-Z0-9\- ]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 24);
+    if (!cleanPrefixo || cleanPrefixo.length < 2) {
+      setErrorMsg('Informe o prefixo da aeronave (ex.: PT-PCG).');
+      return;
+    }
+    const cleanDesc = aeronaveDescricao.trim().slice(0, 200);
+    if (!cleanDesc) {
+      setErrorMsg('Informe a descrição da aeronave.');
+      return;
+    }
+    const targetUnit = units.find(u => u.id === aeronaveUnitId);
+    if (!targetUnit || !isCatUnitName(targetUnit.name)) {
+      setErrorMsg('O cadastro de aeronaves é permitido exclusivamente para a unidade CAT.');
+      return;
+    }
+
+    setSavingAeronave(true);
+    try {
+      const payload: Partial<AeronaveUnidade> = {
+        tipo: aeronaveTipo,
+        prefixo: cleanPrefixo,
+        descricao: cleanDesc,
+        unitId: targetUnit.id,
+        departmentId: targetUnit.departmentId || currentUser.departmentId
+      };
+      const res = editingAeronave
+        ? await storage.updateAeronave(editingAeronave.id, payload)
+        : await storage.saveAeronave(payload);
+
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao salvar aeronave.');
+        return;
+      }
+      setShowAeronaveModal(false);
+      setSuccessMsg(editingAeronave ? 'Aeronave atualizada com sucesso.' : 'Aeronave cadastrada com sucesso.');
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar aeronave.');
+    } finally {
+      setSavingAeronave(false);
+    }
+  };
+
+  const handleDeleteAeronave = (aeronave: AeronaveUnidade) => {
+    setDeleteTarget({
+      type: 'aeronave',
+      item: aeronave,
+      name: `aeronave "${aeronave.tipo} ${aeronave.prefixo} — ${aeronave.descricao}"`
+    });
+  };
+
   const confirmExecutionDelete = async () => {
     if (!deleteTarget) return;
     setErrorMsg('');
@@ -257,6 +350,13 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
       } else if (deleteTarget.type === 'unit') {
         await storage.deleteUnit(deleteTarget.item.id);
         setSuccessMsg(`Unidade "${deleteTarget.item.name}" excluída com sucesso.`);
+      } else if (deleteTarget.type === 'aeronave') {
+        const res = await storage.deleteAeronave(deleteTarget.item.id);
+        if (!res.success) {
+          setErrorMsg(res.error || 'Não foi possível excluir a aeronave.');
+          return;
+        }
+        setSuccessMsg(`Aeronave "${deleteTarget.item.prefixo}" excluída com sucesso.`);
       } else {
         const res = await storage.deleteViatura(deleteTarget.item.id);
         if (!res.success) {
@@ -449,6 +549,10 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                           const unitUserCount = storage.getAllUsers().filter(u => u.unitId === unit.id).length;
                           const unitWeaponCount = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.unitId === unit.id).length;
                           const unitViaturaCount = storage.getViaturas().filter(v => v.unitId === unit.id).length;
+                          const unitIsCat = isCatUnitName(unit.name);
+                          const unitAeronaveCount = unitIsCat
+                            ? storage.getAeronaves().filter(a => a.unitId === unit.id).length
+                            : 0;
                           const effectiveUnitLogo = getSystemLogo(unit, dept);
                           const isSelectedUnit = selectedUnitIdForViaturas === unit.id;
 
@@ -518,17 +622,28 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                               </div>
 
                               <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
-                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-slate-400">
                                   <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
                                   <span>Armas: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
                                   <span>
                                     Viaturas: <strong className="text-cyan-400">{unitViaturaCount}</strong>
                                   </span>
+                                  {unitIsCat && (
+                                    <span>
+                                      Aeronaves: <strong className="text-sky-400">{unitAeronaveCount}</strong>
+                                    </span>
+                                  )}
                                 </div>
                                 {canManageViaturas && (
                                   <div className="flex items-center justify-between text-[10px] pt-1">
                                     <span className={isSelectedUnit ? 'text-cyan-300 font-bold' : 'text-slate-500'}>
-                                      {isSelectedUnit ? '✓ Unidade selecionada — Viaturas abaixo' : 'Clique para gerenciar viaturas'}
+                                      {isSelectedUnit
+                                        ? unitIsCat
+                                          ? '✓ Unidade selecionada — Viaturas e Aeronaves abaixo'
+                                          : '✓ Unidade selecionada — Viaturas abaixo'
+                                        : unitIsCat
+                                        ? 'Clique para gerenciar viaturas e aeronaves'
+                                        : 'Clique para gerenciar viaturas'}
                                     </span>
                                   </div>
                                 )}
@@ -547,7 +662,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         )}
       </div>
 
-      {/* Gestão de Viaturas da Unidade — Visível APENAS quando uma unidade é selecionada */}
+      {/* Gestão de Viaturas (e Aeronaves exclusivamente para CAT) — Visível APENAS quando uma unidade é selecionada */}
       {canManageViaturas && (() => {
         const selectedUnitForViaturas = visibleUnits.find(u => u.id === selectedUnitIdForViaturas) || null;
         if (!selectedUnitForViaturas) return null;
@@ -555,95 +670,185 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         const unitViaturas = storage
           .getViaturas()
           .filter(v => v.unitId === selectedUnitForViaturas.id);
+        const isSelectedUnitCat = isCatUnitName(selectedUnitForViaturas.name);
+        const unitAeronaves = isSelectedUnitCat
+          ? storage.getAeronaves().filter(a => a.unitId === selectedUnitForViaturas.id)
+          : [];
 
         return (
-          <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-md">
-            <div className="bg-slate-800/80 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center space-x-3">
-                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl">
-                  <Car className="w-5 h-5" />
+          <div className="space-y-4">
+            <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-md">
+              <div className="bg-slate-800/80 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl">
+                    <Car className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h2 className="text-base font-bold text-slate-100">
+                      Viaturas — {selectedUnitForViaturas.name} ({unitViaturas.length})
+                    </h2>
+                    <p className="text-[11px] text-slate-400">
+                      Acrescente ou edite as viaturas vinculadas à unidade selecionada para uso nos relatórios de operações.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-100">
-                    Viaturas — {selectedUnitForViaturas.name} ({unitViaturas.length})
-                  </h2>
-                  <p className="text-[11px] text-slate-400">
-                    Acrescente ou edite as viaturas vinculadas à unidade selecionada para uso nos relatórios de operações.
+
+                <div className="flex items-center space-x-2">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenViaturaModal(undefined, selectedUnitForViaturas.id)}
+                    className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Adicionar Viatura</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedUnitIdForViaturas(null)}
+                    className="text-slate-400 hover:text-slate-200 bg-slate-950/60 p-2 rounded-xl border border-slate-800 transition"
+                    title="Fechar painel da unidade"
+                  >
+                    <CloseIcon className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-5 bg-slate-950/40">
+                {unitViaturas.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic text-center py-4">
+                    Nenhuma viatura cadastrada nesta unidade. Clique em &ldquo;Adicionar Viatura&rdquo; para cadastrar.
                   </p>
-                </div>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <button
-                  type="button"
-                  onClick={() => handleOpenViaturaModal(undefined, selectedUnitForViaturas.id)}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Adicionar Viatura</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setSelectedUnitIdForViaturas(null)}
-                  className="text-slate-400 hover:text-slate-200 bg-slate-950/60 p-2 rounded-xl border border-slate-800 transition"
-                  title="Fechar painel de viaturas"
-                >
-                  <CloseIcon className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-
-            <div className="p-5 bg-slate-950/40">
-              {unitViaturas.length === 0 ? (
-                <p className="text-xs text-slate-500 italic text-center py-4">
-                  Nenhuma viatura cadastrada nesta unidade. Clique em &ldquo;Adicionar Viatura&rdquo; para cadastrar.
-                </p>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                  {unitViaturas.map(v => (
-                    <div
-                      key={v.id}
-                      className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
-                    >
-                      <div className="min-w-0 space-y-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
-                            {v.placa}
-                          </span>
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold truncate max-w-[180px]">
-                            {selectedUnitForViaturas.name}
-                          </span>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {unitViaturas.map(v => (
+                      <div
+                        key={v.id}
+                        className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
+                      >
+                        <div className="min-w-0 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
+                              {v.placa}
+                            </span>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold truncate max-w-[180px]">
+                              {selectedUnitForViaturas.name}
+                            </span>
+                          </div>
+                          <p className="text-xs font-semibold text-slate-200 truncate" title={v.descricao}>
+                            {v.descricao}
+                          </p>
                         </div>
-                        <p className="text-xs font-semibold text-slate-200 truncate" title={v.descricao}>
-                          {v.descricao}
-                        </p>
-                      </div>
 
-                      <div className="flex items-center space-x-1 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenViaturaModal(v)}
-                          className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition"
-                          title="Editar Viatura"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        {canDeleteViaturas && (
+                        <div className="flex items-center space-x-1 shrink-0">
                           <button
                             type="button"
-                            onClick={() => handleDeleteViatura(v)}
-                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                            title="Excluir Viatura"
+                            onClick={() => handleOpenViaturaModal(v)}
+                            className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition"
+                            title="Editar Viatura"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Edit2 className="w-3.5 h-3.5" />
                           </button>
-                        )}
+                          {canDeleteViaturas && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteViatura(v)}
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Excluir Viatura"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
+
+            {/* Gestão de Aeronaves — Disponível EXCLUSIVAMENTE ao selecionar a unidade CAT */}
+            {isSelectedUnitCat && (
+              <div className="bg-slate-900 border border-sky-500/40 rounded-2xl overflow-hidden shadow-md">
+                <div className="bg-slate-800/80 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="p-2.5 bg-sky-500/10 border border-sky-500/30 text-sky-400 rounded-xl">
+                      <Plane className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h2 className="text-base font-bold text-slate-100">
+                        Aeronaves — {selectedUnitForViaturas.name} ({unitAeronaves.length})
+                      </h2>
+                      <p className="text-[11px] text-slate-400">
+                        Cadastro exclusivo da unidade CAT (Aviões e Helicópteros) para vinculação de tripulantes e relatórios operacionais.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenAeronaveModal(undefined, selectedUnitForViaturas.id)}
+                      className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Adicionar Aeronave</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-5 bg-slate-950/40">
+                  {unitAeronaves.length === 0 ? (
+                    <p className="text-xs text-slate-500 italic text-center py-4">
+                      Nenhuma aeronave cadastrada na unidade CAT. Clique em &ldquo;Adicionar Aeronave&rdquo; para cadastrar.
+                    </p>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                      {unitAeronaves.map(a => (
+                        <div
+                          key={a.id}
+                          className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-sky-300">
+                                {a.prefixo}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 font-bold">
+                                {a.tipo}
+                              </span>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-200 truncate" title={a.descricao}>
+                              {a.descricao}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center space-x-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAeronaveModal(a)}
+                              className="p-1.5 text-slate-400 hover:text-sky-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Editar Aeronave"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            {canDeleteViaturas && (
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteAeronave(a)}
+                                className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                                title="Excluir Aeronave"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         );
       })()}
@@ -967,6 +1172,115 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-5 py-2 rounded-xl disabled:opacity-50"
                 >
                   {savingViatura ? 'Salvando...' : editingViatura ? 'Salvar Alterações' : 'Cadastrar Viatura'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Aeronave (Exclusivo Unidade CAT) */}
+      {showAeronaveModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <Plane className="w-5 h-5 text-sky-400" />
+                <h3 className="text-lg font-bold text-slate-100">
+                  {editingAeronave ? 'Editar Aeronave' : 'Cadastrar Nova Aeronave'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAeronaveModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg"
+              >
+                <CloseIcon className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAeronave} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Unidade Pertencente
+                </label>
+                <div className="w-full bg-slate-950/70 border border-sky-500/30 rounded-xl px-3.5 py-2 text-sm text-sky-300 font-bold">
+                  {units.find(u => u.id === aeronaveUnitId)?.name || 'CAT'}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Tipo da Aeronave *
+                </label>
+                <select
+                  value={aeronaveTipo}
+                  onChange={(e) => setAeronaveTipo(e.target.value as '' | TipoAeronave)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                  required
+                >
+                  <option value="">Selecione o tipo...</option>
+                  <option value="AVIÃO">AVIÃO</option>
+                  <option value="HELICÓPTERO">HELICÓPTERO</option>
+                </select>
+              </div>
+
+              {aeronaveTipo && (
+                <>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Prefixo da Aeronave *
+                    </label>
+                    <input
+                      type="text"
+                      value={aeronavePrefixo}
+                      onChange={(e) =>
+                        setAeronavePrefixo(
+                          e.target.value.toUpperCase().replace(/[^A-Z0-9\- ]/g, '').slice(0, 24)
+                        )
+                      }
+                      maxLength={24}
+                      placeholder={aeronaveTipo === 'HELICÓPTERO' ? 'Ex.: PP-EIM / PR-PCG' : 'Ex.: PT-PCG'}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono uppercase focus:outline-none focus:border-sky-500"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Descrição da Aeronave *
+                    </label>
+                    <input
+                      type="text"
+                      value={aeronaveDescricao}
+                      onChange={(e) => setAeronaveDescricao(e.target.value.slice(0, 200))}
+                      maxLength={200}
+                      placeholder={
+                        aeronaveTipo === 'HELICÓPTERO'
+                          ? 'Ex.: Airbus H125 Esquilo B3e — Carcará 01'
+                          : 'Ex.: Cessna 208B Grand Caravan'
+                      }
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-500"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+
+              <div className="pt-2 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowAeronaveModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingAeronave || !aeronaveTipo}
+                  className="bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs px-5 py-2 rounded-xl disabled:opacity-50"
+                >
+                  {savingAeronave ? 'Salvando...' : editingAeronave ? 'Salvar Alterações' : 'Cadastrar Aeronave'}
                 </button>
               </div>
             </form>

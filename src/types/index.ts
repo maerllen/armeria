@@ -76,7 +76,21 @@ export interface User {
   canRegisterCanilMeds?: boolean;
   canAdministerCanilMeds?: boolean;
   canViewAllCanilReports?: boolean;
+  catFuncao?: CatFuncaoUsuario;
+  catAeronaveIds?: string[];
   createdAt: string;
+}
+
+export type CatFuncaoUsuario = 'Piloto' | 'Copiloto' | 'Operador Aerotático';
+
+export function isCatUnitName(name?: string | null): boolean {
+  const norm = String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+  if (!norm) return false;
+  return norm === 'CAT' || /\bCAT\b/.test(norm);
 }
 
 export const DEFAULT_SYSTEM_LOGO = '/assets/aistudio/Distintivo_da_Pol_cia_Civil_de_Minas_Gerais_15bab05c.png';
@@ -1385,6 +1399,21 @@ export interface ViaturaUnidade {
   id: string;
   placa: string; // Máscara AAA-XAXX
   descricao: string; // Marca e modelo da viatura
+  departmentId?: string;
+  unitId: string;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export type TipoAeronave = 'AVIÃO' | 'HELICÓPTERO';
+
+export interface AeronaveUnidade {
+  id: string;
+  tipo: TipoAeronave;
+  prefixo: string; // Ex.: PT-PCG, PP-EIM
+  descricao: string; // Descrição / modelo da aeronave
   departmentId?: string;
   unitId: string;
   criadoPorId?: string;

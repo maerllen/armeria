@@ -1,10 +1,10 @@
 import React, { useState, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { User, UserRole, UserCargo, Department, Unit, Course, UserCourse } from '../types';
+import { User, UserRole, UserCargo, CatFuncaoUsuario, isCatUnitName, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
 import { buildStandardDocumentFilename } from '../utils/printHelper';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X, Plane } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -94,6 +94,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [canRegisterCanilMeds, setCanRegisterCanilMeds] = useState(false);
   const [canAdministerCanilMeds, setCanAdministerCanilMeds] = useState(false);
   const [canViewAllCanilReports, setCanViewAllCanilReports] = useState(false);
+  const [catFuncao, setCatFuncao] = useState<'' | CatFuncaoUsuario>('');
+  const [catAeronaveIds, setCatAeronaveIds] = useState<string[]>([]);
   const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
   const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
   const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -192,6 +194,13 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
   // Filtered units based on selected department in form
   const availableUnitsForForm = units.filter(u => u.departmentId === (deptId || currentUser.departmentId));
+  const formEffectiveUnitId = isRestrictedRegistrar ? currentUser.unitId : (unitId || currentUser.unitId);
+  const formEffectiveUnit = units.find(u => u.id === formEffectiveUnitId);
+  const isFormUnitCat = isCatUnitName(formEffectiveUnit?.name);
+  const allAeronaves = storage.getAeronaves();
+  const catUnitAeronaves = isFormUnitCat && formEffectiveUnitId
+    ? allAeronaves.filter(a => a.unitId === formEffectiveUnitId)
+    : [];
 
   // Open User Modal
   const handleOpenUserModal = (usr?: User) => {
@@ -230,6 +239,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanRegisterCanilMeds(Boolean(usr.canRegisterCanilMeds));
       setCanAdministerCanilMeds(Boolean(usr.canAdministerCanilMeds));
       setCanViewAllCanilReports(Boolean(usr.canViewAllCanilReports));
+      setCatFuncao(usr.catFuncao || '');
+      setCatAeronaveIds(Array.isArray(usr.catAeronaveIds) ? [...usr.catAeronaveIds] : []);
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -273,6 +284,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanRegisterCanilMeds(false);
       setCanAdministerCanilMeds(false);
       setCanViewAllCanilReports(false);
+      setCatFuncao('');
+      setCatAeronaveIds([]);
     }
     setShowUserModal(true);
   };
@@ -371,6 +384,20 @@ export const UserModule: React.FC<UserModuleProps> = ({
         ? canCreateAcademyCourses
         : Boolean(editingUser?.canCreateAcademyCourses);
 
+      const targetUnitObj = units.find(u => u.id === targetUnitId);
+      const targetUnitIsCat = isCatUnitName(targetUnitObj?.name);
+      const finalCatFuncao: CatFuncaoUsuario | undefined =
+        targetUnitIsCat && catFuncao ? catFuncao : undefined;
+      const validCatAeronaveIdSet = new Set(
+        storage
+          .getAeronaves()
+          .filter(a => a.unitId === targetUnitId)
+          .map(a => a.id)
+      );
+      const finalCatAeronaveIds: string[] = targetUnitIsCat
+        ? catAeronaveIds.filter(aid => validCatAeronaveIdSet.has(aid))
+        : [];
+
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
           masp: cleanMaspInput,
@@ -397,7 +424,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canManageCanilAndAnimals: selectedRoles.includes('operador_canino') ? canManageCanilAndAnimals : false,
           canRegisterCanilMeds: selectedRoles.includes('operador_canino') ? canRegisterCanilMeds : false,
           canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
-          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false
+          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false,
+          catFuncao: finalCatFuncao,
+          catAeronaveIds: finalCatAeronaveIds
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -426,7 +455,9 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canManageCanilAndAnimals: selectedRoles.includes('operador_canino') ? canManageCanilAndAnimals : false,
           canRegisterCanilMeds: selectedRoles.includes('operador_canino') ? canRegisterCanilMeds : false,
           canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
-          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false
+          canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false,
+          catFuncao: finalCatFuncao,
+          catAeronaveIds: finalCatAeronaveIds
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -1415,6 +1446,24 @@ export const UserModule: React.FC<UserModuleProps> = ({
                                 Criar Cursos: Sim
                               </div>
                             )}
+                            {usr.catFuncao && (
+                              <div className="text-[10px] text-sky-300 font-semibold flex items-center gap-1 mt-0.5">
+                                <Plane className="w-3 h-3 shrink-0" />
+                                <span>CAT: {usr.catFuncao}</span>
+                              </div>
+                            )}
+                            {Array.isArray(usr.catAeronaveIds) && usr.catAeronaveIds.length > 0 && (
+                              <div className="text-[10px] text-cyan-300 font-mono">
+                                Aeronaves:{' '}
+                                {usr.catAeronaveIds
+                                  .map(aid => {
+                                    const aero = allAeronaves.find(a => a.id === aid);
+                                    return aero ? `${aero.prefixo} (${aero.tipo})` : null;
+                                  })
+                                  .filter(Boolean)
+                                  .join(', ') || `${usr.catAeronaveIds.length} vinculada(s)`}
+                              </div>
+                            )}
                           </td>
 
                           {/* Courses */}
@@ -1750,7 +1799,17 @@ export const UserModule: React.FC<UserModuleProps> = ({
                         onChange={(e) => {
                           setDeptId(e.target.value);
                           const depUnits = units.filter(u => u.departmentId === e.target.value);
-                          setUnitId(depUnits[0]?.id || '');
+                          const nextUnit = depUnits[0];
+                          setUnitId(nextUnit?.id || '');
+                          if (!isCatUnitName(nextUnit?.name)) {
+                            setCatFuncao('');
+                            setCatAeronaveIds([]);
+                          } else {
+                            const validIds = new Set(
+                              allAeronaves.filter(a => a.unitId === nextUnit.id).map(a => a.id)
+                            );
+                            setCatAeronaveIds(prev => prev.filter(id => validIds.has(id)));
+                          }
                         }}
                         disabled={!isGeral}
                         className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
@@ -1774,7 +1833,20 @@ export const UserModule: React.FC<UserModuleProps> = ({
                       </label>
                       <select
                         value={unitId}
-                        onChange={(e) => setUnitId(e.target.value)}
+                        onChange={(e) => {
+                          const nextUnitId = e.target.value;
+                          setUnitId(nextUnitId);
+                          const nextUnitObj = units.find(u => u.id === nextUnitId);
+                          if (!isCatUnitName(nextUnitObj?.name)) {
+                            setCatFuncao('');
+                            setCatAeronaveIds([]);
+                          } else {
+                            const validIds = new Set(
+                              allAeronaves.filter(a => a.unitId === nextUnitId).map(a => a.id)
+                            );
+                            setCatAeronaveIds(prev => prev.filter(id => validIds.has(id)));
+                          }
+                        }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
                       >
                         {availableUnitsForForm.map((u) => (
@@ -1785,6 +1857,111 @@ export const UserModule: React.FC<UserModuleProps> = ({
                       </select>
                     </div>
                   </>
+                )}
+
+                {/* Configuração Operacional — Unidade CAT (Função e Aeronaves Vinculadas) */}
+                {isFormUnitCat && (
+                  <div className="sm:col-span-2 bg-sky-500/5 border border-sky-500/30 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center space-x-2">
+                      <Plane className="w-4 h-4 text-sky-400 shrink-0" />
+                      <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+                        Vinculação Operacional — Unidade CAT
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Função na Unidade CAT
+                        </label>
+                        <select
+                          value={catFuncao}
+                          onChange={(e) => setCatFuncao(e.target.value as '' | CatFuncaoUsuario)}
+                          className="w-full bg-slate-950 border border-sky-500/40 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-400"
+                        >
+                          <option value="">Selecione a função...</option>
+                          <option value="Piloto">Piloto</option>
+                          <option value="Copiloto">Copiloto</option>
+                          <option value="Operador Aerotático">Operador Aerotático</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                          Adicionar Aeronave Vinculada
+                        </label>
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            if (!selectedId) return;
+                            setCatAeronaveIds(prev => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
+                          }}
+                          disabled={catUnitAeronaves.length === 0}
+                          className="w-full bg-slate-950 border border-sky-500/40 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-400 disabled:opacity-60"
+                        >
+                          <option value="">
+                            {catUnitAeronaves.length === 0
+                              ? 'Nenhuma aeronave cadastrada na unidade CAT'
+                              : 'Selecionar aeronave da unidade CAT...'}
+                          </option>
+                          {catUnitAeronaves
+                            .filter(a => !catAeronaveIds.includes(a.id))
+                            .map(a => (
+                              <option key={a.id} value={a.id}>
+                                {a.tipo} • {a.prefixo} — {a.descricao}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {catUnitAeronaves.length === 0 ? (
+                      <p className="text-[11px] text-amber-300/90">
+                        Nenhuma aeronave cadastrada nesta unidade CAT ainda. Usuários Armeiro ou Administrador podem cadastrá-las em <strong>Unidades/Deptos</strong> clicando na unidade CAT.
+                      </p>
+                    ) : (
+                      <div className="space-y-2">
+                        <span className="block text-[11px] font-semibold text-slate-400">
+                          Aeronaves vinculadas ao policial ({catAeronaveIds.length} selecionada(s) — clique para marcar ou remover):
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {catUnitAeronaves.map(a => {
+                            const isChecked = catAeronaveIds.includes(a.id);
+                            return (
+                              <button
+                                key={a.id}
+                                type="button"
+                                onClick={() =>
+                                  setCatAeronaveIds(prev =>
+                                    prev.includes(a.id)
+                                      ? prev.filter(id => id !== a.id)
+                                      : [...prev, a.id]
+                                  )
+                                }
+                                className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition flex items-center space-x-1.5 ${
+                                  isChecked
+                                    ? 'bg-sky-500/20 border-sky-400 text-sky-200 shadow-sm'
+                                    : 'bg-slate-950/70 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                                }`}
+                              >
+                                <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-[10px] ${
+                                  isChecked
+                                    ? 'bg-sky-500 border-sky-400 text-slate-950'
+                                    : 'border-slate-600'
+                                }`}>
+                                  {isChecked && <Check className="w-2.5 h-2.5" />}
+                                </span>
+                                <span className="font-mono font-bold">{a.prefixo}</span>
+                                <span className="text-[10px] opacity-80">({a.tipo})</span>
+                                <span className="text-[11px] truncate max-w-[160px] opacity-90">— {a.descricao}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Professor da Academia */}

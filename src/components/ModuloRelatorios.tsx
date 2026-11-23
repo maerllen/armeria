@@ -145,7 +145,6 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
   const [dataVersion, setDataVersion] = useState(0);
   const [activeUnitButtonId, setActiveUnitButtonId] = useState<string>('');
-  const [cocSubView, setCocSubView] = useState<'TREINAMENTO' | 'ACERVO'>('TREINAMENTO');
   const [activeTab, setActiveTab] = useState<ReportTab>(() => {
     if (isOperadorCanino) return 'TREINAMENTO_CANIL';
     if (isCanilOnly) return 'CANIL';
@@ -330,9 +329,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   }, [reportUnitButtons, activeUnitButtonId, isOperadorCanino, currentUser.unitId]);
 
   const isCocActive = Boolean(activeUnitButton?.isCoc);
-  const canSeeCocAcervoTab = !isOperadorCanino && !isArmeiroRole && !isAdministradorRole;
-  const isCocAcervoView = isCocActive && canSeeCocAcervoTab && cocSubView === 'ACERVO';
-  const isCanilTrainingView = isCocActive && !isCocAcervoView;
+  const isCocAcervoView = false;
+  const isCanilTrainingView = isCocActive;
   const isPolicialUnitReportView =
     (isPolicialRole || isArmeiroRole || isAdministradorRole) && !isCocActive;
   const canRenderCanilSection = hasCanilAccess || isCocActive;
@@ -341,7 +339,6 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     setActiveUnitButtonId(btn.id);
     setSelectedVaultSpace('ALL');
     if (btn.isCoc) {
-      setCocSubView('TREINAMENTO');
       setSelectedDept(btn.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
       setSelectedUnit(btn.realUnitId || 'ALL');
       setActiveTab('TREINAMENTO_CANIL');
@@ -368,11 +365,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     if (activeUnitButton.isCoc) {
       setSelectedDept(activeUnitButton.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
       setSelectedUnit(activeUnitButton.realUnitId || 'ALL');
-      if (!canSeeCocAcervoTab || cocSubView === 'TREINAMENTO') {
-        if (activeTab !== 'TREINAMENTO_CANIL') setActiveTab('TREINAMENTO_CANIL');
-      } else if (activeTab !== 'CANIL') {
-        setActiveTab('CANIL');
-      }
+      if (activeTab !== 'TREINAMENTO_CANIL') setActiveTab('TREINAMENTO_CANIL');
     } else {
       const targetDept = activeUnitButton.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL');
       const targetUnit = activeUnitButton.realUnitId || activeUnitButton.id;
@@ -382,8 +375,6 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   }, [
     activeUnitButton,
     activeUnitButtonId,
-    cocSubView,
-    canSeeCocAcervoTab,
     isGeral,
     isOperadorCanino,
     currentUser.departmentId
@@ -2575,41 +2566,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       </div>
 
-      {/* Sub-navegação COC (ocultada para Operador Canino, Armeiro e Administrador) */}
-      {isCocActive && canSeeCocAcervoTab && (
-        <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
-          <button
-            type="button"
-            onClick={() => {
-              setCocSubView('TREINAMENTO');
-              setActiveTab('TREINAMENTO_CANIL');
-            }}
-            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
-              cocSubView === 'TREINAMENTO'
-                ? 'bg-amber-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <PenTool className="w-4 h-4" />
-            <span>Relatórios</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setCocSubView('ACERVO');
-              setActiveTab('CANIL');
-            }}
-            className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
-              cocSubView === 'ACERVO'
-                ? 'bg-amber-500 text-slate-950 shadow'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Dog className="w-4 h-4" />
-            <span>Acervo Canil — Cães, Baias & Farmácia ({screenData.cachorrosCanil.length} / {screenData.movimentacoesCanil.length})</span>
-          </button>
-        </div>
-      )}
+      {/* Sub-navegação Acervo Canil removida da aba COC para todos os perfis */}
 
       {/* Main Sector Tabs (for non-COC units) */}
       {!isCocActive && !isPolicialUnitReportView && (

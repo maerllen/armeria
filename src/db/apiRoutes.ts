@@ -63,6 +63,96 @@ export function parseUserRoles(rolesRaw: any, primaryRole: string): string[] {
   return list.length > 0 ? list : [primaryRole || 'Policial'];
 }
 
+function isCatUnitNameServer(name?: string | null): boolean {
+  const norm = String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+  if (!norm) return false;
+  return norm === 'CAT' || /\bCAT\b/.test(norm);
+}
+
+function sanitizeCatFuncaoServer(raw: any): 'Piloto' | 'Copiloto' | 'Operador Aerotático' | null {
+  const str = String(raw || '').trim();
+  if (!str) return null;
+  const norm = str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (norm === 'piloto') return 'Piloto';
+  if (norm === 'copiloto') return 'Copiloto';
+  if (norm === 'operador aerotatico') return 'Operador Aerotático';
+  return null;
+}
+
+function parseCatAeronaveIdsServer(raw: any): string[] {
+  if (!raw) return [];
+  let arr: any[] = [];
+  if (Array.isArray(raw)) {
+    arr = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) arr = parsed;
+    } catch {
+      arr = [];
+    }
+  }
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const item of arr) {
+    const id = String(item || '').trim().slice(0, 64);
+    if (id && !seen.has(id)) {
+      seen.add(id);
+      result.push(id);
+      if (result.length >= 50) break;
+    }
+  }
+  return result;
+}
+
+let usuariosCatColumnsEnsured = false;
+async function ensureUsuariosCatColumns(pool: any): Promise<void> {
+  if (usuariosCatColumnsEnsured) return;
+  try {
+    const [cols]: any = await pool.query(`
+      SELECT COLUMN_NAME
+      FROM INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = 'USUARIOS'
+        AND COLUMN_NAME IN ('CAT_FUNCAO_USUARIOS', 'CAT_AERONAVES_JSON')
+    `);
+    const existing = new Set((cols || []).map((c: any) => String(c.COLUMN_NAME || '').toUpperCase()));
+    if (!existing.has('CAT_FUNCAO_USUARIOS')) {
+      await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `CAT_FUNCAO_USUARIOS` VARCHAR(64) DEFAULT NULL');
+    }
+    if (!existing.has('CAT_AERONAVES_JSON')) {
+      await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `CAT_AERONAVES_JSON` TEXT DEFAULT NULL');
+    }
+    usuariosCatColumnsEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar colunas CAT em USUARIOS:', err);
+  }
+}
+
+async function isUnitIdCatServer(pool: any, unitId?: string | null): Promise<boolean> {
+  const cleanId = String(unitId || '').trim();
+  if (!cleanId) return false;
+  try {
+    const [rows]: any = await pool.query(
+      'SELECT NOME_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+      [cleanId]
+    );
+    if (!rows || rows.length === 0) return false;
+    return isCatUnitNameServer(rows[0].NOME_UNIDADES);
+  } catch {
+    return false;
+  }
+}
+
 // -------------------------------------------------------------
 // AUTH & USER SESSIONS
 // -------------------------------------------------------------
@@ -76,6 +166,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
     let pool;
     try {
       pool = getPool();
+      await ensureUsuariosCatColumns(pool);
       try {
         [rows] = await pool.query(`
           SELECT 
@@ -105,6 +196,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
             PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
             PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
+            CAT_FUNCAO_USUARIOS as cat_funcao,
+            CAT_AERONAVES_JSON as cat_aeronaves_json,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -139,6 +232,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             0 as can_register_canil_meds,
             0 as can_administer_canil_meds,
             0 as can_view_all_canil_reports,
+            NULL as cat_funcao,
+            NULL as cat_aeronaves_json,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -235,6 +330,8 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       canRegisterCanilMeds: Boolean(dbUser.can_register_canil_meds),
       canAdministerCanilMeds: Boolean(dbUser.can_administer_canil_meds),
       canViewAllCanilReports: Boolean(dbUser.can_view_all_canil_reports),
+      catFuncao: sanitizeCatFuncaoServer(dbUser.cat_funcao) || undefined,
+      catAeronaveIds: parseCatAeronaveIdsServer(dbUser.cat_aeronaves_json),
       courses: (courses || []).map((c: any) => ({
         courseId: c.courseId,
         completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
@@ -449,6 +546,7 @@ apiRouter.delete('/units/:id', async (req: Request, res: Response) => {
 apiRouter.get('/users', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
+    await ensureUsuariosCatColumns(pool);
     let users: any[] = [];
     try {
       const [rows]: any = await pool.query(`
@@ -479,6 +577,8 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
           PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
           PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
+          CAT_FUNCAO_USUARIOS as cat_funcao,
+          CAT_AERONAVES_JSON as cat_aeronaves_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -513,6 +613,8 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           0 as can_register_canil_meds,
           0 as can_administer_canil_meds,
           0 as can_view_all_canil_reports,
+          NULL as cat_funcao,
+          NULL as cat_aeronaves_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -567,6 +669,8 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         canRegisterCanilMeds: Boolean(u.can_register_canil_meds),
         canAdministerCanilMeds: Boolean(u.can_administer_canil_meds),
         canViewAllCanilReports: Boolean(u.can_view_all_canil_reports),
+        catFuncao: sanitizeCatFuncaoServer(u.cat_funcao) || undefined,
+        catAeronaveIds: parseCatAeronaveIdsServer(u.cat_aeronaves_json),
         courses,
         createdAt: u.created_at
       };
@@ -586,6 +690,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       professorSigla, professor_sigla,
       isCourseCoordinator, coordinatorSubject, canManageFormacaoCourses, canManageContinuadoCourses, canCreateAcademyCourses,
       canManageCanilAndAnimals, canRegisterCanilMeds, canAdministerCanilMeds, canViewAllCanilReports,
+      catFuncao, catAeronaveIds,
       courses, actor
     } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
@@ -634,10 +739,29 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     }
 
     const pool = getPool();
+    await ensureUsuariosCatColumns(pool);
     const [existing]: any = await pool.query('SELECT ID_USUARIOS FROM USUARIOS WHERE MASP_USUARIOS = ?', [cleanMasp]);
     if (existing && existing.length > 0) {
       return res.status(400).json({ error: `Já existe um usuário cadastrado com o MASP ${cleanMasp}` });
     }
+
+    const targetIsCatUnit = await isUnitIdCatServer(pool, unitId);
+    const finalCatFuncao = targetIsCatUnit ? sanitizeCatFuncaoServer(catFuncao) : null;
+    let finalCatAeronaveIds = targetIsCatUnit ? parseCatAeronaveIdsServer(catAeronaveIds) : [];
+    if (targetIsCatUnit && finalCatAeronaveIds.length > 0) {
+      try {
+        await ensureAeronavesUnidadeTable(pool);
+        const [validAeroRows]: any = await pool.query(
+          'SELECT ID_AERONAVE FROM AERONAVES_UNIDADE WHERE UNIDADE_ID = ?',
+          [unitId]
+        );
+        const validSet = new Set((validAeroRows || []).map((a: any) => String(a.ID_AERONAVE)));
+        finalCatAeronaveIds = finalCatAeronaveIds.filter(aid => validSet.has(aid));
+      } catch {}
+    }
+    const finalCatAeronavesJson = targetIsCatUnit && finalCatAeronaveIds.length > 0
+      ? JSON.stringify(finalCatAeronaveIds)
+      : null;
 
     const id = `usr-${Date.now()}`;
     const hashedDefaultPass = hashPassword(cleanMasp);
@@ -652,8 +776,9 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           PODE_GERIR_CONTINUADO_USUARIOS, PODE_CRIAR_CURSOS_USUARIOS,
           PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS, PODE_CADASTRAR_MED_CANIL_USUARIOS,
           PODE_MINISTRAR_MED_CANIL_USUARIOS, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS,
+          CAT_FUNCAO_USUARIOS, CAT_AERONAVES_JSON,
           DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -680,7 +805,9 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           finalCanManageCanilAndAnimals ? 1 : 0,
           finalCanRegisterCanilMeds ? 1 : 0,
           finalCanAdministerCanilMeds ? 1 : 0,
-          finalCanViewAllCanilReports ? 1 : 0
+          finalCanViewAllCanilReports ? 1 : 0,
+          finalCatFuncao,
+          finalCatAeronavesJson
         ]
       );
     } catch {
@@ -748,6 +875,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       canRegisterCanilMeds: finalCanRegisterCanilMeds,
       canAdministerCanilMeds: finalCanAdministerCanilMeds,
       canViewAllCanilReports: finalCanViewAllCanilReports,
+      catFuncao: finalCatFuncao || undefined,
+      catAeronaveIds: finalCatAeronaveIds,
       mustChangePassword: true,
       courses: courses || [],
       createdAt: new Date().toISOString()
@@ -996,6 +1125,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     const actor = req.body.actor;
 
     const pool = getPool();
+    await ensureUsuariosCatColumns(pool);
     let rows: any[] = [];
     try {
       const [res]: any = await pool.query(`
@@ -1026,6 +1156,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
           PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
           PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
+          CAT_FUNCAO_USUARIOS as cat_funcao,
+          CAT_AERONAVES_JSON as cat_aeronaves_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1059,6 +1191,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           0 as can_register_canil_meds,
           0 as can_administer_canil_meds,
           0 as can_view_all_canil_reports,
+          NULL as cat_funcao,
+          NULL as cat_aeronaves_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1130,6 +1264,33 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
       ? (updates.coordinatorSubject !== undefined ? (updates.coordinatorSubject || null) : (rows[0].coordinator_subject || null))
       : null;
 
+    const effectiveUnitId = updates.unitId !== undefined ? updates.unitId : rows[0].unit_id;
+    const effectiveUnitIsCat = await isUnitIdCatServer(pool, effectiveUnitId);
+    let nextCatFuncao: string | null = null;
+    let nextCatAeronavesJson: string | null = null;
+    if (effectiveUnitIsCat) {
+      nextCatFuncao =
+        updates.catFuncao !== undefined
+          ? sanitizeCatFuncaoServer(updates.catFuncao)
+          : sanitizeCatFuncaoServer(rows[0].cat_funcao);
+      let nextCatAeronaveIds =
+        updates.catAeronaveIds !== undefined
+          ? parseCatAeronaveIdsServer(updates.catAeronaveIds)
+          : parseCatAeronaveIdsServer(rows[0].cat_aeronaves_json);
+      if (nextCatAeronaveIds.length > 0) {
+        try {
+          await ensureAeronavesUnidadeTable(pool);
+          const [validAeroRows]: any = await pool.query(
+            'SELECT ID_AERONAVE FROM AERONAVES_UNIDADE WHERE UNIDADE_ID = ?',
+            [effectiveUnitId]
+          );
+          const validSet = new Set((validAeroRows || []).map((a: any) => String(a.ID_AERONAVE)));
+          nextCatAeronaveIds = nextCatAeronaveIds.filter(aid => validSet.has(aid));
+        } catch {}
+      }
+      nextCatAeronavesJson = nextCatAeronaveIds.length > 0 ? JSON.stringify(nextCatAeronaveIds) : null;
+    }
+
     try {
       await pool.query(
         `UPDATE USUARIOS SET
@@ -1156,7 +1317,9 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS = COALESCE(?, PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS),
           PODE_CADASTRAR_MED_CANIL_USUARIOS = COALESCE(?, PODE_CADASTRAR_MED_CANIL_USUARIOS),
           PODE_MINISTRAR_MED_CANIL_USUARIOS = COALESCE(?, PODE_MINISTRAR_MED_CANIL_USUARIOS),
-          PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS = COALESCE(?, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS)
+          PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS = COALESCE(?, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS),
+          CAT_FUNCAO_USUARIOS = ?,
+          CAT_AERONAVES_JSON = ?
          WHERE ID_USUARIOS = ?`,
         [
           cleanMasp,
@@ -1183,6 +1346,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           updates.canRegisterCanilMeds !== undefined ? (updates.canRegisterCanilMeds ? 1 : 0) : null,
           updates.canAdministerCanilMeds !== undefined ? (updates.canAdministerCanilMeds ? 1 : 0) : null,
           updates.canViewAllCanilReports !== undefined ? (updates.canViewAllCanilReports ? 1 : 0) : null,
+          nextCatFuncao,
+          nextCatAeronavesJson,
           id
         ]
       );
@@ -13611,6 +13776,406 @@ apiRouter.delete('/viaturas/:id', async (req: Request, res: Response) => {
       'Excluir Viatura',
       `Viatura ${existing.PLACA_VIATURA} (${existing.DESCRICAO_VIATURA}) excluída da unidade ${existing.UNIDADE_ID}`,
       actor,
+      req.ip
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================================
+// MODULO: AERONAVES DA UNIDADE (EXCLUSIVO UNIDADE CAT)
+// =============================================================
+
+let aeronavesUnidadeTableEnsured = false;
+async function ensureAeronavesUnidadeTable(pool: any): Promise<void> {
+  if (aeronavesUnidadeTableEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`AERONAVES_UNIDADE\` (
+        \`ID_AERONAVE\` VARCHAR(64) NOT NULL,
+        \`TIPO_AERONAVE\` ENUM('AVIÃO', 'HELICÓPTERO') NOT NULL,
+        \`PREFIXO_AERONAVE\` VARCHAR(32) NOT NULL,
+        \`DESCRICAO_AERONAVE\` VARCHAR(200) NOT NULL,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) NOT NULL,
+        \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_AERONAVE\`),
+        UNIQUE KEY \`uk_aeronave_prefixo_unidade\` (\`PREFIXO_AERONAVE\`, \`UNIDADE_ID\`),
+        KEY \`idx_aeronave_unidade\` (\`UNIDADE_ID\`),
+        KEY \`idx_aeronave_tipo\` (\`TIPO_AERONAVE\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    aeronavesUnidadeTableEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar tabela AERONAVES_UNIDADE:', err);
+  }
+}
+
+function sanitizeTipoAeronaveServer(raw: any): 'AVIÃO' | 'HELICÓPTERO' | null {
+  const norm = String(raw || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .trim();
+  if (norm === 'AVIAO') return 'AVIÃO';
+  if (norm === 'HELICOPTERO') return 'HELICÓPTERO';
+  return null;
+}
+
+function formatPrefixoAeronaveServer(raw: any): string {
+  return String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9\- ]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 24);
+}
+
+function mapAeronaveRow(r: any) {
+  return {
+    id: r.ID_AERONAVE,
+    tipo: sanitizeTipoAeronaveServer(r.TIPO_AERONAVE) || 'HELICÓPTERO',
+    prefixo: r.PREFIXO_AERONAVE,
+    descricao: r.DESCRICAO_AERONAVE,
+    departmentId: r.DEPARTAMENTO_ID || '',
+    unitId: r.UNIDADE_ID || '',
+    criadoPorId: r.CRIADO_POR_ID || '',
+    criadoPorNome: r.CRIADO_POR_NOME || '',
+    createdAt: r.DATA_CRIACAO ? new Date(r.DATA_CRIACAO).toISOString() : undefined,
+    updatedAt: r.DATA_ATUALIZACAO ? new Date(r.DATA_ATUALIZACAO).toISOString() : undefined
+  };
+}
+
+apiRouter.get('/aeronaves', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureAeronavesUnidadeTable(pool);
+    const [rows]: any = await pool.query(`
+      SELECT
+        ID_AERONAVE,
+        TIPO_AERONAVE,
+        PREFIXO_AERONAVE,
+        DESCRICAO_AERONAVE,
+        DEPARTAMENTO_ID,
+        UNIDADE_ID,
+        CRIADO_POR_ID,
+        CRIADO_POR_NOME,
+        DATA_CRIACAO,
+        DATA_ATUALIZACAO
+      FROM AERONAVES_UNIDADE
+      ORDER BY TIPO_AERONAVE ASC, PREFIXO_AERONAVE ASC
+    `);
+    return res.json((rows || []).map(mapAeronaveRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/aeronaves', async (req: Request, res: Response) => {
+  try {
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureAeronavesUnidadeTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+    const isArmeiro = roles.has('Armeiro');
+
+    if (!isGeral && !isAdmin && !isArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas usuários com perfil Administrador ou Armeiro podem cadastrar aeronaves.'
+      });
+    }
+
+    const tipo = sanitizeTipoAeronaveServer(b.tipo);
+    if (!tipo) {
+      return res.status(400).json({ error: 'Selecione o tipo da aeronave (AVIÃO ou HELICÓPTERO).' });
+    }
+
+    const prefixo = formatPrefixoAeronaveServer(b.prefixo);
+    if (!prefixo || prefixo.length < 2) {
+      return res.status(400).json({ error: 'Informe um prefixo válido para a aeronave (ex.: PT-PCG).' });
+    }
+
+    const descricao = String(b.descricao || '').trim().slice(0, 200);
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição da aeronave.' });
+    }
+
+    const unitId = String(b.unitId || '').trim();
+    if (!unitId) {
+      return res.status(400).json({ error: 'Informe a unidade CAT à qual a aeronave pertence.' });
+    }
+
+    const [uRows]: any = await pool.query(
+      'SELECT ID_UNIDADES, NOME_UNIDADES, DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+      [unitId]
+    );
+    if (!uRows || uRows.length === 0) {
+      return res.status(404).json({ error: 'Unidade selecionada não encontrada.' });
+    }
+
+    const targetUnitName = String(uRows[0].NOME_UNIDADES || '');
+    const targetUnitDeptId = String(uRows[0].DEPARTAMENTO_ID_UNIDADES || '').trim();
+    if (!isCatUnitNameServer(targetUnitName)) {
+      return res.status(403).json({
+        error: 'O cadastro de aeronaves é permitido exclusivamente para a unidade CAT.'
+      });
+    }
+
+    const actorUnitId = String(dbActor.unitId || '').trim();
+    const actorDeptId = String(dbActor.departmentId || '').trim();
+    if (!isGeral && unitId !== actorUnitId) {
+      if (!actorDeptId || targetUnitDeptId !== actorDeptId) {
+        return res.status(403).json({
+          error: 'Você só pode cadastrar aeronaves em unidades CAT vinculadas ao seu departamento.'
+        });
+      }
+    }
+
+    const [dup]: any = await pool.query(
+      'SELECT ID_AERONAVE FROM AERONAVES_UNIDADE WHERE PREFIXO_AERONAVE = ? AND UNIDADE_ID = ? LIMIT 1',
+      [prefixo, unitId]
+    );
+    if (dup && dup.length > 0) {
+      return res.status(409).json({
+        error: `Já existe uma aeronave cadastrada com o prefixo ${prefixo} nesta unidade.`
+      });
+    }
+
+    const id = `AERO-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    await pool.query(
+      `INSERT INTO AERONAVES_UNIDADE (
+        ID_AERONAVE, TIPO_AERONAVE, PREFIXO_AERONAVE, DESCRICAO_AERONAVE,
+        DEPARTAMENTO_ID, UNIDADE_ID, CRIADO_POR_ID, CRIADO_POR_NOME
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, tipo, prefixo, descricao, targetUnitDeptId || null, unitId, dbActor.id || null, dbActor.name || null]
+    );
+
+    await insertAuditLog(
+      'Unidades',
+      'Cadastrar Aeronave',
+      `Aeronave ${tipo} ${prefixo} (${descricao}) cadastrada na unidade CAT ${targetUnitName}`,
+      dbActor,
+      req.ip
+    );
+
+    const [createdRows]: any = await pool.query(
+      'SELECT * FROM AERONAVES_UNIDADE WHERE ID_AERONAVE = ? LIMIT 1',
+      [id]
+    );
+    return res.status(201).json(
+      createdRows && createdRows[0]
+        ? mapAeronaveRow(createdRows[0])
+        : {
+            id,
+            tipo,
+            prefixo,
+            descricao,
+            departmentId: targetUnitDeptId || '',
+            unitId,
+            criadoPorId: dbActor.id || '',
+            criadoPorNome: dbActor.name || ''
+          }
+    );
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/aeronaves/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const b = req.body || {};
+    const actor = b.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureAeronavesUnidadeTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+    const isArmeiro = roles.has('Armeiro');
+
+    if (!isGeral && !isAdmin && !isArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas usuários com perfil Administrador ou Armeiro podem editar aeronaves.'
+      });
+    }
+
+    const [existingRows]: any = await pool.query(
+      'SELECT * FROM AERONAVES_UNIDADE WHERE ID_AERONAVE = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Aeronave não encontrada.' });
+    }
+    const existing = existingRows[0];
+
+    const targetUnitId = String(b.unitId || existing.UNIDADE_ID || '').trim();
+    const [uRows]: any = await pool.query(
+      'SELECT ID_UNIDADES, NOME_UNIDADES, DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+      [targetUnitId]
+    );
+    if (!uRows || uRows.length === 0) {
+      return res.status(404).json({ error: 'Unidade selecionada não encontrada.' });
+    }
+    if (!isCatUnitNameServer(uRows[0].NOME_UNIDADES)) {
+      return res.status(403).json({
+        error: 'Aeronaves só podem permanecer vinculadas à unidade CAT.'
+      });
+    }
+
+    const targetUnitDeptId = String(uRows[0].DEPARTAMENTO_ID_UNIDADES || '').trim();
+    const actorUnitId = String(dbActor.unitId || '').trim();
+    const actorDeptId = String(dbActor.departmentId || '').trim();
+    if (!isGeral) {
+      const existingAllowed =
+        existing.UNIDADE_ID === actorUnitId ||
+        (Boolean(actorDeptId) && (existing.DEPARTAMENTO_ID === actorDeptId || targetUnitDeptId === actorDeptId));
+      if (!existingAllowed || (actorDeptId && targetUnitDeptId && targetUnitDeptId !== actorDeptId)) {
+        return res.status(403).json({
+          error: 'Você só pode editar aeronaves de unidades CAT vinculadas ao seu departamento.'
+        });
+      }
+    }
+
+    const tipo = sanitizeTipoAeronaveServer(b.tipo);
+    if (!tipo) {
+      return res.status(400).json({ error: 'Selecione o tipo da aeronave (AVIÃO ou HELICÓPTERO).' });
+    }
+
+    const prefixo = formatPrefixoAeronaveServer(b.prefixo);
+    if (!prefixo || prefixo.length < 2) {
+      return res.status(400).json({ error: 'Informe um prefixo válido para a aeronave.' });
+    }
+
+    const descricao = String(b.descricao || '').trim().slice(0, 200);
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição da aeronave.' });
+    }
+
+    const [dup]: any = await pool.query(
+      'SELECT ID_AERONAVE FROM AERONAVES_UNIDADE WHERE PREFIXO_AERONAVE = ? AND UNIDADE_ID = ? AND ID_AERONAVE <> ? LIMIT 1',
+      [prefixo, targetUnitId, id]
+    );
+    if (dup && dup.length > 0) {
+      return res.status(409).json({
+        error: `Já existe outra aeronave com o prefixo ${prefixo} nesta unidade.`
+      });
+    }
+
+    await pool.query(
+      'UPDATE AERONAVES_UNIDADE SET TIPO_AERONAVE = ?, PREFIXO_AERONAVE = ?, DESCRICAO_AERONAVE = ?, UNIDADE_ID = ?, DEPARTAMENTO_ID = ? WHERE ID_AERONAVE = ?',
+      [tipo, prefixo, descricao, targetUnitId, targetUnitDeptId || null, id]
+    );
+
+    await insertAuditLog(
+      'Unidades',
+      'Editar Aeronave',
+      `Aeronave ${id} atualizada para ${tipo} ${prefixo} (${descricao})`,
+      dbActor,
+      req.ip
+    );
+
+    const [updatedRows]: any = await pool.query(
+      'SELECT * FROM AERONAVES_UNIDADE WHERE ID_AERONAVE = ? LIMIT 1',
+      [id]
+    );
+    return res.json(updatedRows && updatedRows[0] ? mapAeronaveRow(updatedRows[0]) : { success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/aeronaves/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureAeronavesUnidadeTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+
+    if (!isGeral && !isAdmin) {
+      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem excluir aeronaves.' });
+    }
+
+    const [existingRows]: any = await pool.query(
+      'SELECT ID_AERONAVE, TIPO_AERONAVE, PREFIXO_AERONAVE, DESCRICAO_AERONAVE, UNIDADE_ID, DEPARTAMENTO_ID FROM AERONAVES_UNIDADE WHERE ID_AERONAVE = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Aeronave não encontrada.' });
+    }
+    const existing = existingRows[0];
+
+    const actorUnitId = String(dbActor.unitId || '').trim();
+    const actorDeptId = String(dbActor.departmentId || '').trim();
+    if (!isGeral) {
+      let allowed =
+        existing.UNIDADE_ID === actorUnitId ||
+        (Boolean(actorDeptId) && existing.DEPARTAMENTO_ID === actorDeptId);
+      if (!allowed && actorDeptId) {
+        try {
+          const [eu]: any = await pool.query(
+            'SELECT DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+            [existing.UNIDADE_ID]
+          );
+          if (eu?.[0]?.DEPARTAMENTO_ID_UNIDADES === actorDeptId) allowed = true;
+        } catch {}
+      }
+      if (!allowed) {
+        return res.status(403).json({
+          error: 'Administradores só podem excluir aeronaves de unidades vinculadas ao seu departamento.'
+        });
+      }
+    }
+
+    await pool.query('DELETE FROM AERONAVES_UNIDADE WHERE ID_AERONAVE = ?', [id]);
+    await insertAuditLog(
+      'Unidades',
+      'Excluir Aeronave',
+      `Aeronave ${existing.TIPO_AERONAVE} ${existing.PREFIXO_AERONAVE} (${existing.DESCRICAO_AERONAVE}) excluída da unidade ${existing.UNIDADE_ID}`,
+      dbActor,
       req.ip
     );
     return res.json({ success: true });

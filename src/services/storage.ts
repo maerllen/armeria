@@ -52,6 +52,7 @@ import {
   RelatorioTreinamentoPolicial,
   RelatorioOperacaoPolicial,
   ViaturaUnidade,
+  AeronaveUnidade,
   CautelaArma,
   CautelaMunicao,
   AmmoTransfer,
@@ -108,6 +109,7 @@ export interface AppState {
   relatoriosTreinamentoPolicial: RelatorioTreinamentoPolicial[];
   relatoriosOperacoesPolicial: RelatorioOperacaoPolicial[];
   viaturas: ViaturaUnidade[];
+  aeronaves: AeronaveUnidade[];
   cautelasArmas: CautelaArma[];
   cautelasMunicoes: CautelaMunicao[];
   explosivoTransfers: ExplosivoTransfer[];
@@ -165,6 +167,7 @@ class StorageService {
     relatoriosTreinamentoPolicial: [],
     relatoriosOperacoesPolicial: [],
     viaturas: [],
+    aeronaves: [],
     cautelasArmas: [],
     cautelasMunicoes: [],
     weaponCustodyHistory: []
@@ -233,6 +236,7 @@ class StorageService {
         relatoriosTreinamentoPolicialRes,
         relatoriosOperacoesPolicialRes,
         viaturasRes,
+        aeronavesRes,
         cautelasArmasRes,
         cautelasMunicoesRes,
         materialTransfersRes,
@@ -283,6 +287,7 @@ class StorageService {
         fetchSync('/api/relatorios-treinamento-policial'),
         fetchSync('/api/relatorios-operacoes-policial'),
         fetchSync('/api/viaturas'),
+        fetchSync('/api/aeronaves'),
         fetchSync('/api/cautelas-armas'),
         fetchSync('/api/cautelas-municoes'),
         fetchSync('/api/material-transfers'),
@@ -334,6 +339,7 @@ class StorageService {
       this.state.relatoriosTreinamentoPolicial = relatoriosTreinamentoPolicialRes || [];
       this.state.relatoriosOperacoesPolicial = relatoriosOperacoesPolicialRes || [];
       this.state.viaturas = viaturasRes || [];
+      this.state.aeronaves = aeronavesRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
       this.state.weaponCustodyHistory = weaponCustodyHistoryRes || [];
@@ -4048,6 +4054,64 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir viatura.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Aeronaves da Unidade (Exclusivo Unidade CAT)
+  public getAeronaves(): AeronaveUnidade[] {
+    return this.state.aeronaves || [];
+  }
+
+  public async saveAeronave(
+    aeronave: Partial<AeronaveUnidade>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: AeronaveUnidade }> {
+    try {
+      const res = await fetch('/api/aeronaves', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...aeronave, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao cadastrar aeronave.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateAeronave(
+    id: string,
+    aeronave: Partial<AeronaveUnidade>
+  ): Promise<{ success: boolean; error?: string; data?: AeronaveUnidade }> {
+    try {
+      const res = await fetch(`/api/aeronaves/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...aeronave, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar aeronave.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteAeronave(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/aeronaves/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir aeronave.' };
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
