@@ -13345,20 +13345,43 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
     }
 
     const actorUnitId = String(actor.unitId || '').trim();
+    const actorDeptId = String(actor.departmentId || '').trim();
     const requestedUnitId = String(b.unitId || '').trim();
-    const unitId = isGeral ? (requestedUnitId || actorUnitId) : actorUnitId;
+    const unitId = requestedUnitId || actorUnitId;
     if (!unitId) {
-      return res.status(400).json({ error: 'Usuário Administrador precisa estar vinculado a uma unidade para cadastrar viaturas.' });
+      return res.status(400).json({ error: 'Informe a unidade à qual a viatura pertence.' });
     }
-    if (!isGeral && requestedUnitId && requestedUnitId !== actorUnitId) {
-      return res.status(403).json({ error: 'Administradores só podem cadastrar viaturas na unidade em que estão vinculados.' });
-    }
-
-    const departmentId = String(b.departmentId || actor.departmentId || '').trim() || null;
-    const id = String(b.id || `VTR-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
 
     const pool = getPool();
     await ensureViaturasUnidadeTable(pool);
+
+    let resolvedDeptId = String(b.departmentId || actorDeptId || '').trim() || null;
+    try {
+      const [uRows]: any = await pool.query(
+        'SELECT ID_UNIDADES, DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+        [unitId]
+      );
+      if (uRows && uRows.length > 0) {
+        const targetUnitDeptId = String(uRows[0].DEPARTAMENTO_ID_UNIDADES || '').trim();
+        if (!isGeral && unitId !== actorUnitId) {
+          if (!actorDeptId || targetUnitDeptId !== actorDeptId) {
+            return res.status(403).json({
+              error: 'Administradores só podem cadastrar viaturas em unidades vinculadas ao seu departamento.'
+            });
+          }
+        }
+        if (targetUnitDeptId) resolvedDeptId = targetUnitDeptId;
+      } else if (!isGeral && unitId !== actorUnitId) {
+        return res.status(404).json({ error: 'Unidade selecionada não encontrada.' });
+      }
+    } catch (_) {
+      if (!isGeral && requestedUnitId && requestedUnitId !== actorUnitId) {
+        return res.status(403).json({ error: 'Não foi possível validar o vínculo da unidade selecionada.' });
+      }
+    }
+
+    const departmentId = resolvedDeptId;
+    const id = String(b.id || `VTR-${Date.now()}-${Math.floor(Math.random() * 10000)}`);
 
     const [dup]: any = await pool.query(
       'SELECT ID_VIATURA FROM VIATURAS_UNIDADE WHERE PLACA_VIATURA = ? AND UNIDADE_ID = ? LIMIT 1',
@@ -13432,8 +13455,43 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
     const existing = existingRows[0];
 
     const actorUnitId = String(actor.unitId || '').trim();
-    if (!isGeral && existing.UNIDADE_ID !== actorUnitId) {
-      return res.status(403).json({ error: 'Administradores só podem editar viaturas da unidade em que estão vinculados.' });
+    const actorDeptId = String(actor.departmentId || '').trim();
+    const targetUnitId = String(b.unitId || existing.UNIDADE_ID || '').trim();
+    let targetDeptId = existing.DEPARTAMENTO_ID || actorDeptId || null;
+
+    if (!isGeral) {
+      let existingAllowed = existing.UNIDADE_ID === actorUnitId || (Boolean(actorDeptId) && existing.DEPARTAMENTO_ID === actorDeptId);
+      if (!existingAllowed && actorDeptId) {
+        try {
+          const [eu]: any = await pool.query(
+            'SELECT DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+            [existing.UNIDADE_ID]
+          );
+          if (eu?.[0]?.DEPARTAMENTO_ID_UNIDADES === actorDeptId) existingAllowed = true;
+        } catch (_) {}
+      }
+      if (!existingAllowed) {
+        return res.status(403).json({ error: 'Administradores só podem editar viaturas de unidades vinculadas ao seu departamento.' });
+      }
+
+      if (targetUnitId !== existing.UNIDADE_ID) {
+        const [tu]: any = await pool.query(
+          'SELECT ID_UNIDADES, DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [targetUnitId]
+        );
+        if (!tu || tu.length === 0 || (actorDeptId && String(tu[0].DEPARTAMENTO_ID_UNIDADES || '') !== actorDeptId)) {
+          return res.status(403).json({ error: 'Administradores só podem mover viaturas para unidades do seu departamento.' });
+        }
+        targetDeptId = tu[0].DEPARTAMENTO_ID_UNIDADES || targetDeptId;
+      }
+    } else if (targetUnitId !== existing.UNIDADE_ID) {
+      try {
+        const [tu]: any = await pool.query(
+          'SELECT DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [targetUnitId]
+        );
+        if (tu?.[0]?.DEPARTAMENTO_ID_UNIDADES) targetDeptId = tu[0].DEPARTAMENTO_ID_UNIDADES;
+      } catch (_) {}
     }
 
     const placa = formatPlacaViaturaServer(b.placa || '');
@@ -13450,15 +13508,15 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
 
     const [dup]: any = await pool.query(
       'SELECT ID_VIATURA FROM VIATURAS_UNIDADE WHERE PLACA_VIATURA = ? AND UNIDADE_ID = ? AND ID_VIATURA <> ? LIMIT 1',
-      [placa, existing.UNIDADE_ID, id]
+      [placa, targetUnitId, id]
     );
     if (dup && dup.length > 0) {
       return res.status(409).json({ error: `Já existe outra viatura com a placa ${placa} nesta unidade.` });
     }
 
     await pool.query(
-      'UPDATE VIATURAS_UNIDADE SET PLACA_VIATURA = ?, DESCRICAO_VIATURA = ? WHERE ID_VIATURA = ?',
-      [placa, descricao, id]
+      'UPDATE VIATURAS_UNIDADE SET PLACA_VIATURA = ?, DESCRICAO_VIATURA = ?, UNIDADE_ID = ?, DEPARTAMENTO_ID = ? WHERE ID_VIATURA = ?',
+      [placa, descricao, targetUnitId, targetDeptId, id]
     );
 
     await insertAuditLog(
@@ -13495,7 +13553,7 @@ apiRouter.delete('/viaturas/:id', async (req: Request, res: Response) => {
     await ensureViaturasUnidadeTable(pool);
 
     const [existingRows]: any = await pool.query(
-      'SELECT ID_VIATURA, PLACA_VIATURA, DESCRICAO_VIATURA, UNIDADE_ID FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
+      'SELECT ID_VIATURA, PLACA_VIATURA, DESCRICAO_VIATURA, UNIDADE_ID, DEPARTAMENTO_ID FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
       [id]
     );
     if (!existingRows || existingRows.length === 0) {
@@ -13504,8 +13562,21 @@ apiRouter.delete('/viaturas/:id', async (req: Request, res: Response) => {
     const existing = existingRows[0];
 
     const actorUnitId = String(actor.unitId || '').trim();
-    if (!isGeral && existing.UNIDADE_ID !== actorUnitId) {
-      return res.status(403).json({ error: 'Administradores só podem excluir viaturas da unidade em que estão vinculados.' });
+    const actorDeptId = String(actor.departmentId || '').trim();
+    if (!isGeral) {
+      let allowed = existing.UNIDADE_ID === actorUnitId || (Boolean(actorDeptId) && existing.DEPARTAMENTO_ID === actorDeptId);
+      if (!allowed && actorDeptId) {
+        try {
+          const [eu]: any = await pool.query(
+            'SELECT DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+            [existing.UNIDADE_ID]
+          );
+          if (eu?.[0]?.DEPARTAMENTO_ID_UNIDADES === actorDeptId) allowed = true;
+        } catch (_) {}
+      }
+      if (!allowed) {
+        return res.status(403).json({ error: 'Administradores só podem excluir viaturas de unidades vinculadas ao seu departamento.' });
+      }
     }
 
     await pool.query('DELETE FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ?', [id]);
@@ -18033,21 +18104,45 @@ function sanitizePolTreinoParticipantes(
 
 async function resolveDbActorForPolTreino(pool: any, actorId: string) {
   if (!actorId) return null;
-  const [rows]: any = await pool.query(
-    `SELECT
-      ID_USUARIOS as id,
-      NOME_USUARIOS as name,
-      MASP_USUARIOS as masp,
-      CARGO_USUARIOS as cargo,
-      PERFIL_USUARIOS as role,
-      PERFIS_USUARIOS as rolesJson,
-      UNIDADE_ID_USUARIOS as unitId,
-      DEPARTAMENTO_ID_USUARIOS as departmentId
-    FROM USUARIOS
-    WHERE ID_USUARIOS = ?
-    LIMIT 1`,
-    [actorId]
-  );
+  let rows: any[] = [];
+  try {
+    const [resRows]: any = await pool.query(
+      `SELECT
+        ID_USUARIOS as id,
+        NOME_USUARIOS as name,
+        MASP_USUARIOS as masp,
+        CARGO_USUARIOS as cargo,
+        PERFIL_USUARIOS as role,
+        ROLES_USUARIOS as rolesJson,
+        UNIDADE_ID_USUARIOS as unitId,
+        DEPARTAMENTO_ID_USUARIOS as departmentId
+      FROM USUARIOS
+      WHERE ID_USUARIOS = ?
+      LIMIT 1`,
+      [actorId]
+    );
+    rows = resRows || [];
+  } catch (err: any) {
+    if (err?.code === 'ER_BAD_FIELD_ERROR' || String(err?.message || '').includes('ROLES_USUARIOS')) {
+      const [fallbackRows]: any = await pool.query(
+        `SELECT
+          ID_USUARIOS as id,
+          NOME_USUARIOS as name,
+          MASP_USUARIOS as masp,
+          CARGO_USUARIOS as cargo,
+          PERFIL_USUARIOS as role,
+          UNIDADE_ID_USUARIOS as unitId,
+          DEPARTAMENTO_ID_USUARIOS as departmentId
+        FROM USUARIOS
+        WHERE ID_USUARIOS = ?
+        LIMIT 1`,
+        [actorId]
+      );
+      rows = fallbackRows || [];
+    } else {
+      throw err;
+    }
+  }
   if (!rows || rows.length === 0) return null;
   const u = rows[0];
   let rolesList: string[] = [];
@@ -18067,6 +18162,30 @@ async function resolveDbActorForPolTreino(pool: any, actorId: string) {
     unitId: u.unitId ? String(u.unitId) : null,
     departmentId: u.departmentId ? String(u.departmentId) : null
   };
+}
+
+async function filterPolTreinoOutrasUnidadesByDept(
+  pool: any,
+  outrasUnidades: Array<{ id: string; name: string }>,
+  departmentId?: string | null
+): Promise<Array<{ id: string; name: string }>> {
+  if (!outrasUnidades.length) return [];
+  if (!departmentId) return outrasUnidades;
+  try {
+    const [deptUnitRows]: any = await pool.query(
+      'SELECT ID_UNIDADES as id, NOME_UNIDADES as name FROM UNIDADES WHERE DEPARTAMENTO_ID_UNIDADES = ?',
+      [departmentId]
+    );
+    const allowedMap = new Map<string, string>();
+    for (const r of deptUnitRows || []) {
+      allowedMap.set(String(r.id), String(r.name || ''));
+    }
+    return outrasUnidades
+      .filter(u => allowedMap.has(u.id))
+      .map(u => ({ id: u.id, name: allowedMap.get(u.id) || u.name }));
+  } catch {
+    return outrasUnidades;
+  }
 }
 
 function mapPolTreinoRow(r: any) {
@@ -18194,18 +18313,21 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
       return res.status(400).json({ error: `O limite máximo é de ${POL_TREINO_MAX_PARTICIPANTES} participantes.` });
     }
 
+    const unitId = String(body.unitId || dbActor.unitId || '').trim().slice(0, 64) || null;
+    const departmentId = String(dbActor.departmentId || body.departmentId || '').trim().slice(0, 64) || null;
     const participacaoOutrasUnidades =
       modalidadeParticipacao === 'Coletivo' && Boolean(body.participacaoOutrasUnidades);
     const outrasUnidades = participacaoOutrasUnidades
-      ? sanitizePolTreinoOutrasUnidades(body.outrasUnidades)
+      ? await filterPolTreinoOutrasUnidadesByDept(
+          pool,
+          sanitizePolTreinoOutrasUnidades(body.outrasUnidades),
+          departmentId
+        )
       : [];
     const participantes =
       modalidadeParticipacao === 'Coletivo'
         ? sanitizePolTreinoParticipantes(rawParticipantes, dbActor.id)
         : [];
-
-    const unitId = String(body.unitId || dbActor.unitId || '').trim().slice(0, 64) || null;
-    const departmentId = String(body.departmentId || dbActor.departmentId || '').trim().slice(0, 64) || null;
     let unitName = String(body.unitName || '').trim().slice(0, 255) || null;
     if (!unitName && unitId) {
       try {
@@ -18401,7 +18523,11 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
     const participacaoOutrasUnidades =
       modalidadeParticipacao === 'Coletivo' && Boolean(body.participacaoOutrasUnidades);
     const outrasUnidades = participacaoOutrasUnidades
-      ? sanitizePolTreinoOutrasUnidades(body.outrasUnidades)
+      ? await filterPolTreinoOutrasUnidadesByDept(
+          pool,
+          sanitizePolTreinoOutrasUnidades(body.outrasUnidades),
+          dbActor.departmentId
+        )
       : [];
     const participantes =
       modalidadeParticipacao === 'Coletivo'
@@ -18605,6 +18731,1244 @@ apiRouter.delete('/relatorios-treinamento-policial/:id', async (req: Request, re
     return res.status(500).json({ error: err.message });
   }
 });
+
+// =============================================================
+// PROXY IBGE: MUNICIPIOS POR UF (COM CACHE EM MEMORIA)
+// =============================================================
+const VALID_UFS_BR = new Set([
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO',
+  'MA', 'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI',
+  'RJ', 'RN', 'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+]);
+const ibgeMunicipiosServerCache = new Map<string, string[]>();
+
+apiRouter.get('/ibge/municipios/:uf', async (req: Request, res: Response) => {
+  try {
+    const uf = String(req.params.uf || '').trim().toUpperCase();
+    if (!VALID_UFS_BR.has(uf)) {
+      return res.status(400).json({ error: 'UF inválida.' });
+    }
+    if (ibgeMunicipiosServerCache.has(uf)) {
+      return res.json(ibgeMunicipiosServerCache.get(uf));
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetch(
+        `https://servicodados.ibge.gov.br/api/v1/localidades/estados/${uf}/municipios?orderBy=nome`,
+        { signal: controller.signal }
+      );
+      if (!response.ok) {
+        return res.status(502).json({ error: 'Falha ao consultar municípios no IBGE.' });
+      }
+      const data: any = await response.json();
+      const nomes = Array.isArray(data)
+        ? data
+            .map((m: any) => String(m?.nome || '').trim())
+            .filter(Boolean)
+            .sort((a: string, b: string) => a.localeCompare(b, 'pt-BR'))
+        : [];
+      if (nomes.length > 0) {
+        ibgeMunicipiosServerCache.set(uf, nomes);
+      }
+      return res.json(nomes);
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (err: any) {
+    return res.status(502).json({ error: 'Não foi possível obter lista de municípios no momento.' });
+  }
+});
+
+// =============================================================
+// MODULO: RELATORIOS DE OPERACOES POLICIAL (SINOPSE — NÃO-COC)
+// =============================================================
+const POL_OP_ALLOWED_ACIONAMENTO = new Set(['CEPOLC', 'CHEFIA', 'SEI', 'OUTROS']);
+const POL_OP_ALLOWED_TIPO_ATENDIMENTO = new Set([
+  'Operação prevista',
+  'Operação extraordinária',
+  'Emergencial'
+]);
+const POL_OP_ALLOWED_DEPTS_APOIO = new Set([
+  'COE',
+  '1º Belo Horizonte',
+  '2º Contagem',
+  '3º Vespasiano',
+  '4º Juiz de Fora',
+  '5º Uberaba',
+  '6º Lavras',
+  '7º Divinópolis',
+  '8º Governador Valadares',
+  '9º Uberlândia',
+  '10º Patos de Minas',
+  '11º Montes Claros',
+  '12º Ipatinga',
+  '13º Barbacena',
+  '14º Curvelo',
+  '15º Teófilo Otoni',
+  '16º Unaí',
+  '17º Pouso Alegre',
+  '18º Poços de Caldas',
+  '19º Sete Lagoas',
+  'DEOESP',
+  'DECCOF',
+  'DHPP',
+  'DENARC',
+  'DEFAM',
+  'DEPATRI',
+  'DEMA',
+  'DEICT'
+]);
+const POL_OP_ALLOWED_MATERIAIS_BUSCA = new Set([
+  'ARMA',
+  'DROGA',
+  'ELETRÔNICOS',
+  'VEÍCULOS',
+  'MENOR',
+  'OUTROS'
+]);
+const POL_OP_ALLOWED_TIPOS_CRISE = new Set(['DISTÚRBIO', 'SUICÍDIO', 'OUTROS']);
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+let relatoriosOperacoesPolicialEnsured = false;
+async function ensureRelatoriosOperacoesPolicialTable(pool: any): Promise<void> {
+  if (relatoriosOperacoesPolicialEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_OPERACOES_POLICIAL\` (
+        \`ID_REL_OP_POL\` VARCHAR(64) NOT NULL,
+        \`DATA_OPERACAO\` VARCHAR(10) NOT NULL,
+        \`HORA_SAIDA_BASE\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`HORA_OPERACAO\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`ESTADO_OPERACAO\` VARCHAR(2) NOT NULL DEFAULT 'MG',
+        \`MUNICIPIO_OPERACAO\` VARCHAR(160) NOT NULL,
+        \`APENAS_UM_MUNICIPIO\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`OUTROS_MUNICIPIOS_JSON\` LONGTEXT DEFAULT NULL,
+        \`VIATURAS_JSON\` LONGTEXT DEFAULT NULL,
+        \`OPERADORES_JSON\` LONGTEXT NOT NULL,
+        \`ACIONAMENTO_VIA\` ENUM('CEPOLC', 'CHEFIA', 'SEI', 'OUTROS') NOT NULL DEFAULT 'CEPOLC',
+        \`ACIONAMENTO_OUTROS_DESC\` VARCHAR(250) DEFAULT NULL,
+        \`TIPO_ATENDIMENTO\` ENUM('Operação prevista', 'Operação extraordinária', 'Emergencial') NOT NULL DEFAULT 'Operação prevista',
+        \`DEPARTAMENTOS_APOIO_JSON\` LONGTEXT DEFAULT NULL,
+        \`DESCRICAO_APOIO\` VARCHAR(250) DEFAULT NULL,
+        \`DESCRICAO_EMERGENCIA\` VARCHAR(250) DEFAULT NULL,
+        \`SINOPSE\` TEXT NOT NULL,
+        \`DETALHES_ADICIONAIS_JSON\` LONGTEXT DEFAULT NULL,
+        \`UTILIZOU_ARMA\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`UTILIZOU_ARMA_FOGO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`ARMAS_FOGO_JSON\` LONGTEXT DEFAULT NULL,
+        \`UTILIZOU_ARMA_ELETRICA\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`ARMAS_ELETRICAS_JSON\` LONGTEXT DEFAULT NULL,
+        \`HOUVE_OBITO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`SINOPSE_OBITO\` TEXT DEFAULT NULL,
+        \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
+        \`CRIADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`CRIADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`CRIADOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_REL_OP_POL\`),
+        KEY \`idx_rel_op_pol_data\` (\`DATA_OPERACAO\`),
+        KEY \`idx_rel_op_pol_criador\` (\`CRIADOR_ID\`),
+        KEY \`idx_rel_op_pol_unit\` (\`UNIDADE_ID\`),
+        KEY \`idx_rel_op_pol_dept\` (\`DEPARTAMENTO_ID\`),
+        KEY \`idx_rel_op_pol_tipo\` (\`TIPO_ATENDIMENTO\`),
+        KEY \`idx_rel_op_pol_obito\` (\`HOUVE_OBITO\`),
+        KEY \`idx_rel_op_pol_criacao\` (\`DATA_CRIACAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    relatoriosOperacoesPolicialEnsured = true;
+  } catch (err) {
+    console.error('[API] Erro ao garantir tabela RELATORIOS_OPERACOES_POLICIAL:', err);
+  }
+}
+
+function parseMysqlTimestampMs(val?: string | Date | null): number {
+  if (!val) return Date.now();
+  if (val instanceof Date) return val.getTime();
+  const str = String(val).trim();
+  const normalized = str.includes('T') ? str : str.replace(' ', 'T');
+  const parsed = Date.parse(normalized);
+  return Number.isNaN(parsed) ? Date.now() : parsed;
+}
+
+function sanitizePolOpMunicipios(
+  raw: any,
+  primaryUf: string,
+  primaryMunicipio: string
+): Array<{ uf: string; municipio: string }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>([`${primaryUf}|${primaryMunicipio.toLowerCase()}`]);
+  const out: Array<{ uf: string; municipio: string }> = [];
+  for (const item of raw) {
+    const uf = String(item?.uf || '').trim().toUpperCase();
+    const municipio = String(item?.municipio || '').trim().slice(0, 160);
+    if (!VALID_UFS_BR.has(uf) || !municipio) continue;
+    const key = `${uf}|${municipio.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ uf, municipio });
+    if (out.length >= 100) break;
+  }
+  return out;
+}
+
+function sanitizePolOpViaturas(raw: any): Array<{ id: string; placa: string; descricao: string }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: Array<{ id: string; placa: string; descricao: string }> = [];
+  for (const v of raw) {
+    const id = String(v?.id || '').trim().slice(0, 64);
+    const placa = String(v?.placa || '').trim().toUpperCase().slice(0, 16);
+    const descricao = String(v?.descricao || '').trim().slice(0, 160);
+    if (!id || !placa || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, placa, descricao });
+  }
+  return out;
+}
+
+function sanitizePolOpOperadores(
+  raw: any,
+  creator: { id: string; name: string; masp: string; cargo?: string; unitId?: string | null; unitName?: string | null },
+  existingMap?: Map<string, any>
+) {
+  const seen = new Set<string>();
+  const out: Array<{
+    userId: string;
+    name: string;
+    masp: string;
+    cargo: string;
+    unitId: string;
+    unitName: string;
+    isCreator: boolean;
+    signed: boolean;
+    signedAt: string | null;
+  }> = [];
+
+  const list = Array.isArray(raw) ? raw : [];
+  let hasCreator = false;
+  for (const op of list) {
+    const userId = String(op?.userId || '').trim().slice(0, 64);
+    const name = String(op?.name || '').trim().slice(0, 255);
+    if (!userId || !name || seen.has(userId)) continue;
+    seen.add(userId);
+    const isCreator = userId === creator.id;
+    if (isCreator) hasCreator = true;
+    const prev = existingMap?.get(userId);
+    out.push({
+      userId,
+      name,
+      masp: String(op?.masp || prev?.masp || '').trim().slice(0, 32),
+      cargo: String(op?.cargo || prev?.cargo || '').trim().slice(0, 128),
+      unitId: String(op?.unitId || prev?.unitId || '').trim().slice(0, 64),
+      unitName: String(op?.unitName || prev?.unitName || '').trim().slice(0, 255),
+      isCreator,
+      signed: isCreator ? true : prev ? Boolean(prev.signed) : false,
+      signedAt: isCreator ? (prev?.signedAt || new Date().toISOString()) : (prev?.signedAt || null)
+    });
+  }
+
+  if (!hasCreator && creator.id) {
+    const prevCreator = existingMap?.get(creator.id);
+    out.unshift({
+      userId: creator.id,
+      name: creator.name,
+      masp: creator.masp,
+      cargo: creator.cargo || '',
+      unitId: creator.unitId || '',
+      unitName: creator.unitName || '',
+      isCreator: true,
+      signed: true,
+      signedAt: prevCreator?.signedAt || new Date().toISOString()
+    });
+  }
+
+  return out;
+}
+
+function sanitizePolOpDetalhesAdicionais(raw: any) {
+  const src = raw && typeof raw === 'object' ? raw : {};
+  const mp = src.mandadoPrisao;
+  const mb = src.mandadoBusca;
+  const gc = src.gerenciamentoCrise;
+
+  const res: any = {};
+  if (mp?.ativo) {
+    res.mandadoPrisao = {
+      ativo: true,
+      foragidoPreso: Boolean(mp.foragidoPreso)
+    };
+  }
+  if (mb?.ativo) {
+    const materialArrecadado = Boolean(mb.materialArrecadado);
+    const materiais = materialArrecadado && Array.isArray(mb.materiais)
+      ? Array.from(new Set(mb.materiais.map((m: any) => String(m)).filter((m: string) => POL_OP_ALLOWED_MATERIAIS_BUSCA.has(m))))
+      : [];
+    res.mandadoBusca = {
+      ativo: true,
+      materialArrecadado,
+      materiais,
+      outrosDetalhes:
+        materialArrecadado && materiais.includes('OUTROS')
+          ? String(mb.outrosDetalhes || '').trim().slice(0, 250)
+          : ''
+    };
+  }
+  if (gc?.ativo) {
+    const tipo = POL_OP_ALLOWED_TIPOS_CRISE.has(String(gc.tipo || ''))
+      ? String(gc.tipo)
+      : 'DISTÚRBIO';
+    res.gerenciamentoCrise = {
+      ativo: true,
+      tipo,
+      outrosDetalhes: tipo === 'OUTROS' ? String(gc.outrosDetalhes || '').trim().slice(0, 250) : ''
+    };
+  }
+  return res;
+}
+
+function sanitizePolOpArmasFogo(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const out: Array<{
+    id: string;
+    origem: 'ACERVO' | 'FORA_DO_ACERVO';
+    weaponId?: string;
+    marca: string;
+    modelo: string;
+    numeroSerie: string;
+    calibre: string;
+    quantidadeTiros: number;
+  }> = [];
+
+  for (const item of raw) {
+    const origem = item?.origem === 'ACERVO' ? 'ACERVO' : 'FORA_DO_ACERVO';
+    const numeroSerie = String(item?.numeroSerie || '').trim().slice(0, 128);
+    const marca = String(item?.marca || '').trim().slice(0, 128);
+    const modelo = String(item?.modelo || '').trim().slice(0, 128);
+    const calibre = String(item?.calibre || '').trim().slice(0, 128);
+    const weaponId = origem === 'ACERVO' ? String(item?.weaponId || '').trim().slice(0, 64) : undefined;
+    const rawShots = Number(item?.quantidadeTiros);
+    const quantidadeTiros = Number.isFinite(rawShots) && rawShots >= 0 ? Math.min(100000, Math.floor(rawShots)) : 0;
+
+    if (!numeroSerie && !weaponId) continue;
+    out.push({
+      id: String(item?.id || `af-${Date.now()}-${out.length}`).slice(0, 64),
+      origem,
+      weaponId,
+      marca,
+      modelo,
+      numeroSerie,
+      calibre,
+      quantidadeTiros
+    });
+  }
+  return out;
+}
+
+function sanitizePolOpArmasEletricas(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: Array<{
+    key: string;
+    materialId: string;
+    tipo: string;
+    nome: string;
+    numeroSerie?: string;
+    acautelado: boolean;
+    cautelaId?: string;
+    usuarioCautelaNome?: string;
+    usuarioCautelaMasp?: string;
+  }> = [];
+
+  for (const item of raw) {
+    const key = String(item?.key || item?.cautelaId || item?.materialId || '').trim().slice(0, 128);
+    const materialId = String(item?.materialId || '').trim().slice(0, 64);
+    const nome = String(item?.nome || '').trim().slice(0, 200);
+    if (!key || !materialId || !nome || seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      key,
+      materialId,
+      tipo: String(item?.tipo || '').trim().slice(0, 128),
+      nome,
+      numeroSerie: String(item?.numeroSerie || '').trim().slice(0, 128) || undefined,
+      acautelado: Boolean(item?.acautelado),
+      cautelaId: String(item?.cautelaId || '').trim().slice(0, 64) || undefined,
+      usuarioCautelaNome: String(item?.usuarioCautelaNome || '').trim().slice(0, 255) || undefined,
+      usuarioCautelaMasp: String(item?.usuarioCautelaMasp || '').trim().slice(0, 32) || undefined
+    });
+  }
+  return out;
+}
+
+async function applyAcervoShotsDeltaForPolOp(
+  pool: any,
+  reportId: string,
+  dataOperacao: string,
+  actor: { name: string; masp: string },
+  oldArmas: Array<{ origem: string; weaponId?: string; numeroSerie?: string; quantidadeTiros: number }>,
+  newArmas: Array<{ origem: string; weaponId?: string; numeroSerie?: string; quantidadeTiros: number }>
+): Promise<void> {
+  const aggregate = (list: typeof oldArmas) => {
+    const map = new Map<string, { weaponId: string; serial: string; shots: number }>();
+    for (const a of list || []) {
+      if (a.origem !== 'ACERVO') continue;
+      const wid = String(a.weaponId || '').trim();
+      const ser = String(a.numeroSerie || '').trim();
+      const key = wid || `SER:${ser.toUpperCase()}`;
+      if (!key || key === 'SER:') continue;
+      const prev = map.get(key) || { weaponId: wid, serial: ser, shots: 0 };
+      prev.shots += Math.max(0, Math.floor(Number(a.quantidadeTiros) || 0));
+      if (!prev.weaponId && wid) prev.weaponId = wid;
+      if (!prev.serial && ser) prev.serial = ser;
+      map.set(key, prev);
+    }
+    return map;
+  };
+
+  const oldMap = aggregate(oldArmas);
+  const newMap = aggregate(newArmas);
+  const allKeys = new Set<string>([...oldMap.keys(), ...newMap.keys()]);
+
+  for (const key of allKeys) {
+    const prevEntry = oldMap.get(key);
+    const nextEntry = newMap.get(key);
+    const delta = (nextEntry?.shots || 0) - (prevEntry?.shots || 0);
+    if (delta === 0) continue;
+
+    const wid = nextEntry?.weaponId || prevEntry?.weaponId || '';
+    const ser = nextEntry?.serial || prevEntry?.serial || '';
+
+    try {
+      let affected = 0;
+      if (wid) {
+        const [upd]: any = await pool.query(
+          `UPDATE ARMAS
+           SET TIROS_DISPARADOS_ARMAS = GREATEST(0, COALESCE(TIROS_DISPARADOS_ARMAS, 0) + ?)
+           WHERE ID_ARMAS = ?`,
+          [delta, wid]
+        );
+        affected = Number(upd?.affectedRows || 0);
+      }
+      if (affected === 0 && ser) {
+        await pool.query(
+          `UPDATE ARMAS
+           SET TIROS_DISPARADOS_ARMAS = GREATEST(0, COALESCE(TIROS_DISPARADOS_ARMAS, 0) + ?)
+           WHERE UPPER(TRIM(NUMERO_SERIE_ARMAS)) = UPPER(TRIM(?))`,
+          [delta, ser]
+        );
+      }
+
+      let totalAfter = Math.max(0, delta);
+      try {
+        const [afterRows]: any = await pool.query(
+          `SELECT COALESCE(TIROS_DISPARADOS_ARMAS, 0) AS totalShots, ID_ARMAS as wid, NUMERO_SERIE_ARMAS as ser
+           FROM ARMAS
+           WHERE (? <> '' AND ID_ARMAS = ?)
+              OR (? <> '' AND UPPER(TRIM(NUMERO_SERIE_ARMAS)) = UPPER(TRIM(?)))
+           LIMIT 1`,
+          [wid, wid, ser, ser]
+        );
+        if (afterRows && afterRows.length > 0) {
+          totalAfter = Number(afterRows[0].totalShots || 0);
+        }
+      } catch (_) {}
+
+      const shotRegId = `shot-oppol-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const motivo =
+        delta > 0
+          ? `Relatório de Operação Policial #${reportId.slice(-8)} (${dataOperacao})`
+          : `Ajuste/Exclusão Relatório de Operação Policial #${reportId.slice(-8)} (${dataOperacao})`;
+      try {
+        await pool.query(
+          `INSERT INTO REGISTROS_TIROS_ARMAS (
+             ID_REGISTROS_TIROS, ARMA_ID, NUMERO_SERIE, QUANTIDADE_TIROS, MOTIVO, POLICIAL_NOME, POLICIAL_MASP, TOTAL_TIROS_APOS, DATA_REGISTRO
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [shotRegId, wid || ser, ser || wid, delta, motivo, actor.name || 'Policial', actor.masp || '', totalAfter]
+        );
+      } catch (_) {}
+    } catch (shotErr) {
+      console.warn('[API] Aviso ao atualizar tiros da arma no Relatório de Operação Policial:', shotErr);
+    }
+  }
+}
+
+function mapPolOpRow(r: any) {
+  const safeParse = (val: any, fallback: any) => {
+    try {
+      const p = val ? JSON.parse(val) : fallback;
+      return p ?? fallback;
+    } catch {
+      return fallback;
+    }
+  };
+
+  const createdAtStr = r.createdAt || new Date().toISOString();
+  const createdAtMs = parseMysqlTimestampMs(createdAtStr);
+  const autoSignExpired = Date.now() - createdAtMs >= THIRTY_DAYS_MS;
+
+  const rawOperadores = safeParse(r.operadoresJson, []);
+  const operadores = (Array.isArray(rawOperadores) ? rawOperadores : []).map((op: any) => {
+    const alreadySigned = Boolean(op?.signed);
+    if (!alreadySigned && autoSignExpired) {
+      return {
+        ...op,
+        signed: true,
+        autoSigned: true,
+        signedAt: op?.signedAt || new Date(createdAtMs + THIRTY_DAYS_MS).toISOString()
+      };
+    }
+    return {
+      ...op,
+      signed: alreadySigned,
+      autoSigned: Boolean(op?.autoSigned)
+    };
+  });
+
+  return {
+    id: String(r.id),
+    dataOperacao: String(r.dataOperacao || '').slice(0, 10),
+    horaSaidaBase: String(r.horaSaidaBase || '06:00').slice(0, 5),
+    horaOperacao: String(r.horaOperacao || '06:00').slice(0, 5),
+    estadoOperacao: String(r.estadoOperacao || 'MG'),
+    municipioOperacao: String(r.municipioOperacao || ''),
+    apenasUmMunicipio: Boolean(r.apenasUmMunicipio),
+    outrosMunicipios: Array.isArray(safeParse(r.outrosMunicipiosJson, [])) ? safeParse(r.outrosMunicipiosJson, []) : [],
+    viaturas: Array.isArray(safeParse(r.viaturasJson, [])) ? safeParse(r.viaturasJson, []) : [],
+    operadores,
+    acionamentoVia: POL_OP_ALLOWED_ACIONAMENTO.has(r.acionamentoVia) ? r.acionamentoVia : 'CEPOLC',
+    acionamentoOutrosDescricao: r.acionamentoOutrosDesc ? String(r.acionamentoOutrosDesc) : '',
+    tipoAtendimento: POL_OP_ALLOWED_TIPO_ATENDIMENTO.has(r.tipoAtendimento)
+      ? r.tipoAtendimento
+      : 'Operação prevista',
+    departamentosApoio: Array.isArray(safeParse(r.departamentosApoioJson, []))
+      ? safeParse(r.departamentosApoioJson, [])
+      : [],
+    descricaoApoio: r.descricaoApoio ? String(r.descricaoApoio) : '',
+    descricaoEmergencia: r.descricaoEmergencia ? String(r.descricaoEmergencia) : '',
+    sinopse: String(r.sinopse || ''),
+    detalhesAdicionais: safeParse(r.detalhesAdicionaisJson, {}),
+    utilizouArmaFogoOuEletrica: Boolean(r.utilizouArma),
+    utilizouArmaFogo: Boolean(r.utilizouArmaFogo),
+    armasFogo: Array.isArray(safeParse(r.armasFogoJson, [])) ? safeParse(r.armasFogoJson, []) : [],
+    utilizouArmaEletrica: Boolean(r.utilizouArmaEletrica),
+    armasEletricas: Array.isArray(safeParse(r.armasEletricasJson, [])) ? safeParse(r.armasEletricasJson, []) : [],
+    houveObito: Boolean(r.houveObito),
+    sinopseObito: r.sinopseObito ? String(r.sinopseObito) : '',
+    criadorId: String(r.criadorId || ''),
+    criadorNome: String(r.criadorNome || ''),
+    criadorMasp: String(r.criadorMasp || ''),
+    criadorCargo: r.criadorCargo ? String(r.criadorCargo) : '',
+    departmentId: r.departmentId || undefined,
+    unitId: r.unitId || undefined,
+    unitName: r.unitName || undefined,
+    createdAt: createdAtStr,
+    updatedAt: r.updatedAt || undefined
+  };
+}
+
+const POL_OP_SELECT_COLS = `
+  ID_REL_OP_POL as id,
+  DATA_OPERACAO as dataOperacao,
+  HORA_SAIDA_BASE as horaSaidaBase,
+  HORA_OPERACAO as horaOperacao,
+  ESTADO_OPERACAO as estadoOperacao,
+  MUNICIPIO_OPERACAO as municipioOperacao,
+  APENAS_UM_MUNICIPIO as apenasUmMunicipio,
+  OUTROS_MUNICIPIOS_JSON as outrosMunicipiosJson,
+  VIATURAS_JSON as viaturasJson,
+  OPERADORES_JSON as operadoresJson,
+  ACIONAMENTO_VIA as acionamentoVia,
+  ACIONAMENTO_OUTROS_DESC as acionamentoOutrosDesc,
+  TIPO_ATENDIMENTO as tipoAtendimento,
+  DEPARTAMENTOS_APOIO_JSON as departamentosApoioJson,
+  DESCRICAO_APOIO as descricaoApoio,
+  DESCRICAO_EMERGENCIA as descricaoEmergencia,
+  SINOPSE as sinopse,
+  DETALHES_ADICIONAIS_JSON as detalhesAdicionaisJson,
+  UTILIZOU_ARMA as utilizouArma,
+  UTILIZOU_ARMA_FOGO as utilizouArmaFogo,
+  ARMAS_FOGO_JSON as armasFogoJson,
+  UTILIZOU_ARMA_ELETRICA as utilizouArmaEletrica,
+  ARMAS_ELETRICAS_JSON as armasEletricasJson,
+  HOUVE_OBITO as houveObito,
+  SINOPSE_OBITO as sinopseObito,
+  CRIADOR_ID as criadorId,
+  CRIADOR_NOME as criadorNome,
+  CRIADOR_MASP as criadorMasp,
+  CRIADOR_CARGO as criadorCargo,
+  DEPARTAMENTO_ID as departmentId,
+  UNIDADE_ID as unitId,
+  UNIDADE_NOME as unitName,
+  DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+  DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
+`;
+
+apiRouter.get('/relatorios-operacoes-policial', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosOperacoesPolicialTable(pool);
+    const [rows]: any = await pool.query(
+      `SELECT ${POL_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_POLICIAL ORDER BY DATA_OPERACAO DESC, DATA_CRIACAO DESC`
+    );
+    return res.json((rows || []).map(mapPolOpRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || body.criadorId || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const rawDate = String(body.dataOperacao || '').trim();
+    const dataOperacao = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : todayBr;
+
+    const timeRx = /^\d{2}:\d{2}$/;
+    const horaSaidaBase = timeRx.test(String(body.horaSaidaBase || '').trim())
+      ? String(body.horaSaidaBase).trim()
+      : '06:00';
+    const horaOperacao = timeRx.test(String(body.horaOperacao || '').trim())
+      ? String(body.horaOperacao).trim()
+      : '06:00';
+
+    const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado da operação inválido.' });
+    }
+    const municipioOperacao = String(body.municipioOperacao || '').trim().slice(0, 160);
+    if (!municipioOperacao) {
+      return res.status(400).json({ error: 'Selecione o município principal da operação.' });
+    }
+
+    const apenasUmMunicipio = body.apenasUmMunicipio !== false;
+    const outrosMunicipios = apenasUmMunicipio
+      ? []
+      : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+    if (!apenasUmMunicipio && outrosMunicipios.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um município adicional ou marque que a operação ocorreu em apenas um município.' });
+    }
+
+    const acionamentoVia = String(body.acionamentoVia || '').trim();
+    if (!POL_OP_ALLOWED_ACIONAMENTO.has(acionamentoVia)) {
+      return res.status(400).json({ error: 'Informe uma opção válida para Acionamento via.' });
+    }
+    const acionamentoOutrosDescricao =
+      acionamentoVia === 'OUTROS'
+        ? String(body.acionamentoOutrosDescricao || '').trim().slice(0, 250)
+        : '';
+    if (acionamentoVia === 'OUTROS' && !acionamentoOutrosDescricao) {
+      return res.status(400).json({ error: 'Informe a descrição de Outros no acionamento (até 250 caracteres).' });
+    }
+
+    const tipoAtendimento = String(body.tipoAtendimento || '').trim();
+    if (!POL_OP_ALLOWED_TIPO_ATENDIMENTO.has(tipoAtendimento)) {
+      return res.status(400).json({ error: 'Selecione um Tipo de atendimento válido.' });
+    }
+
+    const departamentosApoio =
+      tipoAtendimento === 'Operação prevista' || tipoAtendimento === 'Operação extraordinária'
+        ? Array.from(
+            new Set(
+              (Array.isArray(body.departamentosApoio) ? body.departamentosApoio : [])
+                .map((d: any) => String(d).trim())
+                .filter((d: string) => POL_OP_ALLOWED_DEPTS_APOIO.has(d))
+            )
+          )
+        : [];
+    if (
+      (tipoAtendimento === 'Operação prevista' || tipoAtendimento === 'Operação extraordinária') &&
+      departamentosApoio.length === 0
+    ) {
+      return res.status(400).json({ error: 'Selecione ao menos um departamento de apoio.' });
+    }
+
+    const descricaoApoio =
+      tipoAtendimento === 'Operação extraordinária'
+        ? String(body.descricaoApoio || '').trim().slice(0, 250)
+        : '';
+    if (tipoAtendimento === 'Operação extraordinária' && !descricaoApoio) {
+      return res.status(400).json({ error: 'Informe a Descrição do Apoio (até 250 caracteres).' });
+    }
+
+    const descricaoEmergencia =
+      tipoAtendimento === 'Emergencial'
+        ? String(body.descricaoEmergencia || '').trim().slice(0, 250)
+        : '';
+    if (tipoAtendimento === 'Emergencial' && !descricaoEmergencia) {
+      return res.status(400).json({ error: 'Informe a Descrição da Emergência (até 250 caracteres).' });
+    }
+
+    const sinopse = String(body.sinopse || '').trim();
+    if (!sinopse) {
+      return res.status(400).json({ error: 'Informe a Sinopse da operação.' });
+    }
+    if (sinopse.length > 1000) {
+      return res.status(400).json({ error: 'A Sinopse da operação não pode exceder 1000 caracteres.' });
+    }
+
+    const houveObito = Boolean(body.houveObito);
+    const sinopseObito = houveObito ? String(body.sinopseObito || '').trim() : '';
+    if (houveObito && !sinopseObito) {
+      return res.status(400).json({ error: 'Informe a sinopse sobre o momento do óbito.' });
+    }
+    if (sinopseObito.length > 600) {
+      return res.status(400).json({ error: 'A sinopse sobre o momento do óbito não pode exceder 600 caracteres.' });
+    }
+
+    const unitId = String(body.unitId || dbActor.unitId || '').trim().slice(0, 64) || null;
+    const departmentId = String(dbActor.departmentId || body.departmentId || '').trim().slice(0, 64) || null;
+    let unitName = String(body.unitName || '').trim().slice(0, 255) || null;
+    if (!unitName && unitId) {
+      try {
+        const [uRows]: any = await pool.query(
+          'SELECT NOME_UNIDADES as name FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [unitId]
+        );
+        if (uRows && uRows.length > 0) unitName = String(uRows[0].name || '');
+      } catch (_) {}
+    }
+
+    const viaturas = sanitizePolOpViaturas(body.viaturas);
+    const operadores = sanitizePolOpOperadores(body.operadores, {
+      id: dbActor.id,
+      name: dbActor.name,
+      masp: dbActor.masp,
+      cargo: dbActor.cargo,
+      unitId,
+      unitName
+    });
+    const detalhesAdicionais = sanitizePolOpDetalhesAdicionais(body.detalhesAdicionais);
+
+    const utilizouArma = Boolean(body.utilizouArmaFogoOuEletrica);
+    const utilizouArmaFogo = utilizouArma && Boolean(body.utilizouArmaFogo);
+    const armasFogo = utilizouArmaFogo ? sanitizePolOpArmasFogo(body.armasFogo) : [];
+    const utilizouArmaEletrica = utilizouArma && Boolean(body.utilizouArmaEletrica);
+    const armasEletricas = utilizouArmaEletrica ? sanitizePolOpArmasEletricas(body.armasEletricas) : [];
+
+    const id = `rel-oppol-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    await pool.query(
+      `INSERT INTO RELATORIOS_OPERACOES_POLICIAL (
+        ID_REL_OP_POL,
+        DATA_OPERACAO,
+        HORA_SAIDA_BASE,
+        HORA_OPERACAO,
+        ESTADO_OPERACAO,
+        MUNICIPIO_OPERACAO,
+        APENAS_UM_MUNICIPIO,
+        OUTROS_MUNICIPIOS_JSON,
+        VIATURAS_JSON,
+        OPERADORES_JSON,
+        ACIONAMENTO_VIA,
+        ACIONAMENTO_OUTROS_DESC,
+        TIPO_ATENDIMENTO,
+        DEPARTAMENTOS_APOIO_JSON,
+        DESCRICAO_APOIO,
+        DESCRICAO_EMERGENCIA,
+        SINOPSE,
+        DETALHES_ADICIONAIS_JSON,
+        UTILIZOU_ARMA,
+        UTILIZOU_ARMA_FOGO,
+        ARMAS_FOGO_JSON,
+        UTILIZOU_ARMA_ELETRICA,
+        ARMAS_ELETRICAS_JSON,
+        HOUVE_OBITO,
+        SINOPSE_OBITO,
+        CRIADOR_ID,
+        CRIADOR_NOME,
+        CRIADOR_MASP,
+        CRIADOR_CARGO,
+        DEPARTAMENTO_ID,
+        UNIDADE_ID,
+        UNIDADE_NOME,
+        DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        id,
+        dataOperacao,
+        horaSaidaBase,
+        horaOperacao,
+        estadoOperacao,
+        municipioOperacao,
+        apenasUmMunicipio ? 1 : 0,
+        JSON.stringify(outrosMunicipios),
+        JSON.stringify(viaturas),
+        JSON.stringify(operadores),
+        acionamentoVia,
+        acionamentoOutrosDescricao || null,
+        tipoAtendimento,
+        JSON.stringify(departamentosApoio),
+        descricaoApoio || null,
+        descricaoEmergencia || null,
+        sinopse,
+        JSON.stringify(detalhesAdicionais),
+        utilizouArma ? 1 : 0,
+        utilizouArmaFogo ? 1 : 0,
+        JSON.stringify(armasFogo),
+        utilizouArmaEletrica ? 1 : 0,
+        JSON.stringify(armasEletricas),
+        houveObito ? 1 : 0,
+        sinopseObito || null,
+        dbActor.id,
+        dbActor.name,
+        dbActor.masp,
+        dbActor.cargo || null,
+        departmentId,
+        unitId,
+        unitName
+      ]
+    );
+
+    if (armasFogo.length > 0) {
+      await applyAcervoShotsDeltaForPolOp(pool, id, dataOperacao, dbActor, [], armasFogo);
+    }
+
+    const [createdRows]: any = await pool.query(
+      `SELECT ${POL_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_POLICIAL WHERE ID_REL_OP_POL = ? LIMIT 1`,
+      [id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Relatório de Operação Policial',
+      `Criada sinopse de operação policial em ${municipioOperacao}/${estadoOperacao} (${tipoAtendimento}) por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(createdRows && createdRows.length > 0 ? mapPolOpRow(createdRows[0]) : { id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-operacoes-policial/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário editor não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não autorizado.' });
+    }
+
+    const [rows]: any = await pool.query(
+      `SELECT ${POL_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_POLICIAL WHERE ID_REL_OP_POL = ? LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+    }
+
+    const existing = rows[0];
+    const isGeralDb = dbActor.role === 'Geral' || dbActor.roles.includes('Geral');
+
+    const createdMs = parseMysqlTimestampMs(existing.createdAt);
+    if (!isGeralDb && Date.now() - createdMs > THREE_DAYS_MS) {
+      return res.status(403).json({
+        error: 'O prazo de 3 dias a contar da data de criação para editar este relatório expirou.'
+      });
+    }
+
+    let existingOperadores: any[] = [];
+    try {
+      const parsed = existing.operadoresJson ? JSON.parse(existing.operadoresJson) : [];
+      if (Array.isArray(parsed)) existingOperadores = parsed;
+    } catch {
+      existingOperadores = [];
+    }
+
+    const isCitedUser =
+      String(existing.criadorId) === dbActor.id ||
+      existingOperadores.some((op: any) => String(op?.userId) === dbActor.id);
+
+    if (!isCitedUser && !isGeralDb) {
+      return res.status(403).json({
+        error: 'Apenas usuários citados neste relatório (ou perfil Geral) podem editá-lo.'
+      });
+    }
+
+    const timeRx = /^\d{2}:\d{2}$/;
+    const rawDate = String(body.dataOperacao || existing.dataOperacao || '').trim();
+    const dataOperacao = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : String(existing.dataOperacao).slice(0, 10);
+    const horaSaidaBase = timeRx.test(String(body.horaSaidaBase || '').trim())
+      ? String(body.horaSaidaBase).trim()
+      : String(existing.horaSaidaBase || '06:00');
+    const horaOperacao = timeRx.test(String(body.horaOperacao || '').trim())
+      ? String(body.horaOperacao).trim()
+      : String(existing.horaOperacao || '06:00');
+
+    const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado da operação inválido.' });
+    }
+    const municipioOperacao = String(body.municipioOperacao || '').trim().slice(0, 160);
+    if (!municipioOperacao) {
+      return res.status(400).json({ error: 'Selecione o município principal da operação.' });
+    }
+
+    const apenasUmMunicipio = body.apenasUmMunicipio !== false;
+    const outrosMunicipios = apenasUmMunicipio
+      ? []
+      : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+    if (!apenasUmMunicipio && outrosMunicipios.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um município adicional.' });
+    }
+
+    const acionamentoVia = String(body.acionamentoVia || '').trim();
+    if (!POL_OP_ALLOWED_ACIONAMENTO.has(acionamentoVia)) {
+      return res.status(400).json({ error: 'Informe uma opção válida para Acionamento via.' });
+    }
+    const acionamentoOutrosDescricao =
+      acionamentoVia === 'OUTROS'
+        ? String(body.acionamentoOutrosDescricao || '').trim().slice(0, 250)
+        : '';
+    if (acionamentoVia === 'OUTROS' && !acionamentoOutrosDescricao) {
+      return res.status(400).json({ error: 'Informe a descrição de Outros no acionamento.' });
+    }
+
+    const tipoAtendimento = String(body.tipoAtendimento || '').trim();
+    if (!POL_OP_ALLOWED_TIPO_ATENDIMENTO.has(tipoAtendimento)) {
+      return res.status(400).json({ error: 'Selecione um Tipo de atendimento válido.' });
+    }
+
+    const departamentosApoio =
+      tipoAtendimento === 'Operação prevista' || tipoAtendimento === 'Operação extraordinária'
+        ? Array.from(
+            new Set(
+              (Array.isArray(body.departamentosApoio) ? body.departamentosApoio : [])
+                .map((d: any) => String(d).trim())
+                .filter((d: string) => POL_OP_ALLOWED_DEPTS_APOIO.has(d))
+            )
+          )
+        : [];
+    if (
+      (tipoAtendimento === 'Operação prevista' || tipoAtendimento === 'Operação extraordinária') &&
+      departamentosApoio.length === 0
+    ) {
+      return res.status(400).json({ error: 'Selecione ao menos um departamento de apoio.' });
+    }
+
+    const descricaoApoio =
+      tipoAtendimento === 'Operação extraordinária'
+        ? String(body.descricaoApoio || '').trim().slice(0, 250)
+        : '';
+    if (tipoAtendimento === 'Operação extraordinária' && !descricaoApoio) {
+      return res.status(400).json({ error: 'Informe a Descrição do Apoio.' });
+    }
+
+    const descricaoEmergencia =
+      tipoAtendimento === 'Emergencial'
+        ? String(body.descricaoEmergencia || '').trim().slice(0, 250)
+        : '';
+    if (tipoAtendimento === 'Emergencial' && !descricaoEmergencia) {
+      return res.status(400).json({ error: 'Informe a Descrição da Emergência.' });
+    }
+
+    const sinopse = String(body.sinopse || '').trim();
+    if (!sinopse || sinopse.length > 1000) {
+      return res.status(400).json({ error: 'A Sinopse é obrigatória e deve ter no máximo 1000 caracteres.' });
+    }
+
+    const houveObito = Boolean(body.houveObito);
+    const sinopseObito = houveObito ? String(body.sinopseObito || '').trim() : '';
+    if (houveObito && (!sinopseObito || sinopseObito.length > 600)) {
+      return res.status(400).json({ error: 'A sinopse sobre o momento do óbito é obrigatória (máx. 600 caracteres).' });
+    }
+
+    const existingOpMap = new Map<string, any>();
+    for (const op of existingOperadores) {
+      if (op?.userId) existingOpMap.set(String(op.userId), op);
+    }
+
+    const viaturas = sanitizePolOpViaturas(body.viaturas);
+    const operadores = sanitizePolOpOperadores(
+      body.operadores,
+      {
+        id: String(existing.criadorId),
+        name: String(existing.criadorNome),
+        masp: String(existing.criadorMasp || ''),
+        cargo: String(existing.criadorCargo || ''),
+        unitId: existing.unitId || null,
+        unitName: existing.unitName || null
+      },
+      existingOpMap
+    );
+    const detalhesAdicionais = sanitizePolOpDetalhesAdicionais(body.detalhesAdicionais);
+
+    let oldArmasFogo: any[] = [];
+    try {
+      const parsed = existing.armasFogoJson ? JSON.parse(existing.armasFogoJson) : [];
+      if (Array.isArray(parsed)) oldArmasFogo = parsed;
+    } catch {
+      oldArmasFogo = [];
+    }
+
+    const utilizouArma = Boolean(body.utilizouArmaFogoOuEletrica);
+    const utilizouArmaFogo = utilizouArma && Boolean(body.utilizouArmaFogo);
+    const armasFogo = utilizouArmaFogo ? sanitizePolOpArmasFogo(body.armasFogo) : [];
+    const utilizouArmaEletrica = utilizouArma && Boolean(body.utilizouArmaEletrica);
+    const armasEletricas = utilizouArmaEletrica ? sanitizePolOpArmasEletricas(body.armasEletricas) : [];
+
+    await pool.query(
+      `UPDATE RELATORIOS_OPERACOES_POLICIAL
+       SET DATA_OPERACAO = ?,
+           HORA_SAIDA_BASE = ?,
+           HORA_OPERACAO = ?,
+           ESTADO_OPERACAO = ?,
+           MUNICIPIO_OPERACAO = ?,
+           APENAS_UM_MUNICIPIO = ?,
+           OUTROS_MUNICIPIOS_JSON = ?,
+           VIATURAS_JSON = ?,
+           OPERADORES_JSON = ?,
+           ACIONAMENTO_VIA = ?,
+           ACIONAMENTO_OUTROS_DESC = ?,
+           TIPO_ATENDIMENTO = ?,
+           DEPARTAMENTOS_APOIO_JSON = ?,
+           DESCRICAO_APOIO = ?,
+           DESCRICAO_EMERGENCIA = ?,
+           SINOPSE = ?,
+           DETALHES_ADICIONAIS_JSON = ?,
+           UTILIZOU_ARMA = ?,
+           UTILIZOU_ARMA_FOGO = ?,
+           ARMAS_FOGO_JSON = ?,
+           UTILIZOU_ARMA_ELETRICA = ?,
+           ARMAS_ELETRICAS_JSON = ?,
+           HOUVE_OBITO = ?,
+           SINOPSE_OBITO = ?
+       WHERE ID_REL_OP_POL = ?`,
+      [
+        dataOperacao,
+        horaSaidaBase,
+        horaOperacao,
+        estadoOperacao,
+        municipioOperacao,
+        apenasUmMunicipio ? 1 : 0,
+        JSON.stringify(outrosMunicipios),
+        JSON.stringify(viaturas),
+        JSON.stringify(operadores),
+        acionamentoVia,
+        acionamentoOutrosDescricao || null,
+        tipoAtendimento,
+        JSON.stringify(departamentosApoio),
+        descricaoApoio || null,
+        descricaoEmergencia || null,
+        sinopse,
+        JSON.stringify(detalhesAdicionais),
+        utilizouArma ? 1 : 0,
+        utilizouArmaFogo ? 1 : 0,
+        JSON.stringify(armasFogo),
+        utilizouArmaEletrica ? 1 : 0,
+        JSON.stringify(armasEletricas),
+        houveObito ? 1 : 0,
+        sinopseObito || null,
+        id
+      ]
+    );
+
+    await applyAcervoShotsDeltaForPolOp(pool, id, dataOperacao, dbActor, oldArmasFogo, armasFogo);
+
+    const [updatedRows]: any = await pool.query(
+      `SELECT ${POL_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_POLICIAL WHERE ID_REL_OP_POL = ? LIMIT 1`,
+      [id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Editar Relatório de Operação Policial',
+      `Relatório de operação policial ${id} editado por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(updatedRows && updatedRows.length > 0 ? mapPolOpRow(updatedRows[0]) : { id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-operacoes-policial/:id/assinar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const signerId = String(actor.id || '').trim();
+    if (!signerId) {
+      return res.status(401).json({ error: 'Usuário assinante não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, signerId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário assinante inválido.' });
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT ID_REL_OP_POL, MUNICIPIO_OPERACAO, OPERADORES_JSON FROM RELATORIOS_OPERACOES_POLICIAL WHERE ID_REL_OP_POL = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+    }
+
+    const row = rows[0];
+    let operadores: any[] = [];
+    try {
+      const parsed = row.OPERADORES_JSON ? JSON.parse(row.OPERADORES_JSON) : [];
+      if (Array.isArray(parsed)) operadores = parsed;
+    } catch {
+      operadores = [];
+    }
+
+    let found = false;
+    const nowIso = new Date().toISOString();
+    const nextOperadores = operadores.map((op: any) => {
+      if (String(op?.userId) === dbActor.id) {
+        found = true;
+        return {
+          ...op,
+          signed: true,
+          autoSigned: false,
+          signedAt: op?.signedAt || nowIso
+        };
+      }
+      return op;
+    });
+
+    if (!found) {
+      return res.status(403).json({ error: 'Você não está citado como operador neste relatório.' });
+    }
+
+    await pool.query(
+      'UPDATE RELATORIOS_OPERACOES_POLICIAL SET OPERADORES_JSON = ? WHERE ID_REL_OP_POL = ?',
+      [JSON.stringify(nextOperadores), id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Assinar Relatório de Operação Policial',
+      `Usuário ${dbActor.name} assinou eletronicamente o relatório de operação ${id} (${row.MUNICIPIO_OPERACAO})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, operadores: nextOperadores });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/relatorios-operacoes-policial/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não autorizado.' });
+    }
+
+    const [rows]: any = await pool.query(
+      `SELECT ID_REL_OP_POL, DATA_OPERACAO, MUNICIPIO_OPERACAO, CRIADOR_ID, OPERADORES_JSON, ARMAS_FOGO_JSON,
+              DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt
+       FROM RELATORIOS_OPERACOES_POLICIAL
+       WHERE ID_REL_OP_POL = ? LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+    }
+
+    const row = rows[0];
+    const isGeralDb = dbActor.role === 'Geral' || dbActor.roles.includes('Geral');
+
+    const createdMs = parseMysqlTimestampMs(row.createdAt);
+    if (!isGeralDb && Date.now() - createdMs > THREE_DAYS_MS) {
+      return res.status(403).json({
+        error: 'O prazo de 3 dias a contar da data de criação para excluir este relatório expirou.'
+      });
+    }
+
+    let operadores: any[] = [];
+    try {
+      const parsed = row.OPERADORES_JSON ? JSON.parse(row.OPERADORES_JSON) : [];
+      if (Array.isArray(parsed)) operadores = parsed;
+    } catch {
+      operadores = [];
+    }
+
+    const isCited =
+      String(row.CRIADOR_ID) === dbActor.id ||
+      operadores.some((op: any) => String(op?.userId) === dbActor.id);
+    if (!isCited && !isGeralDb) {
+      return res.status(403).json({ error: 'Apenas usuários citados no relatório (ou perfil Geral) podem excluí-lo.' });
+    }
+
+    let oldArmasFogo: any[] = [];
+    try {
+      const parsed = row.ARMAS_FOGO_JSON ? JSON.parse(row.ARMAS_FOGO_JSON) : [];
+      if (Array.isArray(parsed)) oldArmasFogo = parsed;
+    } catch {
+      oldArmasFogo = [];
+    }
+
+    if (oldArmasFogo.length > 0) {
+      await applyAcervoShotsDeltaForPolOp(pool, id, String(row.DATA_OPERACAO || ''), dbActor, oldArmasFogo, []);
+    }
+
+    await pool.query('DELETE FROM RELATORIOS_OPERACOES_POLICIAL WHERE ID_REL_OP_POL = ?', [id]);
+
+    await insertAuditLog(
+      'Relatórios',
+      'Excluir Relatório de Operação Policial',
+      `Excluído relatório de operação policial ${id} (${row.MUNICIPIO_OPERACAO}) por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 
 
 

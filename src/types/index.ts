@@ -1464,6 +1464,113 @@ export interface RelatorioTreinamentoPolicial {
   updatedAt?: string;
 }
 
+export interface MunicipioOperacaoPolicial {
+  uf: string;
+  municipio: string;
+}
+
+export interface ViaturaOperacaoPolicial {
+  id: string;
+  placa: string;
+  descricao: string;
+}
+
+export interface OperadorOperacaoPolicial {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  unitId?: string;
+  unitName?: string;
+  isCreator?: boolean;
+  signed: boolean;
+  signedAt?: string | null;
+  autoSigned?: boolean;
+}
+
+export type AcionamentoViaOperacao = 'CEPOLC' | 'CHEFIA' | 'SEI' | 'OUTROS';
+export type TipoAtendimentoOperacao = 'Operação prevista' | 'Operação extraordinária' | 'Emergencial';
+export type MaterialArrecadadoBusca = 'ARMA' | 'DROGA' | 'ELETRÔNICOS' | 'VEÍCULOS' | 'MENOR' | 'OUTROS';
+export type TipoCriseOperacao = 'DISTÚRBIO' | 'SUICÍDIO' | 'OUTROS';
+
+export interface DetalheAdicionalOperacao {
+  mandadoPrisao?: {
+    ativo: boolean;
+    foragidoPreso: boolean;
+  };
+  mandadoBusca?: {
+    ativo: boolean;
+    materialArrecadado: boolean;
+    materiais: MaterialArrecadadoBusca[];
+    outrosDetalhes?: string;
+  };
+  gerenciamentoCrise?: {
+    ativo: boolean;
+    tipo: TipoCriseOperacao;
+    outrosDetalhes?: string;
+  };
+}
+
+export interface ArmaFogoUtilizadaOperacao {
+  id: string;
+  origem: 'ACERVO' | 'FORA_DO_ACERVO';
+  weaponId?: string;
+  marca: string;
+  modelo: string;
+  numeroSerie: string;
+  calibre: string;
+  quantidadeTiros: number;
+}
+
+export interface ArmaEletricaUtilizadaOperacao {
+  key: string;
+  materialId: string;
+  tipo: string;
+  nome: string;
+  numeroSerie?: string;
+  acautelado: boolean;
+  cautelaId?: string;
+  usuarioCautelaNome?: string;
+  usuarioCautelaMasp?: string;
+}
+
+export interface RelatorioOperacaoPolicial {
+  id: string;
+  dataOperacao: string; // YYYY-MM-DD
+  horaSaidaBase: string; // HH:mm
+  horaOperacao: string; // HH:mm
+  estadoOperacao: string; // UF padrão MG
+  municipioOperacao: string;
+  apenasUmMunicipio: boolean;
+  outrosMunicipios: MunicipioOperacaoPolicial[];
+  viaturas: ViaturaOperacaoPolicial[];
+  operadores: OperadorOperacaoPolicial[];
+  acionamentoVia: AcionamentoViaOperacao;
+  acionamentoOutrosDescricao?: string;
+  tipoAtendimento: TipoAtendimentoOperacao;
+  departamentosApoio: string[];
+  descricaoApoio?: string;
+  descricaoEmergencia?: string;
+  sinopse: string; // Máx 1000 caracteres
+  detalhesAdicionais: DetalheAdicionalOperacao;
+  utilizouArmaFogoOuEletrica: boolean;
+  utilizouArmaFogo: boolean;
+  armasFogo: ArmaFogoUtilizadaOperacao[];
+  utilizouArmaEletrica: boolean;
+  armasEletricas: ArmaEletricaUtilizadaOperacao[];
+  houveObito: boolean;
+  sinopseObito?: string; // Máx 600 caracteres
+  criadorId: string;
+  criadorNome: string;
+  criadorMasp: string;
+  criadorCargo?: string;
+  departmentId?: string;
+  unitId?: string;
+  unitName?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 

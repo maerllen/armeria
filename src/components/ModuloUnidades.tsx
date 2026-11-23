@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { User, Department, Unit, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../types';
+import { User, Department, Unit, ViaturaUnidade, DEFAULT_SYSTEM_LOGO, getSystemLogo } from '../types';
 import { storage } from '../services/storage';
-import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info } from 'lucide-react';
+import { formatPlacaViatura, isValidPlacaViatura } from '../utils/masks';
+import { Building2, Plus, Edit2, Trash2, AlertCircle, Shield, Check, Search, ChevronDown, ChevronUp, Building, Image as ImageIcon, Upload, X as CloseIcon, Info, Car } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -22,9 +23,11 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [expandedDeptIds, setExpandedDeptIds] = useState<string[]>([]);
   const [showDeptModal, setShowDeptModal] = useState(false);
   const [showUnitModal, setShowUnitModal] = useState(false);
+  const [showViaturaModal, setShowViaturaModal] = useState(false);
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [editingUnit, setEditingUnit] = useState<Unit | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'unit'; item: any; name: string } | null>(null);
+  const [editingViatura, setEditingViatura] = useState<ViaturaUnidade | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'dept' | 'unit' | 'viatura'; item: any; name: string } | null>(null);
 
   // Form states
   const [deptName, setDeptName] = useState('');
@@ -34,12 +37,23 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [selectedDeptId, setSelectedDeptId] = useState('');
   const [unitLogoUrl, setUnitLogoUrl] = useState('');
 
+  // Viatura form & filter states
+  const [viaturaPlaca, setViaturaPlaca] = useState('');
+  const [viaturaDescricao, setViaturaDescricao] = useState('');
+  const [viaturaUnitId, setViaturaUnitId] = useState('');
+  const [viaturaUnitFilter, setViaturaUnitFilter] = useState('');
+  const [isViaturasOpen, setIsViaturasOpen] = useState(true);
+  const [savingViatura, setSavingViatura] = useState(false);
+
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const isGeral = currentUser.role === 'Geral';
-  const isAdminOrArmeiro = currentUser.role === 'Administrador' || currentUser.role === 'Armeiro';
-  const isPolicial = currentUser.role === 'Policial';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isGeral = effectiveRole === 'Geral';
+  const isAdmin = effectiveRole === 'Administrador';
+  const isAdminOrArmeiro = isAdmin || effectiveRole === 'Armeiro';
+  const isPolicial = effectiveRole === 'Policial';
+  const canManageViaturas = isGeral || isAdmin;
 
   // Helper for reading image files as Base64 Data URL
   const handleImageUpload = (file: File, setter: (val: string) => void) => {
@@ -159,6 +173,78 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
     }
   };
 
+  const handleOpenViaturaModal = (viatura?: ViaturaUnidade, presetUnitId?: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    if (viatura) {
+      setEditingViatura(viatura);
+      setViaturaPlaca(formatPlacaViatura(viatura.placa));
+      setViaturaDescricao(viatura.descricao || '');
+      setViaturaUnitId(viatura.unitId || '');
+    } else {
+      setEditingViatura(null);
+      setViaturaPlaca('');
+      setViaturaDescricao('');
+      setViaturaUnitId(presetUnitId || currentUser.unitId || visibleUnits[0]?.id || '');
+    }
+    setShowViaturaModal(true);
+  };
+
+  const handleSaveViatura = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    const formattedPlaca = formatPlacaViatura(viaturaPlaca);
+    if (!isValidPlacaViatura(formattedPlaca)) {
+      setErrorMsg('Placa inválida. Utilize o padrão AAA-XAXX (ex.: ABC-1D23), com letras maiúsculas e números.');
+      return;
+    }
+    const cleanDesc = viaturaDescricao.trim();
+    if (!cleanDesc) {
+      setErrorMsg('Informe a descrição (marca e modelo) da viatura.');
+      return;
+    }
+    if (!viaturaUnitId) {
+      setErrorMsg('Selecione a unidade à qual a viatura pertence.');
+      return;
+    }
+
+    const targetUnit = units.find(u => u.id === viaturaUnitId);
+    setSavingViatura(true);
+    try {
+      const payload: Partial<ViaturaUnidade> = {
+        placa: formattedPlaca,
+        descricao: cleanDesc.slice(0, 160),
+        unitId: viaturaUnitId,
+        departmentId: targetUnit?.departmentId || currentUser.departmentId
+      };
+      const res = editingViatura
+        ? await storage.updateViatura(editingViatura.id, payload)
+        : await storage.saveViatura(payload);
+
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao salvar viatura.');
+        return;
+      }
+      setShowViaturaModal(false);
+      setSuccessMsg(editingViatura ? 'Viatura atualizada com sucesso.' : 'Viatura cadastrada com sucesso.');
+      onRefresh();
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro ao salvar viatura.');
+    } finally {
+      setSavingViatura(false);
+    }
+  };
+
+  const handleDeleteViatura = (viatura: ViaturaUnidade) => {
+    setDeleteTarget({
+      type: 'viatura',
+      item: viatura,
+      name: `viatura "${viatura.placa} — ${viatura.descricao}"`
+    });
+  };
+
   const confirmExecutionDelete = async () => {
     if (!deleteTarget) return;
     setErrorMsg('');
@@ -167,9 +253,16 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
       if (deleteTarget.type === 'dept') {
         await storage.deleteDepartment(deleteTarget.item.id);
         setSuccessMsg(`Departamento "${deleteTarget.item.name}" excluído com sucesso.`);
-      } else {
+      } else if (deleteTarget.type === 'unit') {
         await storage.deleteUnit(deleteTarget.item.id);
         setSuccessMsg(`Unidade "${deleteTarget.item.name}" excluída com sucesso.`);
+      } else {
+        const res = await storage.deleteViatura(deleteTarget.item.id);
+        if (!res.success) {
+          setErrorMsg(res.error || 'Não foi possível excluir a viatura.');
+          return;
+        }
+        setSuccessMsg(`Viatura "${deleteTarget.item.placa}" excluída com sucesso.`);
       }
       onRefresh();
     } catch (err: any) {
@@ -217,7 +310,7 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
         {/* Action Buttons */}
         {!isPolicial && (
-          <div className="flex items-center space-x-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             {isGeral && (
               <button
                 onClick={() => handleOpenDeptModal()}
@@ -225,6 +318,16 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
               >
                 <Plus className="w-4 h-4 text-amber-400" />
                 <span>Novo Departamento</span>
+              </button>
+            )}
+
+            {canManageViaturas && (
+              <button
+                onClick={() => handleOpenViaturaModal()}
+                className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
+              >
+                <Car className="w-4 h-4" />
+                <span>Nova Viatura</span>
               </button>
             )}
 
@@ -413,7 +516,13 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
 
                               <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
                                 <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
-                                <span>Armas no acervo: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
+                                <span>Armas: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
+                                <span>
+                                  Viaturas:{' '}
+                                  <strong className="text-cyan-400">
+                                    {storage.getViaturas().filter(v => v.unitId === unit.id).length}
+                                  </strong>
+                                </span>
                               </div>
                             </div>
                           );
@@ -428,6 +537,136 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
           })
         )}
       </div>
+
+      {/* Gestão de Viaturas por Unidade (Administrador e Geral) */}
+      {canManageViaturas && (() => {
+        const visibleUnitIds = new Set(visibleUnits.map(u => u.id));
+        const unitNameById = new Map<string, string>(units.map(u => [u.id, u.name]));
+        const allScopedViaturas = storage
+          .getViaturas()
+          .filter(v => isGeral || visibleUnitIds.has(v.unitId));
+        const filteredViaturas = allScopedViaturas.filter(v => {
+          if (viaturaUnitFilter && v.unitId !== viaturaUnitFilter) return false;
+          if (!term) return true;
+          const uName = (unitNameById.get(v.unitId) || '').toLowerCase();
+          return (
+            v.placa.toLowerCase().includes(term) ||
+            v.descricao.toLowerCase().includes(term) ||
+            uName.includes(term)
+          );
+        });
+
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+            <div
+              onClick={() => setIsViaturasOpen(prev => !prev)}
+              className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none transition"
+            >
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl">
+                  <Car className="w-5 h-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-100">
+                    Viaturas das Unidades ({filteredViaturas.length})
+                  </h2>
+                  <p className="text-[11px] text-slate-400">
+                    Cadastre viaturas e vincule cada veículo à unidade correspondente para uso nos relatórios de operações.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
+                <select
+                  value={viaturaUnitFilter}
+                  onChange={(e) => setViaturaUnitFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="">Todas as Unidades</option>
+                  {visibleUnits
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                    .map(u => (
+                      <option key={u.id} value={u.id}>
+                        {u.name}
+                      </option>
+                    ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => handleOpenViaturaModal(undefined, viaturaUnitFilter || undefined)}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-3 py-1.5 rounded-xl flex items-center space-x-1 transition"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Adicionar Viatura</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsViaturasOpen(prev => !prev)}
+                  className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800"
+                >
+                  {isViaturasOpen ? <ChevronUp className="w-4 h-4 text-cyan-400" /> : <ChevronDown className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {isViaturasOpen && (
+              <div className="p-5 bg-slate-950/40">
+                {filteredViaturas.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic text-center py-4">
+                    Nenhuma viatura cadastrada para os critérios selecionados.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredViaturas.map(v => {
+                      const uName = unitNameById.get(v.unitId) || 'Unidade não identificada';
+                      return (
+                        <div
+                          key={v.id}
+                          className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
+                        >
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
+                                {v.placa}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold truncate max-w-[180px]">
+                                {uName}
+                              </span>
+                            </div>
+                            <p className="text-xs font-semibold text-slate-200 truncate" title={v.descricao}>
+                              {v.descricao}
+                            </p>
+                          </div>
+
+                          <div className="flex items-center space-x-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenViaturaModal(v)}
+                              className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Editar Viatura"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteViatura(v)}
+                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                              title="Excluir Viatura"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })()}
 
       {/* Modal Department */}
       {showDeptModal && (
@@ -648,6 +887,106 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                   className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-5 py-2 rounded-xl"
                 >
                   Salvar
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Viatura */}
+      {showViaturaModal && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 z-50 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl my-auto">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center space-x-2">
+                <Car className="w-5 h-5 text-cyan-400" />
+                <h3 className="text-lg font-bold text-slate-100">
+                  {editingViatura ? 'Editar Viatura' : 'Cadastrar Nova Viatura'}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowViaturaModal(false)}
+                className="p-1 text-slate-400 hover:text-slate-200 rounded-lg"
+              >
+                <CloseIcon className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveViatura} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Unidade Pertencente *
+                </label>
+                <select
+                  value={viaturaUnitId}
+                  onChange={(e) => setViaturaUnitId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500"
+                  required
+                >
+                  <option value="">Selecione a unidade...</option>
+                  {visibleUnits
+                    .slice()
+                    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
+                    .map(u => {
+                      const d = departments.find(dep => dep.id === u.departmentId);
+                      return (
+                        <option key={u.id} value={u.id}>
+                          {u.name}{d ? ` (${d.code || d.name})` : ''}
+                        </option>
+                      );
+                    })}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  A viatura ficará disponível para seleção nos relatórios de operações da unidade informada.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Placa da Viatura (Padrão Mercosul AAA-XAXX) *
+                </label>
+                <input
+                  type="text"
+                  value={viaturaPlaca}
+                  onChange={(e) => setViaturaPlaca(formatPlacaViatura(e.target.value))}
+                  maxLength={8}
+                  placeholder="Ex.: ABC-1D23"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 font-mono uppercase focus:outline-none focus:border-cyan-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                  Descrição (Marca e Modelo) *
+                </label>
+                <input
+                  type="text"
+                  value={viaturaDescricao}
+                  onChange={(e) => setViaturaDescricao(e.target.value.slice(0, 160))}
+                  maxLength={160}
+                  placeholder="Ex.: GM Trailblazer 4x4 Caracterizada"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-cyan-500"
+                  required
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => setShowViaturaModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingViatura}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-5 py-2 rounded-xl disabled:opacity-50"
+                >
+                  {savingViatura ? 'Salvando...' : editingViatura ? 'Salvar Alterações' : 'Cadastrar Viatura'}
                 </button>
               </div>
             </form>
