@@ -51,6 +51,7 @@ import {
   RelatorioOperacaoCanil,
   RelatorioTreinamentoPolicial,
   RelatorioOperacaoPolicial,
+  RelatorioOperacaoCat,
   ViaturaUnidade,
   AeronaveUnidade,
   CautelaArma,
@@ -108,6 +109,7 @@ export interface AppState {
   relatoriosOperacoesCanil: RelatorioOperacaoCanil[];
   relatoriosTreinamentoPolicial: RelatorioTreinamentoPolicial[];
   relatoriosOperacoesPolicial: RelatorioOperacaoPolicial[];
+  relatoriosOperacoesCat: RelatorioOperacaoCat[];
   viaturas: ViaturaUnidade[];
   aeronaves: AeronaveUnidade[];
   cautelasArmas: CautelaArma[];
@@ -166,6 +168,7 @@ class StorageService {
     relatoriosOperacoesCanil: [],
     relatoriosTreinamentoPolicial: [],
     relatoriosOperacoesPolicial: [],
+    relatoriosOperacoesCat: [],
     viaturas: [],
     aeronaves: [],
     cautelasArmas: [],
@@ -235,6 +238,7 @@ class StorageService {
         relatoriosOperacoesCanilRes,
         relatoriosTreinamentoPolicialRes,
         relatoriosOperacoesPolicialRes,
+        relatoriosOperacoesCatRes,
         viaturasRes,
         aeronavesRes,
         cautelasArmasRes,
@@ -286,6 +290,7 @@ class StorageService {
         fetchSync('/api/relatorios-operacoes-canil'),
         fetchSync('/api/relatorios-treinamento-policial'),
         fetchSync('/api/relatorios-operacoes-policial'),
+        fetchSync('/api/relatorios-operacoes-cat'),
         fetchSync('/api/viaturas'),
         fetchSync('/api/aeronaves'),
         fetchSync('/api/cautelas-armas'),
@@ -338,6 +343,7 @@ class StorageService {
       this.state.relatoriosOperacoesCanil = relatoriosOperacoesCanilRes || [];
       this.state.relatoriosTreinamentoPolicial = relatoriosTreinamentoPolicialRes || [];
       this.state.relatoriosOperacoesPolicial = relatoriosOperacoesPolicialRes || [];
+      this.state.relatoriosOperacoesCat = relatoriosOperacoesCatRes || [];
       this.state.viaturas = viaturasRes || [];
       this.state.aeronaves = aeronavesRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
@@ -3996,6 +4002,80 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório de operação.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Relatórios de Operações da Unidade CAT
+  public getRelatoriosOperacoesCat(): RelatorioOperacaoCat[] {
+    return this.state.relatoriosOperacoesCat || [];
+  }
+
+  public async saveRelatorioOperacaoCat(
+    rel: Partial<RelatorioOperacaoCat>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: RelatorioOperacaoCat }> {
+    try {
+      const res = await fetch('/api/relatorios-operacoes-cat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao salvar relatório de operação CAT.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateRelatorioOperacaoCat(
+    id: string,
+    rel: Partial<RelatorioOperacaoCat>
+  ): Promise<{ success: boolean; error?: string; data?: RelatorioOperacaoCat }> {
+    try {
+      const res = await fetch(`/api/relatorios-operacoes-cat/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar relatório de operação CAT.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async assinarRelatorioOperacaoCat(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-operacoes-cat/${id}/assinar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao assinar relatório de operação CAT.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteRelatorioOperacaoCat(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-operacoes-cat/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório de operação CAT.' };
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {

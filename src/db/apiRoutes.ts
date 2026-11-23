@@ -20801,6 +20801,1160 @@ apiRouter.delete('/relatorios-operacoes-policial/:id', async (req: Request, res:
   }
 });
 
+// =============================================================
+// MODULO: RELATORIOS DE OPERACOES DA UNIDADE CAT
+// =============================================================
+
+const CAT_OP_ALLOWED_TIPOS_VOO = new Set([
+  'APOIO OPERACIONAL',
+  'APOIO EXTRAORDINÁRIO',
+  'TRANSPORTE DE AUTORIDADES',
+  'OUTROS TIPOS'
+]);
+
+const CAT_OP_ALLOWED_OPERACOES_SOLO = new Set([
+  'Piloto de aeronave não tripulada',
+  'Apoio logístico'
+]);
+
+const CAT_OP_ALLOWED_CAPTURA_TIPOS = new Set([
+  'Pessoa(s)',
+  'Veículo(s)',
+  'Embarcação(ões)',
+  'Cativeiro(s)',
+  'Ponto(s)',
+  'Outros'
+]);
+
+let relatoriosOperacoesCatEnsured = false;
+async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
+  if (relatoriosOperacoesCatEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_OPERACOES_CAT\` (
+        \`ID_REL_OP_CAT\` VARCHAR(64) NOT NULL,
+        \`COM_EMPREGO_AERONAVE\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`DATA_SAIDA_BASE\` VARCHAR(10) NOT NULL,
+        \`DATA_OPERACAO\` VARCHAR(10) NOT NULL,
+        \`HORARIO_DECOLAGEM\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`HORARIO_VOO_OPERACAO\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`ESTADO_OPERACAO\` VARCHAR(2) NOT NULL DEFAULT 'MG',
+        \`MUNICIPIO_OPERACAO\` VARCHAR(160) NOT NULL,
+        \`APENAS_UM_MUNICIPIO\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`OUTROS_MUNICIPIOS_JSON\` LONGTEXT DEFAULT NULL,
+        \`AERONAVES_JSON\` LONGTEXT DEFAULT NULL,
+        \`HORAS_TOTAIS_VOO\` VARCHAR(16) NOT NULL DEFAULT '00:00',
+        \`VIATURAS_JSON\` LONGTEXT DEFAULT NULL,
+        \`TIPO_VOO\` VARCHAR(64) DEFAULT NULL,
+        \`TIPO_VOO_OUTROS_DESC\` VARCHAR(200) DEFAULT NULL,
+        \`TEVE_TRIPULANTE_OPERACIONAL\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`QTD_TRIPULANTES_OPERACIONAIS\` INT NOT NULL DEFAULT 0,
+        \`TRIPULANTES_OPERACIONAIS_JSON\` LONGTEXT DEFAULT NULL,
+        \`TEVE_TRIPULANTE_OUTRA_UNIDADE\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`TRIPULANTES_OUTRA_UNIDADE_JSON\` LONGTEXT DEFAULT NULL,
+        \`TEVE_EQUIPE_SOLO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`EQUIPE_SOLO_JSON\` LONGTEXT DEFAULT NULL,
+        \`TEVE_EMBARCADO_EXTERNO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`EMBARCADOS_EXTERNOS_JSON\` LONGTEXT DEFAULT NULL,
+        \`TRIPULANTES_DESEMBARCARAM\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`PARTICIPOU_CAPTURA_LOCALIZACAO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`CAPTURAS_LOCALIZACOES_JSON\` LONGTEXT DEFAULT NULL,
+        \`TEVE_DISPAROS_CAT\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DISPAROS_CAT_JSON\` LONGTEXT DEFAULT NULL,
+        \`SINOPSE_VOO\` TEXT NOT NULL,
+        \`OPERADORES_JSON\` LONGTEXT NOT NULL,
+        \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
+        \`CRIADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`CRIADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`CRIADOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_REL_OP_CAT\`),
+        KEY \`idx_rel_op_cat_data\` (\`DATA_OPERACAO\`),
+        KEY \`idx_rel_op_cat_criador\` (\`CRIADOR_ID\`),
+        KEY \`idx_rel_op_cat_unit\` (\`UNIDADE_ID\`),
+        KEY \`idx_rel_op_cat_dept\` (\`DEPARTAMENTO_ID\`),
+        KEY \`idx_rel_op_cat_criacao\` (\`DATA_CRIACAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    relatoriosOperacoesCatEnsured = true;
+  } catch (err) {
+    console.error('[API] Erro ao garantir tabela RELATORIOS_OPERACOES_CAT:', err);
+  }
+}
+
+function sanitizeCatHoursHHMM(raw: any): string {
+  const s = String(raw || '').trim();
+  const match = s.match(/^(\d{1,3}):(\d{1,2})$/);
+  if (!match) return '00:00';
+  const hh = Math.min(999, Math.max(0, Number(match[1]) || 0));
+  const mm = Math.min(59, Math.max(0, Number(match[2]) || 0));
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function sumCatFlightHoursHHMM(items: Array<{ horasVoo?: string }>): string {
+  let totalMinutes = 0;
+  for (const item of items || []) {
+    const clean = sanitizeCatHoursHHMM(item?.horasVoo);
+    const [hh, mm] = clean.split(':').map(n => Number(n) || 0);
+    totalMinutes += hh * 60 + mm;
+  }
+  const hh = Math.floor(totalMinutes / 60);
+  const mm = totalMinutes % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+function sanitizeCatOpAeronaves(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const item of raw) {
+    const aeronaveId = String(item?.aeronaveId || '').trim().slice(0, 64);
+    const tipo = sanitizeTipoAeronaveServer(item?.tipo);
+    const prefixo = formatPrefixoAeronaveServer(item?.prefixo);
+    const descricao = String(item?.descricao || '').trim().slice(0, 200);
+    if (!aeronaveId || !tipo || !prefixo || seen.has(aeronaveId)) continue;
+    seen.add(aeronaveId);
+    out.push({
+      aeronaveId,
+      tipo,
+      prefixo,
+      descricao,
+      pilotoId: item?.pilotoId ? String(item.pilotoId).trim().slice(0, 64) : undefined,
+      pilotoNome: item?.pilotoNome ? String(item.pilotoNome).trim().slice(0, 255) : undefined,
+      pilotoMasp: item?.pilotoMasp ? String(item.pilotoMasp).trim().slice(0, 32) : undefined,
+      pilotoCargo: item?.pilotoCargo ? String(item.pilotoCargo).trim().slice(0, 128) : undefined,
+      copilotoId: item?.copilotoId ? String(item.copilotoId).trim().slice(0, 64) : undefined,
+      copilotoNome: item?.copilotoNome ? String(item.copilotoNome).trim().slice(0, 255) : undefined,
+      copilotoMasp: item?.copilotoMasp ? String(item.copilotoMasp).trim().slice(0, 32) : undefined,
+      copilotoCargo: item?.copilotoCargo ? String(item.copilotoCargo).trim().slice(0, 128) : undefined,
+      horasVoo: sanitizeCatHoursHHMM(item?.horasVoo)
+    });
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
+function sanitizeCatOpViaturas(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const v of raw) {
+    const id = String(v?.id || '').trim().slice(0, 64);
+    const placa = String(v?.placa || '').trim().toUpperCase().slice(0, 16);
+    const descricao = String(v?.descricao || '').trim().slice(0, 160);
+    if (!id || !placa || seen.has(id)) continue;
+    seen.add(id);
+    const opSeen = new Set<string>();
+    const operadores: any[] = [];
+    if (Array.isArray(v?.operadores)) {
+      for (const op of v.operadores) {
+        const userId = String(op?.userId || '').trim().slice(0, 64);
+        const name = String(op?.name || '').trim().slice(0, 255);
+        if (!userId || !name || opSeen.has(userId)) continue;
+        opSeen.add(userId);
+        operadores.push({
+          userId,
+          name,
+          masp: String(op?.masp || '').trim().slice(0, 32),
+          cargo: String(op?.cargo || '').trim().slice(0, 128)
+        });
+      }
+    }
+    out.push({
+      id,
+      placa,
+      descricao,
+      operadores,
+      tipoApoio: String(v?.tipoApoio || '').trim().slice(0, 250)
+    });
+    if (out.length >= 30) break;
+  }
+  return out;
+}
+
+function sanitizeCatOpTripulantes(raw: any, origem: 'CAT' | 'COE') {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const t of raw) {
+    const userId = String(t?.userId || '').trim().slice(0, 64);
+    const name = String(t?.name || '').trim().slice(0, 255);
+    if (!userId || !name || seen.has(userId)) continue;
+    seen.add(userId);
+    out.push({
+      userId,
+      name,
+      masp: String(t?.masp || '').trim().slice(0, 32),
+      cargo: String(t?.cargo || '').trim().slice(0, 128),
+      unitId: String(t?.unitId || '').trim().slice(0, 64),
+      unitName: String(t?.unitName || '').trim().slice(0, 255),
+      origem
+    });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
+function sanitizeCatOpEquipeSolo(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const s of raw) {
+    const userId = String(s?.userId || '').trim().slice(0, 64);
+    const name = String(s?.name || '').trim().slice(0, 255);
+    const opSolo = String(s?.operacaoSolo || '').trim();
+    if (!userId || !name || seen.has(userId)) continue;
+    const validOpSolo = CAT_OP_ALLOWED_OPERACOES_SOLO.has(opSolo)
+      ? opSolo
+      : 'Piloto de aeronave não tripulada';
+    seen.add(userId);
+    out.push({
+      userId,
+      name,
+      masp: String(s?.masp || '').trim().slice(0, 32),
+      cargo: String(s?.cargo || '').trim().slice(0, 128),
+      operacaoSolo: validOpSolo,
+      apoioLogisticoDescricao:
+        validOpSolo === 'Apoio logístico'
+          ? String(s?.apoioLogisticoDescricao || '').trim().slice(0, 300)
+          : undefined
+    });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
+function sanitizeCatOpEmbarcadosExternos(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const out: any[] = [];
+  for (let i = 0; i < raw.length && out.length < 50; i++) {
+    const e = raw[i];
+    const name = String(e?.name || '').trim().slice(0, 255);
+    if (!name) continue;
+    const foraDoSistema = Boolean(e?.foraDoSistema);
+    out.push({
+      id: String(e?.id || `emb-${Date.now()}-${i}`).trim().slice(0, 64),
+      foraDoSistema,
+      ehDaCoe: !foraDoSistema && Boolean(e?.ehDaCoe),
+      departmentId: !foraDoSistema ? String(e?.departmentId || '').trim().slice(0, 64) : '',
+      departmentName: !foraDoSistema ? String(e?.departmentName || '').trim().slice(0, 255) : '',
+      unitId: !foraDoSistema ? String(e?.unitId || '').trim().slice(0, 64) : '',
+      unitName: !foraDoSistema ? String(e?.unitName || '').trim().slice(0, 255) : 'Policial de fora do sistema',
+      userId: !foraDoSistema ? String(e?.userId || '').trim().slice(0, 64) : '',
+      name,
+      masp: String(e?.masp || '').trim().slice(0, 32),
+      cargo: String(e?.cargo || '').trim().slice(0, 128)
+    });
+  }
+  return out;
+}
+
+function sanitizeCatOpCapturas(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: any[] = [];
+  for (const item of raw) {
+    const tipo = String(item?.tipo || '').trim();
+    if (!CAT_OP_ALLOWED_CAPTURA_TIPOS.has(tipo) || seen.has(tipo)) continue;
+    const qtd = Math.min(999, Math.max(1, Math.floor(Number(item?.quantidade) || 1)));
+    seen.add(tipo);
+    out.push({
+      tipo,
+      quantidade: qtd,
+      detalhes:
+        tipo === 'Ponto(s)' || tipo === 'Outros'
+          ? String(item?.detalhes || '').trim().slice(0, 500)
+          : undefined
+    });
+  }
+  return out;
+}
+
+function sanitizeCatOpDisparos(raw: any) {
+  if (!Array.isArray(raw)) return [];
+  const out: any[] = [];
+  for (let i = 0; i < raw.length && out.length < 50; i++) {
+    const d = raw[i];
+    const origem = d?.origem === 'ACERVO' ? 'ACERVO' : 'FORA_ACERVO';
+    const marca = String(d?.marca || '').trim().slice(0, 120);
+    const modelo = String(d?.modelo || '').trim().slice(0, 120);
+    const calibre = String(d?.calibre || '').trim().slice(0, 64);
+    const numeroSerie = String(d?.numeroSerie || '').trim().slice(0, 64);
+    const quantidadeTiros = Math.min(99999, Math.max(1, Math.floor(Number(d?.quantidadeTiros) || 1)));
+    if (!numeroSerie && !modelo) continue;
+    out.push({
+      id: String(d?.id || `disp-${Date.now()}-${i}`).trim().slice(0, 64),
+      origem,
+      weaponId: origem === 'ACERVO' ? String(d?.weaponId || '').trim().slice(0, 64) : undefined,
+      marca,
+      modelo,
+      calibre,
+      numeroSerie,
+      quantidadeTiros
+    });
+  }
+  return out;
+}
+
+function buildCatOpSignatureRoster(
+  creator: { id: string; name: string; masp: string; cargo?: string; unitId?: string | null; unitName?: string | null },
+  payload: {
+    aeronaves: any[];
+    viaturas: any[];
+    tripulantesOperacionais: any[];
+    tripulantesOutraUnidade: any[];
+    equipeSolo: any[];
+    embarcadosExternos: any[];
+  },
+  existingMap?: Map<string, any>
+) {
+  const candidates: Array<{ userId: string; name: string; masp: string; cargo?: string; unitId?: string; unitName?: string }> = [];
+
+  for (const a of payload.aeronaves || []) {
+    if (a.pilotoId && a.pilotoNome) {
+      candidates.push({
+        userId: a.pilotoId,
+        name: a.pilotoNome,
+        masp: a.pilotoMasp || '',
+        cargo: a.pilotoCargo || '',
+        unitId: creator.unitId || '',
+        unitName: creator.unitName || ''
+      });
+    }
+    if (a.copilotoId && a.copilotoNome) {
+      candidates.push({
+        userId: a.copilotoId,
+        name: a.copilotoNome,
+        masp: a.copilotoMasp || '',
+        cargo: a.copilotoCargo || '',
+        unitId: creator.unitId || '',
+        unitName: creator.unitName || ''
+      });
+    }
+  }
+  for (const t of payload.tripulantesOperacionais || []) {
+    if (t.userId && t.name) candidates.push(t);
+  }
+  for (const t of payload.tripulantesOutraUnidade || []) {
+    if (t.userId && t.name) candidates.push(t);
+  }
+  for (const s of payload.equipeSolo || []) {
+    if (s.userId && s.name) {
+      candidates.push({
+        userId: s.userId,
+        name: s.name,
+        masp: s.masp || '',
+        cargo: s.cargo || '',
+        unitId: creator.unitId || '',
+        unitName: creator.unitName || ''
+      });
+    }
+  }
+  for (const v of payload.viaturas || []) {
+    for (const op of v.operadores || []) {
+      if (op.userId && op.name) {
+        candidates.push({
+          userId: op.userId,
+          name: op.name,
+          masp: op.masp || '',
+          cargo: op.cargo || '',
+          unitId: creator.unitId || '',
+          unitName: creator.unitName || ''
+        });
+      }
+    }
+  }
+  for (const emb of payload.embarcadosExternos || []) {
+    if (!emb.foraDoSistema && emb.userId && emb.name) {
+      candidates.push({
+        userId: emb.userId,
+        name: emb.name,
+        masp: emb.masp || '',
+        cargo: emb.cargo || '',
+        unitId: emb.unitId || '',
+        unitName: emb.unitName || ''
+      });
+    }
+  }
+
+  return sanitizePolOpOperadores(candidates, creator, existingMap);
+}
+
+function mapCatOpRow(r: any) {
+  const safeParse = (val: any, fallback: any) => {
+    if (!val) return fallback;
+    try {
+      const parsed = JSON.parse(val);
+      return parsed ?? fallback;
+    } catch {
+      return fallback;
+    }
+  };
+  return {
+    id: r.id,
+    comEmpregoAeronave: Boolean(r.comEmpregoAeronave),
+    dataSaidaBase: r.dataSaidaBase,
+    dataOperacao: r.dataOperacao,
+    horarioDecolagem: r.horarioDecolagem || '06:00',
+    horarioVooOperacao: r.horarioVooOperacao || '06:00',
+    estadoOperacao: r.estadoOperacao || 'MG',
+    municipioOperacao: r.municipioOperacao || '',
+    apenasUmMunicipio: Boolean(r.apenasUmMunicipio),
+    outrosMunicipios: Array.isArray(safeParse(r.outrosMunicipiosJson, [])) ? safeParse(r.outrosMunicipiosJson, []) : [],
+    aeronaves: Array.isArray(safeParse(r.aeronavesJson, [])) ? safeParse(r.aeronavesJson, []) : [],
+    horasTotaisVoo: r.horasTotaisVoo || '00:00',
+    viaturas: Array.isArray(safeParse(r.viaturasJson, [])) ? safeParse(r.viaturasJson, []) : [],
+    tipoVoo: r.tipoVoo || undefined,
+    tipoVooOutrosDescricao: r.tipoVooOutrosDesc || undefined,
+    teveTripulanteOperacional: Boolean(r.teveTripulanteOperacional),
+    quantidadeTripulantesOperacionais: Number(r.qtdTripulantesOperacionais) || 0,
+    tripulantesOperacionais: Array.isArray(safeParse(r.tripulantesOperacionaisJson, []))
+      ? safeParse(r.tripulantesOperacionaisJson, [])
+      : [],
+    teveTripulanteOutraUnidade: Boolean(r.teveTripulanteOutraUnidade),
+    tripulantesOutraUnidade: Array.isArray(safeParse(r.tripulantesOutraUnidadeJson, []))
+      ? safeParse(r.tripulantesOutraUnidadeJson, [])
+      : [],
+    teveEquipeSolo: Boolean(r.teveEquipeSolo),
+    equipeSolo: Array.isArray(safeParse(r.equipeSoloJson, [])) ? safeParse(r.equipeSoloJson, []) : [],
+    teveEmbarcadoExterno: Boolean(r.teveEmbarcadoExterno),
+    embarcadosExternos: Array.isArray(safeParse(r.embarcadosExternosJson, []))
+      ? safeParse(r.embarcadosExternosJson, [])
+      : [],
+    tripulantesDesembarcaram: Boolean(r.tripulantesDesembarcaram),
+    participouCapturaLocalizacao: Boolean(r.participouCapturaLocalizacao),
+    capturasLocalizacoes: Array.isArray(safeParse(r.capturasLocalizacoesJson, []))
+      ? safeParse(r.capturasLocalizacoesJson, [])
+      : [],
+    teveDisparosCat: Boolean(r.teveDisparosCat),
+    disparosCat: Array.isArray(safeParse(r.disparosCatJson, [])) ? safeParse(r.disparosCatJson, []) : [],
+    sinopseVoo: r.sinopseVoo || '',
+    operadores: Array.isArray(safeParse(r.operadoresJson, [])) ? safeParse(r.operadoresJson, []) : [],
+    criadorId: r.criadorId,
+    criadorNome: r.criadorNome,
+    criadorMasp: r.criadorMasp || '',
+    criadorCargo: r.criadorCargo || '',
+    departmentId: r.departmentId || '',
+    unitId: r.unitId || '',
+    unitName: r.unitName || '',
+    createdAt: r.createdAt ? new Date(r.createdAt).toISOString() : new Date().toISOString(),
+    updatedAt: r.updatedAt ? new Date(r.updatedAt).toISOString() : undefined
+  };
+}
+
+const CAT_OP_SELECT_COLS = `
+  ID_REL_OP_CAT as id,
+  COM_EMPREGO_AERONAVE as comEmpregoAeronave,
+  DATA_SAIDA_BASE as dataSaidaBase,
+  DATA_OPERACAO as dataOperacao,
+  HORARIO_DECOLAGEM as horarioDecolagem,
+  HORARIO_VOO_OPERACAO as horarioVooOperacao,
+  ESTADO_OPERACAO as estadoOperacao,
+  MUNICIPIO_OPERACAO as municipioOperacao,
+  APENAS_UM_MUNICIPIO as apenasUmMunicipio,
+  OUTROS_MUNICIPIOS_JSON as outrosMunicipiosJson,
+  AERONAVES_JSON as aeronavesJson,
+  HORAS_TOTAIS_VOO as horasTotaisVoo,
+  VIATURAS_JSON as viaturasJson,
+  TIPO_VOO as tipoVoo,
+  TIPO_VOO_OUTROS_DESC as tipoVooOutrosDesc,
+  TEVE_TRIPULANTE_OPERACIONAL as teveTripulanteOperacional,
+  QTD_TRIPULANTES_OPERACIONAIS as qtdTripulantesOperacionais,
+  TRIPULANTES_OPERACIONAIS_JSON as tripulantesOperacionaisJson,
+  TEVE_TRIPULANTE_OUTRA_UNIDADE as teveTripulanteOutraUnidade,
+  TRIPULANTES_OUTRA_UNIDADE_JSON as tripulantesOutraUnidadeJson,
+  TEVE_EQUIPE_SOLO as teveEquipeSolo,
+  EQUIPE_SOLO_JSON as equipeSoloJson,
+  TEVE_EMBARCADO_EXTERNO as teveEmbarcadoExterno,
+  EMBARCADOS_EXTERNOS_JSON as embarcadosExternosJson,
+  TRIPULANTES_DESEMBARCARAM as tripulantesDesembarcaram,
+  PARTICIPOU_CAPTURA_LOCALIZACAO as participouCapturaLocalizacao,
+  CAPTURAS_LOCALIZACOES_JSON as capturasLocalizacoesJson,
+  TEVE_DISPAROS_CAT as teveDisparosCat,
+  DISPAROS_CAT_JSON as disparosCatJson,
+  SINOPSE_VOO as sinopseVoo,
+  OPERADORES_JSON as operadoresJson,
+  CRIADOR_ID as criadorId,
+  CRIADOR_NOME as criadorNome,
+  CRIADOR_MASP as criadorMasp,
+  CRIADOR_CARGO as criadorCargo,
+  DEPARTAMENTO_ID as departmentId,
+  UNIDADE_ID as unitId,
+  UNIDADE_NOME as unitName,
+  DATA_CRIACAO as createdAt,
+  DATA_ATUALIZACAO as updatedAt
+`;
+
+apiRouter.get('/relatorios-operacoes-cat', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCatTable(pool);
+    const [rows]: any = await pool.query(`
+      SELECT ${CAT_OP_SELECT_COLS}
+      FROM RELATORIOS_OPERACOES_CAT
+      ORDER BY DATA_OPERACAO DESC, DATA_CRIACAO DESC
+    `);
+    return res.json((rows || []).map(mapCatOpRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCatTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const targetUnitId = String(body.unitId || dbActor.unitId || '').trim();
+    let targetUnitName = String(body.unitName || '').trim();
+    let targetDeptId = String(body.departmentId || dbActor.departmentId || '').trim();
+    if (targetUnitId) {
+      const [uRows]: any = await pool.query(
+        'SELECT NOME_UNIDADES, DEPARTAMENTO_ID_UNIDADES FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+        [targetUnitId]
+      );
+      if (uRows && uRows.length > 0) {
+        targetUnitName = String(uRows[0].NOME_UNIDADES || targetUnitName);
+        if (uRows[0].DEPARTAMENTO_ID_UNIDADES) targetDeptId = String(uRows[0].DEPARTAMENTO_ID_UNIDADES);
+      }
+    }
+    if (!isCatUnitNameServer(targetUnitName)) {
+      return res.status(403).json({ error: 'Este relatório de operações é exclusivo da unidade CAT.' });
+    }
+
+    const comEmpregoAeronave = Boolean(body.comEmpregoAeronave);
+    const dataSaidaBase = String(body.dataSaidaBase || '').trim().slice(0, 10);
+    const dataOperacao = String(body.dataOperacao || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataSaidaBase) || !/^\d{4}-\d{2}-\d{2}$/.test(dataOperacao)) {
+      return res.status(400).json({ error: 'Datas inválidas. Utilize o formato AAAA-MM-DD.' });
+    }
+
+    const horarioDecolagem = /^\d{2}:\d{2}$/.test(String(body.horarioDecolagem || '').trim())
+      ? String(body.horarioDecolagem).trim()
+      : '06:00';
+    const horarioVooOperacao = /^\d{2}:\d{2}$/.test(String(body.horarioVooOperacao || '').trim())
+      ? String(body.horarioVooOperacao).trim()
+      : '06:00';
+
+    const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado da operação inválido.' });
+    }
+    const municipioOperacao = String(body.municipioOperacao || '').trim().slice(0, 160);
+    if (!municipioOperacao) {
+      return res.status(400).json({ error: 'Selecione o município da operação.' });
+    }
+    const apenasUmMunicipio = Boolean(body.apenasUmMunicipio);
+    const outrosMunicipios = apenasUmMunicipio
+      ? []
+      : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+
+    const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
+    if (comEmpregoAeronave && aeronaves.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos uma aeronave utilizada na operação.' });
+    }
+    if (comEmpregoAeronave) {
+      for (const a of aeronaves) {
+        if (!a.pilotoId) {
+          return res.status(400).json({ error: `Selecione o piloto habilitado para a aeronave ${a.prefixo}.` });
+        }
+      }
+    }
+    const horasTotaisVoo = comEmpregoAeronave ? sumCatFlightHoursHHMM(aeronaves) : '00:00';
+
+    const viaturas = sanitizeCatOpViaturas(body.viaturas);
+    for (const v of viaturas) {
+      if (v.operadores.length === 0) {
+        return res.status(400).json({ error: `Informe ao menos um operador na viatura ${v.placa}.` });
+      }
+      if (!v.tipoApoio) {
+        return res.status(400).json({ error: `Especifique o tipo de apoio da viatura ${v.placa}.` });
+      }
+    }
+
+    const rawTipoVoo = String(body.tipoVoo || '').trim();
+    const tipoVoo = comEmpregoAeronave
+      ? (CAT_OP_ALLOWED_TIPOS_VOO.has(rawTipoVoo) ? rawTipoVoo : 'APOIO OPERACIONAL')
+      : null;
+    const tipoVooOutrosDesc =
+      comEmpregoAeronave && tipoVoo === 'OUTROS TIPOS'
+        ? String(body.tipoVooOutrosDescricao || '').trim().slice(0, 200)
+        : null;
+    if (comEmpregoAeronave && tipoVoo === 'OUTROS TIPOS' && !tipoVooOutrosDesc) {
+      return res.status(400).json({ error: 'Informe os detalhes do Tipo de Voo em "OUTROS TIPOS".' });
+    }
+
+    const teveTripulanteOperacional = comEmpregoAeronave && Boolean(body.teveTripulanteOperacional);
+    const tripulantesOperacionais = teveTripulanteOperacional
+      ? sanitizeCatOpTripulantes(body.tripulantesOperacionais, 'CAT')
+      : [];
+    const qtdTripulantesOperacionais = teveTripulanteOperacional
+      ? Math.max(tripulantesOperacionais.length, Math.min(20, Math.floor(Number(body.quantidadeTripulantesOperacionais) || 0)))
+      : 0;
+
+    const teveTripulanteOutraUnidade = comEmpregoAeronave && Boolean(body.teveTripulanteOutraUnidade);
+    const tripulantesOutraUnidade = teveTripulanteOutraUnidade
+      ? sanitizeCatOpTripulantes(body.tripulantesOutraUnidade, 'COE')
+      : [];
+
+    const teveEquipeSolo = Boolean(body.teveEquipeSolo);
+    const equipeSolo = teveEquipeSolo ? sanitizeCatOpEquipeSolo(body.equipeSolo) : [];
+    for (const s of equipeSolo) {
+      if (s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
+        return res.status(400).json({
+          error: `Informe o tipo de apoio logístico para o operador em solo ${s.name}.`
+        });
+      }
+    }
+
+    const teveEmbarcadoExterno = Boolean(body.teveEmbarcadoExterno);
+    const embarcadosExternos = teveEmbarcadoExterno
+      ? sanitizeCatOpEmbarcadosExternos(body.embarcadosExternos)
+      : [];
+
+    const tripulantesDesembarcaram = comEmpregoAeronave && Boolean(body.tripulantesDesembarcaram);
+    const participouCapturaLocalizacao = comEmpregoAeronave && Boolean(body.participouCapturaLocalizacao);
+    const capturasLocalizacoes = participouCapturaLocalizacao
+      ? sanitizeCatOpCapturas(body.capturasLocalizacoes)
+      : [];
+
+    const teveDisparosCat = Boolean(body.teveDisparosCat);
+    const disparosCat = teveDisparosCat ? sanitizeCatOpDisparos(body.disparosCat) : [];
+    if (teveDisparosCat && disparosCat.length === 0) {
+      return res.status(400).json({ error: 'Adicione ao menos uma arma com quantidade de tiros efetuados.' });
+    }
+
+    const sinopseVoo = String(body.sinopseVoo || '').trim().slice(0, 1000);
+    if (!sinopseVoo) {
+      return res.status(400).json({ error: 'Preencha a sinopse do voo/operação (máx. 1000 caracteres).' });
+    }
+
+    const operadores = buildCatOpSignatureRoster(
+      {
+        id: dbActor.id,
+        name: dbActor.name,
+        masp: dbActor.masp,
+        cargo: dbActor.cargo,
+        unitId: targetUnitId,
+        unitName: targetUnitName
+      },
+      {
+        aeronaves,
+        viaturas,
+        tripulantesOperacionais,
+        tripulantesOutraUnidade,
+        equipeSolo,
+        embarcadosExternos
+      }
+    );
+
+    const id = `ROCAT-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+    await pool.query(
+      `INSERT INTO RELATORIOS_OPERACOES_CAT (
+        ID_REL_OP_CAT, COM_EMPREGO_AERONAVE, DATA_SAIDA_BASE, DATA_OPERACAO,
+        HORARIO_DECOLAGEM, HORARIO_VOO_OPERACAO, ESTADO_OPERACAO, MUNICIPIO_OPERACAO,
+        APENAS_UM_MUNICIPIO, OUTROS_MUNICIPIOS_JSON, AERONAVES_JSON, HORAS_TOTAIS_VOO,
+        VIATURAS_JSON, TIPO_VOO, TIPO_VOO_OUTROS_DESC,
+        TEVE_TRIPULANTE_OPERACIONAL, QTD_TRIPULANTES_OPERACIONAIS, TRIPULANTES_OPERACIONAIS_JSON,
+        TEVE_TRIPULANTE_OUTRA_UNIDADE, TRIPULANTES_OUTRA_UNIDADE_JSON,
+        TEVE_EQUIPE_SOLO, EQUIPE_SOLO_JSON,
+        TEVE_EMBARCADO_EXTERNO, EMBARCADOS_EXTERNOS_JSON,
+        TRIPULANTES_DESEMBARCARAM, PARTICIPOU_CAPTURA_LOCALIZACAO, CAPTURAS_LOCALIZACOES_JSON,
+        TEVE_DISPAROS_CAT, DISPAROS_CAT_JSON, SINOPSE_VOO, OPERADORES_JSON,
+        CRIADOR_ID, CRIADOR_NOME, CRIADOR_MASP, CRIADOR_CARGO,
+        DEPARTAMENTO_ID, UNIDADE_ID, UNIDADE_NOME
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        comEmpregoAeronave ? 1 : 0,
+        dataSaidaBase,
+        dataOperacao,
+        horarioDecolagem,
+        horarioVooOperacao,
+        estadoOperacao,
+        municipioOperacao,
+        apenasUmMunicipio ? 1 : 0,
+        JSON.stringify(outrosMunicipios),
+        JSON.stringify(aeronaves),
+        horasTotaisVoo,
+        JSON.stringify(viaturas),
+        tipoVoo,
+        tipoVooOutrosDesc,
+        teveTripulanteOperacional ? 1 : 0,
+        qtdTripulantesOperacionais,
+        JSON.stringify(tripulantesOperacionais),
+        teveTripulanteOutraUnidade ? 1 : 0,
+        JSON.stringify(tripulantesOutraUnidade),
+        teveEquipeSolo ? 1 : 0,
+        JSON.stringify(equipeSolo),
+        teveEmbarcadoExterno ? 1 : 0,
+        JSON.stringify(embarcadosExternos),
+        tripulantesDesembarcaram ? 1 : 0,
+        participouCapturaLocalizacao ? 1 : 0,
+        JSON.stringify(capturasLocalizacoes),
+        teveDisparosCat ? 1 : 0,
+        JSON.stringify(disparosCat),
+        sinopseVoo,
+        JSON.stringify(operadores),
+        dbActor.id,
+        dbActor.name,
+        dbActor.masp,
+        dbActor.cargo || '',
+        targetDeptId || null,
+        targetUnitId || null,
+        targetUnitName || 'CAT'
+      ]
+    );
+
+    if (disparosCat.length > 0) {
+      await applyAcervoShotsDeltaForPolOp(pool, id, dataOperacao, dbActor, [], disparosCat);
+    }
+
+    await insertAuditLog(
+      'Relatórios',
+      'Criar Relatório de Operação CAT',
+      `Criado relatório de operação CAT ${id} em ${municipioOperacao}/${estadoOperacao} (${comEmpregoAeronave ? `${aeronaves.length} aeronave(s) — ${horasTotaisVoo}` : 'sem emprego de aeronave'})`,
+      dbActor,
+      req.ip
+    );
+
+    const [createdRows]: any = await pool.query(
+      `SELECT ${CAT_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ? LIMIT 1`,
+      [id]
+    );
+    return res.status(201).json(createdRows?.[0] ? mapCatOpRow(createdRows[0]) : { id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCatTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const [existingRows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação CAT não encontrado.' });
+    }
+    const row = existingRows[0];
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeralDb = roles.has('Geral');
+
+    const createdMs = parseMysqlTimestampMs(row.DATA_CRIACAO);
+    if (Date.now() - createdMs > THREE_DAYS_MS && !isGeralDb) {
+      return res.status(403).json({
+        error: 'Prazo de edição expirado. Relatórios de operações podem ser editados apenas dentro de 3 dias após a criação.'
+      });
+    }
+
+    let existingOps: any[] = [];
+    try {
+      const parsed = row.OPERADORES_JSON ? JSON.parse(row.OPERADORES_JSON) : [];
+      if (Array.isArray(parsed)) existingOps = parsed;
+    } catch {}
+    const isCited =
+      String(row.CRIADOR_ID) === dbActor.id ||
+      existingOps.some((op: any) => String(op?.userId) === dbActor.id);
+    if (!isCited && !isGeralDb) {
+      return res.status(403).json({ error: 'Apenas operadores citados no relatório (ou perfil Geral) podem editá-lo.' });
+    }
+
+    const comEmpregoAeronave = Boolean(body.comEmpregoAeronave);
+    const dataSaidaBase = String(body.dataSaidaBase || row.DATA_SAIDA_BASE || '').trim().slice(0, 10);
+    const dataOperacao = String(body.dataOperacao || row.DATA_OPERACAO || '').trim().slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataSaidaBase) || !/^\d{4}-\d{2}-\d{2}$/.test(dataOperacao)) {
+      return res.status(400).json({ error: 'Datas inválidas.' });
+    }
+    const horarioDecolagem = /^\d{2}:\d{2}$/.test(String(body.horarioDecolagem || '').trim())
+      ? String(body.horarioDecolagem).trim()
+      : row.HORARIO_DECOLAGEM || '06:00';
+    const horarioVooOperacao = /^\d{2}:\d{2}$/.test(String(body.horarioVooOperacao || '').trim())
+      ? String(body.horarioVooOperacao).trim()
+      : row.HORARIO_VOO_OPERACAO || '06:00';
+
+    const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado da operação inválido.' });
+    }
+    const municipioOperacao = String(body.municipioOperacao || '').trim().slice(0, 160);
+    if (!municipioOperacao) {
+      return res.status(400).json({ error: 'Selecione o município da operação.' });
+    }
+    const apenasUmMunicipio = Boolean(body.apenasUmMunicipio);
+    const outrosMunicipios = apenasUmMunicipio
+      ? []
+      : sanitizePolOpMunicipios(body.outrosMunicipios, estadoOperacao, municipioOperacao);
+
+    const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
+    if (comEmpregoAeronave && aeronaves.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos uma aeronave utilizada na operação.' });
+    }
+    if (comEmpregoAeronave) {
+      for (const a of aeronaves) {
+        if (!a.pilotoId) {
+          return res.status(400).json({ error: `Selecione o piloto habilitado para a aeronave ${a.prefixo}.` });
+        }
+      }
+    }
+    const horasTotaisVoo = comEmpregoAeronave ? sumCatFlightHoursHHMM(aeronaves) : '00:00';
+
+    const viaturas = sanitizeCatOpViaturas(body.viaturas);
+    for (const v of viaturas) {
+      if (v.operadores.length === 0) {
+        return res.status(400).json({ error: `Informe ao menos um operador na viatura ${v.placa}.` });
+      }
+      if (!v.tipoApoio) {
+        return res.status(400).json({ error: `Especifique o tipo de apoio da viatura ${v.placa}.` });
+      }
+    }
+
+    const rawTipoVoo = String(body.tipoVoo || '').trim();
+    const tipoVoo = comEmpregoAeronave
+      ? (CAT_OP_ALLOWED_TIPOS_VOO.has(rawTipoVoo) ? rawTipoVoo : 'APOIO OPERACIONAL')
+      : null;
+    const tipoVooOutrosDesc =
+      comEmpregoAeronave && tipoVoo === 'OUTROS TIPOS'
+        ? String(body.tipoVooOutrosDescricao || '').trim().slice(0, 200)
+        : null;
+    if (comEmpregoAeronave && tipoVoo === 'OUTROS TIPOS' && !tipoVooOutrosDesc) {
+      return res.status(400).json({ error: 'Informe os detalhes do Tipo de Voo em "OUTROS TIPOS".' });
+    }
+
+    const teveTripulanteOperacional = comEmpregoAeronave && Boolean(body.teveTripulanteOperacional);
+    const tripulantesOperacionais = teveTripulanteOperacional
+      ? sanitizeCatOpTripulantes(body.tripulantesOperacionais, 'CAT')
+      : [];
+    const qtdTripulantesOperacionais = teveTripulanteOperacional
+      ? Math.max(tripulantesOperacionais.length, Math.min(20, Math.floor(Number(body.quantidadeTripulantesOperacionais) || 0)))
+      : 0;
+
+    const teveTripulanteOutraUnidade = comEmpregoAeronave && Boolean(body.teveTripulanteOutraUnidade);
+    const tripulantesOutraUnidade = teveTripulanteOutraUnidade
+      ? sanitizeCatOpTripulantes(body.tripulantesOutraUnidade, 'COE')
+      : [];
+
+    const teveEquipeSolo = Boolean(body.teveEquipeSolo);
+    const equipeSolo = teveEquipeSolo ? sanitizeCatOpEquipeSolo(body.equipeSolo) : [];
+    for (const s of equipeSolo) {
+      if (s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
+        return res.status(400).json({
+          error: `Informe o tipo de apoio logístico para o operador em solo ${s.name}.`
+        });
+      }
+    }
+
+    const teveEmbarcadoExterno = Boolean(body.teveEmbarcadoExterno);
+    const embarcadosExternos = teveEmbarcadoExterno
+      ? sanitizeCatOpEmbarcadosExternos(body.embarcadosExternos)
+      : [];
+
+    const tripulantesDesembarcaram = comEmpregoAeronave && Boolean(body.tripulantesDesembarcaram);
+    const participouCapturaLocalizacao = comEmpregoAeronave && Boolean(body.participouCapturaLocalizacao);
+    const capturasLocalizacoes = participouCapturaLocalizacao
+      ? sanitizeCatOpCapturas(body.capturasLocalizacoes)
+      : [];
+
+    const teveDisparosCat = Boolean(body.teveDisparosCat);
+    const disparosCat = teveDisparosCat ? sanitizeCatOpDisparos(body.disparosCat) : [];
+    if (teveDisparosCat && disparosCat.length === 0) {
+      return res.status(400).json({ error: 'Adicione ao menos uma arma com quantidade de tiros efetuados.' });
+    }
+
+    const sinopseVoo = String(body.sinopseVoo || '').trim().slice(0, 1000);
+    if (!sinopseVoo) {
+      return res.status(400).json({ error: 'Preencha a sinopse do voo/operação.' });
+    }
+
+    const existingMap = new Map<string, any>();
+    for (const op of existingOps) {
+      if (op?.userId) existingMap.set(String(op.userId), op);
+    }
+
+    const operadores = buildCatOpSignatureRoster(
+      {
+        id: String(row.CRIADOR_ID),
+        name: String(row.CRIADOR_NOME),
+        masp: String(row.CRIADOR_MASP || ''),
+        cargo: String(row.CRIADOR_CARGO || ''),
+        unitId: row.UNIDADE_ID,
+        unitName: row.UNIDADE_NOME
+      },
+      {
+        aeronaves,
+        viaturas,
+        tripulantesOperacionais,
+        tripulantesOutraUnidade,
+        equipeSolo,
+        embarcadosExternos
+      },
+      existingMap
+    );
+
+    let oldDisparos: any[] = [];
+    try {
+      const parsed = row.DISPAROS_CAT_JSON ? JSON.parse(row.DISPAROS_CAT_JSON) : [];
+      if (Array.isArray(parsed)) oldDisparos = parsed;
+    } catch {}
+
+    await pool.query(
+      `UPDATE RELATORIOS_OPERACOES_CAT SET
+        COM_EMPREGO_AERONAVE = ?,
+        DATA_SAIDA_BASE = ?,
+        DATA_OPERACAO = ?,
+        HORARIO_DECOLAGEM = ?,
+        HORARIO_VOO_OPERACAO = ?,
+        ESTADO_OPERACAO = ?,
+        MUNICIPIO_OPERACAO = ?,
+        APENAS_UM_MUNICIPIO = ?,
+        OUTROS_MUNICIPIOS_JSON = ?,
+        AERONAVES_JSON = ?,
+        HORAS_TOTAIS_VOO = ?,
+        VIATURAS_JSON = ?,
+        TIPO_VOO = ?,
+        TIPO_VOO_OUTROS_DESC = ?,
+        TEVE_TRIPULANTE_OPERACIONAL = ?,
+        QTD_TRIPULANTES_OPERACIONAIS = ?,
+        TRIPULANTES_OPERACIONAIS_JSON = ?,
+        TEVE_TRIPULANTE_OUTRA_UNIDADE = ?,
+        TRIPULANTES_OUTRA_UNIDADE_JSON = ?,
+        TEVE_EQUIPE_SOLO = ?,
+        EQUIPE_SOLO_JSON = ?,
+        TEVE_EMBARCADO_EXTERNO = ?,
+        EMBARCADOS_EXTERNOS_JSON = ?,
+        TRIPULANTES_DESEMBARCARAM = ?,
+        PARTICIPOU_CAPTURA_LOCALIZACAO = ?,
+        CAPTURAS_LOCALIZACOES_JSON = ?,
+        TEVE_DISPAROS_CAT = ?,
+        DISPAROS_CAT_JSON = ?,
+        SINOPSE_VOO = ?,
+        OPERADORES_JSON = ?
+      WHERE ID_REL_OP_CAT = ?`,
+      [
+        comEmpregoAeronave ? 1 : 0,
+        dataSaidaBase,
+        dataOperacao,
+        horarioDecolagem,
+        horarioVooOperacao,
+        estadoOperacao,
+        municipioOperacao,
+        apenasUmMunicipio ? 1 : 0,
+        JSON.stringify(outrosMunicipios),
+        JSON.stringify(aeronaves),
+        horasTotaisVoo,
+        JSON.stringify(viaturas),
+        tipoVoo,
+        tipoVooOutrosDesc,
+        teveTripulanteOperacional ? 1 : 0,
+        qtdTripulantesOperacionais,
+        JSON.stringify(tripulantesOperacionais),
+        teveTripulanteOutraUnidade ? 1 : 0,
+        JSON.stringify(tripulantesOutraUnidade),
+        teveEquipeSolo ? 1 : 0,
+        JSON.stringify(equipeSolo),
+        teveEmbarcadoExterno ? 1 : 0,
+        JSON.stringify(embarcadosExternos),
+        tripulantesDesembarcaram ? 1 : 0,
+        participouCapturaLocalizacao ? 1 : 0,
+        JSON.stringify(capturasLocalizacoes),
+        teveDisparosCat ? 1 : 0,
+        JSON.stringify(disparosCat),
+        sinopseVoo,
+        JSON.stringify(operadores),
+        id
+      ]
+    );
+
+    if (oldDisparos.length > 0 || disparosCat.length > 0) {
+      await applyAcervoShotsDeltaForPolOp(pool, id, dataOperacao, dbActor, oldDisparos, disparosCat);
+    }
+
+    await insertAuditLog(
+      'Relatórios',
+      'Editar Relatório de Operação CAT',
+      `Atualizado relatório de operação CAT ${id} (${municipioOperacao}/${estadoOperacao}) por ${dbActor.name}`,
+      dbActor,
+      req.ip
+    );
+
+    const [updatedRows]: any = await pool.query(
+      `SELECT ${CAT_OP_SELECT_COLS} FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ? LIMIT 1`,
+      [id]
+    );
+    return res.json(updatedRows?.[0] ? mapCatOpRow(updatedRows[0]) : { success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-operacoes-cat/:id/assinar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCatTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado.' });
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT OPERADORES_JSON, MUNICIPIO_OPERACAO FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação CAT não encontrado.' });
+    }
+
+    let operadores: any[] = [];
+    try {
+      const parsed = rows[0].OPERADORES_JSON ? JSON.parse(rows[0].OPERADORES_JSON) : [];
+      if (Array.isArray(parsed)) operadores = parsed;
+    } catch {}
+
+    const idx = operadores.findIndex((op: any) => String(op?.userId) === dbActor.id);
+    if (idx === -1) {
+      return res.status(403).json({ error: 'Você não consta como participante/assinante deste relatório CAT.' });
+    }
+
+    operadores[idx] = {
+      ...operadores[idx],
+      signed: true,
+      signedAt: new Date().toISOString()
+    };
+
+    await pool.query(
+      'UPDATE RELATORIOS_OPERACOES_CAT SET OPERADORES_JSON = ? WHERE ID_REL_OP_CAT = ?',
+      [JSON.stringify(operadores), id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Assinar Relatório de Operação CAT',
+      `Relatório de operação CAT ${id} (${rows[0].MUNICIPIO_OPERACAO}) assinado por ${dbActor.name}`,
+      dbActor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/relatorios-operacoes-cat/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosOperacoesCatTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT * FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de operação CAT não encontrado.' });
+    }
+    const row = rows[0];
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeralDb = roles.has('Geral');
+
+    const createdMs = parseMysqlTimestampMs(row.DATA_CRIACAO);
+    if (Date.now() - createdMs > THREE_DAYS_MS && !isGeralDb) {
+      return res.status(403).json({
+        error: 'Prazo de exclusão expirado (limite de 3 dias após a criação).'
+      });
+    }
+
+    let operadores: any[] = [];
+    try {
+      const parsed = row.OPERADORES_JSON ? JSON.parse(row.OPERADORES_JSON) : [];
+      if (Array.isArray(parsed)) operadores = parsed;
+    } catch {}
+    const isCited =
+      String(row.CRIADOR_ID) === dbActor.id ||
+      operadores.some((op: any) => String(op?.userId) === dbActor.id);
+    if (!isCited && !isGeralDb) {
+      return res.status(403).json({ error: 'Apenas operadores citados no relatório (ou perfil Geral) podem excluí-lo.' });
+    }
+
+    let oldDisparos: any[] = [];
+    try {
+      const parsed = row.DISPAROS_CAT_JSON ? JSON.parse(row.DISPAROS_CAT_JSON) : [];
+      if (Array.isArray(parsed)) oldDisparos = parsed;
+    } catch {}
+    if (oldDisparos.length > 0) {
+      await applyAcervoShotsDeltaForPolOp(pool, id, String(row.DATA_OPERACAO || ''), dbActor, oldDisparos, []);
+    }
+
+    await pool.query('DELETE FROM RELATORIOS_OPERACOES_CAT WHERE ID_REL_OP_CAT = ?', [id]);
+
+    await insertAuditLog(
+      'Relatórios',
+      'Excluir Relatório de Operação CAT',
+      `Excluído relatório de operação CAT ${id} (${row.MUNICIPIO_OPERACAO}) por ${dbActor.name}`,
+      dbActor,
+      req.ip
+    );
+
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 
 

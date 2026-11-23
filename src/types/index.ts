@@ -1658,6 +1658,148 @@ export interface RelatorioOperacaoPolicial {
   updatedAt?: string;
 }
 
+export type TipoVooCat =
+  | 'APOIO OPERACIONAL'
+  | 'APOIO EXTRAORDINÁRIO'
+  | 'TRANSPORTE DE AUTORIDADES'
+  | 'OUTROS TIPOS';
+
+export type TipoOperacaoSoloCat =
+  | 'Piloto de aeronave não tripulada'
+  | 'Apoio logístico';
+
+export type TipoCapturaLocalizacaoCat =
+  | 'Pessoa(s)'
+  | 'Veículo(s)'
+  | 'Embarcação(ões)'
+  | 'Cativeiro(s)'
+  | 'Ponto(s)'
+  | 'Outros';
+
+export interface AeronaveOperacaoCat {
+  aeronaveId: string;
+  tipo: TipoAeronave;
+  prefixo: string;
+  descricao: string;
+  pilotoId?: string;
+  pilotoNome?: string;
+  pilotoMasp?: string;
+  pilotoCargo?: string;
+  copilotoId?: string;
+  copilotoNome?: string;
+  copilotoMasp?: string;
+  copilotoCargo?: string;
+  horasVoo: string; // HH:mm
+}
+
+export interface ViaturaOperacaoCatOperador {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+}
+
+export interface ViaturaOperacaoCat {
+  id: string;
+  placa: string;
+  descricao: string;
+  operadores: ViaturaOperacaoCatOperador[];
+  tipoApoio: string;
+}
+
+export interface TripulanteOperacionalCat {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  unitId?: string;
+  unitName?: string;
+  origem: 'CAT' | 'COE';
+}
+
+export interface EquipeSoloOperacaoCat {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  operacaoSolo: TipoOperacaoSoloCat;
+  apoioLogisticoDescricao?: string; // Máx 300 caracteres
+}
+
+export interface EmbarcadoExternoCat {
+  id: string;
+  foraDoSistema: boolean;
+  ehDaCoe: boolean;
+  departmentId?: string;
+  departmentName?: string;
+  unitId?: string;
+  unitName?: string;
+  userId?: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+}
+
+export interface DisparoOperacaoCat {
+  id: string;
+  origem: 'ACERVO' | 'FORA_ACERVO';
+  weaponId?: string;
+  marca: string;
+  modelo: string;
+  calibre: string;
+  numeroSerie: string;
+  quantidadeTiros: number;
+}
+
+export interface CapturaLocalizacaoCatItem {
+  tipo: TipoCapturaLocalizacaoCat;
+  quantidade: number;
+  detalhes?: string; // Máx 500 caracteres (para Ponto(s) e Outros)
+}
+
+export interface RelatorioOperacaoCat {
+  id: string;
+  comEmpregoAeronave: boolean;
+  dataSaidaBase: string; // YYYY-MM-DD
+  dataOperacao: string; // YYYY-MM-DD
+  horarioDecolagem: string; // HH:mm
+  horarioVooOperacao: string; // HH:mm
+  estadoOperacao: string; // UF padrão MG
+  municipioOperacao: string;
+  apenasUmMunicipio: boolean;
+  outrosMunicipios: MunicipioOperacaoPolicial[];
+  aeronaves: AeronaveOperacaoCat[];
+  horasTotaisVoo: string; // HH:mm somado
+  viaturas: ViaturaOperacaoCat[];
+  tipoVoo?: TipoVooCat;
+  tipoVooOutrosDescricao?: string; // Máx 200 caracteres
+  teveTripulanteOperacional: boolean;
+  quantidadeTripulantesOperacionais: number;
+  tripulantesOperacionais: TripulanteOperacionalCat[];
+  teveTripulanteOutraUnidade: boolean;
+  tripulantesOutraUnidade: TripulanteOperacionalCat[];
+  teveEquipeSolo: boolean;
+  equipeSolo: EquipeSoloOperacaoCat[];
+  teveEmbarcadoExterno: boolean;
+  embarcadosExternos: EmbarcadoExternoCat[];
+  tripulantesDesembarcaram: boolean;
+  participouCapturaLocalizacao: boolean;
+  capturasLocalizacoes: CapturaLocalizacaoCatItem[];
+  teveDisparosCat: boolean;
+  disparosCat: DisparoOperacaoCat[];
+  sinopseVoo: string; // Máx 1000 caracteres
+  operadores: OperadorOperacaoPolicial[]; // Lista deduplicada para controle de assinaturas eletrônicas
+  criadorId: string;
+  criadorNome: string;
+  criadorMasp: string;
+  criadorCargo?: string;
+  departmentId?: string;
+  unitId?: string;
+  unitName?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 

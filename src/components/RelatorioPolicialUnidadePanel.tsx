@@ -5,11 +5,13 @@ import {
   Unit,
   RelatorioTreinamentoPolicial,
   RelatorioOperacaoPolicial,
+  RelatorioOperacaoCat,
   TituloTreinamentoPolicial,
   LocalTreinamentoPolicial,
   ParticipacaoTreinamentoPolicial,
   ParticipanteTreinamentoPolicial,
   UnidadeParticipanteTreinamento,
+  isCatUnitName,
   getSystemLogo
 } from '../types';
 import { storage } from '../services/storage';
@@ -29,6 +31,11 @@ import {
   formatMandadoBuscaResumo,
   formatGerenciamentoCriseResumo
 } from './RelatorioOperacoesPolicialForm';
+import {
+  RelatorioOperacoesCatForm,
+  printRelatorioOperacaoCat,
+  sumFlightHoursHHMM
+} from './RelatorioOperacoesCatForm';
 import {
   PenTool,
   ClipboardList,
@@ -56,7 +63,8 @@ import {
   Car,
   Crosshair,
   Zap,
-  Skull
+  Skull,
+  Plane
 } from 'lucide-react';
 
 interface RelatorioPolicialUnidadePanelProps {
@@ -157,6 +165,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const effectiveUnitId = activeUnitId || currentUser.unitId || '';
   const effectiveDeptId = activeDeptId || currentUser.departmentId || '';
   const effectiveRole = currentUser.activeRole || currentUser.role;
+  const isCatUnit = isCatUnitName(activeUnitName);
   const canViewUnitReports =
     effectiveRole === 'Armeiro' || effectiveRole === 'Administrador' || effectiveRole === 'Geral';
 
@@ -199,11 +208,13 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
   // Form state — Relatório de Operações (edição iniciada via Meus Relatórios)
   const [editingOpReport, setEditingOpReport] = useState<RelatorioOperacaoPolicial | null>(null);
+  const [editingCatOpReport, setEditingCatOpReport] = useState<RelatorioOperacaoCat | null>(null);
 
   // Inline confirmation states (no window.confirm)
   const [confirmDeleteTodayId, setConfirmDeleteTodayId] = useState<string | null>(null);
   const [confirmDeleteListId, setConfirmDeleteListId] = useState<string | null>(null);
   const [confirmDeleteOpListId, setConfirmDeleteOpListId] = useState<string | null>(null);
+  const [confirmDeleteCatOpListId, setConfirmDeleteCatOpListId] = useState<string | null>(null);
 
   // Meus Relatórios state
   const [myCategoryFilter, setMyCategoryFilter] = useState<MyCategoryFilter>('TODOS');
@@ -226,8 +237,10 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
   const [viewModalReport, setViewModalReport] = useState<RelatorioTreinamentoPolicial | null>(null);
   const [viewModalOpReport, setViewModalOpReport] = useState<RelatorioOperacaoPolicial | null>(null);
+  const [viewModalCatOpReport, setViewModalCatOpReport] = useState<RelatorioOperacaoCat | null>(null);
   const [signingId, setSigningId] = useState<string | null>(null);
   const [signingOpId, setSigningOpId] = useState<string | null>(null);
+  const [signingCatOpId, setSigningCatOpId] = useState<string | null>(null);
 
   const todayBr = getTodayBrasilia();
 
@@ -237,6 +250,10 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
   const allOpReports = useMemo<RelatorioOperacaoPolicial[]>(() => {
     return storage.getRelatoriosOperacoesPolicial();
+  }, [dataVersion, localVersion]);
+
+  const allCatOpReports = useMemo<RelatorioOperacaoCat[]>(() => {
+    return storage.getRelatoriosOperacoesCat();
   }, [dataVersion, localVersion]);
 
   const unitMap = useMemo(() => {
@@ -364,8 +381,27 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     }).length;
   }, [myOpReports, currentUser.id]);
 
-  const totalMyReportsCount = myReports.length + myOpReports.length;
-  const totalPendingSignatureCount = pendingSignatureCount + pendingOpSignatureCount;
+  // CAT Operation reports related to the current user (creator or listed operator)
+  const myCatOpReports = useMemo(() => {
+    return allCatOpReports.filter(rel => {
+      const isCreator = rel.criadorId === currentUser.id;
+      const isListed = (rel.operadores || []).some(op => op.userId === currentUser.id);
+      return isCreator || isListed;
+    });
+  }, [allCatOpReports, currentUser.id]);
+
+  const pendingCatOpSignatureCount = useMemo(() => {
+    return myCatOpReports.filter(rel => {
+      const myOp = (rel.operadores || []).find(op => op.userId === currentUser.id);
+      if (!myOp) return false;
+      return !isPolOpOperatorEffectivelySigned(myOp, rel.createdAt).signed;
+    }).length;
+  }, [myCatOpReports, currentUser.id]);
+
+  const totalMyOpsCount = myOpReports.length + myCatOpReports.length;
+  const totalMyOpsPendingCount = pendingOpSignatureCount + pendingCatOpSignatureCount;
+  const totalMyReportsCount = myReports.length + totalMyOpsCount;
+  const totalPendingSignatureCount = pendingSignatureCount + totalMyOpsPendingCount;
 
   const filteredMyReports = useMemo(() => {
     const q = normalizeText(mySearch);
@@ -426,6 +462,33 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     });
   }, [myOpReports, myFilter, mySearch, currentUser.id]);
 
+  const filteredMyCatOpReports = useMemo(() => {
+    const q = normalizeText(mySearch);
+    return myCatOpReports.filter(rel => {
+      const isCreator = rel.criadorId === currentUser.id;
+      const myOp = (rel.operadores || []).find(op => op.userId === currentUser.id);
+      const eff = myOp ? isPolOpOperatorEffectivelySigned(myOp, rel.createdAt) : null;
+      const isPendingForMe = Boolean(myOp && eff && !eff.signed);
+      const isSignedJointForMe = Boolean(myOp && eff && eff.signed && !isCreator);
+
+      if (myFilter === 'CRIADOS' && !isCreator) return false;
+      if (myFilter === 'ASSINADOS' && !isSignedJointForMe) return false;
+      if (myFilter === 'PENDENTES' && !isPendingForMe) return false;
+
+      if (q) {
+        const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
+        const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
+        const aeroText = (rel.aeronaves || []).map(a => `${a.tipo} ${a.prefixo} ${a.pilotoNome || ''} ${a.copilotoNome || ''}`).join(' ');
+        const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao} ${v.tipoApoio}`).join(' ');
+        const hay = normalizeText(
+          `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoVoo || ''} ${rel.tipoVooOutrosDescricao || ''} ${rel.criadorNome} ${opNames} ${aeroText} ${vtrText} ${rel.sinopseVoo}`
+        );
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [myCatOpReports, myFilter, mySearch, currentUser.id]);
+
   // Relatórios da Unidade (escopo da unidade selecionada — visível para Armeiro, Administrador e Geral)
   const unitScopedTrainReports = useMemo(() => {
     if (!canViewUnitReports) return [];
@@ -447,7 +510,18 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     });
   }, [canViewUnitReports, allOpReports, effectiveUnitId, allUsers]);
 
-  const totalUnitReportsCount = unitScopedTrainReports.length + unitScopedOpReports.length;
+  const unitScopedCatOpReports = useMemo(() => {
+    if (!canViewUnitReports || !isCatUnit) return [];
+    return allCatOpReports.filter(rel => {
+      if (!effectiveUnitId) return true;
+      if (rel.unitId) return rel.unitId === effectiveUnitId;
+      const creator = allUsers.find(u => u.id === rel.criadorId);
+      return creator?.unitId === effectiveUnitId;
+    });
+  }, [canViewUnitReports, isCatUnit, allCatOpReports, effectiveUnitId, allUsers]);
+
+  const totalUnitOpsCount = unitScopedOpReports.length + unitScopedCatOpReports.length;
+  const totalUnitReportsCount = unitScopedTrainReports.length + totalUnitOpsCount;
 
   const unitOperatorsForFilter = useMemo(() => {
     const map = new Map<string, { id: string; name: string; masp: string }>();
@@ -477,8 +551,18 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
         }
       }
     }
+    for (const rel of unitScopedCatOpReports) {
+      if (rel.criadorId && !map.has(rel.criadorId)) {
+        map.set(rel.criadorId, { id: rel.criadorId, name: rel.criadorNome, masp: rel.criadorMasp || '' });
+      }
+      for (const o of rel.operadores || []) {
+        if (o.userId && !map.has(o.userId)) {
+          map.set(o.userId, { id: o.userId, name: o.name, masp: o.masp || '' });
+        }
+      }
+    }
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
-  }, [allUsers, effectiveUnitId, unitScopedTrainReports, unitScopedOpReports]);
+  }, [allUsers, effectiveUnitId, unitScopedTrainReports, unitScopedOpReports, unitScopedCatOpReports]);
 
   const filteredUnitTrainReports = useMemo(() => {
     const q = normalizeText(unitSearch);
@@ -537,6 +621,32 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       return true;
     });
   }, [unitScopedOpReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
+
+  const filteredUnitCatOpReports = useMemo(() => {
+    const q = normalizeText(unitSearch);
+    return unitScopedCatOpReports.filter(rel => {
+      const dt = String(rel.dataOperacao || '').slice(0, 10);
+      if (unitDateStart && dt < unitDateStart) return false;
+      if (unitDateEnd && dt > unitDateEnd) return false;
+      if (unitOperatorId) {
+        const matchOp =
+          rel.criadorId === unitOperatorId ||
+          (rel.operadores || []).some(o => o.userId === unitOperatorId);
+        if (!matchOp) return false;
+      }
+      if (q) {
+        const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
+        const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
+        const aeroText = (rel.aeronaves || []).map(a => `${a.tipo} ${a.prefixo} ${a.pilotoNome || ''} ${a.copilotoNome || ''}`).join(' ');
+        const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao} ${v.tipoApoio}`).join(' ');
+        const hay = normalizeText(
+          `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoVoo || ''} ${rel.criadorNome} ${opNames} ${aeroText} ${vtrText} ${rel.sinopseVoo}`
+        );
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [unitScopedCatOpReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
 
   const resetForm = () => {
     setEditingReport(null);
@@ -955,6 +1065,54 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       setLocalVersion(v => v + 1);
       if (onRefresh) onRefresh();
       setFeedback({ type: 'success', message: 'Relatório de operação excluído com sucesso.' });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleStartEditCatOp = (rel: RelatorioOperacaoCat) => {
+    setFeedback(null);
+    setEditingCatOpReport(rel);
+    setSubTab('OPERACOES');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleSignCatOpReport = async (rel: RelatorioOperacaoCat) => {
+    setFeedback(null);
+    setSigningCatOpId(rel.id);
+    try {
+      const res = await storage.assinarRelatorioOperacaoCat(rel.id);
+      if (!res.success) {
+        setFeedback({ type: 'error', message: res.error || 'Erro ao assinar relatório de operação CAT.' });
+        return;
+      }
+      setLocalVersion(v => v + 1);
+      if (onRefresh) onRefresh();
+      setFeedback({ type: 'success', message: 'Relatório de operação CAT assinado eletronicamente com sucesso!' });
+      if (viewModalCatOpReport?.id === rel.id) {
+        const refreshed = storage.getRelatoriosOperacoesCat().find(r => r.id === rel.id);
+        if (refreshed) setViewModalCatOpReport(refreshed);
+      }
+    } finally {
+      setSigningCatOpId(null);
+    }
+  };
+
+  const handleDeleteCatOpReport = async (id: string) => {
+    setFeedback(null);
+    setIsSubmitting(true);
+    try {
+      const res = await storage.deleteRelatorioOperacaoCat(id);
+      if (!res.success) {
+        setFeedback({ type: 'error', message: res.error || 'Erro ao excluir relatório de operação CAT.' });
+        return;
+      }
+      setConfirmDeleteCatOpListId(null);
+      if (editingCatOpReport?.id === id) setEditingCatOpReport(null);
+      if (viewModalCatOpReport?.id === id) setViewModalCatOpReport(null);
+      setLocalVersion(v => v + 1);
+      if (onRefresh) onRefresh();
+      setFeedback({ type: 'success', message: 'Relatório de operação CAT excluído com sucesso.' });
     } finally {
       setIsSubmitting(false);
     }
@@ -1659,27 +1817,46 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       )}
 
       {/* ================================================================= */}
-      {/* GUIA 2: RELATÓRIO DE OPERAÇÕES (SINOPSE DE OPERAÇÃO)               */}
+      {/* GUIA 2: RELATÓRIO DE OPERAÇÕES (SINOPSE DE OPERAÇÃO / CAT)         */}
       {/* ================================================================= */}
-      {subTab === 'OPERACOES' && (
-        <RelatorioOperacoesPolicialForm
-          currentUser={currentUser}
-          departments={departments}
-          units={units}
-          allUsers={allUsers}
-          activeUnitId={effectiveUnitId}
-          activeUnitName={activeUnitName}
-          activeDeptId={effectiveDeptId}
-          activeDeptName={activeDeptName}
-          editingReportExternal={editingOpReport}
-          onClearExternalEdit={() => setEditingOpReport(null)}
-          onSaved={() => {
-            setLocalVersion(v => v + 1);
-            if (onRefresh) onRefresh();
-          }}
-          dataVersion={dataVersion + localVersion}
-        />
-      )}
+      {subTab === 'OPERACOES' &&
+        (isCatUnit ? (
+          <RelatorioOperacoesCatForm
+            currentUser={currentUser}
+            departments={departments}
+            units={units}
+            allUsers={allUsers}
+            activeUnitId={effectiveUnitId}
+            activeUnitName={activeUnitName}
+            activeDeptId={effectiveDeptId}
+            activeDeptName={activeDeptName}
+            editingReportExternal={editingCatOpReport}
+            onClearExternalEdit={() => setEditingCatOpReport(null)}
+            onSaved={() => {
+              setLocalVersion(v => v + 1);
+              if (onRefresh) onRefresh();
+            }}
+            dataVersion={dataVersion + localVersion}
+          />
+        ) : (
+          <RelatorioOperacoesPolicialForm
+            currentUser={currentUser}
+            departments={departments}
+            units={units}
+            allUsers={allUsers}
+            activeUnitId={effectiveUnitId}
+            activeUnitName={activeUnitName}
+            activeDeptId={effectiveDeptId}
+            activeDeptName={activeDeptName}
+            editingReportExternal={editingOpReport}
+            onClearExternalEdit={() => setEditingOpReport(null)}
+            onSaved={() => {
+              setLocalVersion(v => v + 1);
+              if (onRefresh) onRefresh();
+            }}
+            dataVersion={dataVersion + localVersion}
+          />
+        ))}
 
       {/* ================================================================= */}
       {/* GUIA 3: MEUS RELATÓRIOS                                            */}
@@ -1716,7 +1893,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                 [
                   { id: 'TODOS', label: `Todos os Tipos (${totalMyReportsCount})` },
                   { id: 'TREINAMENTO', label: `Treinamento (${myReports.length})` },
-                  { id: 'OPERACOES', label: `Operações (${myOpReports.length})` }
+                  { id: 'OPERACOES', label: `Operações (${totalMyOpsCount})` }
                 ] as Array<{ id: MyCategoryFilter; label: string }>
               ).map(cat => (
                 <button
@@ -2066,10 +2243,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
               >
                 <span className="flex items-center space-x-2">
                   <Shield className="w-4 h-4 text-cyan-400" />
-                  <span>MEUS RELATÓRIOS DE OPERAÇÕES ({filteredMyOpReports.length})</span>
-                  {pendingOpSignatureCount > 0 && (
+                  <span>
+                    MEUS RELATÓRIOS DE OPERAÇÕES ({filteredMyOpReports.length + filteredMyCatOpReports.length})
+                  </span>
+                  {totalMyOpsPendingCount > 0 && (
                     <span className="px-1.5 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
-                      {pendingOpSignatureCount} pendente{pendingOpSignatureCount > 1 ? 's' : ''}
+                      {totalMyOpsPendingCount} pendente{totalMyOpsPendingCount > 1 ? 's' : ''}
                     </span>
                   )}
                 </span>
@@ -2081,12 +2260,251 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
               {isMyOpsSectionOpen && (
                 <div className="p-3 space-y-2.5 bg-slate-900/60">
-                  {filteredMyOpReports.length === 0 ? (
+                  {filteredMyOpReports.length === 0 && filteredMyCatOpReports.length === 0 ? (
                     <div className="p-6 text-center text-xs text-slate-400">
                       Nenhum relatório de operação encontrado para o filtro selecionado.
                     </div>
                   ) : (
-                    filteredMyOpReports.map(rel => {
+                    <>
+                    {filteredMyCatOpReports.map(rel => {
+                      const isExpanded = Boolean(expandedOpIds[`cat-${rel.id}`]);
+                      const ops = rel.operadores || [];
+                      const myOp = ops.find(o => o.userId === currentUser.id);
+                      const myEff = myOp ? isPolOpOperatorEffectivelySigned(myOp, rel.createdAt) : null;
+                      const needsMySignature = Boolean(myOp && myEff && !myEff.signed);
+                      const remainingMs = getPolOpRemainingEditMs(rel.createdAt, nowMs);
+                      const isCitedOrGeral =
+                        (currentUser.activeRole || currentUser.role) === 'Geral' ||
+                        rel.criadorId === currentUser.id ||
+                        Boolean(myOp);
+                      const canEditOrDelete = remainingMs > 0 && isCitedOrGeral;
+                      const municipiosLabel = [
+                        `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+                        ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
+                      ].join(' • ');
+                      const otherOps = ops.filter(o => o.userId !== rel.criadorId);
+                      const allOpsTooltip = [
+                        `${rel.criadorNome} (Digitador)`,
+                        ...otherOps.map(o => {
+                          const st = isPolOpOperatorEffectivelySigned(o, rel.createdAt);
+                          return `${o.name}${st.signed ? (st.autoSigned ? ' ✓ (30d)' : ' ✓') : ' (Pendente)'}`;
+                        })
+                      ].join('\n');
+                      const prefixos = (rel.aeronaves || []).map(a => `${a.tipo} ${a.prefixo}`).join(', ');
+
+                      return (
+                        <div
+                          key={`cat-${rel.id}`}
+                          className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-3.5 space-y-3 text-xs"
+                        >
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black inline-flex items-center space-x-1">
+                                  <Plane className="w-3 h-3" />
+                                  <span>CAT</span>
+                                </span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {formatDateBr(rel.dataOperacao)}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-mono">
+                                  {rel.horarioDecolagem} → {rel.horarioVooOperacao}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                                  {municipiosLabel}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-semibold">
+                                  {rel.comEmpregoAeronave
+                                    ? `${rel.tipoVoo || 'COM AERONAVE'}${prefixos ? ` • ${prefixos}` : ''}`
+                                    : 'Sem emprego de aeronave'}
+                                </span>
+                                {rel.comEmpregoAeronave && (
+                                  <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-200 text-[10px] font-mono">
+                                    Voo: {rel.horasTotaisVoo || sumFlightHoursHHMM(rel.aeronaves || [])}h
+                                  </span>
+                                )}
+                                {needsMySignature && (
+                                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                                    Assinatura Pendente
+                                  </span>
+                                )}
+                                {canEditOrDelete && (
+                                  <span className="px-2 py-0.5 rounded bg-slate-900 border border-cyan-500/30 text-cyan-300 text-[10px] font-mono">
+                                    Edição: {formatRemainingCountdown(remainingMs)}
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-300">
+                                {otherOps.length > 0 ? (
+                                  <span>
+                                    <span className="text-slate-400">Digitador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>{' '}
+                                    <span className="text-slate-400">e </span>
+                                    <span
+                                      title={allOpsTooltip}
+                                      className="font-bold text-cyan-300 underline decoration-dotted cursor-help"
+                                    >
+                                      OUTROS ({otherOps.length})
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    <span className="text-slate-400">Operador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {needsMySignature && (
+                                <button
+                                  type="button"
+                                  disabled={signingCatOpId === rel.id}
+                                  onClick={() => handleSignCatOpReport(rel)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center space-x-1 transition disabled:opacity-50"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{signingCatOpId === rel.id ? 'Assinando...' : 'Assinar'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandOpItem(`cat-${rel.id}`)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <span>{isExpanded ? 'Fechar' : 'Abrir'}</span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setViewModalCatOpReport(rel)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Ver</span>
+                              </button>
+
+                              {canEditOrDelete && isCatUnit && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleStartEditCatOp(rel)}
+                                  className="px-2.5 py-1.5 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                  <span>Editar</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  printRelatorioOperacaoCat(
+                                    rel,
+                                    units,
+                                    departments,
+                                    activeUnitName,
+                                    activeDeptName
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+
+                              {canEditOrDelete && (
+                                confirmDeleteCatOpListId === rel.id ? (
+                                  <div className="flex items-center space-x-1">
+                                    <button
+                                      type="button"
+                                      disabled={isSubmitting}
+                                      onClick={() => handleDeleteCatOpReport(rel.id)}
+                                      className="px-2 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[11px]"
+                                    >
+                                      Confirmar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setConfirmDeleteCatOpListId(null)}
+                                      className="px-2 py-1.5 rounded-lg bg-slate-800 text-slate-300 font-bold text-[11px]"
+                                    >
+                                      Não
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteCatOpListId(rel.id)}
+                                    className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 transition"
+                                    title="Excluir relatório CAT"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )
+                              )}
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                              {rel.comEmpregoAeronave && (rel.aeronaves || []).length > 0 && (
+                                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-1.5">
+                                  <span className="block text-[10px] font-bold uppercase text-amber-300">
+                                    Aeronave(s) e Tripulação de Comando — Total: {rel.horasTotaisVoo || sumFlightHoursHHMM(rel.aeronaves || [])}h
+                                  </span>
+                                  {rel.aeronaves.map(a => (
+                                    <div key={a.aeronaveId} className="text-[11px] text-slate-200">
+                                      <strong>{a.tipo} {a.prefixo}</strong> • Piloto: {a.pilotoNome || '-'}
+                                      {a.copilotoNome ? ` • Copiloto: ${a.copilotoNome}` : ''} • Horas: <span className="font-mono">{a.horasVoo || '00:00'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                  {rel.comEmpregoAeronave ? 'Sinopse do Voo' : 'Sinopse da Operação'}
+                                </span>
+                                <p className="text-slate-200 whitespace-pre-wrap bg-slate-900/70 border border-slate-800 rounded-lg p-3">
+                                  {rel.sinopseVoo}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
+                                  Operadores / Assinaturas ({ops.length})
+                                </span>
+                                <div className="space-y-1.5">
+                                  {ops.map(op => {
+                                    const st = isPolOpOperatorEffectivelySigned(op, rel.createdAt);
+                                    return (
+                                      <div
+                                        key={op.userId}
+                                        className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5"
+                                      >
+                                        <span className="text-slate-200">
+                                          <span className="font-semibold">{op.name}</span>
+                                          {op.cargo && <span className="text-[10px] text-slate-400"> • {op.cargo}</span>}
+                                          {op.userId === rel.criadorId && (
+                                            <span className="text-[10px] text-cyan-300 font-bold"> (Digitador)</span>
+                                          )}
+                                        </span>
+                                        <span className={`font-bold text-[11px] ${st.signed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                          {st.signed ? (st.autoSigned ? '✓ Assinado (30 dias)' : '✓ Assinado') : 'Pendente'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {filteredMyOpReports.map(rel => {
                       const isExpanded = Boolean(expandedOpIds[rel.id]);
                       const ops = rel.operadores || [];
                       const myOp = ops.find(o => o.userId === currentUser.id);
@@ -2438,7 +2856,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                           )}
                         </div>
                       );
-                    })
+                    })}
+                    </>
                   )}
                 </div>
               )}
@@ -2486,7 +2905,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
               >
                 <option value="TODOS">Todos ({totalUnitReportsCount})</option>
                 <option value="TREINAMENTO">Treinamento ({unitScopedTrainReports.length})</option>
-                <option value="OPERACOES">Operações ({unitScopedOpReports.length})</option>
+                <option value="OPERACOES">Operações ({totalUnitOpsCount})</option>
               </select>
             </div>
 
@@ -2737,7 +3156,9 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
               >
                 <span className="flex items-center space-x-2">
                   <Shield className="w-4 h-4 text-cyan-400" />
-                  <span>RELATÓRIOS DE OPERAÇÕES DA UNIDADE ({filteredUnitOpReports.length})</span>
+                  <span>
+                    RELATÓRIOS DE OPERAÇÕES DA UNIDADE ({filteredUnitOpReports.length + filteredUnitCatOpReports.length})
+                  </span>
                 </span>
                 <span className="flex items-center space-x-1 text-slate-400">
                   <span>{isUnitOpsSectionOpen ? 'Ocultar' : 'Abrir'}</span>
@@ -2747,12 +3168,199 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
               {isUnitOpsSectionOpen && (
                 <div className="p-3 space-y-2.5 bg-slate-900/60">
-                  {filteredUnitOpReports.length === 0 ? (
+                  {filteredUnitOpReports.length === 0 && filteredUnitCatOpReports.length === 0 ? (
                     <div className="p-6 text-center text-xs text-slate-400">
                       Nenhum relatório de operação encontrado para os filtros selecionados.
                     </div>
                   ) : (
-                    filteredUnitOpReports.map(rel => {
+                    <>
+                    {filteredUnitCatOpReports.map(rel => {
+                      const itemKey = `ucat-${rel.id}`;
+                      const isExpanded = Boolean(expandedUnitIds[itemKey]);
+                      const ops = rel.operadores || [];
+                      const myOp = ops.find(o => o.userId === currentUser.id);
+                      const myEff = myOp ? isPolOpOperatorEffectivelySigned(myOp, rel.createdAt) : null;
+                      const needsMySignature = Boolean(myOp && myEff && !myEff.signed);
+                      const municipiosLabel = [
+                        `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+                        ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
+                      ].join(' • ');
+                      const otherOps = ops.filter(o => o.userId !== rel.criadorId);
+                      const allOpsTooltip = [
+                        `${rel.criadorNome} (Digitador)`,
+                        ...otherOps.map(o => {
+                          const st = isPolOpOperatorEffectivelySigned(o, rel.createdAt);
+                          return `${o.name}${st.signed ? (st.autoSigned ? ' ✓ (30d)' : ' ✓') : ' (Pendente)'}`;
+                        })
+                      ].join('\n');
+                      const prefixos = (rel.aeronaves || []).map(a => `${a.tipo} ${a.prefixo}`).join(', ');
+
+                      return (
+                        <div
+                          key={itemKey}
+                          className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-3.5 space-y-3 text-xs"
+                        >
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="px-2 py-0.5 rounded bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-black inline-flex items-center space-x-1">
+                                  <Plane className="w-3 h-3" />
+                                  <span>CAT</span>
+                                </span>
+                                <span className="font-mono font-bold text-slate-100">
+                                  {formatDateBr(rel.dataOperacao)}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-mono">
+                                  {rel.horarioDecolagem} → {rel.horarioVooOperacao}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                                  {municipiosLabel}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-semibold">
+                                  {rel.comEmpregoAeronave
+                                    ? `${rel.tipoVoo || 'COM AERONAVE'}${prefixos ? ` • ${prefixos}` : ''}`
+                                    : 'Sem emprego de aeronave'}
+                                </span>
+                                {rel.comEmpregoAeronave && (
+                                  <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-amber-200 text-[10px] font-mono">
+                                    Voo: {rel.horasTotaisVoo || sumFlightHoursHHMM(rel.aeronaves || [])}h
+                                  </span>
+                                )}
+                                {needsMySignature && (
+                                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                                    Assinatura Pendente
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-300">
+                                {otherOps.length > 0 ? (
+                                  <span>
+                                    <span className="text-slate-400">Digitador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>{' '}
+                                    <span className="text-slate-400">e </span>
+                                    <span
+                                      title={allOpsTooltip}
+                                      className="font-bold text-cyan-300 underline decoration-dotted cursor-help"
+                                    >
+                                      OUTROS ({otherOps.length})
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    <span className="text-slate-400">Operador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {needsMySignature && (
+                                <button
+                                  type="button"
+                                  disabled={signingCatOpId === rel.id}
+                                  onClick={() => handleSignCatOpReport(rel)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center space-x-1 transition disabled:opacity-50"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{signingCatOpId === rel.id ? 'Assinando...' : 'Assinar'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandUnitItem(itemKey)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <span>{isExpanded ? 'Fechar' : 'Abrir'}</span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setViewModalCatOpReport(rel)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Ver</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  printRelatorioOperacaoCat(
+                                    rel,
+                                    units,
+                                    departments,
+                                    activeUnitName,
+                                    activeDeptName
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                              {rel.comEmpregoAeronave && (rel.aeronaves || []).length > 0 && (
+                                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5 space-y-1.5">
+                                  <span className="block text-[10px] font-bold uppercase text-amber-300">
+                                    Aeronave(s) — Total: {rel.horasTotaisVoo || sumFlightHoursHHMM(rel.aeronaves || [])}h
+                                  </span>
+                                  {rel.aeronaves.map(a => (
+                                    <div key={a.aeronaveId} className="text-[11px] text-slate-200">
+                                      <strong>{a.tipo} {a.prefixo}</strong> • Piloto: {a.pilotoNome || '-'}
+                                      {a.copilotoNome ? ` • Copiloto: ${a.copilotoNome}` : ''} • Horas: <span className="font-mono">{a.horasVoo || '00:00'}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                  {rel.comEmpregoAeronave ? 'Sinopse do Voo' : 'Sinopse da Operação'}
+                                </span>
+                                <p className="text-slate-200 whitespace-pre-wrap bg-slate-900/70 border border-slate-800 rounded-lg p-3">
+                                  {rel.sinopseVoo}
+                                </p>
+                              </div>
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
+                                  Operadores / Assinaturas ({ops.length})
+                                </span>
+                                <div className="space-y-1.5">
+                                  {ops.map(op => {
+                                    const st = isPolOpOperatorEffectivelySigned(op, rel.createdAt);
+                                    return (
+                                      <div
+                                        key={op.userId}
+                                        className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5"
+                                      >
+                                        <span className="text-slate-200">
+                                          <span className="font-semibold">{op.name}</span>
+                                          {op.cargo && <span className="text-[10px] text-slate-400"> • {op.cargo}</span>}
+                                          {op.userId === rel.criadorId && (
+                                            <span className="text-[10px] text-cyan-300 font-bold"> (Digitador)</span>
+                                          )}
+                                        </span>
+                                        <span className={`font-bold text-[11px] ${st.signed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                          {st.signed ? (st.autoSigned ? '✓ Assinado (30 dias)' : '✓ Assinado') : 'Pendente'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                    {filteredUnitOpReports.map(rel => {
                       const itemKey = `uo-${rel.id}`;
                       const isExpanded = Boolean(expandedUnitIds[itemKey]);
                       const ops = rel.operadores || [];
@@ -3039,7 +3647,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                           )}
                         </div>
                       );
-                    })
+                    })}
+                    </>
                   )}
                 </div>
               )}
@@ -3497,6 +4106,329 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                       <button
                         type="button"
                         onClick={() => setViewModalOpReport(null)}
+                        className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+                      >
+                        Fechar
+                      </button>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal de Visualização — Relatório de Operação CAT (Ver) */}
+      {viewModalCatOpReport && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between sticky top-0 bg-slate-900 z-10">
+              <div>
+                <h3 className="text-sm font-black uppercase text-slate-100 flex items-center space-x-2">
+                  <Plane className="w-4 h-4 text-amber-400" />
+                  <span>
+                    Relatório de Operação CAT —{' '}
+                    {viewModalCatOpReport.comEmpregoAeronave ? 'Com Emprego de Aeronave' : 'Sem Emprego de Aeronave'}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Saída Base: {formatDateBr(viewModalCatOpReport.dataSaidaBase)} • Operação:{' '}
+                  {formatDateBr(viewModalCatOpReport.dataOperacao)} • {viewModalCatOpReport.horarioDecolagem} →{' '}
+                  {viewModalCatOpReport.horarioVooOperacao} • {viewModalCatOpReport.unitName || activeUnitName}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setViewModalCatOpReport(null)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              {(() => {
+                const ops = viewModalCatOpReport.operadores || [];
+                const myOp = ops.find(o => o.userId === currentUser.id);
+                const myEff = myOp ? isPolOpOperatorEffectivelySigned(myOp, viewModalCatOpReport.createdAt) : null;
+                const needsSign = Boolean(myOp && myEff && !myEff.signed);
+                const allMunicipios = [
+                  `${viewModalCatOpReport.municipioOperacao}/${viewModalCatOpReport.estadoOperacao}`,
+                  ...(!viewModalCatOpReport.apenasUmMunicipio
+                    ? (viewModalCatOpReport.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`)
+                    : [])
+                ];
+
+                return (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                        <span className="block text-[10px] font-bold uppercase text-slate-400">
+                          Município(s) da Operação
+                        </span>
+                        <span className="font-bold text-amber-300 block mt-0.5">
+                          {allMunicipios.join(' • ')}
+                        </span>
+                      </div>
+                      {viewModalCatOpReport.comEmpregoAeronave && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                          <span className="block text-[10px] font-bold uppercase text-slate-400">
+                            Tipo de Voo
+                          </span>
+                          <span className="font-bold text-cyan-300 block mt-0.5">
+                            {viewModalCatOpReport.tipoVoo || 'APOIO OPERACIONAL'}
+                            {viewModalCatOpReport.tipoVoo === 'OUTROS TIPOS' &&
+                            viewModalCatOpReport.tipoVooOutrosDescricao
+                              ? ` — ${viewModalCatOpReport.tipoVooOutrosDescricao}`
+                              : ''}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
+                    {viewModalCatOpReport.comEmpregoAeronave &&
+                      (viewModalCatOpReport.aeronaves || []).length > 0 && (
+                        <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-bold uppercase text-amber-300">
+                              Aeronave(s) Empregada(s) e Tripulação de Comando
+                            </span>
+                            <span className="text-[11px] font-mono font-bold text-amber-200">
+                              Total: {viewModalCatOpReport.horasTotaisVoo || sumFlightHoursHHMM(viewModalCatOpReport.aeronaves || [])}h
+                            </span>
+                          </div>
+                          {viewModalCatOpReport.aeronaves.map(a => (
+                            <div
+                              key={a.aeronaveId}
+                              className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
+                            >
+                              <div className="font-bold text-amber-200">
+                                {a.tipo} • {a.prefixo} {a.descricao ? `— ${a.descricao}` : ''}
+                              </div>
+                              <div className="text-[11px] text-slate-300">
+                                Piloto: <strong>{a.pilotoNome || 'Não informado'}</strong>
+                                {a.copilotoNome ? ` • Copiloto: ${a.copilotoNome}` : ''} • Horas de Voo:{' '}
+                                <strong className="font-mono">{a.horasVoo || '00:00'}</strong>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    {(viewModalCatOpReport.viaturas || []).length > 0 && (
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                        <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                          Viatura(s) Empregada(s) ({viewModalCatOpReport.viaturas.length})
+                        </span>
+                        {viewModalCatOpReport.viaturas.map(v => (
+                          <div
+                            key={v.id}
+                            className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
+                          >
+                            <div className="font-mono font-bold">
+                              {v.placa} {v.descricao ? `— ${v.descricao}` : ''}
+                            </div>
+                            <div className="text-[11px] text-slate-300">
+                              Integrante(s): {(v.operadores || []).map(o => o.name).join(', ') || 'Não informado'}
+                            </div>
+                            <div className="text-[11px] text-slate-400">Apoio: {v.tipoApoio || '-'}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {viewModalCatOpReport.comEmpregoAeronave &&
+                      ((viewModalCatOpReport.tripulantesOperacionais || []).length > 0 ||
+                        (viewModalCatOpReport.tripulantesOutraUnidade || []).length > 0) && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                          <span className="block text-[10px] font-bold uppercase text-slate-400">
+                            Tripulantes Operacionais
+                          </span>
+                          {(viewModalCatOpReport.tripulantesOperacionais || []).map(t => (
+                            <div key={`cat-t-${t.userId}`} className="text-[11px] text-slate-200">
+                              <strong>[CAT]</strong> {t.name}{' '}
+                              {t.masp ? `(MASP ${formatMasp(t.masp)})` : ''}
+                            </div>
+                          ))}
+                          {(viewModalCatOpReport.tripulantesOutraUnidade || []).map(t => (
+                            <div key={`coe-t-${t.userId}`} className="text-[11px] text-slate-200">
+                              <strong>[COE{t.unitName ? ` — ${t.unitName}` : ''}]</strong> {t.name}{' '}
+                              {t.masp ? `(MASP ${formatMasp(t.masp)})` : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    {viewModalCatOpReport.teveEquipeSolo &&
+                      (viewModalCatOpReport.equipeSolo || []).length > 0 && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                          <span className="block text-[10px] font-bold uppercase text-slate-400">
+                            Equipe em Solo ({viewModalCatOpReport.equipeSolo.length})
+                          </span>
+                          {viewModalCatOpReport.equipeSolo.map(s => (
+                            <div key={s.userId} className="text-[11px] text-slate-200">
+                              <strong>{s.name}</strong> — {s.operacaoSolo}
+                              {s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
+                                ? `: ${s.apoioLogisticoDescricao}`
+                                : ''}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    {viewModalCatOpReport.teveEmbarcadoExterno &&
+                      (viewModalCatOpReport.embarcadosExternos || []).length > 0 && (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                          <span className="block text-[10px] font-bold uppercase text-slate-400">
+                            Embarcado(s) Externo(s) ({viewModalCatOpReport.embarcadosExternos.length})
+                          </span>
+                          {viewModalCatOpReport.embarcadosExternos.map(e => (
+                            <div key={e.id} className="text-[11px] text-slate-200">
+                              <strong>{e.name}</strong> (MASP: {e.masp ? formatMasp(e.masp) : 'N/A'}) —{' '}
+                              {e.foraDoSistema
+                                ? 'Policial de fora do sistema'
+                                : e.ehDaCoe
+                                ? `COE${e.unitName ? ` / ${e.unitName}` : ''}`
+                                : `${e.departmentName || 'Outro Depto'}${e.unitName ? ` / ${e.unitName}` : ''}`}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    {viewModalCatOpReport.comEmpregoAeronave && (
+                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <div>
+                            <span className="block text-[10px] font-bold uppercase text-slate-400">
+                              Tripulantes desembarcaram?
+                            </span>
+                            <span className="font-bold text-slate-100">
+                              {viewModalCatOpReport.tripulantesDesembarcaram ? 'SIM' : 'NÃO'}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="block text-[10px] font-bold uppercase text-slate-400">
+                              Captura / Localização com aeronave?
+                            </span>
+                            <span className="font-bold text-slate-100">
+                              {viewModalCatOpReport.participouCapturaLocalizacao ? 'SIM' : 'NÃO'}
+                            </span>
+                          </div>
+                        </div>
+                        {viewModalCatOpReport.participouCapturaLocalizacao &&
+                          (viewModalCatOpReport.capturasLocalizacoes || []).length > 0 && (
+                            <div className="space-y-1 pt-2 border-t border-slate-800">
+                              {viewModalCatOpReport.capturasLocalizacoes.map((c, idx) => (
+                                <div key={`${c.tipo}-${idx}`} className="text-[11px] text-slate-200">
+                                  <strong className="text-amber-300">{c.tipo}</strong> — Qtd: {c.quantidade}
+                                  {c.detalhes ? ` • ${c.detalhes}` : ''}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                      </div>
+                    )}
+
+                    {viewModalCatOpReport.teveDisparosCat &&
+                      (viewModalCatOpReport.disparosCat || []).length > 0 && (
+                        <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-1.5">
+                          <span className="block text-[10px] font-bold uppercase text-amber-300">
+                            Disparos por Operadores da CAT
+                          </span>
+                          {viewModalCatOpReport.disparosCat.map((d, i) => (
+                            <div
+                              key={d.id || i}
+                              className="text-slate-200 bg-slate-900 border border-slate-800 rounded-lg p-2 text-[11px]"
+                            >
+                              <strong>[{d.origem === 'ACERVO' ? 'Acervo' : 'Fora do Acervo'}]</strong> {d.marca}{' '}
+                              {d.modelo} • Nº Série: {d.numeroSerie} • Calibre: {d.calibre} •{' '}
+                              <strong>{d.quantidadeTiros} tiro(s)</strong>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                      <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
+                        {viewModalCatOpReport.comEmpregoAeronave ? 'Sinopse do Voo' : 'Sinopse da Operação'}
+                      </span>
+                      <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+                        {viewModalCatOpReport.sinopseVoo}
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                      <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                        Assinaturas Eletrônicas ({ops.length})
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {ops.map(op => {
+                          const st = isPolOpOperatorEffectivelySigned(op, viewModalCatOpReport.createdAt);
+                          return (
+                            <div
+                              key={op.userId}
+                              className="flex items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-2"
+                            >
+                              <div>
+                                <p className="font-bold text-slate-100">{op.name}</p>
+                                <p className="text-[11px] text-slate-300">{op.cargo || 'Policial Civil'}</p>
+                                <p className="text-[10px] text-slate-400 font-mono">
+                                  MASP: {op.masp ? formatMasp(op.masp) : 'N/A'}
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <span
+                                  className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                    st.signed
+                                      ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+                                  }`}
+                                >
+                                  {st.signed ? (st.autoSigned ? '✓ Assinado (30d)' : '✓ Assinado') : 'Pendente'}
+                                </span>
+                                {op.userId === viewModalCatOpReport.criadorId && (
+                                  <span className="block text-[10px] font-bold text-cyan-300 mt-0.5">
+                                    Digitador
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-slate-800">
+                      {needsSign && (
+                        <button
+                          type="button"
+                          disabled={signingCatOpId === viewModalCatOpReport.id}
+                          onClick={() => handleSignCatOpReport(viewModalCatOpReport)}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center space-x-1.5"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>Assinar Relatório</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          printRelatorioOperacaoCat(
+                            viewModalCatOpReport,
+                            units,
+                            departments,
+                            activeUnitName,
+                            activeDeptName
+                          )
+                        }
+                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5"
+                      >
+                        <Printer className="w-4 h-4" />
+                        <span>Imprimir</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setViewModalCatOpReport(null)}
                         className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
                       >
                         Fechar
