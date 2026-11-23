@@ -727,9 +727,9 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
             ${rel.condutorAssinado ? '<div class="sig-digital">Assinado eletronicamente</div>' : '<div class="sig-space"></div>'}
             <div class="sig-line">${escapeHtmlText(rel.condutorNome)}</div>
             <div class="sig-meta">${rel.condutorMasp ? `MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))}` : ''} ${rel.condutorCargo ? `• ${escapeHtmlText(rel.condutorCargo)}` : ''}</div>
-            <div class="sig-role">Condutor Responsável • Cão(s): ${escapeHtmlText(creatorDogsText)}</div>
+            <div class="sig-role">Condutor Digitador • Cão(s): ${escapeHtmlText(creatorDogsText)}</div>
           </div>
-          ${(rel.participantes || []).slice(0, 15).map((p, idx) => {
+          ${(rel.participantes || []).slice(0, 15).map((p) => {
             const dogsText = (p.cachorros && p.cachorros.length > 0)
               ? p.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}${c.microchip ? ` [Chip: ${c.microchip}]` : ''}`).join(', ')
               : 'Sem cachorro';
@@ -738,7 +738,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
               ${p.signed ? `<div class="sig-digital">Assinado eletronicamente${p.signedAt ? ` em ${escapeHtmlText(new Date(p.signedAt).toLocaleString('pt-BR'))}` : ''}</div>` : '<div class="sig-space"></div>'}
               <div class="sig-line">${escapeHtmlText(p.name)}</div>
               <div class="sig-meta">${p.masp ? `MASP: ${escapeHtmlText(formatMasp(p.masp))}` : ''} ${p.cargo ? `• ${escapeHtmlText(p.cargo)}` : ''}</div>
-              <div class="sig-role">Participante ${idx + 1} • Cão(s): ${escapeHtmlText(dogsText)}</div>
+              <div class="sig-role">Condutor • Cão(s): ${escapeHtmlText(dogsText)}</div>
             </div>
           `;
           }).join('')}
