@@ -12,11 +12,14 @@ import {
   TripulanteOperacionalCat,
   EquipeSoloOperacaoCat,
   EmbarcadoExternoCat,
+  TipoEmbarcadoExternoCat,
   DisparoOperacaoCat,
   CapturaLocalizacaoCatItem,
   MunicipioOperacaoPolicial,
   RelatorioOperacaoCat,
-  getSystemLogo
+  getSystemLogo,
+  getUserCatHabilitacoes,
+  userHasCatFuncaoForAeronave
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
@@ -78,6 +81,8 @@ const MAX_APOIO_VIATURA = 250;
 const MAX_APOIO_LOGISTICO = 300;
 const MAX_TIPO_VOO_OUTROS = 200;
 const MAX_CAPTURA_DETALHES = 500;
+const MAX_OBITO_DETALHES = 500;
+const CAT_CHEFIA_VIP_LABEL = "CHEFIA/CONSELHO/SUPERINTENDÊNCIA/VIP's";
 
 const TIPOS_VOO_CAT: TipoVooCat[] = [
   'APOIO OPERACIONAL',
@@ -168,6 +173,44 @@ const normalizeHHMMInput = (raw: string): string => {
 const isValidHHMM = (val?: string | null): boolean => {
   const match = String(val || '').trim().match(/^(\d{1,3}):([0-5]\d)$/);
   return Boolean(match);
+};
+
+const parseHHMMToClockMinutes = (val?: string | null): number => {
+  const m = String(val || '').trim().match(/^(\d{2}):(\d{2})$/);
+  if (!m) return 0;
+  return (parseInt(m[1], 10) || 0) * 60 + (parseInt(m[2], 10) || 0);
+};
+
+const catTimeRangesOverlap = (
+  startA: string,
+  endA: string,
+  startB: string,
+  endB: string
+): boolean => {
+  const s1 = parseHHMMToClockMinutes(startA);
+  let e1 = parseHHMMToClockMinutes(endA);
+  const s2 = parseHHMMToClockMinutes(startB);
+  let e2 = parseHHMMToClockMinutes(endB);
+  if (e1 < s1) e1 += 1440;
+  if (e2 < s2) e2 += 1440;
+  if (s1 === e1 && s2 === e2) return s1 === s2;
+  if (s1 === e1) return s1 >= s2 && s1 <= e2;
+  if (s2 === e2) return s2 >= s1 && s2 <= e1;
+  return s1 < e2 && s2 < e1;
+};
+
+const isUserOperadorAerotaticoForAeronave = (
+  user?: User | null,
+  aeronaveId?: string
+): boolean => {
+  if (!user) return false;
+  const habs = getUserCatHabilitacoes(user);
+  const opAero = habs.find(h => h.funcao === 'Operador Aerotático');
+  if (!opAero) return false;
+  if (aeronaveId && opAero.aeronaveIds.length > 0) {
+    return opAero.aeronaveIds.includes(aeronaveId);
+  }
+  return true;
 };
 
 export const sumFlightHoursHHMM = (aeronaves: AeronaveOperacaoCat[]): string => {
@@ -309,20 +352,24 @@ export function printRelatorioOperacaoCat(
       ? `
       <div style="margin-bottom:6px;">
         <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#475569;margin-bottom:3px;">
-          Equipe em Solo — ${(rel.equipeSolo || []).length}
+          ${rel.comEmpregoAeronave ? 'Apoio de Aeronave Não Tripulada' : 'Equipe CAT Solo'} — ${(rel.equipeSolo || []).length}
         </div>
         <ul class="clean-list">
           ${(rel.equipeSolo || [])
-            .map(
-              s =>
-                `<li><strong>${escapeHtmlText(s.name)}</strong>${
+            .map(s => {
+              if (rel.comEmpregoAeronave) {
+                return `<li><strong>${escapeHtmlText(s.name)}</strong>${
                   s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
-                } — <strong>${escapeHtmlText(s.operacaoSolo)}</strong>${
-                  s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
-                    ? `: ${escapeHtmlText(s.apoioLogisticoDescricao)}`
-                    : ''
-                }</li>`
-            )
+                }</li>`;
+              }
+              return `<li><strong>${escapeHtmlText(s.name)}</strong>${
+                s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
+              } — <strong>${escapeHtmlText(s.operacaoSolo)}</strong>${
+                s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
+                  ? `: ${escapeHtmlText(s.apoioLogisticoDescricao)}`
+                  : ''
+              }</li>`;
+            })
             .join('')}
         </ul>
       </div>
@@ -331,16 +378,21 @@ export function printRelatorioOperacaoCat(
 
   const equipeExtraSectionHtml =
     tripulantesCatHtml || tripulantesCoeHtml || equipeSoloHtml
-      ? `<div class="section-title">Tripulação Operacional e Equipe em Solo</div>${tripulantesCatHtml}${tripulantesCoeHtml}${equipeSoloHtml}`
+      ? `<div class="section-title">${
+          rel.comEmpregoAeronave ? 'Tripulação Operacional e Apoio de Aeronave Não Tripulada' : 'Equipe'
+        }</div>${tripulantesCatHtml}${tripulantesCoeHtml}${equipeSoloHtml}`
       : '';
 
   const embarcadosHtml =
-    rel.teveEmbarcadoExterno && (rel.embarcadosExternos || []).length > 0
+    rel.comEmpregoAeronave && rel.teveEmbarcadoExterno && (rel.embarcadosExternos || []).length > 0
       ? `
       <div class="section-title">Embarcado(s) Externo(s) à Unidade (${(rel.embarcadosExternos || []).length})</div>
       <ul class="clean-list">
         ${(rel.embarcadosExternos || [])
           .map(e => {
+            if (e.tipoEmbarcado === 'CHEFIA_VIP') {
+              return `<li><strong>${escapeHtmlText(CAT_CHEFIA_VIP_LABEL)}</strong></li>`;
+            }
             if (e.foraDoSistema) {
               return `<li><strong>${escapeHtmlText(e.name)}</strong> • MASP: ${escapeHtmlText(
                 e.masp ? formatMasp(e.masp) : 'N/A'
@@ -392,6 +444,32 @@ export function printRelatorioOperacaoCat(
     `
     : '';
 
+  const obitosHtml =
+    rel.teveDisparosCat && rel.teveObito
+      ? `
+      <div style="margin-top:8px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;padding:8px 10px;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#991b1b;margin-bottom:4px;">
+          Registro de Óbito(s) — Quantidade: ${Number(rel.quantidadeObitos || 0)}
+        </div>
+        ${(rel.obitosDetalhamentos || [])
+          .map(
+            (det, idx) => `
+          <div style="font-size:11.5px;color:#0f172a;margin-top:4px;white-space:pre-wrap;">
+            <strong>${
+              rel.mesmoDetalhamentoObitos || (rel.obitosDetalhamentos || []).length === 1
+                ? 'Detalhamento da ação:'
+                : `Óbito #${idx + 1}:`
+            }</strong> ${escapeHtmlText(det)}
+          </div>
+        `
+          )
+          .join('')}
+      </div>
+    `
+      : rel.teveDisparosCat
+      ? `<div style="margin-top:6px;font-size:11px;color:#334155;"><strong>Teve óbito?</strong> NÃO</div>`
+      : '';
+
   const disparosHtml =
     rel.teveDisparosCat && (rel.disparosCat || []).length > 0
       ? `
@@ -412,6 +490,7 @@ export function printRelatorioOperacaoCat(
           )
           .join('')}
       </ul>
+      ${obitosHtml}
     `
       : `
       <div class="info-box full" style="margin-top:10px;">
@@ -491,7 +570,9 @@ export function printRelatorioOperacaoCat(
           <p>${escapeHtmlText(deptLabel)} • Unidade: ${escapeHtmlText(unitLabel)}</p>
           <p>
             Modalidade: <strong>${rel.comEmpregoAeronave ? 'Com Emprego de Aeronave' : 'Sem Emprego de Aeronave'}</strong>
-            • Saída da Base: ${escapeHtmlText(formatDateBr(rel.dataSaidaBase))}
+            • Saída da Base: ${escapeHtmlText(formatDateBr(rel.dataSaidaBase))}${
+              rel.horarioSaidaBase ? ` às ${escapeHtmlText(rel.horarioSaidaBase)}` : ''
+            }
             • Operação: ${escapeHtmlText(formatDateBr(rel.dataOperacao))}
           </p>
         </div>
@@ -499,7 +580,11 @@ export function printRelatorioOperacaoCat(
 
       <div class="meta-grid">
         <div class="info-box">
-          <div class="info-label">${rel.comEmpregoAeronave ? 'Horário da Decolagem / Voo da Operação' : 'Horário Saída / Operação'}</div>
+          <div class="info-label">${
+            rel.comEmpregoAeronave
+              ? 'Horário Início / Término da Operação'
+              : 'Horário Saída / Operação'
+          }</div>
           <div class="info-value">${escapeHtmlText(rel.horarioDecolagem)} → ${escapeHtmlText(rel.horarioVooOperacao)}</div>
         </div>
         <div class="info-box">
@@ -573,9 +658,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
   // 2. Datas e Horários
   const [dataSaidaBase, setDataSaidaBase] = useState<string>(() => getTodayBrasilia());
+  const [horarioSaidaBase, setHorarioSaidaBase] = useState<string>('06:00');
   const [dataOperacao, setDataOperacao] = useState<string>(() => getTodayBrasilia());
-  const [horarioDecolagem, setHorarioDecolagem] = useState<string>('06:00');
-  const [horarioVooOperacao, setHorarioVooOperacao] = useState<string>('06:00');
+  const [horarioDecolagem, setHorarioDecolagem] = useState<string>('06:00'); // Início da Operação
+  const [horarioVooOperacao, setHorarioVooOperacao] = useState<string>('07:00'); // Término da Operação
 
   // 3. Local da Operação (idêntico às demais unidades)
   const [estadoOperacao, setEstadoOperacao] = useState<string>('MG');
@@ -589,12 +675,12 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   }));
   const [loadingUf, setLoadingUf] = useState<Record<string, boolean>>({});
 
-  // 4. Aeronaves e Viaturas
+  // 4. Aeronave (máximo 1 por relatório) e Viaturas
   const [aeronaveTipoDraft, setAeronaveTipoDraft] = useState<TipoAeronave | ''>('');
   const [aeronavesSelecionadas, setAeronavesSelecionadas] = useState<AeronaveOperacaoCat[]>([]);
   const [viaturasSelecionadas, setViaturasSelecionadas] = useState<ViaturaOperacaoCat[]>([]);
 
-  // 5. Tripulante Operacional (CAT e COE) + Equipe em Solo
+  // 5. Tripulante Operacional (CAT e COE) + Equipe CAT Solo / Apoio de Aeronave Não Tripulada
   const [teveTripulanteOperacional, setTeveTripulanteOperacional] = useState<boolean>(false);
   const [qtdTripulantesOp, setQtdTripulantesOp] = useState<number>(1);
   const [tripulantesOpSlots, setTripulantesOpSlots] = useState<string[]>(['']);
@@ -611,10 +697,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   const [tipoVoo, setTipoVoo] = useState<TipoVooCat>('APOIO OPERACIONAL');
   const [tipoVooOutrosDescricao, setTipoVooOutrosDescricao] = useState<string>('');
 
-  // 7. Embarcado Externo à Unidade
+  // 7. Embarcado Externo à Unidade (somente com emprego de aeronave)
   const [teveEmbarcadoExterno, setTeveEmbarcadoExterno] = useState<boolean>(false);
   const [embarcadosExternos, setEmbarcadosExternos] = useState<EmbarcadoExternoCat[]>([]);
-  const [embForaSistemaDraft, setEmbForaSistemaDraft] = useState<boolean>(false);
+  const [embTipoDraft, setEmbTipoDraft] = useState<TipoEmbarcadoExternoCat>('SISTEMA');
   const [embEhDaCoeDraft, setEmbEhDaCoeDraft] = useState<boolean>(true);
   const [embDeptIdDraft, setEmbDeptIdDraft] = useState<string>('');
   const [embUnitIdDraft, setEmbUnitIdDraft] = useState<string>('');
@@ -630,7 +716,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   const [capturaQtdDraft, setCapturaQtdDraft] = useState<string>('1');
   const [capturaDetalhesDraft, setCapturaDetalhesDraft] = useState<string>('');
 
-  // 9. Disparos CAT
+  // 9. Disparos CAT + Óbitos
   const [teveDisparosCat, setTeveDisparosCat] = useState<boolean>(false);
   const [disparosCat, setDisparosCat] = useState<DisparoOperacaoCat[]>([]);
   const [disparoOrigemDraft, setDisparoOrigemDraft] = useState<'ACERVO' | 'FORA_ACERVO'>('ACERVO');
@@ -641,6 +727,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   const [disparoCalibreDraft, setDisparoCalibreDraft] = useState<string>('');
   const [disparoSerieDraft, setDisparoSerieDraft] = useState<string>('');
   const [disparoQtdTirosDraft, setDisparoQtdTirosDraft] = useState<string>('1');
+  const [teveObito, setTeveObito] = useState<boolean>(false);
+  const [quantidadeObitos, setQuantidadeObitos] = useState<number>(1);
+  const [mesmoDetalhamentoObitos, setMesmoDetalhamentoObitos] = useState<boolean>(true);
+  const [obitosDetalhamentos, setObitosDetalhamentos] = useState<string[]>(['']);
 
   // 10. Sinopse do Voo
   const [sinopseVoo, setSinopseVoo] = useState<string>('');
@@ -715,11 +805,61 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       .sort((a, b) => a.prefixo.localeCompare(b.prefixo, 'pt-BR'));
   }, [effectiveUnitId, dataVersion]);
 
+  const selectedAeronave = aeronavesSelecionadas[0] || null;
+
   const availableAeronavesByTipo = useMemo(() => {
     if (!aeronaveTipoDraft) return [];
-    const selectedIds = new Set(aeronavesSelecionadas.map(a => a.aeronaveId));
-    return catAeronaves.filter(a => a.tipo === aeronaveTipoDraft && !selectedIds.has(a.id));
-  }, [catAeronaves, aeronaveTipoDraft, aeronavesSelecionadas]);
+    return catAeronaves.filter(a => a.tipo === aeronaveTipoDraft);
+  }, [catAeronaves, aeronaveTipoDraft]);
+
+  // Conflitos de data e horário (data da operação + hora inicial + hora final) contra outros relatórios CAT
+  const scheduleConflicts = useMemo(() => {
+    const aeronavesMap = new Map<
+      string,
+      { reportId: string; municipio: string; inicio: string; fim: string }
+    >();
+    const crewMap = new Map<
+      string,
+      { reportId: string; municipio: string; inicio: string; fim: string }
+    >();
+    if (!comEmpregoAeronave || !dataOperacao || !horarioDecolagem || !horarioVooOperacao) {
+      return { aeronaves: aeronavesMap, crew: crewMap };
+    }
+    const allReports = storage.getRelatoriosOperacoesCat();
+    for (const r of allReports) {
+      if (!r.comEmpregoAeronave) continue;
+      if (editingReport && r.id === editingReport.id) continue;
+      if (String(r.dataOperacao || '').slice(0, 10) !== String(dataOperacao).slice(0, 10)) continue;
+      const rStart = r.horarioDecolagem || '06:00';
+      const rEnd = r.horarioVooOperacao || '06:00';
+      if (!catTimeRangesOverlap(horarioDecolagem, horarioVooOperacao, rStart, rEnd)) continue;
+
+      const info = {
+        reportId: r.id,
+        municipio: `${r.municipioOperacao || ''}${r.estadoOperacao ? `/${r.estadoOperacao}` : ''}`,
+        inicio: rStart,
+        fim: rEnd
+      };
+
+      for (const a of r.aeronaves || []) {
+        if (a.aeronaveId && !aeronavesMap.has(a.aeronaveId)) {
+          aeronavesMap.set(a.aeronaveId, info);
+        }
+        if (a.pilotoId && !crewMap.has(a.pilotoId)) {
+          crewMap.set(a.pilotoId, info);
+        }
+        if (a.copilotoId && !crewMap.has(a.copilotoId)) {
+          crewMap.set(a.copilotoId, info);
+        }
+      }
+      for (const t of r.tripulantesOperacionais || []) {
+        if (t.userId && !crewMap.has(t.userId)) {
+          crewMap.set(t.userId, info);
+        }
+      }
+    }
+    return { aeronaves: aeronavesMap, crew: crewMap };
+  }, [comEmpregoAeronave, dataOperacao, horarioDecolagem, horarioVooOperacao, editingReport?.id, dataVersion]);
 
   const availableViaturas = useMemo(() => {
     const selectedIds = new Set(viaturasSelecionadas.map(v => v.id));
@@ -729,21 +869,86 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       .sort((a, b) => a.placa.localeCompare(b.placa, 'pt-BR'));
   }, [viaturasSelecionadas, effectiveUnitId, dataVersion]);
 
+  // Ocupantes inseridos nas viaturas selecionadas (usado em "Apoio de aeronave não tripulada?" quando COM aeronave)
+  const viaturaOcupantes = useMemo(() => {
+    const map = new Map<string, { userId: string; name: string; masp: string; cargo?: string }>();
+    for (const v of viaturasSelecionadas) {
+      for (const op of v.operadores || []) {
+        if (op.userId && !map.has(op.userId)) {
+          map.set(op.userId, op);
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [viaturasSelecionadas]);
+
+  // Sincroniza "Apoio de aeronave não tripulada" caso ocupantes sejam removidos da viatura
+  useEffect(() => {
+    if (!comEmpregoAeronave) return;
+    const validIds = new Set(viaturaOcupantes.map(o => o.userId));
+    setEquipeSolo(prev => {
+      const next = prev.filter(item => validIds.has(item.userId));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [comEmpregoAeronave, viaturaOcupantes]);
+
+  // Mapa de armas acauteladas para os usuários selecionados em EQUIPE CAT SOLO (usado no modo SEM aeronave)
+  const soloAcauteladasInfo = useMemo(() => {
+    const holderByWeaponId = new Map<string, string>();
+    if (comEmpregoAeronave) {
+      return { holderByWeaponId, soloCount: 0 };
+    }
+    const soloUserIds = new Set(equipeSolo.map(s => s.userId));
+    const soloUserNames = new Set(equipeSolo.map(s => normalizeText(s.name)));
+    if (soloUserIds.size === 0) {
+      return { holderByWeaponId, soloCount: 0 };
+    }
+
+    // 1. Cautelas ativas em ACAUTELAR_ARMAS
+    for (const c of storage.getCautelasArmas()) {
+      if (
+        (c.status === 'AUTORIZADA' || c.status === 'DEVOLUCAO_PENDENTE') &&
+        c.weaponId &&
+        soloUserIds.has(c.requesterId)
+      ) {
+        holderByWeaponId.set(c.weaponId, c.requesterName || 'Operador CAT');
+      }
+    }
+
+    // 2. Saídas diretas em andamento (weaponCustodyHistory sem returnDate)
+    for (const w of storage.getAllWeaponsForLookup()) {
+      if (holderByWeaponId.has(w.id)) continue;
+      if (w.status !== 'Com o Policial' && w.status !== 'Acautelada') continue;
+      const openRecord = storage.getWeaponCustodyHistory(w.id).find(h => !h.returnDate);
+      if (openRecord && soloUserNames.has(normalizeText(openRecord.custodyUserName))) {
+        holderByWeaponId.set(w.id, openRecord.custodyUserName);
+      }
+    }
+
+    return { holderByWeaponId, soloCount: soloUserIds.size };
+  }, [comEmpregoAeronave, equipeSolo, dataVersion]);
+
   const filteredAcervoWeapons = useMemo(() => {
     const allW = storage.getAllWeaponsForLookup();
     const q = normalizeText(weaponSearchDraft);
-    const unitFiltered = effectiveUnitId ? allW.filter(w => w.unitId === effectiveUnitId) : allW;
-    const baseList = unitFiltered.length > 0 ? unitFiltered : allW;
+    let baseList = allW;
+    if (!comEmpregoAeronave) {
+      baseList = allW.filter(w => soloAcauteladasInfo.holderByWeaponId.has(w.id));
+    } else {
+      const unitFiltered = effectiveUnitId ? allW.filter(w => w.unitId === effectiveUnitId) : allW;
+      baseList = unitFiltered.length > 0 ? unitFiltered : allW;
+    }
     return baseList
       .filter(w => {
         if (!q) return true;
+        const holder = soloAcauteladasInfo.holderByWeaponId.get(w.id) || '';
         const hay = normalizeText(
-          `${w.serialNumber} ${w.manufacturer} ${w.model} ${w.caliber} ${w.type} ${w.status || ''} ${w.maintenanceReason || ''}`
+          `${w.serialNumber} ${w.manufacturer} ${w.model} ${w.caliber} ${w.type} ${w.status || ''} ${w.maintenanceReason || ''} ${holder}`
         );
         return hay.includes(q);
       })
       .sort((a, b) => (a.serialNumber || '').localeCompare(b.serialNumber || '', 'pt-BR'));
-  }, [weaponSearchDraft, effectiveUnitId, dataVersion]);
+  }, [weaponSearchDraft, effectiveUnitId, comEmpregoAeronave, soloAcauteladasInfo, dataVersion]);
 
   const selectedMunicipioKeys = useMemo(() => {
     const set = new Set<string>();
@@ -787,15 +992,18 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setEditingReport(rel);
     setComEmpregoAeronave(Boolean(rel.comEmpregoAeronave));
     setDataSaidaBase(String(rel.dataSaidaBase || getTodayBrasilia()).slice(0, 10));
+    setHorarioSaidaBase(rel.horarioSaidaBase || rel.horarioDecolagem || '06:00');
     setDataOperacao(String(rel.dataOperacao || getTodayBrasilia()).slice(0, 10));
     setHorarioDecolagem(rel.horarioDecolagem || '06:00');
-    setHorarioVooOperacao(rel.horarioVooOperacao || '06:00');
+    setHorarioVooOperacao(rel.horarioVooOperacao || '07:00');
     setEstadoOperacao(rel.estadoOperacao || 'MG');
     setMunicipioOperacao(rel.municipioOperacao || '');
     setApenasUmMunicipio(Boolean(rel.apenasUmMunicipio));
     setOutrosMunicipios(Array.isArray(rel.outrosMunicipios) ? rel.outrosMunicipios : []);
     setAeronaveTipoDraft('');
-    setAeronavesSelecionadas(Array.isArray(rel.aeronaves) ? rel.aeronaves : []);
+    setAeronavesSelecionadas(
+      Array.isArray(rel.aeronaves) && rel.aeronaves.length > 0 ? [rel.aeronaves[0]] : []
+    );
     setViaturasSelecionadas(Array.isArray(rel.viaturas) ? rel.viaturas : []);
     setTipoVoo(rel.tipoVoo || 'APOIO OPERACIONAL');
     setTipoVooOutrosDescricao(rel.tipoVooOutrosDescricao || '');
@@ -814,8 +1022,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setEquipeSolo(solo);
 
     const embs = Array.isArray(rel.embarcadosExternos) ? rel.embarcadosExternos : [];
-    setTeveEmbarcadoExterno(Boolean(rel.teveEmbarcadoExterno) && embs.length > 0);
-    setEmbarcadosExternos(embs);
+    setTeveEmbarcadoExterno(Boolean(rel.comEmpregoAeronave) && Boolean(rel.teveEmbarcadoExterno) && embs.length > 0);
+    setEmbarcadosExternos(Boolean(rel.comEmpregoAeronave) ? embs : []);
 
     setTripulantesDesembarcaram(Boolean(rel.tripulantesDesembarcaram));
     setParticipouCapturaLocalizacao(Boolean(rel.participouCapturaLocalizacao));
@@ -824,6 +1032,19 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     const disps = Array.isArray(rel.disparosCat) ? rel.disparosCat : [];
     setTeveDisparosCat(Boolean(rel.teveDisparosCat) && disps.length > 0);
     setDisparosCat(disps);
+
+    const hasObito = Boolean(rel.teveDisparosCat) && Boolean(rel.teveObito);
+    const qObitos = Math.max(1, Number(rel.quantidadeObitos) || 1);
+    const sameObito = rel.mesmoDetalhamentoObitos === undefined ? true : Boolean(rel.mesmoDetalhamentoObitos);
+    const dets = Array.isArray(rel.obitosDetalhamentos) ? rel.obitosDetalhamentos : [];
+    setTeveObito(hasObito);
+    setQuantidadeObitos(qObitos);
+    setMesmoDetalhamentoObitos(qObitos <= 1 ? true : sameObito);
+    setObitosDetalhamentos(
+      hasObito && dets.length > 0
+        ? dets
+        : Array.from({ length: sameObito || qObitos <= 1 ? 1 : qObitos }, () => '')
+    );
 
     setSinopseVoo(rel.sinopseVoo || '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -841,9 +1062,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     if (onClearExternalEdit) onClearExternalEdit();
     setComEmpregoAeronave(true);
     setDataSaidaBase(getTodayBrasilia());
+    setHorarioSaidaBase('06:00');
     setDataOperacao(getTodayBrasilia());
     setHorarioDecolagem('06:00');
-    setHorarioVooOperacao('06:00');
+    setHorarioVooOperacao('07:00');
     setEstadoOperacao('MG');
     setMunicipioOperacao('');
     setApenasUmMunicipio(true);
@@ -866,7 +1088,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setTipoVooOutrosDescricao('');
     setTeveEmbarcadoExterno(false);
     setEmbarcadosExternos([]);
-    setEmbForaSistemaDraft(false);
+    setEmbTipoDraft('SISTEMA');
     setEmbEhDaCoeDraft(true);
     setEmbDeptIdDraft('');
     setEmbUnitIdDraft('');
@@ -889,6 +1111,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setDisparoCalibreDraft('');
     setDisparoSerieDraft('');
     setDisparoQtdTirosDraft('1');
+    setTeveObito(false);
+    setQuantidadeObitos(1);
+    setMesmoDetalhamentoObitos(true);
+    setObitosDetalhamentos(['']);
     setSinopseVoo('');
   };
 
@@ -905,9 +1131,18 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     if (!aeronaveId) return;
     const found = catAeronaves.find(a => a.id === aeronaveId);
     if (!found) return;
-    if (aeronavesSelecionadas.some(a => a.aeronaveId === found.id)) return;
-    setAeronavesSelecionadas(prev => [
-      ...prev,
+    const conflict = scheduleConflicts.aeronaves.get(found.id);
+    if (conflict) {
+      setFeedback({
+        type: 'error',
+        message: `A aeronave ${found.prefixo} já se encontra em outro relatório na data ${formatDateBr(
+          dataOperacao
+        )} (${conflict.inicio} às ${conflict.fim}${conflict.municipio ? ` — ${conflict.municipio}` : ''}).`
+      });
+      return;
+    }
+    setFeedback(null);
+    setAeronavesSelecionadas([
       {
         aeronaveId: found.id,
         tipo: found.tipo,
@@ -916,6 +1151,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         horasVoo: ''
       }
     ]);
+    // Limpa tripulantes selecionados que não estejam habilitados para a nova aeronave
+    setTripulantesOpSlots(prev => prev.map(() => ''));
   };
 
   const handleUpdateAeronaveField = (aeronaveId: string, patch: Partial<AeronaveOperacaoCat>) => {
@@ -1042,12 +1279,15 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
   const handleAddEquipeSolo = (userId: string) => {
     if (!userId) return;
     if (equipeSolo.some(s => s.userId === userId)) return;
-    const u = catUnitUsers.find(usr => usr.id === userId);
+    const u = comEmpregoAeronave
+      ? viaturaOcupantes.find(op => op.userId === userId)
+      : catUnitUsers.find(usr => usr.id === userId);
     if (!u) return;
+    const resolvedId = 'userId' in u ? u.userId : u.id;
     setEquipeSolo(prev => [
       ...prev,
       {
-        userId: u.id,
+        userId: resolvedId,
         name: u.name,
         masp: u.masp || '',
         cargo: u.cargo || '',
@@ -1057,8 +1297,60 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     ]);
   };
 
+  const handleChangeQuantidadeObitos = (newQtyRaw: number) => {
+    const qty = Math.max(1, Math.min(99, newQtyRaw || 1));
+    setQuantidadeObitos(qty);
+    if (qty <= 1) {
+      setMesmoDetalhamentoObitos(true);
+      setObitosDetalhamentos(prev => [prev[0] || '']);
+      return;
+    }
+    setObitosDetalhamentos(prev => {
+      if (mesmoDetalhamentoObitos) return [prev[0] || ''];
+      const next = [...prev];
+      while (next.length < qty) next.push('');
+      return next.slice(0, qty);
+    });
+  };
+
+  const handleToggleMesmoDetalhamentoObitos = (same: boolean) => {
+    setMesmoDetalhamentoObitos(same);
+    if (same) {
+      setObitosDetalhamentos(prev => [prev[0] || '']);
+    } else {
+      setObitosDetalhamentos(prev => {
+        const next = [...prev];
+        while (next.length < quantidadeObitos) next.push('');
+        return next.slice(0, quantidadeObitos);
+      });
+    }
+  };
+
   const handleAddEmbarcadoExterno = () => {
-    if (embForaSistemaDraft) {
+    if (embTipoDraft === 'CHEFIA_VIP') {
+      if (embarcadosExternos.some(e => e.tipoEmbarcado === 'CHEFIA_VIP')) {
+        setFeedback({
+          type: 'error',
+          message: `A opção "${CAT_CHEFIA_VIP_LABEL}" já foi adicionada.`
+        });
+        return;
+      }
+      setEmbarcadosExternos(prev => [
+        ...prev,
+        {
+          id: `emb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          tipoEmbarcado: 'CHEFIA_VIP',
+          foraDoSistema: false,
+          ehDaCoe: false,
+          name: CAT_CHEFIA_VIP_LABEL,
+          masp: ''
+        }
+      ]);
+      setFeedback(null);
+      return;
+    }
+
+    if (embTipoDraft === 'FORA_SISTEMA') {
       const nome = embNomeForaDraft.trim();
       const masp = embMaspForaDraft.trim();
       if (!nome || !masp) {
@@ -1069,6 +1361,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         ...prev,
         {
           id: `emb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+          tipoEmbarcado: 'FORA_SISTEMA',
           foraDoSistema: true,
           ehDaCoe: false,
           name: nome,
@@ -1085,7 +1378,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       setFeedback({ type: 'error', message: 'Selecione o policial embarcado antes de adicionar.' });
       return;
     }
-    if (embarcadosExternos.some(e => !e.foraDoSistema && e.userId === embUserIdDraft)) {
+    if (embarcadosExternos.some(e => e.tipoEmbarcado !== 'CHEFIA_VIP' && !e.foraDoSistema && e.userId === embUserIdDraft)) {
       setFeedback({ type: 'error', message: 'Este policial já foi adicionado aos embarcados externos.' });
       return;
     }
@@ -1097,6 +1390,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       ...prev,
       {
         id: `emb-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        tipoEmbarcado: 'SISTEMA',
         foraDoSistema: false,
         ehDaCoe: embEhDaCoeDraft,
         departmentId: uDept?.id || u.departmentId || '',
@@ -1204,8 +1498,8 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       setFeedback({ type: 'error', message: 'Informe a data da saída da base e a data da operação.' });
       return;
     }
-    if (!horarioDecolagem || !horarioVooOperacao) {
-      setFeedback({ type: 'error', message: 'Informe os horários da operação.' });
+    if ((comEmpregoAeronave && !horarioSaidaBase) || !horarioDecolagem || !horarioVooOperacao) {
+      setFeedback({ type: 'error', message: 'Informe todos os horários da operação.' });
       return;
     }
     if (!estadoOperacao || !municipioOperacao) {
@@ -1222,24 +1516,55 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
     if (comEmpregoAeronave) {
       if (aeronavesSelecionadas.length === 0) {
-        setFeedback({ type: 'error', message: 'Selecione ao menos uma aeronave empregada na operação.' });
+        setFeedback({ type: 'error', message: 'Selecione a aeronave empregada na operação.' });
         return;
       }
-      for (const a of aeronavesSelecionadas) {
-        if (!a.pilotoId) {
+      if (aeronavesSelecionadas.length > 1) {
+        setFeedback({ type: 'error', message: 'Selecione apenas uma aeronave por relatório de operação CAT.' });
+        return;
+      }
+      const a = aeronavesSelecionadas[0];
+      const aeroConflict = scheduleConflicts.aeronaves.get(a.aeronaveId);
+      if (aeroConflict) {
+        setFeedback({
+          type: 'error',
+          message: `Conflito de agenda: a aeronave ${a.prefixo} já está em outro relatório na data ${formatDateBr(
+            dataOperacao
+          )} (${aeroConflict.inicio} às ${aeroConflict.fim}${aeroConflict.municipio ? ` — ${aeroConflict.municipio}` : ''}).`
+        });
+        return;
+      }
+      if (!a.pilotoId) {
+        setFeedback({
+          type: 'error',
+          message: `Selecione o Piloto habilitado para a aeronave ${a.tipo} ${a.prefixo}.`
+        });
+        return;
+      }
+      const pilotoConflict = scheduleConflicts.crew.get(a.pilotoId);
+      if (pilotoConflict) {
+        setFeedback({
+          type: 'error',
+          message: `Conflito de agenda: o Piloto ${a.pilotoNome || ''} já consta em outro relatório no horário ${pilotoConflict.inicio} às ${pilotoConflict.fim}.`
+        });
+        return;
+      }
+      if (a.copilotoId) {
+        const copilotoConflict = scheduleConflicts.crew.get(a.copilotoId);
+        if (copilotoConflict) {
           setFeedback({
             type: 'error',
-            message: `Selecione o Piloto habilitado para a aeronave ${a.tipo} ${a.prefixo}.`
+            message: `Conflito de agenda: o Copiloto ${a.copilotoNome || ''} já consta em outro relatório no horário ${copilotoConflict.inicio} às ${copilotoConflict.fim}.`
           });
           return;
         }
-        if (!isValidHHMM(a.horasVoo)) {
-          setFeedback({
-            type: 'error',
-            message: `Informe as horas de voo no formato HH:mm para a aeronave ${a.tipo} ${a.prefixo} (ex.: 01:30).`
-          });
-          return;
-        }
+      }
+      if (!isValidHHMM(a.horasVoo)) {
+        setFeedback({
+          type: 'error',
+          message: `Informe as horas de voo no formato HH:mm para a aeronave ${a.tipo} ${a.prefixo} (ex.: 01:30).`
+        });
+        return;
       }
       if (tipoVoo === 'OUTROS TIPOS' && !tipoVooOutrosDescricao.trim()) {
         setFeedback({ type: 'error', message: 'Descreva o tipo de voo ao selecionar "OUTROS TIPOS".' });
@@ -1275,6 +1600,15 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
           });
           return;
         }
+        const tripConflict = scheduleConflicts.crew.get(uid);
+        if (tripConflict) {
+          const usrObj = allUsers.find(usr => usr.id === uid);
+          setFeedback({
+            type: 'error',
+            message: `Conflito de agenda: o Operador Aerotático ${usrObj?.name || ''} já consta em outro relatório no horário ${tripConflict.inicio} às ${tripConflict.fim}.`
+          });
+          return;
+        }
         if (seen.has(uid)) continue;
         seen.add(uid);
         const u = allUsers.find(usr => usr.id === uid);
@@ -1304,22 +1638,26 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       if (equipeSolo.length === 0) {
         setFeedback({
           type: 'error',
-          message: 'Selecione ao menos um operador na Equipe em Solo ou marque "Não".'
+          message: comEmpregoAeronave
+            ? 'Selecione ao menos um ocupante da viatura para o Apoio de Aeronave Não Tripulada ou marque "Não".'
+            : 'Selecione ao menos um operador em EQUIPE CAT SOLO ou marque "Não".'
         });
         return;
       }
-      for (const s of equipeSolo) {
-        if (s.operacaoSolo === 'Apoio logístico' && !(s.apoioLogisticoDescricao || '').trim()) {
-          setFeedback({
-            type: 'error',
-            message: `Informe o tipo de apoio logístico prestado por ${s.name}.`
-          });
-          return;
+      if (!comEmpregoAeronave) {
+        for (const s of equipeSolo) {
+          if (s.operacaoSolo === 'Apoio logístico' && !(s.apoioLogisticoDescricao || '').trim()) {
+            setFeedback({
+              type: 'error',
+              message: `Informe o tipo de apoio logístico prestado por ${s.name}.`
+            });
+            return;
+          }
         }
       }
     }
 
-    if (teveEmbarcadoExterno && embarcadosExternos.length === 0) {
+    if (comEmpregoAeronave && teveEmbarcadoExterno && embarcadosExternos.length === 0) {
       setFeedback({
         type: 'error',
         message: 'Adicione ao menos um embarcado externo ou marque "Não".'
@@ -1343,6 +1681,29 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       return;
     }
 
+    const expectedObitoCount = teveDisparosCat && teveObito
+      ? (quantidadeObitos <= 1 || mesmoDetalhamentoObitos ? 1 : quantidadeObitos)
+      : 0;
+    const obitosDetalhamentosLimpos =
+      teveDisparosCat && teveObito
+        ? Array.from({ length: expectedObitoCount }, (_, i) =>
+            String(obitosDetalhamentos[i] || '').trim().slice(0, MAX_OBITO_DETALHES)
+          )
+        : [];
+    if (teveDisparosCat && teveObito) {
+      if (quantidadeObitos < 1) {
+        setFeedback({ type: 'error', message: 'Informe a quantidade de óbitos (mínimo 1).' });
+        return;
+      }
+      if (obitosDetalhamentosLimpos.some(txt => !txt)) {
+        setFeedback({
+          type: 'error',
+          message: 'Preencha o detalhamento da ação que resultou no(s) óbito(s) (até 500 caracteres).'
+        });
+        return;
+      }
+    }
+
     if (!sinopseVoo.trim()) {
       setFeedback({
         type: 'error',
@@ -1356,6 +1717,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     const payload: Partial<RelatorioOperacaoCat> = {
       comEmpregoAeronave,
       dataSaidaBase,
+      horarioSaidaBase: comEmpregoAeronave ? horarioSaidaBase : horarioDecolagem,
       dataOperacao,
       horarioDecolagem,
       horarioVooOperacao,
@@ -1363,7 +1725,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       municipioOperacao,
       apenasUmMunicipio,
       outrosMunicipios: apenasUmMunicipio ? [] : outrosMunicipios,
-      aeronaves: comEmpregoAeronave ? aeronavesSelecionadas : [],
+      aeronaves: comEmpregoAeronave ? aeronavesSelecionadas.slice(0, 1) : [],
       horasTotaisVoo: comEmpregoAeronave ? horasTotaisVooCalculado : '00:00',
       viaturas: viaturasSelecionadas,
       tipoVoo: comEmpregoAeronave ? tipoVoo : undefined,
@@ -1378,14 +1740,19 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         comEmpregoAeronave && teveTripulanteOutraUnidade ? tripulantesOutraUnidade : [],
       teveEquipeSolo,
       equipeSolo: teveEquipeSolo ? equipeSolo : [],
-      teveEmbarcadoExterno,
-      embarcadosExternos: teveEmbarcadoExterno ? embarcadosExternos : [],
+      teveEmbarcadoExterno: comEmpregoAeronave && teveEmbarcadoExterno,
+      embarcadosExternos: comEmpregoAeronave && teveEmbarcadoExterno ? embarcadosExternos : [],
       tripulantesDesembarcaram: comEmpregoAeronave && tripulantesDesembarcaram,
       participouCapturaLocalizacao: comEmpregoAeronave && participouCapturaLocalizacao,
       capturasLocalizacoes:
         comEmpregoAeronave && participouCapturaLocalizacao ? capturasLocalizacoes : [],
       teveDisparosCat,
       disparosCat: teveDisparosCat ? disparosCat : [],
+      teveObito: teveDisparosCat && teveObito,
+      quantidadeObitos: teveDisparosCat && teveObito ? quantidadeObitos : 0,
+      mesmoDetalhamentoObitos:
+        teveDisparosCat && teveObito ? (quantidadeObitos <= 1 ? true : mesmoDetalhamentoObitos) : true,
+      obitosDetalhamentos: obitosDetalhamentosLimpos,
       sinopseVoo: sinopseVoo.trim().slice(0, MAX_SINOPSE_VOO),
       departmentId: effectiveDeptId,
       unitId: effectiveUnitId,
@@ -1631,7 +1998,13 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <button
               type="button"
-              onClick={() => setComEmpregoAeronave(true)}
+              onClick={() => {
+                if (!comEmpregoAeronave) {
+                  setComEmpregoAeronave(true);
+                  setEquipeSolo([]);
+                  setTeveEquipeSolo(false);
+                }
+              }}
               className={`px-4 py-3 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
                 comEmpregoAeronave
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
@@ -1643,7 +2016,17 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
             </button>
             <button
               type="button"
-              onClick={() => setComEmpregoAeronave(false)}
+              onClick={() => {
+                if (comEmpregoAeronave) {
+                  setComEmpregoAeronave(false);
+                  setAeronavesSelecionadas([]);
+                  setAeronaveTipoDraft('');
+                  setTeveEmbarcadoExterno(false);
+                  setEmbarcadosExternos([]);
+                  setEquipeSolo([]);
+                  setTeveEquipeSolo(true);
+                }
+              }}
               className={`px-4 py-3 rounded-xl border text-xs font-bold flex items-center justify-center space-x-2 transition ${
                 !comEmpregoAeronave
                   ? 'bg-amber-500 text-slate-950 border-amber-400 shadow'
@@ -1656,7 +2039,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
           </div>
           {!comEmpregoAeronave && (
             <p className="text-[11px] text-slate-400">
-              Modo sem emprego de aeronave ativo: campos exclusivos de aeronave, pilotos, tripulação aérea, tipo de voo e horas de voo permanecem ocultos.
+              Modo sem emprego de aeronave ativo: campos exclusivos de aeronave, pilotos, tripulação aérea, embarcados externos, tipo de voo e horas de voo permanecem ocultos.
             </p>
           )}
         </div>
@@ -1669,52 +2052,112 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
             <Calendar className="w-4 h-4 text-amber-400" />
             <span>Datas e Horários</span>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Data da Saída da Base *
-              </label>
-              <input
-                type="date"
-                value={dataSaidaBase}
-                onChange={e => setDataSaidaBase(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
+          {comEmpregoAeronave ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Data da Saída da Base *
+                </label>
+                <input
+                  type="date"
+                  value={dataSaidaBase}
+                  onChange={e => setDataSaidaBase(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Hora da Saída da Base *
+                </label>
+                <input
+                  type="time"
+                  value={horarioSaidaBase}
+                  onChange={e => setHorarioSaidaBase(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Data da Operação *
+                </label>
+                <input
+                  type="date"
+                  value={dataOperacao}
+                  onChange={e => setDataOperacao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Horário do Início da Operação *
+                </label>
+                <input
+                  type="time"
+                  value={horarioDecolagem}
+                  onChange={e => setHorarioDecolagem(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Horário do Término da Operação *
+                </label>
+                <input
+                  type="time"
+                  value={horarioVooOperacao}
+                  onChange={e => setHorarioVooOperacao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Data da Operação *
-              </label>
-              <input
-                type="date"
-                value={dataOperacao}
-                onChange={e => setDataOperacao(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Data da Saída da Base *
+                </label>
+                <input
+                  type="date"
+                  value={dataSaidaBase}
+                  onChange={e => setDataSaidaBase(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Data da Operação *
+                </label>
+                <input
+                  type="date"
+                  value={dataOperacao}
+                  onChange={e => setDataOperacao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Horário de Saída da Base *
+                </label>
+                <input
+                  type="time"
+                  value={horarioDecolagem}
+                  onChange={e => setHorarioDecolagem(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                  Horário da Operação *
+                </label>
+                <input
+                  type="time"
+                  value={horarioVooOperacao}
+                  onChange={e => setHorarioVooOperacao(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                {comEmpregoAeronave ? 'Horário da Decolagem *' : 'Horário de Saída da Base *'}
-              </label>
-              <input
-                type="time"
-                value={horarioDecolagem}
-                onChange={e => setHorarioDecolagem(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                {comEmpregoAeronave ? 'Horário do Voo da Operação *' : 'Horário da Operação *'}
-              </label>
-              <input
-                type="time"
-                value={horarioVooOperacao}
-                onChange={e => setHorarioVooOperacao(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
-            </div>
-          </div>
+          )}
         </div>
 
         {/* =============================================================== */}
@@ -1867,23 +2310,25 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         {/* BLOCO 4: AERONAVE UTILIZADA & VIATURA UTILIZADA (MESMA DIV)     */}
         {/* =============================================================== */}
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-5">
-          {/* Sub-bloco 4A: Aeronave Utilizada (somente com emprego de aeronave) */}
+          {/* Sub-bloco 4A: Aeronave Utilizada (somente com emprego de aeronave — apenas 1 por relatório) */}
           {comEmpregoAeronave && (
             <div className="space-y-3">
-              <div className="flex items-center space-x-2 text-xs font-black uppercase tracking-wider text-amber-300">
-                <Plane className="w-4 h-4" />
-                <span>Aeronave Utilizada</span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center space-x-2 text-xs font-black uppercase tracking-wider text-amber-300">
+                  <Plane className="w-4 h-4" />
+                  <span>Aeronave Utilizada (1 aeronave por relatório)</span>
+                </div>
               </div>
 
               {catAeronaves.length === 0 ? (
                 <p className="text-xs text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                   Nenhuma aeronave cadastrada para a unidade CAT. Cadastre aeronaves no módulo Unidades/Deptos.
                 </p>
-              ) : (
+              ) : !selectedAeronave ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
                     <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                      Tipo da Aeronave
+                      Tipo da Aeronave *
                     </label>
                     <select
                       value={aeronaveTipoDraft}
@@ -1899,7 +2344,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                   {aeronaveTipoDraft && (
                     <div>
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                        Prefixo da Aeronave ({aeronaveTipoDraft})
+                        Prefixo da Aeronave ({aeronaveTipoDraft}) *
                       </label>
                       <select
                         value=""
@@ -1908,44 +2353,64 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                       >
                         <option value="">
                           {availableAeronavesByTipo.length === 0
-                            ? 'Nenhum prefixo disponível para este tipo'
-                            : 'Selecione o prefixo para adicionar...'}
+                            ? 'Nenhum prefixo cadastrado para este tipo'
+                            : 'Selecione o prefixo da aeronave...'}
                         </option>
-                        {availableAeronavesByTipo.map(a => (
-                          <option key={a.id} value={a.id}>
-                            {a.prefixo} {a.descricao ? `— ${a.descricao}` : ''}
-                          </option>
-                        ))}
+                        {availableAeronavesByTipo.map(a => {
+                          const conflict = scheduleConflicts.aeronaves.get(a.id);
+                          return (
+                            <option key={a.id} value={a.id} disabled={Boolean(conflict)}>
+                              {a.prefixo} {a.descricao ? `— ${a.descricao}` : ''}
+                              {conflict
+                                ? ` (INDISPONÍVEL — em outro relatório ${conflict.inicio}–${conflict.fim})`
+                                : ''}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                   )}
                 </div>
-              )}
-
-              {aeronavesSelecionadas.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  {aeronavesSelecionadas.map(a => (
-                    <div
-                      key={a.aeronaveId}
-                      className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-amber-500/15 border border-amber-500/35 text-xs"
-                    >
-                      <Plane className="w-3.5 h-3.5 text-amber-400" />
-                      <span className="font-bold text-amber-200">{a.tipo}</span>
-                      <span className="font-mono font-black text-slate-100">{a.prefixo}</span>
-                      {a.descricao && <span className="text-slate-400 text-[11px]">— {a.descricao}</span>}
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setAeronavesSelecionadas(prev =>
-                            prev.filter(item => item.aeronaveId !== a.aeronaveId)
-                          )
-                        }
-                        className="text-slate-400 hover:text-red-400"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/15 border border-amber-500/35 text-xs">
+                    <div className="flex items-center space-x-2">
+                      <Plane className="w-4 h-4 text-amber-400" />
+                      <span className="font-bold text-amber-200">{selectedAeronave.tipo}</span>
+                      <span className="font-mono font-black text-slate-100">{selectedAeronave.prefixo}</span>
+                      {selectedAeronave.descricao && (
+                        <span className="text-slate-300 text-[11px]">— {selectedAeronave.descricao}</span>
+                      )}
                     </div>
-                  ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAeronavesSelecionadas([]);
+                        setTripulantesOpSlots(['']);
+                      }}
+                      className="px-2.5 py-1 rounded-lg bg-slate-900/80 hover:bg-red-500/20 text-slate-300 hover:text-red-300 border border-slate-700 text-[11px] font-bold flex items-center space-x-1"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Trocar Aeronave</span>
+                    </button>
+                  </div>
+
+                  {(() => {
+                    const activeConflict = scheduleConflicts.aeronaves.get(selectedAeronave.aeronaveId);
+                    if (!activeConflict) return null;
+                    return (
+                      <div className="rounded-xl bg-red-500/15 border border-red-500/40 px-3.5 py-2.5 text-xs text-red-200 flex items-start space-x-2">
+                        <AlertTriangle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        <span>
+                          <strong>Aeronave já em uso neste horário:</strong> a aeronave{' '}
+                          <strong>{selectedAeronave.prefixo}</strong> já se encontra em outro relatório na data{' '}
+                          <strong>{formatDateBr(dataOperacao)}</strong> ({activeConflict.inicio} às{' '}
+                          {activeConflict.fim}
+                          {activeConflict.municipio ? ` — ${activeConflict.municipio}` : ''}). Troque a aeronave ou ajuste a data/horário da operação.
+                        </span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -2075,102 +2540,126 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         </div>
 
         {/* =============================================================== */}
-        {/* BLOCO 5: EQUIPE (PILOTO, COPILOTO, TRIPULANTE OP E EQUIPE SOLO) */}
+        {/* BLOCO 5: EQUIPE                                                 */}
         {/* =============================================================== */}
         <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-5">
           <div className="flex items-center space-x-2 text-xs font-black uppercase tracking-wider text-slate-200">
             <Users className="w-4 h-4 text-amber-400" />
             <span>
               {comEmpregoAeronave
-                ? 'Piloto, Copiloto, Tripulação Operacional e Equipe em Solo'
-                : 'Equipe em Solo'}
+                ? 'Piloto, Copiloto, Tripulação Operacional e Apoio de Aeronave Não Tripulada'
+                : 'EQUIPE'}
             </span>
           </div>
 
-          {/* 5A: Piloto e Copiloto por aeronave (somente com emprego de aeronave) */}
+          {/* 5A: Piloto e Copiloto da aeronave selecionada (somente com emprego de aeronave) */}
           {comEmpregoAeronave && (
             <div className="space-y-3">
-              {aeronavesSelecionadas.length === 0 ? (
+              {!selectedAeronave ? (
                 <p className="text-xs text-slate-400">
-                  Selecione ao menos uma aeronave acima para escolher o Piloto e o Copiloto habilitados.
+                  Selecione a aeronave acima para escolher o Piloto e o Copiloto habilitados.
                 </p>
-              ) : (
-                aeronavesSelecionadas.map(a => {
-                  const pilotosHabilitados = catUnitUsers.filter(
-                    u =>
-                      (u.catFuncao === 'Piloto' && (u.catAeronaveIds || []).includes(a.aeronaveId)) ||
-                      u.id === a.pilotoId
-                  );
-                  const copilotosHabilitados = catUnitUsers.filter(
-                    u =>
-                      (u.catFuncao === 'Copiloto' && (u.catAeronaveIds || []).includes(a.aeronaveId)) ||
-                      u.id === a.copilotoId
-                  );
-                  return (
-                    <div
-                      key={a.aeronaveId}
-                      className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3 text-xs"
-                    >
-                      <div className="flex items-center space-x-2 text-amber-300 font-bold">
-                        <Plane className="w-3.5 h-3.5" />
-                        <span>
-                          {a.tipo} • {a.prefixo}
-                        </span>
+              ) : (() => {
+                const a = selectedAeronave;
+                const pilotosHabilitados = catUnitUsers.filter(
+                  u =>
+                    userHasCatFuncaoForAeronave(u, 'Piloto', a.aeronaveId) ||
+                    u.id === a.pilotoId
+                );
+                const copilotosHabilitados = catUnitUsers.filter(
+                  u =>
+                    userHasCatFuncaoForAeronave(u, 'Copiloto', a.aeronaveId) ||
+                    u.id === a.copilotoId
+                );
+                const pilotoActiveConflict = a.pilotoId ? scheduleConflicts.crew.get(a.pilotoId) : undefined;
+                const copilotoActiveConflict = a.copilotoId ? scheduleConflicts.crew.get(a.copilotoId) : undefined;
+
+                return (
+                  <div
+                    key={a.aeronaveId}
+                    className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3 text-xs"
+                  >
+                    <div className="flex items-center space-x-2 text-amber-300 font-bold">
+                      <Plane className="w-3.5 h-3.5" />
+                      <span>
+                        {a.tipo} • {a.prefixo}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-bold uppercase text-slate-400">
+                          Piloto (habilitado para {a.prefixo}) *
+                        </label>
+                        <select
+                          value={a.pilotoId || ''}
+                          onChange={e => handleSelectPilotoForAeronave(a.aeronaveId, e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">
+                            {pilotosHabilitados.length === 0
+                              ? 'Nenhum piloto habilitado para esta aeronave'
+                              : 'Selecione o piloto...'}
+                          </option>
+                          {pilotosHabilitados.map(u => {
+                            const conflict = scheduleConflicts.crew.get(u.id);
+                            return (
+                              <option key={u.id} value={u.id} disabled={Boolean(conflict)}>
+                                {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                                {conflict
+                                  ? ` — INDISPONÍVEL (em operação ${conflict.inicio}–${conflict.fim})`
+                                  : ''}
+                              </option>
+                            );
+                          })}
+                        </select>
+                        {pilotoActiveConflict && (
+                          <p className="text-[11px] text-red-300">
+                            Este piloto já consta em outro relatório neste horário ({pilotoActiveConflict.inicio}–{pilotoActiveConflict.fim}). Selecione outro piloto.
+                          </p>
+                        )}
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                            Piloto (habilitado para {a.prefixo}) *
-                          </label>
-                          <select
-                            value={a.pilotoId || ''}
-                            onChange={e => handleSelectPilotoForAeronave(a.aeronaveId, e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                          >
-                            <option value="">
-                              {pilotosHabilitados.length === 0
-                                ? 'Nenhum piloto habilitado para esta aeronave'
-                                : 'Selecione o piloto...'}
-                            </option>
-                            {pilotosHabilitados.map(u => (
-                              <option key={u.id} value={u.id}>
+                      <div className="space-y-1">
+                        <label className="block text-[10px] font-bold uppercase text-slate-400">
+                          Copiloto (habilitado para {a.prefixo})
+                        </label>
+                        <select
+                          value={a.copilotoId || ''}
+                          onChange={e => handleSelectCopilotoForAeronave(a.aeronaveId, e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                        >
+                          <option value="">
+                            {copilotosHabilitados.length === 0
+                              ? 'Nenhum copiloto habilitado para esta aeronave'
+                              : 'Selecione o copiloto (opcional)...'}
+                          </option>
+                          {copilotosHabilitados.map(u => {
+                            const conflict = scheduleConflicts.crew.get(u.id);
+                            return (
+                              <option key={u.id} value={u.id} disabled={Boolean(conflict)}>
                                 {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                                {conflict
+                                  ? ` — INDISPONÍVEL (em operação ${conflict.inicio}–${conflict.fim})`
+                                  : ''}
                               </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                            Copiloto (habilitado para {a.prefixo})
-                          </label>
-                          <select
-                            value={a.copilotoId || ''}
-                            onChange={e => handleSelectCopilotoForAeronave(a.aeronaveId, e.target.value)}
-                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                          >
-                            <option value="">
-                              {copilotosHabilitados.length === 0
-                                ? 'Nenhum copiloto habilitado para esta aeronave'
-                                : 'Selecione o copiloto (opcional)...'}
-                            </option>
-                            {copilotosHabilitados.map(u => (
-                              <option key={u.id} value={u.id}>
-                                {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                            );
+                          })}
+                        </select>
+                        {copilotoActiveConflict && (
+                          <p className="text-[11px] text-red-300">
+                            Este copiloto já consta em outro relatório neste horário ({copilotoActiveConflict.inicio}–{copilotoActiveConflict.fim}). Selecione outro copiloto.
+                          </p>
+                        )}
                       </div>
                     </div>
-                  );
-                })
-              )}
+                  </div>
+                );
+              })()}
             </div>
           )}
 
-          {/* 5B: Tripulante Operacional (CAT e COE) — somente com emprego de aeronave */}
+          {/* 5B: Tripulante Operacional (CAT — estritamente Operador Aerotático — e COE) */}
           {comEmpregoAeronave && (
             <div className="pt-4 border-t border-slate-800 space-y-4 text-xs">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2212,38 +2701,76 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                 )}
               </div>
 
-              {teveTripulanteOperacional && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {tripulantesOpSlots.map((selectedUid, idx) => {
-                    const otherChosen = new Set(
-                      tripulantesOpSlots.filter((id, i) => i !== idx && Boolean(id))
-                    );
-                    const avail = catUnitUsers.filter(u => !otherChosen.has(u.id));
-                    return (
-                      <div key={idx}>
-                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                          Tripulante Operacional #{idx + 1} *
-                        </label>
-                        <select
-                          value={selectedUid}
-                          onChange={e => {
-                            const val = e.target.value;
-                            setTripulantesOpSlots(prev => prev.map((cur, i) => (i === idx ? val : cur)));
-                          }}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                        >
-                          <option value="">Selecione o policial da unidade CAT...</option>
-                          {avail.map(u => (
-                            <option key={u.id} value={u.id}>
-                              {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+              {teveTripulanteOperacional && (() => {
+                const operadoresAerotaticos = catUnitUsers.filter(u =>
+                  isUserOperadorAerotaticoForAeronave(u, selectedAeronave?.aeronaveId)
+                );
+
+                return (
+                  <div className="space-y-2">
+                    {!selectedAeronave && (
+                      <p className="text-[11px] text-amber-300/90">
+                        Selecione a aeronave acima para filtrar os Operadores Aerotáticos habilitados para ela.
+                      </p>
+                    )}
+                    {selectedAeronave && operadoresAerotaticos.length === 0 && (
+                      <p className="text-[11px] text-amber-300/90">
+                        Nenhum usuário com função de Operador Aerotático habilitado para {selectedAeronave.prefixo}.
+                      </p>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {tripulantesOpSlots.map((selectedUid, idx) => {
+                        const otherChosen = new Set(
+                          tripulantesOpSlots.filter((id, i) => i !== idx && Boolean(id))
+                        );
+                        const avail = catUnitUsers.filter(
+                          u =>
+                            !otherChosen.has(u.id) &&
+                            (operadoresAerotaticos.some(b => b.id === u.id) || u.id === selectedUid)
+                        );
+                        const activeConflict = selectedUid ? scheduleConflicts.crew.get(selectedUid) : undefined;
+                        return (
+                          <div key={idx} className="space-y-1">
+                            <label className="block text-[10px] font-bold uppercase text-slate-400">
+                              Tripulante Operacional #{idx + 1} (Operador Aerotático) *
+                            </label>
+                            <select
+                              value={selectedUid}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setTripulantesOpSlots(prev => prev.map((cur, i) => (i === idx ? val : cur)));
+                              }}
+                              className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                            >
+                              <option value="">
+                                {avail.length === 0
+                                  ? 'Nenhum operador aerotático disponível'
+                                  : 'Selecione o operador aerotático...'}
+                              </option>
+                              {avail.map(u => {
+                                const conflict = scheduleConflicts.crew.get(u.id);
+                                return (
+                                  <option key={u.id} value={u.id} disabled={Boolean(conflict)}>
+                                    {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                                    {conflict
+                                      ? ` — INDISPONÍVEL (em operação ${conflict.inicio}–${conflict.fim})`
+                                      : ''}
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            {activeConflict && (
+                              <p className="text-[11px] text-red-300">
+                                Este operador aerotático já consta em outro relatório neste horário ({activeConflict.inicio}–{activeConflict.fim}).
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Tripulante operacional de outra unidade do Departamento COE */}
               <div className="space-y-3 pt-2 border-t border-slate-800/80">
@@ -2354,11 +2881,11 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
             </div>
           )}
 
-          {/* 5C: Equipe em Solo (mesma div de equipe, disponível com e sem aeronave) */}
+          {/* 5C: COM aeronave = Apoio de aeronave não tripulada (ocupantes da viatura) | SEM aeronave = EQUIPE CAT SOLO */}
           <div className={`${comEmpregoAeronave ? 'pt-4 border-t border-slate-800' : ''} space-y-3 text-xs`}>
-            <div className="sm:w-72">
+            <div className="sm:w-80">
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                Teve equipe em solo?
+                {comEmpregoAeronave ? 'Apoio de aeronave não tripulada?' : 'Teve equipe em solo?'}
               </label>
               <select
                 value={teveEquipeSolo ? 'SIM' : 'NAO'}
@@ -2374,11 +2901,67 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
               </select>
             </div>
 
-            {teveEquipeSolo && (
+            {teveEquipeSolo && comEmpregoAeronave && (
+              <div className="space-y-3">
+                {viaturaOcupantes.length === 0 ? (
+                  <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                    Nenhum ocupante de viatura informado ainda. Adicione uma viatura e seus ocupantes no bloco acima para selecionar os operadores do apoio de aeronave não tripulada.
+                  </p>
+                ) : (
+                  <>
+                    <div className="sm:w-96">
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        Selecionar ocupante(s) da viatura no apoio de aeronave não tripulada *
+                      </label>
+                      <select
+                        value=""
+                        onChange={e => handleAddEquipeSolo(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="">Selecione um ocupante da viatura...</option>
+                        {viaturaOcupantes
+                          .filter(op => !equipeSolo.some(s => s.userId === op.userId))
+                          .map(op => (
+                            <option key={op.userId} value={op.userId}>
+                              {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''}
+                            </option>
+                          ))}
+                      </select>
+                    </div>
+
+                    {equipeSolo.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {equipeSolo.map(s => (
+                          <span
+                            key={s.userId}
+                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px] font-semibold"
+                          >
+                            <span>
+                              {s.name} {s.masp ? `(MASP ${formatMasp(s.masp)})` : ''}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setEquipeSolo(prev => prev.filter(item => item.userId !== s.userId))
+                              }
+                              className="hover:text-red-300"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            )}
+
+            {teveEquipeSolo && !comEmpregoAeronave && (
               <div className="space-y-3">
                 <div className="sm:w-96">
                   <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                    Adicionar Operador da Equipe em Solo (Unidade CAT)
+                    EQUIPE CAT SOLO
                   </label>
                   <select
                     value=""
@@ -2543,260 +3126,293 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         )}
 
         {/* =============================================================== */}
-        {/* BLOCO 7: EMBARCADO EXTERNO À UNIDADE                            */}
+        {/* BLOCO 7: EMBARCADO EXTERNO À UNIDADE (SOMENTE COM AERONAVE)     */}
         {/* =============================================================== */}
-        <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
-          <div className="flex items-center space-x-2 text-xs font-black uppercase tracking-wider text-slate-200">
-            <UserPlus className="w-4 h-4 text-amber-400" />
-            <span>Embarcado Externo à Unidade</span>
-          </div>
+        {comEmpregoAeronave && (
+          <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-4 space-y-3 text-xs">
+            <div className="flex items-center space-x-2 text-xs font-black uppercase tracking-wider text-slate-200">
+              <UserPlus className="w-4 h-4 text-amber-400" />
+              <span>Embarcado Externo à Unidade</span>
+            </div>
 
-          <div className="sm:w-72">
-            <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-              Teve embarcado externo à unidade?
-            </label>
-            <select
-              value={teveEmbarcadoExterno ? 'SIM' : 'NAO'}
-              onChange={e => {
-                const yes = e.target.value === 'SIM';
-                setTeveEmbarcadoExterno(yes);
-                if (!yes) setEmbarcadosExternos([]);
-              }}
-              className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-            >
-              <option value="NAO">Não</option>
-              <option value="SIM">Sim</option>
-            </select>
-          </div>
+            <div className="sm:w-72">
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                Teve embarcado externo à unidade?
+              </label>
+              <select
+                value={teveEmbarcadoExterno ? 'SIM' : 'NAO'}
+                onChange={e => {
+                  const yes = e.target.value === 'SIM';
+                  setTeveEmbarcadoExterno(yes);
+                  if (!yes) setEmbarcadosExternos([]);
+                }}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="NAO">Não</option>
+                <option value="SIM">Sim</option>
+              </select>
+            </div>
 
-          {teveEmbarcadoExterno && (
-            <div className="space-y-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3.5">
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={() => setEmbForaSistemaDraft(false)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${
-                    !embForaSistemaDraft
-                      ? 'bg-amber-500 text-slate-950 border-amber-400'
-                      : 'bg-slate-950 text-slate-300 border-slate-700'
-                  }`}
-                >
-                  Policial cadastrado no sistema
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setEmbForaSistemaDraft(true)}
-                  className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${
-                    embForaSistemaDraft
-                      ? 'bg-amber-500 text-slate-950 border-amber-400'
-                      : 'bg-slate-950 text-slate-300 border-slate-700'
-                  }`}
-                >
-                  Policial de fora do sistema
-                </button>
-              </div>
-
-              {!embForaSistemaDraft ? (
-                <div className="space-y-3">
-                  <div className="sm:w-64">
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                      Da COE?
-                    </label>
-                    <select
-                      value={embEhDaCoeDraft ? 'SIM' : 'NAO'}
-                      onChange={e => {
-                        setEmbEhDaCoeDraft(e.target.value === 'SIM');
-                        setEmbDeptIdDraft('');
-                        setEmbUnitIdDraft('');
-                        setEmbUserIdDraft('');
-                      }}
-                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                    >
-                      <option value="SIM">Sim (Policial da COE)</option>
-                      <option value="NAO">Não (Outro Departamento / Unidade)</option>
-                    </select>
-                  </div>
-
-                  {embEhDaCoeDraft ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
-                      <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                          Policial da COE
-                        </label>
-                        <select
-                          value={embUserIdDraft}
-                          onChange={e => setEmbUserIdDraft(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                        >
-                          <option value="">Selecione o policial da COE...</option>
-                          {embCoeUsers.map(u => {
-                            const uName = units.find(un => un.id === u.unitId)?.name;
-                            return (
-                              <option key={u.id} value={u.id}>
-                                {u.name} {uName ? `(${uName})` : ''}{' '}
-                                {u.masp ? `— MASP ${formatMasp(u.masp)}` : ''}
-                              </option>
-                            );
-                          })}
-                        </select>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddEmbarcadoExterno}
-                        disabled={!embUserIdDraft}
-                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 disabled:opacity-40"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Adicionar</span>
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                          Departamento
-                        </label>
-                        <select
-                          value={embDeptIdDraft}
-                          onChange={e => {
-                            setEmbDeptIdDraft(e.target.value);
-                            setEmbUnitIdDraft('');
-                            setEmbUserIdDraft('');
-                          }}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                        >
-                          <option value="">Selecione o departamento...</option>
-                          {departments.map(d => (
-                            <option key={d.id} value={d.id}>
-                              {d.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                          Unidade
-                        </label>
-                        <select
-                          value={embUnitIdDraft}
-                          onChange={e => {
-                            setEmbUnitIdDraft(e.target.value);
-                            setEmbUserIdDraft('');
-                          }}
-                          disabled={!embDeptIdDraft}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 disabled:opacity-50"
-                        >
-                          <option value="">Selecione a unidade...</option>
-                          {embUnitsForDept.map(un => (
-                            <option key={un.id} value={un.id}>
-                              {un.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                          Usuário
-                        </label>
-                        <select
-                          value={embUserIdDraft}
-                          onChange={e => setEmbUserIdDraft(e.target.value)}
-                          disabled={!embUnitIdDraft}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 disabled:opacity-50"
-                        >
-                          <option value="">Selecione o policial...</option>
-                          {embUsersForUnit.map(u => (
-                            <option key={u.id} value={u.id}>
-                              {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAddEmbarcadoExterno}
-                        disabled={!embUserIdDraft}
-                        className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 disabled:opacity-40"
-                      >
-                        <Plus className="w-4 h-4" />
-                        <span>Adicionar</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                      Nome Completo *
-                    </label>
-                    <input
-                      type="text"
-                      value={embNomeForaDraft}
-                      onChange={e => setEmbNomeForaDraft(e.target.value)}
-                      placeholder="Nome do policial de fora do sistema"
-                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                      MASP *
-                    </label>
-                    <input
-                      type="text"
-                      value={embMaspForaDraft}
-                      onChange={e => setEmbMaspForaDraft(e.target.value)}
-                      placeholder="Ex.: 123456-7"
-                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
+            {teveEmbarcadoExterno && (
+              <div className="space-y-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3.5">
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    onClick={handleAddEmbarcadoExterno}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5"
+                    onClick={() => setEmbTipoDraft('SISTEMA')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                      embTipoDraft === 'SISTEMA'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-700'
+                    }`}
                   >
-                    <Plus className="w-4 h-4" />
-                    <span>Adicionar</span>
+                    Policial cadastrado no sistema
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmbTipoDraft('FORA_SISTEMA')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                      embTipoDraft === 'FORA_SISTEMA'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    Policial de fora do sistema
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmbTipoDraft('CHEFIA_VIP')}
+                    className={`px-3 py-1.5 rounded-lg text-[11px] font-bold border transition ${
+                      embTipoDraft === 'CHEFIA_VIP'
+                        ? 'bg-amber-500 text-slate-950 border-amber-400'
+                        : 'bg-slate-950 text-slate-300 border-slate-700'
+                    }`}
+                  >
+                    {CAT_CHEFIA_VIP_LABEL}
                   </button>
                 </div>
-              )}
 
-              {embarcadosExternos.length > 0 && (
-                <div className="space-y-1.5 pt-2 border-t border-slate-800">
-                  {embarcadosExternos.map(e => (
-                    <div
-                      key={e.id}
-                      className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2"
+                {embTipoDraft === 'CHEFIA_VIP' ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2.5 bg-slate-950/70 border border-slate-800 rounded-xl px-3.5 py-2.5">
+                    <span className="text-[11px] text-slate-300">
+                      Registro de embarque para <strong>{CAT_CHEFIA_VIP_LABEL}</strong> (sem necessidade de informar nome).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleAddEmbarcadoExterno}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5"
                     >
-                      <div className="text-[11px] text-slate-200">
-                        <span className="font-bold">{e.name}</span>
-                        <span className="ml-2 font-mono text-slate-400">
-                          MASP: {e.masp ? formatMasp(e.masp) : 'N/A'}
-                        </span>
-                        <span className="ml-2 px-2 py-0.5 rounded bg-slate-800 text-amber-300 text-[10px] font-semibold">
-                          {e.foraDoSistema
-                            ? 'Policial de fora do sistema'
-                            : e.ehDaCoe
-                            ? `COE${e.unitName ? ` • ${e.unitName}` : ''}`
-                            : `${e.departmentName || 'Outro Depto'}${e.unitName ? ` • ${e.unitName}` : ''}`}
-                        </span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setEmbarcadosExternos(prev => prev.filter(item => item.id !== e.id))
-                        }
-                        className="text-slate-400 hover:text-red-400"
+                      <Plus className="w-4 h-4" />
+                      <span>Adicionar</span>
+                    </button>
+                  </div>
+                ) : embTipoDraft === 'SISTEMA' ? (
+                  <div className="space-y-3">
+                    <div className="sm:w-64">
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        Da COE?
+                      </label>
+                      <select
+                        value={embEhDaCoeDraft ? 'SIM' : 'NAO'}
+                        onChange={e => {
+                          setEmbEhDaCoeDraft(e.target.value === 'SIM');
+                          setEmbDeptIdDraft('');
+                          setEmbUnitIdDraft('');
+                          setEmbUserIdDraft('');
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                       >
-                        <X className="w-3.5 h-3.5" />
-                      </button>
+                        <option value="SIM">Sim (Policial da COE)</option>
+                        <option value="NAO">Não (Outro Departamento / Unidade)</option>
+                      </select>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+
+                    {embEhDaCoeDraft ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Policial da COE
+                          </label>
+                          <select
+                            value={embUserIdDraft}
+                            onChange={e => setEmbUserIdDraft(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                          >
+                            <option value="">Selecione o policial da COE...</option>
+                            {embCoeUsers.map(u => {
+                              const uName = units.find(un => un.id === u.unitId)?.name;
+                              return (
+                                <option key={u.id} value={u.id}>
+                                  {u.name} {uName ? `(${uName})` : ''}{' '}
+                                  {u.masp ? `— MASP ${formatMasp(u.masp)}` : ''}
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddEmbarcadoExterno}
+                          disabled={!embUserIdDraft}
+                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 disabled:opacity-40"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Departamento
+                          </label>
+                          <select
+                            value={embDeptIdDraft}
+                            onChange={e => {
+                              setEmbDeptIdDraft(e.target.value);
+                              setEmbUnitIdDraft('');
+                              setEmbUserIdDraft('');
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                          >
+                            <option value="">Selecione o departamento...</option>
+                            {departments.map(d => (
+                              <option key={d.id} value={d.id}>
+                                {d.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Unidade
+                          </label>
+                          <select
+                            value={embUnitIdDraft}
+                            onChange={e => {
+                              setEmbUnitIdDraft(e.target.value);
+                              setEmbUserIdDraft('');
+                            }}
+                            disabled={!embDeptIdDraft}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                          >
+                            <option value="">Selecione a unidade...</option>
+                            {embUnitsForDept.map(un => (
+                              <option key={un.id} value={un.id}>
+                                {un.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                            Usuário
+                          </label>
+                          <select
+                            value={embUserIdDraft}
+                            onChange={e => setEmbUserIdDraft(e.target.value)}
+                            disabled={!embUnitIdDraft}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500 disabled:opacity-50"
+                          >
+                            <option value="">Selecione o policial...</option>
+                            {embUsersForUnit.map(u => (
+                              <option key={u.id} value={u.id}>
+                                {u.name} {u.masp ? `(MASP ${formatMasp(u.masp)})` : ''}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddEmbarcadoExterno}
+                          disabled={!embUserIdDraft}
+                          className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5 disabled:opacity-40"
+                        >
+                          <Plus className="w-4 h-4" />
+                          <span>Adicionar</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 items-end">
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        Nome Completo *
+                      </label>
+                      <input
+                        type="text"
+                        value={embNomeForaDraft}
+                        onChange={e => setEmbNomeForaDraft(e.target.value)}
+                        placeholder="Nome do policial de fora do sistema"
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        MASP *
+                      </label>
+                      <input
+                        type="text"
+                        value={embMaspForaDraft}
+                        onChange={e => setEmbMaspForaDraft(e.target.value)}
+                        placeholder="Ex.: 123456-7"
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddEmbarcadoExterno}
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1.5"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Adicionar</span>
+                    </button>
+                  </div>
+                )}
+
+                {embarcadosExternos.length > 0 && (
+                  <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                    {embarcadosExternos.map(e => (
+                      <div
+                        key={e.id}
+                        className="flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2"
+                      >
+                        <div className="text-[11px] text-slate-200">
+                          {e.tipoEmbarcado === 'CHEFIA_VIP' ? (
+                            <span className="font-bold text-amber-300">{CAT_CHEFIA_VIP_LABEL}</span>
+                          ) : (
+                            <>
+                              <span className="font-bold">{e.name}</span>
+                              <span className="ml-2 font-mono text-slate-400">
+                                MASP: {e.masp ? formatMasp(e.masp) : 'N/A'}
+                              </span>
+                              <span className="ml-2 px-2 py-0.5 rounded bg-slate-800 text-amber-300 text-[10px] font-semibold">
+                                {e.foraDoSistema
+                                  ? 'Policial de fora do sistema'
+                                  : e.ehDaCoe
+                                  ? `COE${e.unitName ? ` • ${e.unitName}` : ''}`
+                                  : `${e.departmentName || 'Outro Depto'}${e.unitName ? ` • ${e.unitName}` : ''}`}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setEmbarcadosExternos(prev => prev.filter(item => item.id !== e.id))
+                          }
+                          className="text-slate-400 hover:text-red-400"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* =============================================================== */}
         {/* BLOCO 8: DESEMBARQUE & CAPTURA / LOCALIZAÇÃO (COM AERONAVE)     */}
@@ -2955,7 +3571,13 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
               onChange={e => {
                 const yes = e.target.value === 'SIM';
                 setTeveDisparosCat(yes);
-                if (!yes) setDisparosCat([]);
+                if (!yes) {
+                  setDisparosCat([]);
+                  setTeveObito(false);
+                  setQuantidadeObitos(1);
+                  setMesmoDetalhamentoObitos(true);
+                  setObitosDetalhamentos(['']);
+                }
               }}
               className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
             >
@@ -2976,7 +3598,9 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                       : 'bg-slate-950 text-slate-300 border-slate-700'
                   }`}
                 >
-                  Arma do Acervo (Unidade CAT)
+                  {comEmpregoAeronave
+                    ? 'Arma do Acervo (Unidade CAT)'
+                    : 'Arma do Acervo (Acauteladas para EQUIPE CAT SOLO)'}
                 </button>
                 <button
                   type="button"
@@ -2993,32 +3617,58 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
               {disparoOrigemDraft === 'ACERVO' ? (
                 <div className="space-y-2.5">
+                  {!comEmpregoAeronave && soloAcauteladasInfo.soloCount === 0 && (
+                    <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                      Selecione os operadores em <strong>EQUIPE CAT SOLO</strong> acima para listar as armas acauteladas para eles.
+                    </p>
+                  )}
+                  {!comEmpregoAeronave &&
+                    soloAcauteladasInfo.soloCount > 0 &&
+                    soloAcauteladasInfo.holderByWeaponId.size === 0 && (
+                      <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+                        Nenhuma arma acautelada encontrada para os operadores selecionados em <strong>EQUIPE CAT SOLO</strong>.
+                      </p>
+                    )}
                   <div className="relative">
                     <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
                       value={weaponSearchDraft}
                       onChange={e => setWeaponSearchDraft(e.target.value)}
-                      placeholder="Filtrar armas da unidade por série, marca, modelo ou calibre..."
+                      placeholder={
+                        comEmpregoAeronave
+                          ? 'Filtrar armas da unidade por série, marca, modelo ou calibre...'
+                          : 'Filtrar armas acauteladas da EQUIPE CAT SOLO por série, modelo, calibre ou policial...'
+                      }
                       className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-4 gap-2.5 items-end">
                     <div className="sm:col-span-2">
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                        Arma do Acervo ({filteredAcervoWeapons.length})
+                        {comEmpregoAeronave
+                          ? `Arma do Acervo (${filteredAcervoWeapons.length})`
+                          : `Armas Acauteladas — EQUIPE CAT SOLO (${filteredAcervoWeapons.length})`}
                       </label>
                       <select
                         value={selectedWeaponIdDraft}
                         onChange={e => setSelectedWeaponIdDraft(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                       >
-                        <option value="">Selecione a arma...</option>
-                        {filteredAcervoWeapons.map(w => (
-                          <option key={w.id} value={w.id}>
-                            {w.serialNumber} — {w.manufacturer} {w.model} ({w.caliber})
-                          </option>
-                        ))}
+                        <option value="">
+                          {filteredAcervoWeapons.length === 0
+                            ? 'Nenhuma arma disponível'
+                            : 'Selecione a arma...'}
+                        </option>
+                        {filteredAcervoWeapons.map(w => {
+                          const holderName = soloAcauteladasInfo.holderByWeaponId.get(w.id);
+                          return (
+                            <option key={w.id} value={w.id}>
+                              {w.serialNumber} — {w.manufacturer} {w.model} ({w.caliber})
+                              {!comEmpregoAeronave && holderName ? ` • Acautelada: ${holderName}` : ''}
+                            </option>
+                          );
+                        })}
                       </select>
                     </div>
                     <div>
@@ -3143,6 +3793,113 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                   ))}
                 </div>
               )}
+
+              {/* Pergunta "Teve óbito?" vinculada aos disparos realizados */}
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                      Teve óbito?
+                    </label>
+                    <select
+                      value={teveObito ? 'SIM' : 'NAO'}
+                      onChange={e => {
+                        const yes = e.target.value === 'SIM';
+                        setTeveObito(yes);
+                        if (!yes) {
+                          setQuantidadeObitos(1);
+                          setMesmoDetalhamentoObitos(true);
+                          setObitosDetalhamentos(['']);
+                        } else if (obitosDetalhamentos.length === 0) {
+                          setObitosDetalhamentos(['']);
+                        }
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="NAO">Não</option>
+                      <option value="SIM">Sim</option>
+                    </select>
+                  </div>
+
+                  {teveObito && (
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        Quantos óbitos? *
+                      </label>
+                      <input
+                        type="number"
+                        min={1}
+                        max={99}
+                        value={quantidadeObitos}
+                        onChange={e => handleChangeQuantidadeObitos(parseInt(e.target.value, 10))}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                  )}
+
+                  {teveObito && quantidadeObitos > 1 && (
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                        Formato do detalhamento
+                      </label>
+                      <select
+                        value={mesmoDetalhamentoObitos ? 'UNICO' : 'INDIVIDUAL'}
+                        onChange={e => handleToggleMesmoDetalhamentoObitos(e.target.value === 'UNICO')}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                      >
+                        <option value="UNICO">Um detalhamento para todos os óbitos</option>
+                        <option value="INDIVIDUAL">Um detalhamento para cada óbito</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
+
+                {teveObito && (
+                  <div className="space-y-2.5">
+                    {Array.from(
+                      { length: quantidadeObitos <= 1 || mesmoDetalhamentoObitos ? 1 : quantidadeObitos },
+                      (_, idx) => {
+                        const val = obitosDetalhamentos[idx] || '';
+                        const isSingle = quantidadeObitos <= 1 || mesmoDetalhamentoObitos;
+                        return (
+                          <div key={idx} className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="block text-[10px] font-bold uppercase text-red-300">
+                                {isSingle
+                                  ? 'Descreva a ação que resultou no(s) óbito(s) *'
+                                  : `Detalhamento da ação — Óbito #${idx + 1} *`}
+                              </label>
+                              <span
+                                className={`font-mono text-[10px] font-bold ${
+                                  val.length >= MAX_OBITO_DETALHES ? 'text-amber-400' : 'text-slate-400'
+                                }`}
+                              >
+                                {val.length} / {MAX_OBITO_DETALHES}
+                              </span>
+                            </div>
+                            <textarea
+                              rows={3}
+                              maxLength={MAX_OBITO_DETALHES}
+                              value={val}
+                              onChange={e => {
+                                const txt = e.target.value;
+                                setObitosDetalhamentos(prev => {
+                                  const next = [...prev];
+                                  while (next.length <= idx) next.push('');
+                                  next[idx] = txt;
+                                  return next;
+                                });
+                              }}
+                              placeholder="Descreva a ação que resultou no óbito (até 500 caracteres)..."
+                              className="w-full bg-slate-950 border border-red-500/40 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-red-400"
+                            />
+                          </div>
+                        );
+                      }
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>

@@ -4132,9 +4132,13 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                   </span>
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Saída Base: {formatDateBr(viewModalCatOpReport.dataSaidaBase)} • Operação:{' '}
-                  {formatDateBr(viewModalCatOpReport.dataOperacao)} • {viewModalCatOpReport.horarioDecolagem} →{' '}
-                  {viewModalCatOpReport.horarioVooOperacao} • {viewModalCatOpReport.unitName || activeUnitName}
+                  Saída Base: {formatDateBr(viewModalCatOpReport.dataSaidaBase)}
+                  {viewModalCatOpReport.comEmpregoAeronave && viewModalCatOpReport.horarioSaidaBase
+                    ? ` às ${viewModalCatOpReport.horarioSaidaBase}`
+                    : ''}{' '}
+                  • Operação: {formatDateBr(viewModalCatOpReport.dataOperacao)} •{' '}
+                  {viewModalCatOpReport.horarioDecolagem} → {viewModalCatOpReport.horarioVooOperacao} •{' '}
+                  {viewModalCatOpReport.unitName || activeUnitName}
                 </p>
               </div>
               <button
@@ -4263,20 +4267,29 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                       (viewModalCatOpReport.equipeSolo || []).length > 0 && (
                         <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
                           <span className="block text-[10px] font-bold uppercase text-slate-400">
-                            Equipe em Solo ({viewModalCatOpReport.equipeSolo.length})
+                            {viewModalCatOpReport.comEmpregoAeronave
+                              ? `Apoio de Aeronave Não Tripulada (${viewModalCatOpReport.equipeSolo.length})`
+                              : `Equipe CAT Solo (${viewModalCatOpReport.equipeSolo.length})`}
                           </span>
                           {viewModalCatOpReport.equipeSolo.map(s => (
                             <div key={s.userId} className="text-[11px] text-slate-200">
-                              <strong>{s.name}</strong> — {s.operacaoSolo}
-                              {s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
-                                ? `: ${s.apoioLogisticoDescricao}`
-                                : ''}
+                              <strong>{s.name}</strong>
+                              {!viewModalCatOpReport.comEmpregoAeronave && (
+                                <>
+                                  {' — '}
+                                  {s.operacaoSolo}
+                                  {s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
+                                    ? `: ${s.apoioLogisticoDescricao}`
+                                    : ''}
+                                </>
+                              )}
                             </div>
                           ))}
                         </div>
                       )}
 
-                    {viewModalCatOpReport.teveEmbarcadoExterno &&
+                    {viewModalCatOpReport.comEmpregoAeronave &&
+                      viewModalCatOpReport.teveEmbarcadoExterno &&
                       (viewModalCatOpReport.embarcadosExternos || []).length > 0 && (
                         <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
                           <span className="block text-[10px] font-bold uppercase text-slate-400">
@@ -4284,12 +4297,20 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                           </span>
                           {viewModalCatOpReport.embarcadosExternos.map(e => (
                             <div key={e.id} className="text-[11px] text-slate-200">
-                              <strong>{e.name}</strong> (MASP: {e.masp ? formatMasp(e.masp) : 'N/A'}) —{' '}
-                              {e.foraDoSistema
-                                ? 'Policial de fora do sistema'
-                                : e.ehDaCoe
-                                ? `COE${e.unitName ? ` / ${e.unitName}` : ''}`
-                                : `${e.departmentName || 'Outro Depto'}${e.unitName ? ` / ${e.unitName}` : ''}`}
+                              {e.tipoEmbarcado === 'CHEFIA_VIP' ? (
+                                <strong className="text-amber-300">
+                                  CHEFIA/CONSELHO/SUPERINTENDÊNCIA/VIP's
+                                </strong>
+                              ) : (
+                                <>
+                                  <strong>{e.name}</strong> (MASP: {e.masp ? formatMasp(e.masp) : 'N/A'}) —{' '}
+                                  {e.foraDoSistema
+                                    ? 'Policial de fora do sistema'
+                                    : e.ehDaCoe
+                                    ? `COE${e.unitName ? ` / ${e.unitName}` : ''}`
+                                    : `${e.departmentName || 'Outro Depto'}${e.unitName ? ` / ${e.unitName}` : ''}`}
+                                </>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -4331,7 +4352,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
                     {viewModalCatOpReport.teveDisparosCat &&
                       (viewModalCatOpReport.disparosCat || []).length > 0 && (
-                        <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-1.5">
+                        <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
                           <span className="block text-[10px] font-bold uppercase text-amber-300">
                             Disparos por Operadores da CAT
                           </span>
@@ -4345,6 +4366,28 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                               <strong>{d.quantidadeTiros} tiro(s)</strong>
                             </div>
                           ))}
+                          {viewModalCatOpReport.teveObito ? (
+                            <div className="bg-red-500/10 border border-red-500/35 rounded-lg p-2.5 space-y-1.5 mt-1">
+                              <span className="block text-[10px] font-bold uppercase text-red-300">
+                                Óbito(s) Registrado(s) — Quantidade: {viewModalCatOpReport.quantidadeObitos || 0}
+                              </span>
+                              {(viewModalCatOpReport.obitosDetalhamentos || []).map((det, idx) => (
+                                <div key={idx} className="text-[11px] text-slate-200 whitespace-pre-wrap">
+                                  <strong className="text-red-200">
+                                    {viewModalCatOpReport.mesmoDetalhamentoObitos ||
+                                    (viewModalCatOpReport.obitosDetalhamentos || []).length === 1
+                                      ? 'Detalhamento: '
+                                      : `Óbito #${idx + 1}: `}
+                                  </strong>
+                                  {det}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="text-[11px] text-slate-400">
+                              <strong>Teve óbito?</strong> Não
+                            </div>
+                          )}
                         </div>
                       )}
 

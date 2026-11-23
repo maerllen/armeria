@@ -82,7 +82,9 @@ function sanitizeCatFuncaoServer(raw: any): 'Piloto' | 'Copiloto' | 'Operador Ae
     .toLowerCase();
   if (norm === 'piloto') return 'Piloto';
   if (norm === 'copiloto') return 'Copiloto';
-  if (norm === 'operador aerotatico') return 'Operador Aerotático';
+  if (norm === 'operador aerotatico' || norm === 'tripulante' || norm === 'tripulante operacional') {
+    return 'Operador Aerotático';
+  }
   return null;
 }
 
@@ -114,6 +116,90 @@ function parseCatAeronaveIdsServer(raw: any): string[] {
   return result;
 }
 
+interface CatHabilitacaoServer {
+  funcao: 'Piloto' | 'Copiloto' | 'Operador Aerotático';
+  aeronaveIds: string[];
+}
+
+function sanitizeCatHabilitacoesServer(
+  raw: any,
+  legacyFuncao?: any,
+  legacyAeronaveIds?: any
+): CatHabilitacaoServer[] {
+  let list: any[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (trimmed) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) list = parsed;
+      } catch {
+        list = [];
+      }
+    }
+  }
+
+  const map = new Map<'Piloto' | 'Copiloto' | 'Operador Aerotático', Set<string>>();
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const fn = sanitizeCatFuncaoServer(item.funcao);
+    if (!fn) continue;
+    if (!map.has(fn)) map.set(fn, new Set<string>());
+    const set = map.get(fn)!;
+    const ids = parseCatAeronaveIdsServer(item.aeronaveIds);
+    for (const aid of ids) set.add(aid);
+  }
+
+  if (map.size === 0) {
+    const legFn = sanitizeCatFuncaoServer(legacyFuncao);
+    if (legFn) {
+      const ids = parseCatAeronaveIdsServer(legacyAeronaveIds);
+      map.set(legFn, new Set<string>(ids));
+    }
+  }
+
+  const order: Array<'Piloto' | 'Copiloto' | 'Operador Aerotático'> = [
+    'Piloto',
+    'Copiloto',
+    'Operador Aerotático'
+  ];
+  const result: CatHabilitacaoServer[] = [];
+  for (const fn of order) {
+    if (map.has(fn)) {
+      result.push({
+        funcao: fn,
+        aeronaveIds: Array.from(map.get(fn)!)
+      });
+    }
+  }
+  return result;
+}
+
+function deriveLegacyCatFields(habs: CatHabilitacaoServer[]): {
+  catFuncao: 'Piloto' | 'Copiloto' | 'Operador Aerotático' | null;
+  catAeronaveIds: string[];
+} {
+  if (!habs || habs.length === 0) {
+    return { catFuncao: null, catAeronaveIds: [] };
+  }
+  const unionIds: string[] = [];
+  const seen = new Set<string>();
+  for (const h of habs) {
+    for (const aid of h.aeronaveIds) {
+      if (!seen.has(aid)) {
+        seen.add(aid);
+        unionIds.push(aid);
+      }
+    }
+  }
+  return {
+    catFuncao: habs[0].funcao,
+    catAeronaveIds: unionIds
+  };
+}
+
 let usuariosCatColumnsEnsured = false;
 async function ensureUsuariosCatColumns(pool: any): Promise<void> {
   if (usuariosCatColumnsEnsured) return;
@@ -123,7 +209,7 @@ async function ensureUsuariosCatColumns(pool: any): Promise<void> {
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = DATABASE()
         AND TABLE_NAME = 'USUARIOS'
-        AND COLUMN_NAME IN ('CAT_FUNCAO_USUARIOS', 'CAT_AERONAVES_JSON')
+        AND COLUMN_NAME IN ('CAT_FUNCAO_USUARIOS', 'CAT_AERONAVES_JSON', 'CAT_HABILITACOES_JSON')
     `);
     const existing = new Set((cols || []).map((c: any) => String(c.COLUMN_NAME || '').toUpperCase()));
     if (!existing.has('CAT_FUNCAO_USUARIOS')) {
@@ -131,6 +217,26 @@ async function ensureUsuariosCatColumns(pool: any): Promise<void> {
     }
     if (!existing.has('CAT_AERONAVES_JSON')) {
       await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `CAT_AERONAVES_JSON` TEXT DEFAULT NULL');
+    }
+    if (!existing.has('CAT_HABILITACOES_JSON')) {
+      await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `CAT_HABILITACOES_JSON` TEXT DEFAULT NULL AFTER `CAT_AERONAVES_JSON`');
+      // Migração automática de registros legados (CAT_FUNCAO_USUARIOS + CAT_AERONAVES_JSON -> CAT_HABILITACOES_JSON)
+      try {
+        const [legacyRows]: any = await pool.query(
+          'SELECT ID_USUARIOS, CAT_FUNCAO_USUARIOS, CAT_AERONAVES_JSON FROM USUARIOS WHERE CAT_FUNCAO_USUARIOS IS NOT NULL AND (CAT_HABILITACOES_JSON IS NULL OR CAT_HABILITACOES_JSON = "")'
+        );
+        for (const r of legacyRows || []) {
+          const habs = sanitizeCatHabilitacoesServer(null, r.CAT_FUNCAO_USUARIOS, r.CAT_AERONAVES_JSON);
+          if (habs.length > 0) {
+            await pool.query(
+              'UPDATE USUARIOS SET CAT_HABILITACOES_JSON = ? WHERE ID_USUARIOS = ?',
+              [JSON.stringify(habs), r.ID_USUARIOS]
+            );
+          }
+        }
+      } catch (migErr) {
+        console.warn('Aviso ao migrar habilitações CAT legadas:', migErr);
+      }
     }
     usuariosCatColumnsEnsured = true;
   } catch (err) {
@@ -198,6 +304,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
             CAT_FUNCAO_USUARIOS as cat_funcao,
             CAT_AERONAVES_JSON as cat_aeronaves_json,
+            CAT_HABILITACOES_JSON as cat_habilitacoes_json,
             DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
             DATA_CRIACAO_USUARIOS as created_at
           FROM USUARIOS WHERE MASP_USUARIOS = ?
@@ -330,8 +437,19 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       canRegisterCanilMeds: Boolean(dbUser.can_register_canil_meds),
       canAdministerCanilMeds: Boolean(dbUser.can_administer_canil_meds),
       canViewAllCanilReports: Boolean(dbUser.can_view_all_canil_reports),
-      catFuncao: sanitizeCatFuncaoServer(dbUser.cat_funcao) || undefined,
-      catAeronaveIds: parseCatAeronaveIdsServer(dbUser.cat_aeronaves_json),
+      ...(() => {
+        const habs = sanitizeCatHabilitacoesServer(
+          dbUser.cat_habilitacoes_json,
+          dbUser.cat_funcao,
+          dbUser.cat_aeronaves_json
+        );
+        const leg = deriveLegacyCatFields(habs);
+        return {
+          catFuncao: leg.catFuncao || undefined,
+          catAeronaveIds: leg.catAeronaveIds,
+          catHabilitacoes: habs
+        };
+      })(),
       courses: (courses || []).map((c: any) => ({
         courseId: c.courseId,
         completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
@@ -579,6 +697,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
           CAT_FUNCAO_USUARIOS as cat_funcao,
           CAT_AERONAVES_JSON as cat_aeronaves_json,
+          CAT_HABILITACOES_JSON as cat_habilitacoes_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -615,6 +734,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           0 as can_view_all_canil_reports,
           NULL as cat_funcao,
           NULL as cat_aeronaves_json,
+          NULL as cat_habilitacoes_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password,
           DATA_CRIACAO_USUARIOS as created_at
         FROM USUARIOS ORDER BY DATA_CRIACAO_USUARIOS ASC
@@ -669,8 +789,19 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         canRegisterCanilMeds: Boolean(u.can_register_canil_meds),
         canAdministerCanilMeds: Boolean(u.can_administer_canil_meds),
         canViewAllCanilReports: Boolean(u.can_view_all_canil_reports),
-        catFuncao: sanitizeCatFuncaoServer(u.cat_funcao) || undefined,
-        catAeronaveIds: parseCatAeronaveIdsServer(u.cat_aeronaves_json),
+        ...(() => {
+          const habs = sanitizeCatHabilitacoesServer(
+            u.cat_habilitacoes_json,
+            u.cat_funcao,
+            u.cat_aeronaves_json
+          );
+          const leg = deriveLegacyCatFields(habs);
+          return {
+            catFuncao: leg.catFuncao || undefined,
+            catAeronaveIds: leg.catAeronaveIds,
+            catHabilitacoes: habs
+          };
+        })(),
         courses,
         createdAt: u.created_at
       };
@@ -690,7 +821,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       professorSigla, professor_sigla,
       isCourseCoordinator, coordinatorSubject, canManageFormacaoCourses, canManageContinuadoCourses, canCreateAcademyCourses,
       canManageCanilAndAnimals, canRegisterCanilMeds, canAdministerCanilMeds, canViewAllCanilReports,
-      catFuncao, catAeronaveIds,
+      catFuncao, catAeronaveIds, catHabilitacoes,
       courses, actor
     } = req.body;
     const cleanMasp = (masp || '').replace(/\D/g, '');
@@ -746,9 +877,10 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
     }
 
     const targetIsCatUnit = await isUnitIdCatServer(pool, unitId);
-    const finalCatFuncao = targetIsCatUnit ? sanitizeCatFuncaoServer(catFuncao) : null;
-    let finalCatAeronaveIds = targetIsCatUnit ? parseCatAeronaveIdsServer(catAeronaveIds) : [];
-    if (targetIsCatUnit && finalCatAeronaveIds.length > 0) {
+    let finalCatHabs: CatHabilitacaoServer[] = targetIsCatUnit
+      ? sanitizeCatHabilitacoesServer(catHabilitacoes, catFuncao, catAeronaveIds)
+      : [];
+    if (targetIsCatUnit && finalCatHabs.length > 0) {
       try {
         await ensureAeronavesUnidadeTable(pool);
         const [validAeroRows]: any = await pool.query(
@@ -756,11 +888,20 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           [unitId]
         );
         const validSet = new Set((validAeroRows || []).map((a: any) => String(a.ID_AERONAVE)));
-        finalCatAeronaveIds = finalCatAeronaveIds.filter(aid => validSet.has(aid));
+        finalCatHabs = finalCatHabs.map(h => ({
+          funcao: h.funcao,
+          aeronaveIds: h.aeronaveIds.filter(aid => validSet.has(aid))
+        }));
       } catch {}
     }
+    const derivedCat = deriveLegacyCatFields(finalCatHabs);
+    const finalCatFuncao = targetIsCatUnit ? derivedCat.catFuncao : null;
+    const finalCatAeronaveIds = targetIsCatUnit ? derivedCat.catAeronaveIds : [];
     const finalCatAeronavesJson = targetIsCatUnit && finalCatAeronaveIds.length > 0
       ? JSON.stringify(finalCatAeronaveIds)
+      : null;
+    const finalCatHabilitacoesJson = targetIsCatUnit && finalCatHabs.length > 0
+      ? JSON.stringify(finalCatHabs)
       : null;
 
     const id = `usr-${Date.now()}`;
@@ -776,9 +917,9 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           PODE_GERIR_CONTINUADO_USUARIOS, PODE_CRIAR_CURSOS_USUARIOS,
           PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS, PODE_CADASTRAR_MED_CANIL_USUARIOS,
           PODE_MINISTRAR_MED_CANIL_USUARIOS, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS,
-          CAT_FUNCAO_USUARIOS, CAT_AERONAVES_JSON,
+          CAT_FUNCAO_USUARIOS, CAT_AERONAVES_JSON, CAT_HABILITACOES_JSON,
           DEVE_ALTERAR_SENHA_USUARIOS, DATA_CRIACAO_USUARIOS
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW())`,
         [
           id,
           cleanMasp,
@@ -807,7 +948,8 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
           finalCanAdministerCanilMeds ? 1 : 0,
           finalCanViewAllCanilReports ? 1 : 0,
           finalCatFuncao,
-          finalCatAeronavesJson
+          finalCatAeronavesJson,
+          finalCatHabilitacoesJson
         ]
       );
     } catch {
@@ -877,6 +1019,7 @@ apiRouter.post('/users', async (req: Request, res: Response) => {
       canViewAllCanilReports: finalCanViewAllCanilReports,
       catFuncao: finalCatFuncao || undefined,
       catAeronaveIds: finalCatAeronaveIds,
+      catHabilitacoes: finalCatHabs,
       mustChangePassword: true,
       courses: courses || [],
       createdAt: new Date().toISOString()
@@ -1158,6 +1301,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
           CAT_FUNCAO_USUARIOS as cat_funcao,
           CAT_AERONAVES_JSON as cat_aeronaves_json,
+          CAT_HABILITACOES_JSON as cat_habilitacoes_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1193,6 +1337,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           0 as can_view_all_canil_reports,
           NULL as cat_funcao,
           NULL as cat_aeronaves_json,
+          NULL as cat_habilitacoes_json,
           DEVE_ALTERAR_SENHA_USUARIOS as must_change_password
         FROM USUARIOS WHERE ID_USUARIOS = ?
       `, [id]);
@@ -1268,16 +1413,26 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     const effectiveUnitIsCat = await isUnitIdCatServer(pool, effectiveUnitId);
     let nextCatFuncao: string | null = null;
     let nextCatAeronavesJson: string | null = null;
+    let nextCatHabilitacoesJson: string | null = null;
     if (effectiveUnitIsCat) {
-      nextCatFuncao =
-        updates.catFuncao !== undefined
-          ? sanitizeCatFuncaoServer(updates.catFuncao)
-          : sanitizeCatFuncaoServer(rows[0].cat_funcao);
-      let nextCatAeronaveIds =
-        updates.catAeronaveIds !== undefined
-          ? parseCatAeronaveIdsServer(updates.catAeronaveIds)
-          : parseCatAeronaveIdsServer(rows[0].cat_aeronaves_json);
-      if (nextCatAeronaveIds.length > 0) {
+      let nextCatHabs: CatHabilitacaoServer[];
+      if (updates.catHabilitacoes !== undefined) {
+        nextCatHabs = sanitizeCatHabilitacoesServer(updates.catHabilitacoes);
+      } else if (updates.catFuncao !== undefined || updates.catAeronaveIds !== undefined) {
+        nextCatHabs = sanitizeCatHabilitacoesServer(
+          null,
+          updates.catFuncao !== undefined ? updates.catFuncao : rows[0].cat_funcao,
+          updates.catAeronaveIds !== undefined ? updates.catAeronaveIds : rows[0].cat_aeronaves_json
+        );
+      } else {
+        nextCatHabs = sanitizeCatHabilitacoesServer(
+          rows[0].cat_habilitacoes_json,
+          rows[0].cat_funcao,
+          rows[0].cat_aeronaves_json
+        );
+      }
+
+      if (nextCatHabs.length > 0) {
         try {
           await ensureAeronavesUnidadeTable(pool);
           const [validAeroRows]: any = await pool.query(
@@ -1285,10 +1440,17 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
             [effectiveUnitId]
           );
           const validSet = new Set((validAeroRows || []).map((a: any) => String(a.ID_AERONAVE)));
-          nextCatAeronaveIds = nextCatAeronaveIds.filter(aid => validSet.has(aid));
+          nextCatHabs = nextCatHabs.map(h => ({
+            funcao: h.funcao,
+            aeronaveIds: h.aeronaveIds.filter(aid => validSet.has(aid))
+          }));
         } catch {}
       }
-      nextCatAeronavesJson = nextCatAeronaveIds.length > 0 ? JSON.stringify(nextCatAeronaveIds) : null;
+
+      const derived = deriveLegacyCatFields(nextCatHabs);
+      nextCatFuncao = derived.catFuncao;
+      nextCatAeronavesJson = derived.catAeronaveIds.length > 0 ? JSON.stringify(derived.catAeronaveIds) : null;
+      nextCatHabilitacoesJson = nextCatHabs.length > 0 ? JSON.stringify(nextCatHabs) : null;
     }
 
     try {
@@ -1319,7 +1481,8 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           PODE_MINISTRAR_MED_CANIL_USUARIOS = COALESCE(?, PODE_MINISTRAR_MED_CANIL_USUARIOS),
           PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS = COALESCE(?, PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS),
           CAT_FUNCAO_USUARIOS = ?,
-          CAT_AERONAVES_JSON = ?
+          CAT_AERONAVES_JSON = ?,
+          CAT_HABILITACOES_JSON = ?
          WHERE ID_USUARIOS = ?`,
         [
           cleanMasp,
@@ -1348,6 +1511,7 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
           updates.canViewAllCanilReports !== undefined ? (updates.canViewAllCanilReports ? 1 : 0) : null,
           nextCatFuncao,
           nextCatAeronavesJson,
+          nextCatHabilitacoesJson,
           id
         ]
       );
@@ -20835,6 +20999,7 @@ async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
         \`ID_REL_OP_CAT\` VARCHAR(64) NOT NULL,
         \`COM_EMPREGO_AERONAVE\` TINYINT(1) NOT NULL DEFAULT 1,
         \`DATA_SAIDA_BASE\` VARCHAR(10) NOT NULL,
+        \`HORARIO_SAIDA_BASE\` VARCHAR(5) DEFAULT NULL,
         \`DATA_OPERACAO\` VARCHAR(10) NOT NULL,
         \`HORARIO_DECOLAGEM\` VARCHAR(5) NOT NULL DEFAULT '06:00',
         \`HORARIO_VOO_OPERACAO\` VARCHAR(5) NOT NULL DEFAULT '06:00',
@@ -20861,6 +21026,10 @@ async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
         \`CAPTURAS_LOCALIZACOES_JSON\` LONGTEXT DEFAULT NULL,
         \`TEVE_DISPAROS_CAT\` TINYINT(1) NOT NULL DEFAULT 0,
         \`DISPAROS_CAT_JSON\` LONGTEXT DEFAULT NULL,
+        \`TEVE_OBITO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`QTD_OBITOS\` INT NOT NULL DEFAULT 0,
+        \`MESMO_DETALHAMENTO_OBITOS\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`OBITOS_DETALHAMENTOS_JSON\` LONGTEXT DEFAULT NULL,
         \`SINOPSE_VOO\` TEXT NOT NULL,
         \`OPERADORES_JSON\` LONGTEXT NOT NULL,
         \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
@@ -20880,6 +21049,22 @@ async function ensureRelatoriosOperacoesCatTable(pool: any): Promise<void> {
         KEY \`idx_rel_op_cat_criacao\` (\`DATA_CRIACAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+    const extraCols: Array<[string, string]> = [
+      ['HORARIO_SAIDA_BASE', 'VARCHAR(5) DEFAULT NULL'],
+      ['TEVE_OBITO', 'TINYINT(1) NOT NULL DEFAULT 0'],
+      ['QTD_OBITOS', 'INT NOT NULL DEFAULT 0'],
+      ['MESMO_DETALHAMENTO_OBITOS', 'TINYINT(1) NOT NULL DEFAULT 1'],
+      ['OBITOS_DETALHAMENTOS_JSON', 'LONGTEXT DEFAULT NULL']
+    ];
+    for (const [col, def] of extraCols) {
+      try {
+        await pool.query(`ALTER TABLE \`RELATORIOS_OPERACOES_CAT\` ADD COLUMN \`${col}\` ${def}`);
+      } catch (colErr: any) {
+        if (colErr?.errno !== 1060) {
+          console.warn(`[API] Aviso ao garantir coluna ${col} em RELATORIOS_OPERACOES_CAT:`, colErr?.message);
+        }
+      }
+    }
     relatoriosOperacoesCatEnsured = true;
   } catch (err) {
     console.error('[API] Erro ao garantir tabela RELATORIOS_OPERACOES_CAT:', err);
@@ -21028,16 +21213,38 @@ function sanitizeCatOpEquipeSolo(raw: any) {
   return out;
 }
 
+const CAT_CHEFIA_VIP_LABEL = "CHEFIA/CONSELHO/SUPERINTENDÊNCIA/VIP's";
+
 function sanitizeCatOpEmbarcadosExternos(raw: any) {
   if (!Array.isArray(raw)) return [];
   const out: any[] = [];
   for (let i = 0; i < raw.length && out.length < 50; i++) {
     const e = raw[i];
+    const rawTipo = String(e?.tipoEmbarcado || '').trim().toUpperCase();
+    const isChefiaVip = rawTipo === 'CHEFIA_VIP';
+    if (isChefiaVip) {
+      out.push({
+        id: String(e?.id || `emb-${Date.now()}-${i}`).trim().slice(0, 64),
+        tipoEmbarcado: 'CHEFIA_VIP',
+        foraDoSistema: false,
+        ehDaCoe: false,
+        departmentId: '',
+        departmentName: '',
+        unitId: '',
+        unitName: CAT_CHEFIA_VIP_LABEL,
+        userId: '',
+        name: CAT_CHEFIA_VIP_LABEL,
+        masp: '',
+        cargo: ''
+      });
+      continue;
+    }
     const name = String(e?.name || '').trim().slice(0, 255);
     if (!name) continue;
-    const foraDoSistema = Boolean(e?.foraDoSistema);
+    const foraDoSistema = rawTipo === 'FORA_SISTEMA' || Boolean(e?.foraDoSistema);
     out.push({
       id: String(e?.id || `emb-${Date.now()}-${i}`).trim().slice(0, 64),
+      tipoEmbarcado: foraDoSistema ? 'FORA_SISTEMA' : 'SISTEMA',
       foraDoSistema,
       ehDaCoe: !foraDoSistema && Boolean(e?.ehDaCoe),
       departmentId: !foraDoSistema ? String(e?.departmentId || '').trim().slice(0, 64) : '',
@@ -21051,6 +21258,112 @@ function sanitizeCatOpEmbarcadosExternos(raw: any) {
     });
   }
   return out;
+}
+
+function sanitizeCatOpObitosDetalhamentos(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 100).map(item => String(item || '').trim().slice(0, 500));
+}
+
+function parseHHMMToClockMinutesServer(val?: string | null): number {
+  const m = String(val || '').trim().match(/^(\d{2}):(\d{2})$/);
+  if (!m) return 0;
+  return (Number(m[1]) || 0) * 60 + (Number(m[2]) || 0);
+}
+
+function catOpTimeRangesOverlapServer(
+  startA: string,
+  endA: string,
+  startB: string,
+  endB: string
+): boolean {
+  const s1 = parseHHMMToClockMinutesServer(startA);
+  let e1 = parseHHMMToClockMinutesServer(endA);
+  const s2 = parseHHMMToClockMinutesServer(startB);
+  let e2 = parseHHMMToClockMinutesServer(endB);
+  if (e1 < s1) e1 += 1440;
+  if (e2 < s2) e2 += 1440;
+  if (s1 === e1 && s2 === e2) return s1 === s2;
+  if (s1 === e1) return s1 >= s2 && s1 <= e2;
+  if (s2 === e2) return s2 >= s1 && s2 <= e1;
+  return s1 < e2 && s2 < e1;
+}
+
+async function checkCatOpScheduleConflictsServer(
+  pool: any,
+  params: {
+    excludeId?: string | null;
+    dataOperacao: string;
+    horarioInicio: string;
+    horarioTermino: string;
+    aeronave?: any;
+    tripulantesOperacionais: any[];
+  }
+): Promise<string | null> {
+  const { excludeId, dataOperacao, horarioInicio, horarioTermino, aeronave, tripulantesOperacionais } = params;
+  if (!aeronave?.aeronaveId) return null;
+
+  const sql = excludeId
+    ? `SELECT ID_REL_OP_CAT, HORARIO_DECOLAGEM, HORARIO_VOO_OPERACAO, AERONAVES_JSON, TRIPULANTES_OPERACIONAIS_JSON, MUNICIPIO_OPERACAO
+       FROM RELATORIOS_OPERACOES_CAT
+       WHERE COM_EMPREGO_AERONAVE = 1 AND DATA_OPERACAO = ? AND ID_REL_OP_CAT <> ?`
+    : `SELECT ID_REL_OP_CAT, HORARIO_DECOLAGEM, HORARIO_VOO_OPERACAO, AERONAVES_JSON, TRIPULANTES_OPERACIONAIS_JSON, MUNICIPIO_OPERACAO
+       FROM RELATORIOS_OPERACOES_CAT
+       WHERE COM_EMPREGO_AERONAVE = 1 AND DATA_OPERACAO = ?`;
+  const [rows]: any = await pool.query(sql, excludeId ? [dataOperacao, excludeId] : [dataOperacao]);
+
+  const incomingCrew: Array<{ userId: string; name: string; label: string }> = [];
+  if (aeronave.pilotoId) {
+    incomingCrew.push({ userId: aeronave.pilotoId, name: aeronave.pilotoNome || 'Piloto', label: 'Piloto' });
+  }
+  if (aeronave.copilotoId) {
+    incomingCrew.push({ userId: aeronave.copilotoId, name: aeronave.copilotoNome || 'Copiloto', label: 'Copiloto' });
+  }
+  for (const t of tripulantesOperacionais || []) {
+    if (t?.userId) {
+      incomingCrew.push({ userId: t.userId, name: t.name || 'Operador Aerotático', label: 'Operador Aerotático' });
+    }
+  }
+
+  for (const row of rows || []) {
+    const rStart = String(row.HORARIO_DECOLAGEM || '06:00');
+    const rEnd = String(row.HORARIO_VOO_OPERACAO || '06:00');
+    if (!catOpTimeRangesOverlapServer(horarioInicio, horarioTermino, rStart, rEnd)) continue;
+
+    let rAeros: any[] = [];
+    let rTrips: any[] = [];
+    try {
+      const parsed = row.AERONAVES_JSON ? JSON.parse(row.AERONAVES_JSON) : [];
+      if (Array.isArray(parsed)) rAeros = parsed;
+    } catch {}
+    try {
+      const parsed = row.TRIPULANTES_OPERACIONAIS_JSON ? JSON.parse(row.TRIPULANTES_OPERACIONAIS_JSON) : [];
+      if (Array.isArray(parsed)) rTrips = parsed;
+    } catch {}
+
+    const mun = String(row.MUNICIPIO_OPERACAO || '').trim();
+    const faixa = `${rStart} às ${rEnd}${mun ? ` (${mun})` : ''}`;
+
+    if (rAeros.some(a => String(a?.aeronaveId) === String(aeronave.aeronaveId))) {
+      return `A aeronave ${aeronave.prefixo} já se encontra em outro relatório na data ${dataOperacao} no horário ${faixa}.`;
+    }
+
+    const busyCrewIds = new Set<string>();
+    for (const ra of rAeros) {
+      if (ra?.pilotoId) busyCrewIds.add(String(ra.pilotoId));
+      if (ra?.copilotoId) busyCrewIds.add(String(ra.copilotoId));
+    }
+    for (const rt of rTrips) {
+      if (rt?.userId) busyCrewIds.add(String(rt.userId));
+    }
+
+    for (const member of incomingCrew) {
+      if (busyCrewIds.has(String(member.userId))) {
+        return `O ${member.label} ${member.name} já se encontra em outro relatório de operação na data ${dataOperacao} no horário ${faixa}.`;
+      }
+    }
+  }
+  return null;
 }
 
 function sanitizeCatOpCapturas(raw: any) {
@@ -21169,7 +21482,7 @@ function buildCatOpSignatureRoster(
     }
   }
   for (const emb of payload.embarcadosExternos || []) {
-    if (!emb.foraDoSistema && emb.userId && emb.name) {
+    if (emb.tipoEmbarcado !== 'CHEFIA_VIP' && !emb.foraDoSistema && emb.userId && emb.name) {
       candidates.push({
         userId: emb.userId,
         name: emb.name,
@@ -21198,6 +21511,7 @@ function mapCatOpRow(r: any) {
     id: r.id,
     comEmpregoAeronave: Boolean(r.comEmpregoAeronave),
     dataSaidaBase: r.dataSaidaBase,
+    horarioSaidaBase: r.horarioSaidaBase || r.horarioDecolagem || '06:00',
     dataOperacao: r.dataOperacao,
     horarioDecolagem: r.horarioDecolagem || '06:00',
     horarioVooOperacao: r.horarioVooOperacao || '06:00',
@@ -21232,6 +21546,12 @@ function mapCatOpRow(r: any) {
       : [],
     teveDisparosCat: Boolean(r.teveDisparosCat),
     disparosCat: Array.isArray(safeParse(r.disparosCatJson, [])) ? safeParse(r.disparosCatJson, []) : [],
+    teveObito: Boolean(r.teveObito),
+    quantidadeObitos: Number(r.qtdObitos) || 0,
+    mesmoDetalhamentoObitos: r.mesmoDetalhamentoObitos === undefined || r.mesmoDetalhamentoObitos === null ? true : Boolean(r.mesmoDetalhamentoObitos),
+    obitosDetalhamentos: Array.isArray(safeParse(r.obitosDetalhamentosJson, []))
+      ? safeParse(r.obitosDetalhamentosJson, [])
+      : [],
     sinopseVoo: r.sinopseVoo || '',
     operadores: Array.isArray(safeParse(r.operadoresJson, [])) ? safeParse(r.operadoresJson, []) : [],
     criadorId: r.criadorId,
@@ -21250,6 +21570,7 @@ const CAT_OP_SELECT_COLS = `
   ID_REL_OP_CAT as id,
   COM_EMPREGO_AERONAVE as comEmpregoAeronave,
   DATA_SAIDA_BASE as dataSaidaBase,
+  HORARIO_SAIDA_BASE as horarioSaidaBase,
   DATA_OPERACAO as dataOperacao,
   HORARIO_DECOLAGEM as horarioDecolagem,
   HORARIO_VOO_OPERACAO as horarioVooOperacao,
@@ -21276,6 +21597,10 @@ const CAT_OP_SELECT_COLS = `
   CAPTURAS_LOCALIZACOES_JSON as capturasLocalizacoesJson,
   TEVE_DISPAROS_CAT as teveDisparosCat,
   DISPAROS_CAT_JSON as disparosCatJson,
+  TEVE_OBITO as teveObito,
+  QTD_OBITOS as qtdObitos,
+  MESMO_DETALHAMENTO_OBITOS as mesmoDetalhamentoObitos,
+  OBITOS_DETALHAMENTOS_JSON as obitosDetalhamentosJson,
   SINOPSE_VOO as sinopseVoo,
   OPERADORES_JSON as operadoresJson,
   CRIADOR_ID as criadorId,
@@ -21351,6 +21676,9 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
     const horarioVooOperacao = /^\d{2}:\d{2}$/.test(String(body.horarioVooOperacao || '').trim())
       ? String(body.horarioVooOperacao).trim()
       : '06:00';
+    const horarioSaidaBase = /^\d{2}:\d{2}$/.test(String(body.horarioSaidaBase || '').trim())
+      ? String(body.horarioSaidaBase).trim()
+      : horarioDecolagem;
 
     const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
     if (!VALID_UFS_BR.has(estadoOperacao)) {
@@ -21367,7 +21695,10 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
 
     const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
     if (comEmpregoAeronave && aeronaves.length === 0) {
-      return res.status(400).json({ error: 'Selecione ao menos uma aeronave utilizada na operação.' });
+      return res.status(400).json({ error: 'Selecione a aeronave utilizada na operação.' });
+    }
+    if (comEmpregoAeronave && aeronaves.length > 1) {
+      return res.status(400).json({ error: 'Selecione apenas uma aeronave por relatório de operação CAT.' });
     }
     if (comEmpregoAeronave) {
       for (const a of aeronaves) {
@@ -21408,6 +21739,19 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
       ? Math.max(tripulantesOperacionais.length, Math.min(20, Math.floor(Number(body.quantidadeTripulantesOperacionais) || 0)))
       : 0;
 
+    if (comEmpregoAeronave) {
+      const conflictError = await checkCatOpScheduleConflictsServer(pool, {
+        dataOperacao,
+        horarioInicio: horarioDecolagem,
+        horarioTermino: horarioVooOperacao,
+        aeronave: aeronaves[0],
+        tripulantesOperacionais
+      });
+      if (conflictError) {
+        return res.status(409).json({ error: conflictError });
+      }
+    }
+
     const teveTripulanteOutraUnidade = comEmpregoAeronave && Boolean(body.teveTripulanteOutraUnidade);
     const tripulantesOutraUnidade = teveTripulanteOutraUnidade
       ? sanitizeCatOpTripulantes(body.tripulantesOutraUnidade, 'COE')
@@ -21416,14 +21760,14 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
     const teveEquipeSolo = Boolean(body.teveEquipeSolo);
     const equipeSolo = teveEquipeSolo ? sanitizeCatOpEquipeSolo(body.equipeSolo) : [];
     for (const s of equipeSolo) {
-      if (s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
+      if (!comEmpregoAeronave && s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
         return res.status(400).json({
           error: `Informe o tipo de apoio logístico para o operador em solo ${s.name}.`
         });
       }
     }
 
-    const teveEmbarcadoExterno = Boolean(body.teveEmbarcadoExterno);
+    const teveEmbarcadoExterno = comEmpregoAeronave && Boolean(body.teveEmbarcadoExterno);
     const embarcadosExternos = teveEmbarcadoExterno
       ? sanitizeCatOpEmbarcadosExternos(body.embarcadosExternos)
       : [];
@@ -21438,6 +21782,24 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
     const disparosCat = teveDisparosCat ? sanitizeCatOpDisparos(body.disparosCat) : [];
     if (teveDisparosCat && disparosCat.length === 0) {
       return res.status(400).json({ error: 'Adicione ao menos uma arma com quantidade de tiros efetuados.' });
+    }
+
+    const teveObito = teveDisparosCat && Boolean(body.teveObito);
+    const quantidadeObitos = teveObito ? Math.min(999, Math.max(1, Math.floor(Number(body.quantidadeObitos) || 0))) : 0;
+    const mesmoDetalhamentoObitos = teveObito
+      ? (quantidadeObitos <= 1 ? true : Boolean(body.mesmoDetalhamentoObitos))
+      : true;
+    const obitosDetalhamentos = teveObito ? sanitizeCatOpObitosDetalhamentos(body.obitosDetalhamentos) : [];
+    if (teveObito) {
+      const expectedDescCount = mesmoDetalhamentoObitos ? 1 : quantidadeObitos;
+      if (
+        obitosDetalhamentos.length < expectedDescCount ||
+        obitosDetalhamentos.slice(0, expectedDescCount).some(txt => !txt)
+      ) {
+        return res.status(400).json({
+          error: 'Informe o detalhamento da ação que resultou no(s) óbito(s) (até 500 caracteres).'
+        });
+      }
     }
 
     const sinopseVoo = String(body.sinopseVoo || '').trim().slice(0, 1000);
@@ -21467,7 +21829,7 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
     const id = `ROCAT-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
     await pool.query(
       `INSERT INTO RELATORIOS_OPERACOES_CAT (
-        ID_REL_OP_CAT, COM_EMPREGO_AERONAVE, DATA_SAIDA_BASE, DATA_OPERACAO,
+        ID_REL_OP_CAT, COM_EMPREGO_AERONAVE, DATA_SAIDA_BASE, HORARIO_SAIDA_BASE, DATA_OPERACAO,
         HORARIO_DECOLAGEM, HORARIO_VOO_OPERACAO, ESTADO_OPERACAO, MUNICIPIO_OPERACAO,
         APENAS_UM_MUNICIPIO, OUTROS_MUNICIPIOS_JSON, AERONAVES_JSON, HORAS_TOTAIS_VOO,
         VIATURAS_JSON, TIPO_VOO, TIPO_VOO_OUTROS_DESC,
@@ -21476,14 +21838,17 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
         TEVE_EQUIPE_SOLO, EQUIPE_SOLO_JSON,
         TEVE_EMBARCADO_EXTERNO, EMBARCADOS_EXTERNOS_JSON,
         TRIPULANTES_DESEMBARCARAM, PARTICIPOU_CAPTURA_LOCALIZACAO, CAPTURAS_LOCALIZACOES_JSON,
-        TEVE_DISPAROS_CAT, DISPAROS_CAT_JSON, SINOPSE_VOO, OPERADORES_JSON,
+        TEVE_DISPAROS_CAT, DISPAROS_CAT_JSON,
+        TEVE_OBITO, QTD_OBITOS, MESMO_DETALHAMENTO_OBITOS, OBITOS_DETALHAMENTOS_JSON,
+        SINOPSE_VOO, OPERADORES_JSON,
         CRIADOR_ID, CRIADOR_NOME, CRIADOR_MASP, CRIADOR_CARGO,
         DEPARTAMENTO_ID, UNIDADE_ID, UNIDADE_NOME
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         comEmpregoAeronave ? 1 : 0,
         dataSaidaBase,
+        horarioSaidaBase,
         dataOperacao,
         horarioDecolagem,
         horarioVooOperacao,
@@ -21510,6 +21875,10 @@ apiRouter.post('/relatorios-operacoes-cat', async (req: Request, res: Response) 
         JSON.stringify(capturasLocalizacoes),
         teveDisparosCat ? 1 : 0,
         JSON.stringify(disparosCat),
+        teveObito ? 1 : 0,
+        quantidadeObitos,
+        mesmoDetalhamentoObitos ? 1 : 0,
+        JSON.stringify(teveObito ? obitosDetalhamentos.slice(0, mesmoDetalhamentoObitos ? 1 : quantidadeObitos) : []),
         sinopseVoo,
         JSON.stringify(operadores),
         dbActor.id,
@@ -21605,6 +21974,9 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
     const horarioVooOperacao = /^\d{2}:\d{2}$/.test(String(body.horarioVooOperacao || '').trim())
       ? String(body.horarioVooOperacao).trim()
       : row.HORARIO_VOO_OPERACAO || '06:00';
+    const horarioSaidaBase = /^\d{2}:\d{2}$/.test(String(body.horarioSaidaBase || '').trim())
+      ? String(body.horarioSaidaBase).trim()
+      : row.HORARIO_SAIDA_BASE || horarioDecolagem;
 
     const estadoOperacao = String(body.estadoOperacao || 'MG').trim().toUpperCase();
     if (!VALID_UFS_BR.has(estadoOperacao)) {
@@ -21621,7 +21993,10 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
 
     const aeronaves = comEmpregoAeronave ? sanitizeCatOpAeronaves(body.aeronaves) : [];
     if (comEmpregoAeronave && aeronaves.length === 0) {
-      return res.status(400).json({ error: 'Selecione ao menos uma aeronave utilizada na operação.' });
+      return res.status(400).json({ error: 'Selecione a aeronave utilizada na operação.' });
+    }
+    if (comEmpregoAeronave && aeronaves.length > 1) {
+      return res.status(400).json({ error: 'Selecione apenas uma aeronave por relatório de operação CAT.' });
     }
     if (comEmpregoAeronave) {
       for (const a of aeronaves) {
@@ -21662,6 +22037,20 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
       ? Math.max(tripulantesOperacionais.length, Math.min(20, Math.floor(Number(body.quantidadeTripulantesOperacionais) || 0)))
       : 0;
 
+    if (comEmpregoAeronave) {
+      const conflictError = await checkCatOpScheduleConflictsServer(pool, {
+        excludeId: id,
+        dataOperacao,
+        horarioInicio: horarioDecolagem,
+        horarioTermino: horarioVooOperacao,
+        aeronave: aeronaves[0],
+        tripulantesOperacionais
+      });
+      if (conflictError) {
+        return res.status(409).json({ error: conflictError });
+      }
+    }
+
     const teveTripulanteOutraUnidade = comEmpregoAeronave && Boolean(body.teveTripulanteOutraUnidade);
     const tripulantesOutraUnidade = teveTripulanteOutraUnidade
       ? sanitizeCatOpTripulantes(body.tripulantesOutraUnidade, 'COE')
@@ -21670,14 +22059,14 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
     const teveEquipeSolo = Boolean(body.teveEquipeSolo);
     const equipeSolo = teveEquipeSolo ? sanitizeCatOpEquipeSolo(body.equipeSolo) : [];
     for (const s of equipeSolo) {
-      if (s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
+      if (!comEmpregoAeronave && s.operacaoSolo === 'Apoio logístico' && !s.apoioLogisticoDescricao) {
         return res.status(400).json({
           error: `Informe o tipo de apoio logístico para o operador em solo ${s.name}.`
         });
       }
     }
 
-    const teveEmbarcadoExterno = Boolean(body.teveEmbarcadoExterno);
+    const teveEmbarcadoExterno = comEmpregoAeronave && Boolean(body.teveEmbarcadoExterno);
     const embarcadosExternos = teveEmbarcadoExterno
       ? sanitizeCatOpEmbarcadosExternos(body.embarcadosExternos)
       : [];
@@ -21692,6 +22081,24 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
     const disparosCat = teveDisparosCat ? sanitizeCatOpDisparos(body.disparosCat) : [];
     if (teveDisparosCat && disparosCat.length === 0) {
       return res.status(400).json({ error: 'Adicione ao menos uma arma com quantidade de tiros efetuados.' });
+    }
+
+    const teveObito = teveDisparosCat && Boolean(body.teveObito);
+    const quantidadeObitos = teveObito ? Math.min(999, Math.max(1, Math.floor(Number(body.quantidadeObitos) || 0))) : 0;
+    const mesmoDetalhamentoObitos = teveObito
+      ? (quantidadeObitos <= 1 ? true : Boolean(body.mesmoDetalhamentoObitos))
+      : true;
+    const obitosDetalhamentos = teveObito ? sanitizeCatOpObitosDetalhamentos(body.obitosDetalhamentos) : [];
+    if (teveObito) {
+      const expectedDescCount = mesmoDetalhamentoObitos ? 1 : quantidadeObitos;
+      if (
+        obitosDetalhamentos.length < expectedDescCount ||
+        obitosDetalhamentos.slice(0, expectedDescCount).some(txt => !txt)
+      ) {
+        return res.status(400).json({
+          error: 'Informe o detalhamento da ação que resultou no(s) óbito(s) (até 500 caracteres).'
+        });
+      }
     }
 
     const sinopseVoo = String(body.sinopseVoo || '').trim().slice(0, 1000);
@@ -21734,6 +22141,7 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
       `UPDATE RELATORIOS_OPERACOES_CAT SET
         COM_EMPREGO_AERONAVE = ?,
         DATA_SAIDA_BASE = ?,
+        HORARIO_SAIDA_BASE = ?,
         DATA_OPERACAO = ?,
         HORARIO_DECOLAGEM = ?,
         HORARIO_VOO_OPERACAO = ?,
@@ -21760,12 +22168,17 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
         CAPTURAS_LOCALIZACOES_JSON = ?,
         TEVE_DISPAROS_CAT = ?,
         DISPAROS_CAT_JSON = ?,
+        TEVE_OBITO = ?,
+        QTD_OBITOS = ?,
+        MESMO_DETALHAMENTO_OBITOS = ?,
+        OBITOS_DETALHAMENTOS_JSON = ?,
         SINOPSE_VOO = ?,
         OPERADORES_JSON = ?
       WHERE ID_REL_OP_CAT = ?`,
       [
         comEmpregoAeronave ? 1 : 0,
         dataSaidaBase,
+        horarioSaidaBase,
         dataOperacao,
         horarioDecolagem,
         horarioVooOperacao,
@@ -21792,6 +22205,10 @@ apiRouter.put('/relatorios-operacoes-cat/:id', async (req: Request, res: Respons
         JSON.stringify(capturasLocalizacoes),
         teveDisparosCat ? 1 : 0,
         JSON.stringify(disparosCat),
+        teveObito ? 1 : 0,
+        quantidadeObitos,
+        mesmoDetalhamentoObitos ? 1 : 0,
+        JSON.stringify(teveObito ? obitosDetalhamentos.slice(0, mesmoDetalhamentoObitos ? 1 : quantidadeObitos) : []),
         sinopseVoo,
         JSON.stringify(operadores),
         id

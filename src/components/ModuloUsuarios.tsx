@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
-import { User, UserRole, UserCargo, CatFuncaoUsuario, isCatUnitName, Department, Unit, Course, UserCourse } from '../types';
+import { User, UserRole, UserCargo, CatFuncaoUsuario, CatHabilitacaoUsuario, CAT_FUNCOES_USUARIO, getUserCatHabilitacoes, isCatUnitName, Department, Unit, Course, UserCourse } from '../types';
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
 import { buildStandardDocumentFilename } from '../utils/printHelper';
@@ -31,6 +31,37 @@ interface ExcelImportResult {
     unitName: string;
   }>;
 }
+
+type CatHabilitacoesMap = Record<CatFuncaoUsuario, { enabled: boolean; aeronaveIds: string[] }>;
+
+const createEmptyCatHabilitacoesMap = (): CatHabilitacoesMap => ({
+  'Piloto': { enabled: false, aeronaveIds: [] },
+  'Copiloto': { enabled: false, aeronaveIds: [] },
+  'Operador Aerotático': { enabled: false, aeronaveIds: [] }
+});
+
+const buildCatHabilitacoesMapFromUser = (usr?: User | null): CatHabilitacoesMap => {
+  const map = createEmptyCatHabilitacoesMap();
+  for (const hab of getUserCatHabilitacoes(usr)) {
+    if (map[hab.funcao]) {
+      map[hab.funcao] = {
+        enabled: true,
+        aeronaveIds: [...hab.aeronaveIds]
+      };
+    }
+  }
+  return map;
+};
+
+const getCatFuncaoDisplayLabel = (funcao: CatFuncaoUsuario): string => {
+  if (funcao === 'Operador Aerotático') return 'Tripulante (Operador Aerotático)';
+  return funcao;
+};
+
+const getCatFuncaoShortLabel = (funcao: CatFuncaoUsuario): string => {
+  if (funcao === 'Operador Aerotático') return 'Tripulante';
+  return funcao;
+};
 
 interface UserModuleProps {
   currentUser: User;
@@ -94,8 +125,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
   const [canRegisterCanilMeds, setCanRegisterCanilMeds] = useState(false);
   const [canAdministerCanilMeds, setCanAdministerCanilMeds] = useState(false);
   const [canViewAllCanilReports, setCanViewAllCanilReports] = useState(false);
-  const [catFuncao, setCatFuncao] = useState<'' | CatFuncaoUsuario>('');
-  const [catAeronaveIds, setCatAeronaveIds] = useState<string[]>([]);
+  const [catHabilitacoesMap, setCatHabilitacoesMap] = useState<CatHabilitacoesMap>(createEmptyCatHabilitacoesMap);
   const [showPromoteTeacherModal, setShowPromoteTeacherModal] = useState(false);
   const [existingMaspUser, setExistingMaspUser] = useState<User | null>(null);
   const [promoteSubject, setPromoteSubject] = useState<'MEAF' | 'TAP' | 'DP'>('MEAF');
@@ -202,6 +232,79 @@ export const UserModule: React.FC<UserModuleProps> = ({
     ? allAeronaves.filter(a => a.unitId === formEffectiveUnitId)
     : [];
 
+  const toggleCatFuncaoEnabled = (funcao: CatFuncaoUsuario) => {
+    setCatHabilitacoesMap(prev => {
+      const cur = prev[funcao];
+      return {
+        ...prev,
+        [funcao]: cur.enabled
+          ? { enabled: false, aeronaveIds: [] }
+          : { enabled: true, aeronaveIds: [...cur.aeronaveIds] }
+      };
+    });
+  };
+
+  const toggleCatAeronaveForFuncao = (funcao: CatFuncaoUsuario, aeronaveId: string) => {
+    setCatHabilitacoesMap(prev => {
+      const cur = prev[funcao];
+      const has = cur.aeronaveIds.includes(aeronaveId);
+      return {
+        ...prev,
+        [funcao]: {
+          enabled: true,
+          aeronaveIds: has
+            ? cur.aeronaveIds.filter(id => id !== aeronaveId)
+            : [...cur.aeronaveIds, aeronaveId]
+        }
+      };
+    });
+  };
+
+  const addCatAeronaveForFuncao = (funcao: CatFuncaoUsuario, aeronaveId: string) => {
+    if (!aeronaveId) return;
+    setCatHabilitacoesMap(prev => {
+      const cur = prev[funcao];
+      if (cur.aeronaveIds.includes(aeronaveId)) return prev;
+      return {
+        ...prev,
+        [funcao]: {
+          enabled: true,
+          aeronaveIds: [...cur.aeronaveIds, aeronaveId]
+        }
+      };
+    });
+  };
+
+  const setAllCatAeronavesForFuncao = (funcao: CatFuncaoUsuario, ids: string[]) => {
+    setCatHabilitacoesMap(prev => ({
+      ...prev,
+      [funcao]: {
+        enabled: true,
+        aeronaveIds: Array.from(new Set(ids))
+      }
+    }));
+  };
+
+  const pruneCatHabilitacoesByUnit = (nextUnitId: string, nextUnitName?: string | null) => {
+    if (!isCatUnitName(nextUnitName)) {
+      setCatHabilitacoesMap(createEmptyCatHabilitacoesMap());
+      return;
+    }
+    const validIds = new Set(
+      allAeronaves.filter(a => a.unitId === nextUnitId).map(a => a.id)
+    );
+    setCatHabilitacoesMap(prev => {
+      const next = createEmptyCatHabilitacoesMap();
+      for (const f of CAT_FUNCOES_USUARIO) {
+        next[f] = {
+          enabled: prev[f].enabled,
+          aeronaveIds: prev[f].aeronaveIds.filter(id => validIds.has(id))
+        };
+      }
+      return next;
+    });
+  };
+
   // Open User Modal
   const handleOpenUserModal = (usr?: User) => {
     setErrorMsg('');
@@ -239,8 +342,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanRegisterCanilMeds(Boolean(usr.canRegisterCanilMeds));
       setCanAdministerCanilMeds(Boolean(usr.canAdministerCanilMeds));
       setCanViewAllCanilReports(Boolean(usr.canViewAllCanilReports));
-      setCatFuncao(usr.catFuncao || '');
-      setCatAeronaveIds(Array.isArray(usr.catAeronaveIds) ? [...usr.catAeronaveIds] : []);
+      setCatHabilitacoesMap(buildCatHabilitacoesMapFromUser(usr));
     } else {
       setEditingUser(null);
       setMaspRaw('');
@@ -284,8 +386,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
       setCanRegisterCanilMeds(false);
       setCanAdministerCanilMeds(false);
       setCanViewAllCanilReports(false);
-      setCatFuncao('');
-      setCatAeronaveIds([]);
+      setCatHabilitacoesMap(createEmptyCatHabilitacoesMap());
     }
     setShowUserModal(true);
   };
@@ -386,17 +487,36 @@ export const UserModule: React.FC<UserModuleProps> = ({
 
       const targetUnitObj = units.find(u => u.id === targetUnitId);
       const targetUnitIsCat = isCatUnitName(targetUnitObj?.name);
-      const finalCatFuncao: CatFuncaoUsuario | undefined =
-        targetUnitIsCat && catFuncao ? catFuncao : undefined;
       const validCatAeronaveIdSet = new Set(
         storage
           .getAeronaves()
           .filter(a => a.unitId === targetUnitId)
           .map(a => a.id)
       );
-      const finalCatAeronaveIds: string[] = targetUnitIsCat
-        ? catAeronaveIds.filter(aid => validCatAeronaveIdSet.has(aid))
-        : [];
+      const finalCatHabilitacoes: CatHabilitacaoUsuario[] = [];
+      if (targetUnitIsCat) {
+        for (const funcao of CAT_FUNCOES_USUARIO) {
+          const entry = catHabilitacoesMap[funcao];
+          if (!entry?.enabled) continue;
+          const filteredIds: string[] = Array.from(
+            new Set<string>(entry.aeronaveIds.filter(aid => validCatAeronaveIdSet.has(aid)))
+          );
+          if (validCatAeronaveIdSet.size > 0 && filteredIds.length === 0) {
+            setErrorMsg(
+              `Selecione ao menos uma aeronave para a função "${getCatFuncaoDisplayLabel(funcao)}" ou desmarque essa função.`
+            );
+            return;
+          }
+          finalCatHabilitacoes.push({
+            funcao,
+            aeronaveIds: filteredIds
+          });
+        }
+      }
+      const finalCatFuncao: CatFuncaoUsuario | undefined = finalCatHabilitacoes[0]?.funcao;
+      const finalCatAeronaveIds: string[] = Array.from(
+        new Set(finalCatHabilitacoes.flatMap(h => h.aeronaveIds))
+      );
 
       if (editingUser) {
         await storage.updateUser(editingUser.id, {
@@ -426,7 +546,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
           canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false,
           catFuncao: finalCatFuncao,
-          catAeronaveIds: finalCatAeronaveIds
+          catAeronaveIds: finalCatAeronaveIds,
+          catHabilitacoes: finalCatHabilitacoes
         });
         setSuccessMsg('Policial atualizado com sucesso.');
       } else {
@@ -457,7 +578,8 @@ export const UserModule: React.FC<UserModuleProps> = ({
           canAdministerCanilMeds: selectedRoles.includes('operador_canino') ? canAdministerCanilMeds : false,
           canViewAllCanilReports: selectedRoles.includes('operador_canino') ? canViewAllCanilReports : false,
           catFuncao: finalCatFuncao,
-          catAeronaveIds: finalCatAeronaveIds
+          catAeronaveIds: finalCatAeronaveIds,
+          catHabilitacoes: finalCatHabilitacoes
         });
         setSuccessMsg('Novo policial cadastrado com sucesso. A senha inicial será o número do MASP.');
       }
@@ -1446,24 +1568,42 @@ export const UserModule: React.FC<UserModuleProps> = ({
                                 Criar Cursos: Sim
                               </div>
                             )}
-                            {usr.catFuncao && (
-                              <div className="text-[10px] text-sky-300 font-semibold flex items-center gap-1 mt-0.5">
-                                <Plane className="w-3 h-3 shrink-0" />
-                                <span>CAT: {usr.catFuncao}</span>
-                              </div>
-                            )}
-                            {Array.isArray(usr.catAeronaveIds) && usr.catAeronaveIds.length > 0 && (
-                              <div className="text-[10px] text-cyan-300 font-mono">
-                                Aeronaves:{' '}
-                                {usr.catAeronaveIds
-                                  .map(aid => {
-                                    const aero = allAeronaves.find(a => a.id === aid);
-                                    return aero ? `${aero.prefixo} (${aero.tipo})` : null;
-                                  })
-                                  .filter(Boolean)
-                                  .join(', ') || `${usr.catAeronaveIds.length} vinculada(s)`}
-                              </div>
-                            )}
+                            {(() => {
+                              const catHabs = getUserCatHabilitacoes(usr);
+                              if (catHabs.length === 0) return null;
+                              return (
+                                <div className="mt-1 space-y-0.5">
+                                  {catHabs.map(hab => {
+                                    const aeroLabels = hab.aeronaveIds
+                                      .map(aid => {
+                                        const aero = allAeronaves.find(a => a.id === aid);
+                                        return aero ? `${aero.prefixo} (${aero.tipo})` : null;
+                                      })
+                                      .filter(Boolean);
+                                    return (
+                                      <div
+                                        key={hab.funcao}
+                                        className="text-[10px] text-sky-300 flex items-start gap-1 leading-tight"
+                                      >
+                                        <Plane className="w-3 h-3 shrink-0 mt-0.5 text-sky-400" />
+                                        <span>
+                                          <strong className="font-semibold text-sky-200">
+                                            {getCatFuncaoShortLabel(hab.funcao)}:
+                                          </strong>{' '}
+                                          <span className="font-mono text-cyan-300">
+                                            {aeroLabels.length > 0
+                                              ? aeroLabels.join(', ')
+                                              : hab.aeronaveIds.length > 0
+                                                ? `${hab.aeronaveIds.length} aeronave(s)`
+                                                : 'Sem aeronave vinculada'}
+                                          </span>
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           {/* Courses */}
@@ -1801,15 +1941,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                           const depUnits = units.filter(u => u.departmentId === e.target.value);
                           const nextUnit = depUnits[0];
                           setUnitId(nextUnit?.id || '');
-                          if (!isCatUnitName(nextUnit?.name)) {
-                            setCatFuncao('');
-                            setCatAeronaveIds([]);
-                          } else {
-                            const validIds = new Set(
-                              allAeronaves.filter(a => a.unitId === nextUnit.id).map(a => a.id)
-                            );
-                            setCatAeronaveIds(prev => prev.filter(id => validIds.has(id)));
-                          }
+                          pruneCatHabilitacoesByUnit(nextUnit?.id || '', nextUnit?.name);
                         }}
                         disabled={!isGeral}
                         className={`w-full border rounded-xl px-3.5 py-2 text-sm ${
@@ -1837,15 +1969,7 @@ export const UserModule: React.FC<UserModuleProps> = ({
                           const nextUnitId = e.target.value;
                           setUnitId(nextUnitId);
                           const nextUnitObj = units.find(u => u.id === nextUnitId);
-                          if (!isCatUnitName(nextUnitObj?.name)) {
-                            setCatFuncao('');
-                            setCatAeronaveIds([]);
-                          } else {
-                            const validIds = new Set(
-                              allAeronaves.filter(a => a.unitId === nextUnitId).map(a => a.id)
-                            );
-                            setCatAeronaveIds(prev => prev.filter(id => validIds.has(id)));
-                          }
+                          pruneCatHabilitacoesByUnit(nextUnitId, nextUnitObj?.name);
                         }}
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-sm text-slate-100"
                       >
@@ -1859,108 +1983,162 @@ export const UserModule: React.FC<UserModuleProps> = ({
                   </>
                 )}
 
-                {/* Configuração Operacional — Unidade CAT (Função e Aeronaves Vinculadas) */}
+                {/* Configuração Operacional — Unidade CAT (Múltiplas Funções e Aeronaves por Função) */}
                 {isFormUnitCat && (
                   <div className="sm:col-span-2 bg-sky-500/5 border border-sky-500/30 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center space-x-2">
-                      <Plane className="w-4 h-4 text-sky-400 shrink-0" />
-                      <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
-                        Vinculação Operacional — Unidade CAT
-                      </span>
+                    <div className="space-y-1">
+                      <div className="flex items-center space-x-2">
+                        <Plane className="w-4 h-4 text-sky-400 shrink-0" />
+                        <span className="text-xs font-bold text-sky-300 uppercase tracking-wider">
+                          Vinculação Operacional — Unidade CAT (Habilitações por Aeronave)
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-400">
+                        Marque uma ou mais funções abaixo (Piloto, Copiloto e/ou Tripulante) e vincule, de forma independente, as aeronaves em que o policial é habilitado para cada função.
+                      </p>
                     </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                          Função na Unidade CAT
-                        </label>
-                        <select
-                          value={catFuncao}
-                          onChange={(e) => setCatFuncao(e.target.value as '' | CatFuncaoUsuario)}
-                          className="w-full bg-slate-950 border border-sky-500/40 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-400"
-                        >
-                          <option value="">Selecione a função...</option>
-                          <option value="Piloto">Piloto</option>
-                          <option value="Copiloto">Copiloto</option>
-                          <option value="Operador Aerotático">Operador Aerotático</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
-                          Adicionar Aeronave Vinculada
-                        </label>
-                        <select
-                          value=""
-                          onChange={(e) => {
-                            const selectedId = e.target.value;
-                            if (!selectedId) return;
-                            setCatAeronaveIds(prev => (prev.includes(selectedId) ? prev : [...prev, selectedId]));
-                          }}
-                          disabled={catUnitAeronaves.length === 0}
-                          className="w-full bg-slate-950 border border-sky-500/40 rounded-xl px-3.5 py-2 text-sm text-slate-100 focus:outline-none focus:border-sky-400 disabled:opacity-60"
-                        >
-                          <option value="">
-                            {catUnitAeronaves.length === 0
-                              ? 'Nenhuma aeronave cadastrada na unidade CAT'
-                              : 'Selecionar aeronave da unidade CAT...'}
-                          </option>
-                          {catUnitAeronaves
-                            .filter(a => !catAeronaveIds.includes(a.id))
-                            .map(a => (
-                              <option key={a.id} value={a.id}>
-                                {a.tipo} • {a.prefixo} — {a.descricao}
-                              </option>
-                            ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {catUnitAeronaves.length === 0 ? (
-                      <p className="text-[11px] text-amber-300/90">
+                    {catUnitAeronaves.length === 0 && (
+                      <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
                         Nenhuma aeronave cadastrada nesta unidade CAT ainda. Usuários Armeiro ou Administrador podem cadastrá-las em <strong>Unidades/Deptos</strong> clicando na unidade CAT.
                       </p>
-                    ) : (
-                      <div className="space-y-2">
-                        <span className="block text-[11px] font-semibold text-slate-400">
-                          Aeronaves vinculadas ao policial ({catAeronaveIds.length} selecionada(s) — clique para marcar ou remover):
-                        </span>
-                        <div className="flex flex-wrap gap-2">
-                          {catUnitAeronaves.map(a => {
-                            const isChecked = catAeronaveIds.includes(a.id);
-                            return (
-                              <button
-                                key={a.id}
-                                type="button"
-                                onClick={() =>
-                                  setCatAeronaveIds(prev =>
-                                    prev.includes(a.id)
-                                      ? prev.filter(id => id !== a.id)
-                                      : [...prev, a.id]
-                                  )
-                                }
-                                className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition flex items-center space-x-1.5 ${
-                                  isChecked
-                                    ? 'bg-sky-500/20 border-sky-400 text-sky-200 shadow-sm'
-                                    : 'bg-slate-950/70 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
-                                }`}
-                              >
-                                <span className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-[10px] ${
-                                  isChecked
-                                    ? 'bg-sky-500 border-sky-400 text-slate-950'
-                                    : 'border-slate-600'
-                                }`}>
-                                  {isChecked && <Check className="w-2.5 h-2.5" />}
-                                </span>
-                                <span className="font-mono font-bold">{a.prefixo}</span>
-                                <span className="text-[10px] opacity-80">({a.tipo})</span>
-                                <span className="text-[11px] truncate max-w-[160px] opacity-90">— {a.descricao}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
                     )}
+
+                    <div className="space-y-2.5">
+                      {CAT_FUNCOES_USUARIO.map(funcao => {
+                        const entry = catHabilitacoesMap[funcao];
+                        const isEnabled = Boolean(entry?.enabled);
+                        const selectedIds = entry?.aeronaveIds || [];
+                        const remainingAeronaves = catUnitAeronaves.filter(
+                          a => !selectedIds.includes(a.id)
+                        );
+                        const funcaoLabel = getCatFuncaoDisplayLabel(funcao);
+
+                        return (
+                          <div
+                            key={funcao}
+                            className={`rounded-xl border p-3 transition ${
+                              isEnabled
+                                ? 'bg-slate-950/90 border-sky-500/50'
+                                : 'bg-slate-950/40 border-slate-800'
+                            }`}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <label className="flex items-center space-x-2.5 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={isEnabled}
+                                  onChange={() => toggleCatFuncaoEnabled(funcao)}
+                                  className="w-4 h-4 rounded border-slate-600 text-sky-500 focus:ring-sky-500/30 bg-slate-900"
+                                />
+                                <span
+                                  className={`text-xs font-bold uppercase tracking-wider ${
+                                    isEnabled ? 'text-sky-200' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {funcaoLabel}
+                                </span>
+                              </label>
+
+                              <div className="flex items-center gap-2">
+                                {isEnabled && (
+                                  <span className="text-[11px] font-semibold text-cyan-300">
+                                    {selectedIds.length} aeronave(s)
+                                  </span>
+                                )}
+                                {isEnabled && catUnitAeronaves.length > 1 && (
+                                  <>
+                                    {selectedIds.length < catUnitAeronaves.length && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setAllCatAeronavesForFuncao(
+                                            funcao,
+                                            catUnitAeronaves.map(a => a.id)
+                                          )
+                                        }
+                                        className="text-[10px] font-semibold text-sky-400 hover:text-sky-300 underline"
+                                      >
+                                        Todas
+                                      </button>
+                                    )}
+                                    {selectedIds.length > 0 && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setAllCatAeronavesForFuncao(funcao, [])}
+                                        className="text-[10px] font-semibold text-slate-400 hover:text-slate-200 underline"
+                                      >
+                                        Limpar
+                                      </button>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+
+                            {isEnabled && catUnitAeronaves.length > 0 && (
+                              <div className="mt-3 pt-2.5 border-t border-slate-800/80 space-y-2.5">
+                                {remainingAeronaves.length > 0 && (
+                                  <select
+                                    value=""
+                                    onChange={(e) => addCatAeronaveForFuncao(funcao, e.target.value)}
+                                    className="w-full bg-slate-900 border border-sky-500/30 rounded-lg px-3 py-1.5 text-xs text-slate-100 focus:outline-none focus:border-sky-400"
+                                  >
+                                    <option value="">
+                                      + Adicionar aeronave como {getCatFuncaoShortLabel(funcao)}...
+                                    </option>
+                                    {remainingAeronaves.map(a => (
+                                      <option key={a.id} value={a.id}>
+                                        {a.tipo} • {a.prefixo} — {a.descricao}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+
+                                <div className="flex flex-wrap gap-1.5">
+                                  {catUnitAeronaves.map(a => {
+                                    const isChecked = selectedIds.includes(a.id);
+                                    return (
+                                      <button
+                                        key={a.id}
+                                        type="button"
+                                        onClick={() => toggleCatAeronaveForFuncao(funcao, a.id)}
+                                        className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold transition flex items-center space-x-1.5 ${
+                                          isChecked
+                                            ? 'bg-sky-500/20 border-sky-400 text-sky-200 shadow-sm'
+                                            : 'bg-slate-900/70 border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-200'
+                                        }`}
+                                      >
+                                        <span
+                                          className={`w-3.5 h-3.5 rounded flex items-center justify-center border text-[10px] ${
+                                            isChecked
+                                              ? 'bg-sky-500 border-sky-400 text-slate-950'
+                                              : 'border-slate-600'
+                                          }`}
+                                        >
+                                          {isChecked && <Check className="w-2.5 h-2.5" />}
+                                        </span>
+                                        <span className="font-mono font-bold">{a.prefixo}</span>
+                                        <span className="text-[10px] opacity-80">({a.tipo})</span>
+                                        <span className="text-[11px] truncate max-w-[150px] opacity-90">
+                                          — {a.descricao}
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+
+                                {selectedIds.length === 0 && (
+                                  <p className="text-[11px] text-amber-300/90">
+                                    Selecione ao menos 1 aeronave para habilitar o policial como {funcaoLabel}.
+                                  </p>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 

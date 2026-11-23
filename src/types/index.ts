@@ -78,10 +78,60 @@ export interface User {
   canViewAllCanilReports?: boolean;
   catFuncao?: CatFuncaoUsuario;
   catAeronaveIds?: string[];
+  catHabilitacoes?: CatHabilitacaoUsuario[];
   createdAt: string;
 }
 
 export type CatFuncaoUsuario = 'Piloto' | 'Copiloto' | 'Operador Aerotático';
+
+export interface CatHabilitacaoUsuario {
+  funcao: CatFuncaoUsuario;
+  aeronaveIds: string[];
+}
+
+export const CAT_FUNCOES_USUARIO: readonly CatFuncaoUsuario[] = [
+  'Piloto',
+  'Copiloto',
+  'Operador Aerotático'
+];
+
+export function getUserCatHabilitacoes(
+  user?: Pick<User, 'catHabilitacoes' | 'catFuncao' | 'catAeronaveIds'> | null
+): CatHabilitacaoUsuario[] {
+  if (!user) return [];
+  if (Array.isArray(user.catHabilitacoes) && user.catHabilitacoes.length > 0) {
+    return user.catHabilitacoes
+      .filter(h => h && h.funcao)
+      .map(h => ({
+        funcao: h.funcao,
+        aeronaveIds: Array.isArray(h.aeronaveIds) ? Array.from(new Set(h.aeronaveIds.filter(Boolean))) : []
+      }));
+  }
+  if (user.catFuncao) {
+    return [
+      {
+        funcao: user.catFuncao,
+        aeronaveIds: Array.isArray(user.catAeronaveIds)
+          ? Array.from(new Set(user.catAeronaveIds.filter(Boolean)))
+          : []
+      }
+    ];
+  }
+  return [];
+}
+
+export function userHasCatFuncaoForAeronave(
+  user?: Pick<User, 'catHabilitacoes' | 'catFuncao' | 'catAeronaveIds'> | null,
+  funcao?: CatFuncaoUsuario,
+  aeronaveId?: string
+): boolean {
+  if (!user || !funcao) return false;
+  const habs = getUserCatHabilitacoes(user);
+  const match = habs.find(h => h.funcao === funcao);
+  if (!match) return false;
+  if (!aeronaveId) return true;
+  return match.aeronaveIds.includes(aeronaveId);
+}
 
 export function isCatUnitName(name?: string | null): boolean {
   const norm = String(name || '')
@@ -1726,8 +1776,11 @@ export interface EquipeSoloOperacaoCat {
   apoioLogisticoDescricao?: string; // Máx 300 caracteres
 }
 
+export type TipoEmbarcadoExternoCat = 'SISTEMA' | 'FORA_SISTEMA' | 'CHEFIA_VIP';
+
 export interface EmbarcadoExternoCat {
   id: string;
+  tipoEmbarcado?: TipoEmbarcadoExternoCat;
   foraDoSistema: boolean;
   ehDaCoe: boolean;
   departmentId?: string;
@@ -1761,9 +1814,10 @@ export interface RelatorioOperacaoCat {
   id: string;
   comEmpregoAeronave: boolean;
   dataSaidaBase: string; // YYYY-MM-DD
+  horarioSaidaBase?: string; // HH:mm
   dataOperacao: string; // YYYY-MM-DD
-  horarioDecolagem: string; // HH:mm
-  horarioVooOperacao: string; // HH:mm
+  horarioDecolagem: string; // HH:mm (Horário do Início da Operação)
+  horarioVooOperacao: string; // HH:mm (Horário do Término da Operação)
   estadoOperacao: string; // UF padrão MG
   municipioOperacao: string;
   apenasUmMunicipio: boolean;
@@ -1787,6 +1841,10 @@ export interface RelatorioOperacaoCat {
   capturasLocalizacoes: CapturaLocalizacaoCatItem[];
   teveDisparosCat: boolean;
   disparosCat: DisparoOperacaoCat[];
+  teveObito?: boolean;
+  quantidadeObitos?: number;
+  mesmoDetalhamentoObitos?: boolean;
+  obitosDetalhamentos?: string[]; // Até 500 caracteres cada
   sinopseVoo: string; // Máx 1000 caracteres
   operadores: OperadorOperacaoPolicial[]; // Lista deduplicada para controle de assinaturas eletrônicas
   criadorId: string;
