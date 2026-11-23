@@ -9,6 +9,9 @@ import {
   ParticipanteTreinamentoCachorro,
   LocalTreinamentoCanil,
   ParticipacaoTreinamentoCanil,
+  TopicoTreinamentoCanilTipo,
+  TopicoTreinamentoCanilItem,
+  TOPICOS_TREINAMENTO_CANIL,
   RelatorioOperacaoCanil,
   SolicitacaoOperacaoCanil,
   MaterialEncontradoOperacaoCanil,
@@ -48,7 +51,8 @@ import {
   Package,
   Car,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Tag
 } from 'lucide-react';
 
 interface RelatorioTreinamentoCanilPanelProps {
@@ -172,14 +176,17 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     modalidadeParticipacao: ParticipacaoTreinamentoCanil;
     descricao: string;
     participantes: ParticipanteTreinamentoCanil[];
+    topicosTreinamento: TopicoTreinamentoCanilItem[];
   }>({
     dataTreinamento: getTodayIsoBr(),
     cachorros: [],
     modalidadeLocal: 'Interno',
     modalidadeParticipacao: 'Sozinho',
     descricao: '',
-    participantes: []
+    participantes: [],
+    topicosTreinamento: []
   });
+  const [selectedTopicoToAdd, setSelectedTopicoToAdd] = useState<TopicoTreinamentoCanilTipo | ''>('');
   const [hasUserChangedMainDog, setHasUserChangedMainDog] = useState(false);
   const [editingTreinoReport, setEditingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
   const [participantSearch, setParticipantSearch] = useState('');
@@ -463,6 +470,101 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     }));
   };
 
+  // Todos os K9 presentes no formulário atual de treinamento (condutor + participantes coletivos)
+  const allFormDogs = useMemo<ParticipanteTreinamentoCachorro[]>(() => {
+    const map = new Map<string, ParticipanteTreinamentoCachorro>();
+    for (const dog of treinoForm.cachorros) {
+      if (dog?.id && !map.has(dog.id)) map.set(dog.id, dog);
+    }
+    if (treinoForm.modalidadeParticipacao === 'Coletivo') {
+      for (const p of treinoForm.participantes) {
+        for (const dog of p.cachorros || []) {
+          if (dog?.id && !map.has(dog.id)) map.set(dog.id, dog);
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [treinoForm.cachorros, treinoForm.modalidadeParticipacao, treinoForm.participantes]);
+
+  // Mantém os K9 selecionados nos tópicos sincronizados caso um animal seja removido do relatório
+  useEffect(() => {
+    const validIds = new Set(allFormDogs.map(d => d.id));
+    setTreinoForm(prev => {
+      if (prev.topicosTreinamento.length === 0) return prev;
+      let changed = false;
+      const nextTopicos = prev.topicosTreinamento.map(item => {
+        if (item.aplicarTodosK9) return item;
+        const filtered = (item.cachorros || []).filter(c => validIds.has(c.id));
+        if (filtered.length !== (item.cachorros || []).length) {
+          changed = true;
+          return { ...item, cachorros: filtered };
+        }
+        return item;
+      });
+      return changed ? { ...prev, topicosTreinamento: nextTopicos } : prev;
+    });
+  }, [allFormDogs]);
+
+  const handleAddTopicoTreinamento = (topico: TopicoTreinamentoCanilTipo | '') => {
+    if (!topico) return;
+    setTreinoForm(prev => {
+      if (prev.topicosTreinamento.some(t => t.topico === topico)) return prev;
+      return {
+        ...prev,
+        topicosTreinamento: [
+          ...prev.topicosTreinamento,
+          {
+            topico,
+            aplicarTodosK9: true,
+            cachorros: allFormDogs.map(d => ({ ...d }))
+          }
+        ]
+      };
+    });
+    setSelectedTopicoToAdd('');
+  };
+
+  const handleRemoveTopicoTreinamento = (topico: TopicoTreinamentoCanilTipo) => {
+    setTreinoForm(prev => ({
+      ...prev,
+      topicosTreinamento: prev.topicosTreinamento.filter(t => t.topico !== topico)
+    }));
+  };
+
+  const handleSetTopicoScope = (topico: TopicoTreinamentoCanilTipo, aplicarTodosK9: boolean) => {
+    setTreinoForm(prev => ({
+      ...prev,
+      topicosTreinamento: prev.topicosTreinamento.map(t => {
+        if (t.topico !== topico) return t;
+        if (aplicarTodosK9) {
+          return { ...t, aplicarTodosK9: true, cachorros: allFormDogs.map(d => ({ ...d })) };
+        }
+        return {
+          ...t,
+          aplicarTodosK9: false,
+          cachorros: allFormDogs.length === 1 ? [{ ...allFormDogs[0] }] : []
+        };
+      })
+    }));
+  };
+
+  const handleToggleDogInTopico = (topico: TopicoTreinamentoCanilTipo, dog: ParticipanteTreinamentoCachorro) => {
+    setTreinoForm(prev => ({
+      ...prev,
+      topicosTreinamento: prev.topicosTreinamento.map(t => {
+        if (t.topico !== topico) return t;
+        const exists = t.cachorros.some(c => c.id === dog.id);
+        return {
+          ...t,
+          aplicarTodosK9: false,
+          cachorros: exists
+            ? t.cachorros.filter(c => c.id !== dog.id)
+            : [...t.cachorros, { ...dog }]
+        };
+      })
+    }));
+  };
+
   const handleStartEditTreinamento = (rel: RelatorioTreinamentoCanil) => {
     if (!canEditRelatorioTreinamento(rel)) {
       notifyError('Este relatório só pode ser modificado no mesmo dia em que foi criado pelo condutor autor ou por participantes que já assinaram.');
@@ -479,8 +581,14 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       participantes: (rel.participantes || []).map(p => ({
         ...p,
         cachorros: (p.cachorros || []).map(c => ({ ...c }))
+      })),
+      topicosTreinamento: (rel.topicosTreinamento || []).map(t => ({
+        topico: t.topico,
+        aplicarTodosK9: Boolean(t.aplicarTodosK9),
+        cachorros: (t.cachorros || []).map(c => ({ ...c }))
       }))
     });
+    setSelectedTopicoToAdd('');
     setParticipantSearch('');
     setViewingTreinoReport(null);
     setActiveTab('relatorio-treinamento');
@@ -499,8 +607,10 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       modalidadeLocal: 'Interno',
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
-      participantes: []
+      participantes: [],
+      topicosTreinamento: []
     });
+    setSelectedTopicoToAdd('');
     setParticipantSearch('');
   };
 
@@ -528,6 +638,25 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       return;
     }
 
+    const validFormDogIds = new Set(allFormDogs.map(d => d.id));
+    for (const item of treinoForm.topicosTreinamento) {
+      if (!item.aplicarTodosK9) {
+        const validSelected = (item.cachorros || []).filter(c => validFormDogIds.has(c.id));
+        if (validSelected.length === 0) {
+          notifyError(`Selecione ao menos um K9 para o tópico "${item.topico}" ou marque "Todos os K9 do relatório".`);
+          return;
+        }
+      }
+    }
+
+    const normalizedTopicos: TopicoTreinamentoCanilItem[] = treinoForm.topicosTreinamento.map(item => ({
+      topico: item.topico,
+      aplicarTodosK9: item.aplicarTodosK9,
+      cachorros: item.aplicarTodosK9
+        ? allFormDogs.map(d => ({ ...d }))
+        : (item.cachorros || []).filter(c => validFormDogIds.has(c.id))
+    }));
+
     const primaryDogEntry = treinoForm.cachorros[0];
     const primaryDogRecord = cachorros.find(c => c.id === primaryDogEntry.id);
 
@@ -543,7 +672,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         modalidadeLocal: treinoForm.modalidadeLocal,
         modalidadeParticipacao: treinoForm.modalidadeParticipacao,
         descricao: cleanDesc,
-        participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : []
+        participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
+        topicosTreinamento: normalizedTopicos
       });
     } else {
       const todayDate = getTodayIsoBr();
@@ -562,6 +692,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         modalidadeParticipacao: treinoForm.modalidadeParticipacao,
         descricao: cleanDesc,
         participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
+        topicosTreinamento: normalizedTopicos,
         departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
         unitId: currentUser.unitId || defaultUnitId || primaryDogRecord?.unitId || ''
       });
@@ -587,8 +718,10 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       modalidadeLocal: 'Interno',
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
-      participantes: []
+      participantes: [],
+      topicosTreinamento: []
     });
+    setSelectedTopicoToAdd('');
     setParticipantSearch('');
     triggerRefresh();
 
@@ -752,8 +885,10 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       for (const m of unidadeMunicipiosCache[unidadeFilterEstado] || getCachedMunicipiosPorUF(unidadeFilterEstado)) {
         addCity(m);
       }
-      if (unidadeFilterEstado === 'MG') {
-        for (const op of relatoriosOperacoes) addCity(op.comarca);
+      for (const op of relatoriosOperacoes) {
+        if ((op.estadoOperacao || 'MG').toUpperCase() === unidadeFilterEstado.toUpperCase()) {
+          addCity(op.comarca);
+        }
       }
     } else {
       for (const op of relatoriosOperacoes) addCity(op.comarca);
@@ -953,6 +1088,21 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   </div>
 ${infoTableHtml}
 
+  ${(rel.topicosTreinamento || []).length > 0 ? `
+  <div class="desc-box" style="margin-bottom: 12px;">
+    <div class="desc-title">Tópicos de Treinamento Realizados (${(rel.topicosTreinamento || []).length})</div>
+    <div style="display: flex; flex-direction: column; gap: 4px; font-size: 11px;">
+      ${(rel.topicosTreinamento || [])
+        .map(t => {
+          const dogsLabel = t.aplicarTodosK9
+            ? `Todos os K9 do relatório (${(t.cachorros || []).map(c => c.nome).join(', ') || 'Todos'})`
+            : (t.cachorros || []).map(c => c.nome).join(', ') || 'Nenhum';
+          return `<div><strong>${escapeHtmlText(t.topico)}</strong> — K9: ${escapeHtmlText(dogsLabel)}</div>`;
+        })
+        .join('')}
+    </div>
+  </div>` : ''}
+
   <div class="desc-box">
     <div class="desc-title">Descrição do Treinamento do Dia</div>
     <div class="desc-text">${escapeHtmlText(rel.descricao)}</div>
@@ -996,6 +1146,12 @@ ${infoTableHtml}
                     })
                     .join('; ')}</span>`
                 : '';
+            const topicosHtml =
+              (r.topicosTreinamento || []).length > 0
+                ? `<div style="margin-bottom:4px;font-size:9.5px;color:#334155;"><strong>Tópicos:</strong> ${(r.topicosTreinamento || [])
+                    .map(t => `${escapeHtmlText(t.topico)} (${escapeHtmlText(t.aplicarTodosK9 ? 'Todos os K9' : (t.cachorros || []).map(c => c.nome).join(', '))})`)
+                    .join(' • ')}</div>`
+                : '';
             return `
             <tr>
               <td style="font-family: monospace; white-space: nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
@@ -1003,7 +1159,7 @@ ${infoTableHtml}
               <td>${condutorDogsHtml}${participantsSummary}</td>
               <td>${escapeHtmlText(r.modalidadeLocal)}</td>
               <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px; color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
-              <td style="white-space: pre-wrap; word-break: break-word;">${escapeHtmlText(r.descricao)}</td>
+              <td style="white-space: pre-wrap; word-break: break-word;">${topicosHtml}${escapeHtmlText(r.descricao)}</td>
             </tr>`;
           })
           .join('');
@@ -1124,7 +1280,7 @@ ${infoTableHtml}
         const repDeptId = r.departmentId || units.find(u => u.id === r.unitId)?.departmentId || '';
         if (repDeptId !== unidadeFilterDeptId) return false;
       }
-      if (unidadeFilterEstado && unidadeFilterEstado !== 'MG') return false;
+      if (unidadeFilterEstado && (r.estadoOperacao || 'MG').toUpperCase() !== unidadeFilterEstado.toUpperCase()) return false;
       if (unidadeFilterPolicialId) {
         const matchesCreator = r.criadorId === unidadeFilterPolicialId;
         const matchesOp = (r.operadores || []).some(op => op.userId === unidadeFilterPolicialId);
@@ -1287,8 +1443,8 @@ ${infoTableHtml}
       <span class="val" style="font-family: monospace;">${escapeHtmlText(formatDateBr(rel.dataOperacao))} às ${escapeHtmlText(rel.horaOperacao)}</span>
     </div>
     <div class="info-card">
-      <span class="lbl">Comarca (MG)</span>
-      <span class="val">${escapeHtmlText(rel.comarca)} / MG</span>
+      <span class="lbl">Estado / Comarca</span>
+      <span class="val">${escapeHtmlText(rel.comarca)} / ${escapeHtmlText(rel.estadoOperacao || 'MG')}</span>
     </div>
     <div class="info-card">
       <span class="lbl">Solicitação</span>
@@ -1297,6 +1453,14 @@ ${infoTableHtml}
     <div class="info-card">
       <span class="lbl">Material Encontrado?</span>
       <span class="val">${rel.materialEncontrado ? 'SIM' : 'NÃO'}</span>
+    </div>
+    <div class="info-card" style="grid-column: 1 / -1;">
+      <span class="lbl">Apoio a Outro Departamento?</span>
+      <span class="val">${
+        rel.apoioOutroDepartamento && (rel.departamentosApoio || []).length > 0
+          ? `SIM — ${escapeHtmlText((rel.departamentosApoio || []).join(' • '))}`
+          : 'NÃO'
+      }</span>
     </div>
   </div>
 
@@ -1376,11 +1540,15 @@ ${infoTableHtml}
                 r.solicitacaoTipo === 'Outros' && r.solicitacaoOutrosDetalhes
                   ? `Outros: ${r.solicitacaoOutrosDetalhes}`
                   : r.solicitacaoTipo;
+              const apoioDeptHtml =
+                r.apoioOutroDepartamento && (r.departamentosApoio || []).length > 0
+                  ? `<div style="margin-top:3px;font-size:9px;color:#334155;"><strong>Apoio:</strong> ${escapeHtmlText((r.departamentosApoio || []).join('; '))}</div>`
+                  : '';
               return `
                 <tr>
                   <td style="font-family:monospace; white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataOperacao))}<br/>${escapeHtmlText(r.horaOperacao)}</td>
-                  <td><strong>${escapeHtmlText(r.comarca)}</strong></td>
-                  <td>${escapeHtmlText(solTxt)}</td>
+                  <td><strong>${escapeHtmlText(r.comarca)}</strong> / ${escapeHtmlText(r.estadoOperacao || 'MG')}</td>
+                  <td>${escapeHtmlText(solTxt)}${apoioDeptHtml}</td>
                   <td>${vtrsHtml}</td>
                   <td>${matHtml}</td>
                   <td>${opsHtml}</td>
@@ -1535,6 +1703,12 @@ ${infoTableHtml}
                       })
                       .join('; ')}</span>`
                   : '';
+              const topicosHtml =
+                (r.topicosTreinamento || []).length > 0
+                  ? `<div style="margin-bottom:3px;font-size:9px;color:#334155;"><strong>Tópicos:</strong> ${(r.topicosTreinamento || [])
+                      .map(t => `${escapeHtmlText(t.topico)} (${escapeHtmlText(t.aplicarTodosK9 ? 'Todos os K9' : (t.cachorros || []).map(c => c.nome).join(', '))})`)
+                      .join(' • ')}</div>`
+                  : '';
               return `
                 <tr>
                   <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
@@ -1542,7 +1716,7 @@ ${infoTableHtml}
                   <td>${condutorDogsHtml}${participantsSummary}</td>
                   <td>${escapeHtmlText(r.modalidadeLocal)}</td>
                   <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px;color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
-                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(r.descricao)}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${topicosHtml}${escapeHtmlText(r.descricao)}</td>
                 </tr>`;
             })
             .join('')}
@@ -1591,11 +1765,15 @@ ${infoTableHtml}
                 r.solicitacaoTipo === 'Outros' && r.solicitacaoOutrosDetalhes
                   ? `Outros: ${r.solicitacaoOutrosDetalhes}`
                   : r.solicitacaoTipo;
+              const apoioDeptHtml =
+                r.apoioOutroDepartamento && (r.departamentosApoio || []).length > 0
+                  ? `<div style="margin-top:3px;font-size:8.5px;color:#334155;"><strong>Apoio:</strong> ${escapeHtmlText((r.departamentosApoio || []).join('; '))}</div>`
+                  : '';
               return `
                 <tr>
                   <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataOperacao))}<br/>${escapeHtmlText(r.horaOperacao)}</td>
-                  <td><strong>${escapeHtmlText(r.comarca)}</strong> / MG</td>
-                  <td>${escapeHtmlText(solTxt)}</td>
+                  <td><strong>${escapeHtmlText(r.comarca)}</strong> / ${escapeHtmlText(r.estadoOperacao || 'MG')}</td>
+                  <td>${escapeHtmlText(solTxt)}${apoioDeptHtml}</td>
                   <td>${vtrsHtml}</td>
                   <td>${matHtml}</td>
                   <td>${opsHtml}</td>
@@ -1671,9 +1849,12 @@ ${infoTableHtml}
     payload: {
       dataOperacao: string;
       horaOperacao: string;
+      estadoOperacao: string;
       comarca: string;
       solicitacaoTipo: SolicitacaoOperacaoCanil;
       solicitacaoOutrosDetalhes: string;
+      apoioOutroDepartamento: boolean;
+      departamentosApoio: string[];
       materialEncontrado: boolean;
       materiaisEncontrados: MaterialEncontradoOperacaoCanil[];
       operadores: OperadorOperacaoCanil[];
@@ -2407,6 +2588,155 @@ ${infoTableHtml}
               </div>
             )}
 
+            {/* Tópicos de Treinamento K9 */}
+            <div className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-4 space-y-3.5 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h3 className="font-bold text-amber-300 uppercase flex items-center space-x-2">
+                    <Tag className="w-4 h-4" />
+                    <span>Tópico(s) de Treinamento K9</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Selecione um ou mais tópicos realizados e defina se foram aplicados a <strong>todos os K9 do relatório</strong> ou apenas a <strong>K9 específicos</strong>.
+                  </p>
+                </div>
+                {treinoForm.topicosTreinamento.length > 0 && (
+                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[11px] shrink-0">
+                    {treinoForm.topicosTreinamento.length} tópico(s)
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-2">
+                <select
+                  value={selectedTopicoToAdd}
+                  onChange={(e) => {
+                    const val = e.target.value as TopicoTreinamentoCanilTipo | '';
+                    setSelectedTopicoToAdd(val);
+                    if (val) handleAddTopicoTreinamento(val);
+                  }}
+                  className="flex-1 bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs font-semibold focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">
+                    {treinoForm.topicosTreinamento.length === 0
+                      ? 'Selecione um tópico de treinamento para adicionar...'
+                      : '+ Adicionar outro tópico de treinamento...'}
+                  </option>
+                  {TOPICOS_TREINAMENTO_CANIL.filter(
+                    t => !treinoForm.topicosTreinamento.some(item => item.topico === t)
+                  ).map(topico => (
+                    <option key={topico} value={topico}>
+                      {topico}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {treinoForm.topicosTreinamento.length > 0 && (
+                <div className="space-y-2.5">
+                  {treinoForm.topicosTreinamento.map(item => (
+                    <div
+                      key={item.topico}
+                      className="bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2.5"
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/50 text-amber-300 font-black uppercase tracking-wide text-[11px]">
+                            {item.topico}
+                          </span>
+                          <div className="inline-flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleSetTopicoScope(item.topico, true)}
+                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition ${
+                                item.aplicarTodosK9
+                                  ? 'bg-emerald-500/20 border-emerald-400 text-emerald-300'
+                                  : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              Todos os K9 do relatório
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSetTopicoScope(item.topico, false)}
+                              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition ${
+                                !item.aplicarTodosK9
+                                  ? 'bg-cyan-500/20 border-cyan-400 text-cyan-300'
+                                  : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200'
+                              }`}
+                            >
+                              Selecionar K9
+                            </button>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveTopicoTreinamento(item.topico)}
+                          className="text-slate-400 hover:text-red-400 transition flex items-center space-x-1 text-[11px]"
+                          title="Remover tópico"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>Remover</span>
+                        </button>
+                      </div>
+
+                      {item.aplicarTodosK9 ? (
+                        <div className="pt-1.5 border-t border-slate-800/80 flex flex-wrap items-center gap-1.5 text-[11px]">
+                          <span className="text-emerald-400 font-semibold">Aplicado a todos os K9 do relatório:</span>
+                          {allFormDogs.length === 0 ? (
+                            <span className="text-amber-300 italic">Nenhum cachorro selecionado ainda no relatório.</span>
+                          ) : (
+                            allFormDogs.map(dog => (
+                              <span
+                                key={`${item.topico}-all-${dog.id}`}
+                                className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-200 font-semibold"
+                              >
+                                <Dog className="w-3 h-3 text-emerald-400" />
+                                <span>{dog.nome}</span>
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      ) : (
+                        <div className="pt-1.5 border-t border-slate-800/80 space-y-1.5">
+                          <p className="text-[11px] text-cyan-300 font-semibold">
+                            Indique qual(is) K9 realizaram o tópico &quot;{item.topico}&quot;:
+                          </p>
+                          {allFormDogs.length === 0 ? (
+                            <p className="text-[11px] text-amber-300 italic">
+                              Adicione ao menos um cachorro ao relatório acima para vinculá-lo a este tópico.
+                            </p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {allFormDogs.map(dog => {
+                                const isChecked = item.cachorros.some(c => c.id === dog.id);
+                                return (
+                                  <button
+                                    key={`${item.topico}-sel-${dog.id}`}
+                                    type="button"
+                                    onClick={() => handleToggleDogInTopico(item.topico, dog)}
+                                    className={`inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg border text-[11px] font-bold transition ${
+                                      isChecked
+                                        ? 'bg-amber-500/20 border-amber-400 text-amber-200 shadow'
+                                        : 'bg-slate-950 border-slate-700 text-slate-400 hover:text-slate-200 hover:border-slate-500'
+                                    }`}
+                                  >
+                                    <Dog className={`w-3 h-3 ${isChecked ? 'text-amber-400' : 'text-slate-500'}`} />
+                                    <span>{dog.nome}{dog.raca ? ` (${dog.raca})` : ''}</span>
+                                    {isChecked && <CheckCircle2 className="w-3 h-3 text-emerald-400" />}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {/* Descrição até 1000 caracteres */}
             <div className="space-y-1.5 text-xs">
               <div className="flex items-center justify-between">
@@ -2606,7 +2936,7 @@ ${infoTableHtml}
                                   </span>
                                   <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-100 border border-slate-700 text-[10px] font-bold flex items-center space-x-1">
                                     <MapPin className="w-3 h-3 text-amber-400" />
-                                    <span>{rel.comarca}/MG</span>
+                                    <span>{rel.comarca}/{rel.estadoOperacao || 'MG'}</span>
                                   </span>
                                   <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
                                     Solicitação: {solicitacaoTxt}
@@ -2682,6 +3012,22 @@ ${infoTableHtml}
 
                           {isItemOpen && (
                             <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50">
+                              {rel.apoioOutroDepartamento && (rel.departamentosApoio || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Building className="w-3.5 h-3.5" />
+                                    <span>Apoio a outro(s) departamento(s):</span>
+                                  </span>
+                                  {(rel.departamentosApoio || []).map(dept => (
+                                    <span
+                                      key={dept}
+                                      className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
+                                    >
+                                      {dept}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               {(rel.viaturas || []).length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 text-[11px]">
                                   <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
@@ -2950,6 +3296,25 @@ ${infoTableHtml}
 
                           {isItemOpen && (
                             <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 rounded-b-xl">
+                              {(rel.topicosTreinamento || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-amber-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Tag className="w-3.5 h-3.5" />
+                                    <span>Tópicos ({(rel.topicosTreinamento || []).length}):</span>
+                                  </span>
+                                  {(rel.topicosTreinamento || []).map(t => (
+                                    <span
+                                      key={t.topico}
+                                      className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 font-semibold"
+                                    >
+                                      <strong>{t.topico}</strong> —{' '}
+                                      {t.aplicarTodosK9
+                                        ? `Todos os K9 (${(t.cachorros || []).map(c => c.nome).join(', ') || 'Todos'})`
+                                        : (t.cachorros || []).map(c => c.nome).join(', ')}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
@@ -3359,7 +3724,7 @@ ${infoTableHtml}
                                   </span>
                                   <span className="font-bold text-slate-100 text-xs flex items-center space-x-1">
                                     <MapPin className="w-3 h-3 text-amber-400" />
-                                    <span>{rel.comarca}/MG</span>
+                                    <span>{rel.comarca}/{rel.estadoOperacao || 'MG'}</span>
                                   </span>
                                   <span className="px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
                                     {solicitacaoTxt}
@@ -3434,6 +3799,22 @@ ${infoTableHtml}
 
                           {isItemOpen && (
                             <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs">
+                              {rel.apoioOutroDepartamento && (rel.departamentosApoio || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Building className="w-3.5 h-3.5" />
+                                    <span>Apoio a outro(s) departamento(s):</span>
+                                  </span>
+                                  {(rel.departamentosApoio || []).map(dept => (
+                                    <span
+                                      key={dept}
+                                      className="px-2 py-0.5 rounded-lg bg-cyan-500/10 border border-cyan-500/30 text-cyan-200 font-semibold"
+                                    >
+                                      {dept}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               {(rel.viaturas || []).length > 0 && (
                                 <div className="flex flex-wrap gap-1.5 text-[11px]">
                                   <span className="text-cyan-400 font-bold flex items-center space-x-1 mr-1">
@@ -3654,6 +4035,25 @@ ${infoTableHtml}
 
                           {isItemOpen && (
                             <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs rounded-b-xl">
+                              {(rel.topicosTreinamento || []).length > 0 && (
+                                <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                  <span className="text-amber-400 font-bold flex items-center space-x-1 mr-1">
+                                    <Tag className="w-3.5 h-3.5" />
+                                    <span>Tópicos ({(rel.topicosTreinamento || []).length}):</span>
+                                  </span>
+                                  {(rel.topicosTreinamento || []).map(t => (
+                                    <span
+                                      key={t.topico}
+                                      className="px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-200 font-semibold"
+                                    >
+                                      <strong>{t.topico}</strong> —{' '}
+                                      {t.aplicarTodosK9
+                                        ? `Todos os K9 (${(t.cachorros || []).map(c => c.nome).join(', ') || 'Todos'})`
+                                        : (t.cachorros || []).map(c => c.nome).join(', ')}
+                                    </span>
+                                  ))}
+                                </div>
+                              )}
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
@@ -3769,6 +4169,30 @@ ${infoTableHtml}
                 </div>
               </div>
 
+              {(viewingTreinoReport.topicosTreinamento || []).length > 0 && (
+                <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
+                  <span className="text-[10px] text-amber-400 uppercase font-bold flex items-center space-x-1.5">
+                    <Tag className="w-3.5 h-3.5" />
+                    <span>Tópicos de Treinamento Realizados ({(viewingTreinoReport.topicosTreinamento || []).length})</span>
+                  </span>
+                  <div className="space-y-1.5">
+                    {(viewingTreinoReport.topicosTreinamento || []).map(t => (
+                      <div
+                        key={t.topico}
+                        className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex flex-wrap items-center justify-between gap-2"
+                      >
+                        <span className="font-bold text-amber-300">{t.topico}</span>
+                        <span className="text-slate-200 font-semibold">
+                          {t.aplicarTodosK9
+                            ? `Todos os K9 (${(t.cachorros || []).map(c => c.nome).join(', ') || 'Todos'})`
+                            : `K9: ${(t.cachorros || []).map(c => c.nome).join(', ') || '-'}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
                 <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1.5">
                   Descrição do Treinamento do Dia
@@ -3872,7 +4296,7 @@ ${infoTableHtml}
               <div className="flex items-center space-x-2">
                 <ShieldAlert className="w-5 h-5 text-emerald-400" />
                 <h3 className="font-black text-slate-100 font-mono text-sm uppercase">
-                  Relatório de Operação • {viewingOperacaoReport.comarca}/MG ({formatDateBr(viewingOperacaoReport.dataOperacao)} às {viewingOperacaoReport.horaOperacao})
+                  Relatório de Operação • {viewingOperacaoReport.comarca}/{viewingOperacaoReport.estadoOperacao || 'MG'} ({formatDateBr(viewingOperacaoReport.dataOperacao)} às {viewingOperacaoReport.horaOperacao})
                 </h3>
               </div>
               <button
@@ -3893,8 +4317,10 @@ ${infoTableHtml}
                   </p>
                 </div>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Comarca</span>
-                  <p className="font-bold text-slate-100 text-sm">{viewingOperacaoReport.comarca} / MG</p>
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Estado / Comarca</span>
+                  <p className="font-bold text-slate-100 text-sm">
+                    {viewingOperacaoReport.comarca} / {viewingOperacaoReport.estadoOperacao || 'MG'}
+                  </p>
                 </div>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                   <span className="text-[10px] text-slate-400 uppercase font-bold">Solicitação</span>
@@ -3910,6 +4336,23 @@ ${infoTableHtml}
                   <p className={`font-bold ${viewingOperacaoReport.materialEncontrado ? 'text-emerald-400' : 'text-slate-300'}`}>
                     {viewingOperacaoReport.materialEncontrado ? 'SIM' : 'NÃO'}
                   </p>
+                </div>
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 sm:col-span-2">
+                  <span className="text-[10px] text-slate-400 uppercase font-bold">Apoio a Outro Departamento?</span>
+                  {viewingOperacaoReport.apoioOutroDepartamento && (viewingOperacaoReport.departamentosApoio || []).length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 mt-1.5">
+                      {(viewingOperacaoReport.departamentosApoio || []).map(dept => (
+                        <span
+                          key={dept}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px] font-semibold"
+                        >
+                          {dept}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="font-bold text-slate-300">NÃO</p>
+                  )}
                 </div>
               </div>
 

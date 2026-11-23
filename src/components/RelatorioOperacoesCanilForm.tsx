@@ -12,7 +12,13 @@ import {
   ViaturaOperacaoCanil,
   RelatorioOperacaoCanil
 } from '../types';
-import { MUNICIPIOS_MG, normalizeCitySearch } from '../data/municipiosMG';
+import { normalizeCitySearch } from '../data/municipiosMG';
+import {
+  ESTADOS_BR,
+  DEPARTAMENTOS_APOIO_OPERACAO,
+  getCachedMunicipiosPorUF,
+  fetchMunicipiosPorUF
+} from '../data/estadosMunicipiosBR';
 import { formatMasp, formatPlacaViatura, isValidPlacaViatura } from '../utils/masks';
 import { storage } from '../services/storage';
 import {
@@ -31,7 +37,8 @@ import {
   ShieldAlert,
   FileText,
   Package,
-  Car
+  Car,
+  Building
 } from 'lucide-react';
 
 const MATERIAIS_OPCOES: TipoMaterialEncontradoCanil[] = ['Droga', 'Arma', 'Munição', 'Explosivos'];
@@ -54,9 +61,12 @@ interface RelatorioOperacoesCanilFormProps {
     payload: {
       dataOperacao: string;
       horaOperacao: string;
+      estadoOperacao: string;
       comarca: string;
       solicitacaoTipo: SolicitacaoOperacaoCanil;
       solicitacaoOutrosDetalhes: string;
+      apoioOutroDepartamento: boolean;
+      departamentosApoio: string[];
       materialEncontrado: boolean;
       materiaisEncontrados: MaterialEncontradoOperacaoCanil[];
       operadores: OperadorOperacaoCanil[];
@@ -139,10 +149,16 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
 
   const [dataOperacao, setDataOperacao] = useState<string>(getTodayIsoBr());
   const [horaOperacao, setHoraOperacao] = useState<string>('06:00');
+  const [estadoOperacao, setEstadoOperacao] = useState<string>('MG');
+  const [municipiosUf, setMunicipiosUf] = useState<string[]>(() => getCachedMunicipiosPorUF('MG'));
+  const [loadingMunicipios, setLoadingMunicipios] = useState<boolean>(false);
   const [comarca, setComarca] = useState<string>('');
   const [comarcaOpen, setComarcaOpen] = useState<boolean>(false);
   const [solicitacaoTipo, setSolicitacaoTipo] = useState<SolicitacaoOperacaoCanil>('CEPOLC');
   const [solicitacaoOutrosDetalhes, setSolicitacaoOutrosDetalhes] = useState<string>('');
+  const [apoioOutroDepartamento, setApoioOutroDepartamento] = useState<boolean>(false);
+  const [departamentosApoio, setDepartamentosApoio] = useState<string[]>([]);
+  const [deptApoioSelect, setDeptApoioSelect] = useState<string>('');
   const [materialEncontrado, setMaterialEncontrado] = useState<boolean>(false);
   const [materiaisEncontrados, setMateriaisEncontrados] = useState<MaterialEncontradoOperacaoCanil[]>([]);
   const [operadores, setOperadores] = useState<OperadorOperacaoCanil[]>(() => [
@@ -242,16 +258,44 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
     }
   }, [activeDogs, currentUser.id, editingReport, hasInitializedCreatorDog]);
 
+  // Carregar municípios do Estado selecionado (MG já vem completo em cache; demais UFs via IBGE + cache)
+  useEffect(() => {
+    let active = true;
+    const uf = (estadoOperacao || 'MG').toUpperCase();
+    const cached = getCachedMunicipiosPorUF(uf);
+    setMunicipiosUf(cached);
+    setLoadingMunicipios(true);
+    fetchMunicipiosPorUF(uf)
+      .then(list => {
+        if (active && Array.isArray(list) && list.length > 0) {
+          setMunicipiosUf(list);
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setLoadingMunicipios(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [estadoOperacao]);
+
   // Populate form when entering edit mode or reset when leaving edit mode
   useEffect(() => {
     setLocalError(null);
     if (editingReport) {
       setDataOperacao(editingReport.dataOperacao || getTodayIsoBr());
       setHoraOperacao(editingReport.horaOperacao || '06:00');
+      setEstadoOperacao((editingReport.estadoOperacao || 'MG').toUpperCase());
       setComarca(editingReport.comarca || '');
       setComarcaOpen(false);
       setSolicitacaoTipo(editingReport.solicitacaoTipo || 'CEPOLC');
       setSolicitacaoOutrosDetalhes(editingReport.solicitacaoOutrosDetalhes || '');
+      setApoioOutroDepartamento(Boolean(editingReport.apoioOutroDepartamento));
+      setDepartamentosApoio(
+        Array.isArray(editingReport.departamentosApoio) ? [...editingReport.departamentosApoio] : []
+      );
+      setDeptApoioSelect('');
       setMaterialEncontrado(Boolean(editingReport.materialEncontrado));
       setMateriaisEncontrados(
         (editingReport.materiaisEncontrados || []).map(m => ({
@@ -276,10 +320,14 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
     } else {
       setDataOperacao(getTodayIsoBr());
       setHoraOperacao('06:00');
+      setEstadoOperacao('MG');
       setComarca('');
       setComarcaOpen(false);
       setSolicitacaoTipo('CEPOLC');
       setSolicitacaoOutrosDetalhes('');
+      setApoioOutroDepartamento(false);
+      setDepartamentosApoio([]);
+      setDeptApoioSelect('');
       setMaterialEncontrado(false);
       setMateriaisEncontrados([]);
       setOperadores([buildInitialCreatorOperator()]);
@@ -292,13 +340,14 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
     }
   }, [editingReport?.id, currentUser.id]);
 
-  // Filtered Minas Gerais municipalities as user types
+  // Filtered municipalities of selected UF as user types
   const filteredComarcas = useMemo(() => {
+    const baseList = municipiosUf.length > 0 ? municipiosUf : getCachedMunicipiosPorUF(estadoOperacao);
     const q = normalizeCitySearch(comarca);
-    if (!q) return MUNICIPIOS_MG.slice(0, 40);
+    if (!q) return baseList.slice(0, 60);
     const startsWithMatches: string[] = [];
     const containsMatches: string[] = [];
-    for (const city of MUNICIPIOS_MG) {
+    for (const city of baseList) {
       const norm = normalizeCitySearch(city);
       if (norm.startsWith(q)) {
         startsWithMatches.push(city);
@@ -306,8 +355,19 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
         containsMatches.push(city);
       }
     }
-    return [...startsWithMatches, ...containsMatches].slice(0, 50);
-  }, [comarca]);
+    return [...startsWithMatches, ...containsMatches].slice(0, 60);
+  }, [comarca, municipiosUf, estadoOperacao]);
+
+  const handleAddDepartamentoApoio = (deptName: string) => {
+    const clean = deptName.trim();
+    if (!clean) return;
+    setDepartamentosApoio(prev => (prev.includes(clean) ? prev : [...prev, clean]));
+    setDeptApoioSelect('');
+  };
+
+  const handleRemoveDepartamentoApoio = (deptName: string) => {
+    setDepartamentosApoio(prev => prev.filter(d => d !== deptName));
+  };
 
   // Eligible operators: same unit + Operador Canino profile (for Geral, all Operador Canino)
   const eligibleOperators = useMemo(() => {
@@ -633,16 +693,25 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
       setLocalError('Informe o horário da operação.');
       return;
     }
+    if (!estadoOperacao) {
+      setLocalError('Selecione o Estado (UF) da operação.');
+      return;
+    }
     const cleanComarca = comarca.trim();
-    const matchedCity = MUNICIPIOS_MG.find(
+    const baseCities = municipiosUf.length > 0 ? municipiosUf : getCachedMunicipiosPorUF(estadoOperacao);
+    const matchedCity = baseCities.find(
       c => normalizeCitySearch(c) === normalizeCitySearch(cleanComarca)
     );
-    if (!cleanComarca || !matchedCity) {
-      setLocalError('Selecione uma Comarca válida da lista de municípios mineiros.');
+    if (!cleanComarca || (baseCities.length > 0 && !matchedCity)) {
+      setLocalError(`Selecione uma Comarca/Município válida da lista de ${estadoOperacao}.`);
       return;
     }
     if (solicitacaoTipo === 'Outros' && !solicitacaoOutrosDetalhes.trim()) {
       setLocalError('Informe brevemente o detalhe da solicitação em "Outros".');
+      return;
+    }
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      setLocalError('Selecione ao menos um departamento da PCMG apoiado na operação.');
       return;
     }
     if (operadores.length === 0) {
@@ -678,9 +747,12 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
       {
         dataOperacao,
         horaOperacao,
-        comarca: matchedCity,
+        estadoOperacao,
+        comarca: matchedCity || cleanComarca,
         solicitacaoTipo,
         solicitacaoOutrosDetalhes: solicitacaoTipo === 'Outros' ? solicitacaoOutrosDetalhes.trim() : '',
+        apoioOutroDepartamento,
+        departamentosApoio: apoioOutroDepartamento ? departamentosApoio : [],
         materialEncontrado,
         materiaisEncontrados: materialEncontrado ? materiaisEncontrados : [],
         operadores,
@@ -693,9 +765,13 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
     if (ok && !editingReport) {
       setDataOperacao(getTodayIsoBr());
       setHoraOperacao('06:00');
+      setEstadoOperacao('MG');
       setComarca('');
       setSolicitacaoTipo('CEPOLC');
       setSolicitacaoOutrosDetalhes('');
+      setApoioOutroDepartamento(false);
+      setDepartamentosApoio([]);
+      setDeptApoioSelect('');
       setMaterialEncontrado(false);
       setMateriaisEncontrados([]);
       setOperadores([buildInitialCreatorOperator()]);
@@ -883,141 +959,264 @@ export const RelatorioOperacoesCanilForm: React.FC<RelatorioOperacoesCanilFormPr
           </div>
         )}
 
-        {/* BLOCO 1: DATA, HORA, COMARCA E SOLICITAÇÃO */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
-          {/* Data (inicia com data do dia, editável) */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
-              <Calendar className="w-3.5 h-3.5 text-amber-400" />
-              <span>Data da Operação *</span>
-            </label>
-            <input
-              type="date"
-              value={dataOperacao}
-              onChange={(e) => setDataOperacao(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
-            />
-          </div>
-
-          {/* Hora (padrão 06:00, selecionável) */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
-              <Clock className="w-3.5 h-3.5 text-amber-400" />
-              <span>Hora *</span>
-            </label>
-            <input
-              type="time"
-              value={horaOperacao}
-              onChange={(e) => setHoraOperacao(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
-            />
-          </div>
-
-          {/* Comarca (Autocomplete municípios mineiros) */}
-          <div ref={comarcaBoxRef} className="relative">
-            <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
-              <MapPin className="w-3.5 h-3.5 text-amber-400" />
-              <span>Comarca (MG) *</span>
-            </label>
-            <div className="relative">
+        {/* BLOCO 1: DATA, HORA, ESTADO, COMARCA, SOLICITAÇÃO E APOIO A OUTRO DEPARTAMENTO */}
+        <div className="bg-slate-950/50 border border-slate-800 rounded-2xl p-4 space-y-4 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            {/* Data (inicia com data do dia, editável) */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
+                <Calendar className="w-3.5 h-3.5 text-amber-400" />
+                <span>Data da Operação *</span>
+              </label>
               <input
-                type="text"
-                value={comarca}
-                onFocus={() => setComarcaOpen(true)}
-                onChange={(e) => {
-                  setComarca(e.target.value);
-                  setComarcaOpen(true);
-                }}
-                placeholder="Digite o município de Minas Gerais..."
-                autoComplete="off"
-                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                type="date"
+                value={dataOperacao}
+                onChange={(e) => setDataOperacao(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
               />
-              {comarca && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setComarca('');
+            </div>
+
+            {/* Hora (padrão 06:00, selecionável) */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Hora *</span>
+              </label>
+              <input
+                type="time"
+                value={horaOperacao}
+                onChange={(e) => setHoraOperacao(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-mono focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            {/* Estado (UF) */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
+                <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                <span>Estado *</span>
+              </label>
+              <select
+                value={estadoOperacao}
+                onChange={(e) => {
+                  const nextUf = e.target.value;
+                  setEstadoOperacao(nextUf);
+                  setComarca('');
+                  setComarcaOpen(false);
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-semibold focus:outline-none focus:border-amber-500"
+              >
+                {ESTADOS_BR.map(uf => (
+                  <option key={uf.sigla} value={uf.sigla}>
+                    {uf.sigla} — {uf.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Comarca / Município (todos os municípios do Estado selecionado) */}
+            <div ref={comarcaBoxRef} className="relative">
+              <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
+                <MapPin className="w-3.5 h-3.5 text-amber-400" />
+                <span>Comarca ({estadoOperacao}) *</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={comarca}
+                  onFocus={() => setComarcaOpen(true)}
+                  onChange={(e) => {
+                    setComarca(e.target.value);
                     setComarcaOpen(true);
                   }}
-                  className="absolute right-2.5 top-2.5 text-slate-500 hover:text-slate-200"
-                  title="Limpar comarca"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                  placeholder={
+                    loadingMunicipios
+                      ? `Carregando municípios de ${estadoOperacao}...`
+                      : `Digite o município (${estadoOperacao})...`
+                  }
+                  autoComplete="off"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-3 pr-8 py-2.5 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                {comarca && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setComarca('');
+                      setComarcaOpen(true);
+                    }}
+                    className="absolute right-2.5 top-2.5 text-slate-500 hover:text-slate-200"
+                    title="Limpar comarca"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {comarcaOpen && (
+                <div className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl shadow-2xl divide-y divide-slate-800/80">
+                  {filteredComarcas.length === 0 ? (
+                    <div className="px-3 py-2.5 text-slate-500 italic text-[11px]">
+                      {loadingMunicipios
+                        ? `Carregando municípios de ${estadoOperacao}...`
+                        : `Nenhum município de ${estadoOperacao} encontrado para "${comarca}".`}
+                    </div>
+                  ) : (
+                    filteredComarcas.map(city => {
+                      const isExact = normalizeCitySearch(city) === normalizeCitySearch(comarca);
+                      return (
+                        <button
+                          key={city}
+                          type="button"
+                          onClick={() => {
+                            setComarca(city);
+                            setComarcaOpen(false);
+                          }}
+                          className={`w-full text-left px-3 py-2 text-xs transition flex items-center justify-between ${
+                            isExact
+                              ? 'bg-amber-500/20 text-amber-300 font-bold'
+                              : 'text-slate-200 hover:bg-slate-800'
+                          }`}
+                        >
+                          <span>{city}</span>
+                          <span className="text-[10px] text-slate-500 font-mono">{estadoOperacao}</span>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
               )}
             </div>
 
-            {comarcaOpen && (
-              <div className="absolute z-30 left-0 right-0 mt-1 max-h-56 overflow-y-auto bg-slate-950 border border-slate-700 rounded-xl shadow-2xl divide-y divide-slate-800/80">
-                {filteredComarcas.length === 0 ? (
-                  <div className="px-3 py-2.5 text-slate-500 italic text-[11px]">
-                    Nenhum município mineiro encontrado para &quot;{comarca}&quot;.
+            {/* Solicitação (CEPOLC, SEI, Outros) */}
+            <div>
+              <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
+                <FileText className="w-3.5 h-3.5 text-amber-400" />
+                <span>Solicitação *</span>
+              </label>
+              <select
+                value={solicitacaoTipo}
+                onChange={(e) => {
+                  const next = e.target.value as SolicitacaoOperacaoCanil;
+                  setSolicitacaoTipo(next);
+                  if (next !== 'Outros') setSolicitacaoOutrosDetalhes('');
+                }}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-semibold focus:outline-none focus:border-amber-500"
+              >
+                <option value="CEPOLC">CEPOLC</option>
+                <option value="SEI">SEI</option>
+                <option value="Outros">Outros</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Detalhe breve quando Solicitação === Outros */}
+          {solicitacaoTipo === 'Outros' && (
+            <div className="bg-slate-900/70 border border-amber-500/30 rounded-xl p-3.5 text-xs">
+              <label className="block text-[11px] font-bold text-amber-300 uppercase mb-1.5">
+                Detalhe da Solicitação (Outros) *
+              </label>
+              <input
+                type="text"
+                value={solicitacaoOutrosDetalhes}
+                onChange={(e) => setSolicitacaoOutrosDetalhes(e.target.value.slice(0, 200))}
+                maxLength={200}
+                placeholder="Informe brevemente a origem ou número da solicitação..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          )}
+
+          {/* Linha de baixo: Apoio a outro departamento? (PCMG — múltipla seleção) */}
+          <div className="pt-3 border-t border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <label className="text-[11px] font-bold text-slate-300 uppercase flex items-center space-x-1.5">
+                <Building className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Apoio a outro departamento?</span>
+              </label>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setApoioOutroDepartamento(false);
+                    setDepartamentosApoio([]);
+                    setDeptApoioSelect('');
+                  }}
+                  className={`px-4 py-1.5 rounded-lg border text-xs font-bold transition ${
+                    !apoioOutroDepartamento
+                      ? 'bg-slate-800 border-slate-600 text-slate-100 shadow'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Não
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setApoioOutroDepartamento(true)}
+                  className={`px-4 py-1.5 rounded-lg border text-xs font-bold transition ${
+                    apoioOutroDepartamento
+                      ? 'bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200'
+                  }`}
+                >
+                  Sim
+                </button>
+              </div>
+            </div>
+
+            {apoioOutroDepartamento && (
+              <div className="bg-slate-900/70 border border-cyan-500/30 rounded-xl p-3.5 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <select
+                    value={deptApoioSelect}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setDeptApoioSelect(val);
+                      if (val) handleAddDepartamentoApoio(val);
+                    }}
+                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="">
+                      {departamentosApoio.length === 0
+                        ? 'Selecione o departamento da Polícia Civil de Minas Gerais apoiado...'
+                        : '+ Adicionar outro departamento da PCMG...'}
+                    </option>
+                    {DEPARTAMENTOS_APOIO_OPERACAO.filter(d => !departamentosApoio.includes(d)).map(dept => (
+                      <option key={dept} value={dept}>
+                        {dept}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {departamentosApoio.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {departamentosApoio.map(dept => (
+                      <span
+                        key={dept}
+                        className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/40 text-cyan-200 text-[11px] font-semibold"
+                      >
+                        <Building className="w-3 h-3 text-cyan-400 shrink-0" />
+                        <span>{dept}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDepartamentoApoio(dept)}
+                          className="text-slate-400 hover:text-red-400 transition"
+                          title="Remover departamento"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))}
                   </div>
                 ) : (
-                  filteredComarcas.map(city => {
-                    const isExact = normalizeCitySearch(city) === normalizeCitySearch(comarca);
-                    return (
-                      <button
-                        key={city}
-                        type="button"
-                        onClick={() => {
-                          setComarca(city);
-                          setComarcaOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-2 text-xs transition flex items-center justify-between ${
-                          isExact
-                            ? 'bg-amber-500/20 text-amber-300 font-bold'
-                            : 'text-slate-200 hover:bg-slate-800'
-                        }`}
-                      >
-                        <span>{city}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">MG</span>
-                      </button>
-                    );
-                  })
+                  <p className="text-[11px] text-amber-300/90">
+                    Selecione um ou mais departamentos da PCMG apoiados nesta operação.
+                  </p>
                 )}
               </div>
             )}
           </div>
-
-          {/* Solicitação (CEPOLC, SEI, Outros) */}
-          <div>
-            <label className="block text-[11px] font-bold text-slate-300 uppercase mb-1.5 flex items-center space-x-1.5">
-              <FileText className="w-3.5 h-3.5 text-amber-400" />
-              <span>Solicitação *</span>
-            </label>
-            <select
-              value={solicitacaoTipo}
-              onChange={(e) => {
-                const next = e.target.value as SolicitacaoOperacaoCanil;
-                setSolicitacaoTipo(next);
-                if (next !== 'Outros') setSolicitacaoOutrosDetalhes('');
-              }}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-slate-100 font-semibold focus:outline-none focus:border-amber-500"
-            >
-              <option value="CEPOLC">CEPOLC</option>
-              <option value="SEI">SEI</option>
-              <option value="Outros">Outros</option>
-            </select>
-          </div>
         </div>
-
-        {/* Detalhe breve quando Solicitação === Outros */}
-        {solicitacaoTipo === 'Outros' && (
-          <div className="bg-slate-950/70 border border-amber-500/30 rounded-xl p-3.5 text-xs">
-            <label className="block text-[11px] font-bold text-amber-300 uppercase mb-1.5">
-              Detalhe da Solicitação (Outros) *
-            </label>
-            <input
-              type="text"
-              value={solicitacaoOutrosDetalhes}
-              onChange={(e) => setSolicitacaoOutrosDetalhes(e.target.value.slice(0, 200))}
-              maxLength={200}
-              placeholder="Informe brevemente a origem ou número da solicitação..."
-              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-            />
-          </div>
-        )}
 
         {/* BLOCO 1B: VIATURAS UTILIZADAS NA OPERAÇÃO (MULTI-SELEÇÃO POR PLACA OU DESCRIÇÃO) */}
         <div className="bg-slate-950/60 border border-slate-800 rounded-2xl p-4 space-y-3 text-xs">

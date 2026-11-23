@@ -1404,9 +1404,51 @@ export interface ParticipanteTreinamentoCanil {
   cachorros?: ParticipanteTreinamentoCachorro[];
 }
 
+export type TopicoTreinamentoCanilTipo =
+  | 'VEÍCULO'
+  | 'ENTERRADA'
+  | 'ALTO'
+  | 'TEMPO'
+  | 'INDICAÇÃO'
+  | 'FECHADO'
+  | 'FISICO'
+  | 'PADERE'
+  | 'COLONIZAÇÃO'
+  | 'MALAS'
+  | 'POSIÇÕES'
+  | 'CONDUÇÃO'
+  | 'HAND TARGET'
+  | 'SOLTAR'
+  | 'FOCINHEIRA';
+
+export const TOPICOS_TREINAMENTO_CANIL: TopicoTreinamentoCanilTipo[] = [
+  'VEÍCULO',
+  'ENTERRADA',
+  'ALTO',
+  'TEMPO',
+  'INDICAÇÃO',
+  'FECHADO',
+  'FISICO',
+  'PADERE',
+  'COLONIZAÇÃO',
+  'MALAS',
+  'POSIÇÕES',
+  'CONDUÇÃO',
+  'HAND TARGET',
+  'SOLTAR',
+  'FOCINHEIRA'
+];
+
+export interface TopicoTreinamentoCanilItem {
+  topico: TopicoTreinamentoCanilTipo;
+  aplicarTodosK9: boolean;
+  cachorros: ParticipanteTreinamentoCachorro[];
+}
+
 export interface RelatorioTreinamentoCanil {
   id: string;
   dataTreinamento: string; // YYYY-MM-DD
+  horaTreinamento?: string; // HH:mm
   condutorId: string;
   condutorNome: string;
   condutorMasp: string;
@@ -1420,6 +1462,7 @@ export interface RelatorioTreinamentoCanil {
   modalidadeParticipacao: ParticipacaoTreinamentoCanil;
   descricao: string; // Máximo 1000 caracteres
   participantes: ParticipanteTreinamentoCanil[]; // Até 15 participantes adicionais quando Coletivo
+  topicosTreinamento?: TopicoTreinamentoCanilItem[];
   condutorAssinado: boolean;
   condutorAssinadoEm?: string;
   departmentId?: string;
@@ -1482,9 +1525,12 @@ export interface RelatorioOperacaoCanil {
   id: string;
   dataOperacao: string; // YYYY-MM-DD
   horaOperacao: string; // HH:mm (padrão 06:00)
-  comarca: string; // Município de Minas Gerais
+  estadoOperacao?: string; // UF (padrão MG)
+  comarca: string; // Município/Comarca do estado selecionado
   solicitacaoTipo: SolicitacaoOperacaoCanil;
   solicitacaoOutrosDetalhes?: string;
+  apoioOutroDepartamento?: boolean;
+  departamentosApoio?: string[];
   materialEncontrado: boolean;
   materiaisEncontrados: MaterialEncontradoOperacaoCanil[];
   operadores: OperadorOperacaoCanil[];

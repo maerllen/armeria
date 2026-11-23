@@ -12343,24 +12343,303 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
 });
 
 // --- 5. RELATÓRIOS DE TREINAMENTO CANIL K9 ---
+const VALID_TOPICOS_TREINAMENTO_CANIL = new Set([
+  'VEÍCULO',
+  'ENTERRADA',
+  'ALTO',
+  'TEMPO',
+  'INDICAÇÃO',
+  'FECHADO',
+  'FISICO',
+  'PADERE',
+  'COLONIZAÇÃO',
+  'MALAS',
+  'POSIÇÕES',
+  'CONDUÇÃO',
+  'HAND TARGET',
+  'SOLTAR',
+  'FOCINHEIRA'
+]);
+
+function getCurrentTimeBrHHmm(): string {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'America/Sao_Paulo',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).formatToParts(new Date());
+    const hh = String(Number(parts.find(p => p.type === 'hour')?.value || '0') % 24).padStart(2, '0');
+    const mm = String(parts.find(p => p.type === 'minute')?.value || '00').padStart(2, '0');
+    return `${hh}:${mm}`;
+  } catch {
+    return new Date().toTimeString().slice(0, 5);
+  }
+}
+
+function collectAllDogsFromTraining(
+  condutorCachorros: Array<{ id: string; nome: string; raca: string; microchip: string }>,
+  participantes: any[]
+): Array<{ id: string; nome: string; raca: string; microchip: string }> {
+  const map = new Map<string, { id: string; nome: string; raca: string; microchip: string }>();
+  for (const dog of condutorCachorros || []) {
+    if (dog?.id && dog?.nome && !map.has(dog.id)) map.set(dog.id, dog);
+  }
+  for (const p of participantes || []) {
+    for (const dog of p?.cachorros || []) {
+      if (dog?.id && dog?.nome && !map.has(dog.id)) map.set(dog.id, dog);
+    }
+  }
+  return Array.from(map.values());
+}
+
+function sanitizeTopicosTreinamentoCanil(
+  raw: any,
+  allReportDogs: Array<{ id: string; nome: string; raca: string; microchip: string }>
+): { items: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> }>; error?: string } {
+  if (!Array.isArray(raw)) return { items: [] };
+  const dogMap = new Map(allReportDogs.map(d => [d.id, d]));
+  const seenTopics = new Set<string>();
+  const items: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> }> = [];
+
+  for (const entry of raw) {
+    const topico = String(entry?.topico || '').trim();
+    if (!topico || !VALID_TOPICOS_TREINAMENTO_CANIL.has(topico)) continue;
+    if (seenTopics.has(topico)) continue;
+    seenTopics.add(topico);
+
+    const aplicarTodosK9 = Boolean(entry?.aplicarTodosK9);
+    if (aplicarTodosK9) {
+      items.push({
+        topico,
+        aplicarTodosK9: true,
+        cachorros: allReportDogs.map(d => ({ ...d }))
+      });
+    } else {
+      const rawDogs = Array.isArray(entry?.cachorros) ? entry.cachorros : [];
+      const seenDogs = new Set<string>();
+      const selectedDogs: Array<{ id: string; nome: string; raca: string; microchip: string }> = [];
+      for (const d of rawDogs) {
+        const did = String(d?.id || '').trim();
+        if (!did || seenDogs.has(did)) continue;
+        const matched = dogMap.get(did);
+        if (matched) {
+          seenDogs.add(did);
+          selectedDogs.push({ ...matched });
+        }
+      }
+      if (selectedDogs.length === 0) {
+        return {
+          items: [],
+          error: `Selecione ao menos um K9 do relatório para o tópico "${topico}" ou marque "Todos os K9 do relatório".`
+        };
+      }
+      items.push({
+        topico,
+        aplicarTodosK9: false,
+        cachorros: selectedDogs
+      });
+    }
+  }
+
+  return { items };
+}
+
+async function syncTopicosTreinamentoK9Table(
+  pool: any,
+  meta: {
+    idRelTreinamento: string;
+    dataTreinamento: string;
+    horaTreinamento: string;
+    condutorId: string;
+    condutorNome: string;
+    condutorMasp: string;
+    condutorCargo: string | null;
+    modalidadeLocal: string;
+    modalidadeParticipacao: string;
+    departmentId: string | null;
+    unitId: string | null;
+  },
+  topicos: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> }>
+): Promise<void> {
+  await pool.query(
+    'DELETE FROM RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9 WHERE ID_REL_TREINAMENTO = ?',
+    [meta.idRelTreinamento]
+  );
+
+  let seq = 0;
+  for (const item of topicos) {
+    for (const dog of item.cachorros || []) {
+      seq += 1;
+      const rowId = `rtk9-${Date.now()}-${seq}-${Math.random().toString(36).substring(2, 6)}`;
+      await pool.query(
+        `INSERT INTO RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9 (
+          ID_TOPICO_K9, ID_REL_TREINAMENTO, TOPICO,
+          DATA_TREINAMENTO, HORA_TREINAMENTO,
+          CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
+          CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP,
+          APLICAR_TODOS_K9, MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO,
+          DEPARTAMENTO_ID, UNIDADE_ID, DATA_CRIACAO
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          rowId,
+          meta.idRelTreinamento,
+          item.topico,
+          meta.dataTreinamento,
+          meta.horaTreinamento || '00:00',
+          meta.condutorId,
+          meta.condutorNome,
+          meta.condutorMasp || '',
+          meta.condutorCargo || null,
+          dog.id,
+          dog.nome,
+          dog.raca || null,
+          dog.microchip || null,
+          item.aplicarTodosK9 ? 1 : 0,
+          meta.modalidadeLocal,
+          meta.modalidadeParticipacao,
+          meta.departmentId,
+          meta.unitId
+        ]
+      );
+    }
+  }
+}
+
 let relatoriosTreinamentoSchemaEnsured = false;
 async function ensureRelatoriosTreinamentoSchema(pool: any) {
   if (relatoriosTreinamentoSchemaEnsured) return;
   try {
-    const [cols]: any = await pool.query(
-      `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_TREINAMENTO_CANIL' AND COLUMN_NAME = 'CACHORROS_JSON'`
-    );
-    if (!cols?.[0]?.cnt) {
-      await pool.query(
-        'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `CACHORROS_JSON` LONGTEXT DEFAULT NULL AFTER `CACHORRO_MICROCHIP`'
+    const missingChecks: Array<[string, string]> = [
+      ['CACHORROS_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `CACHORROS_JSON` LONGTEXT DEFAULT NULL AFTER `CACHORRO_MICROCHIP`'],
+      ['HORA_TREINAMENTO', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `HORA_TREINAMENTO` VARCHAR(5) DEFAULT NULL AFTER `DATA_TREINAMENTO`'],
+      ['TOPICOS_TREINAMENTO_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `TOPICOS_TREINAMENTO_JSON` LONGTEXT DEFAULT NULL AFTER `PARTICIPANTES_JSON`']
+    ];
+    for (const [colName, alterSql] of missingChecks) {
+      const [cols]: any = await pool.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_TREINAMENTO_CANIL' AND COLUMN_NAME = ?`,
+        [colName]
       );
+      if (!cols?.[0]?.cnt) {
+        await pool.query(alterSql);
+      }
     }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9\` (
+        \`ID_TOPICO_K9\` VARCHAR(64) NOT NULL,
+        \`ID_REL_TREINAMENTO\` VARCHAR(64) NOT NULL,
+        \`TOPICO\` VARCHAR(64) NOT NULL,
+        \`DATA_TREINAMENTO\` VARCHAR(10) NOT NULL,
+        \`HORA_TREINAMENTO\` VARCHAR(5) NOT NULL DEFAULT '00:00',
+        \`CONDUTOR_ID\` VARCHAR(64) NOT NULL,
+        \`CONDUTOR_NOME\` VARCHAR(255) NOT NULL,
+        \`CONDUTOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`CONDUTOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`CACHORRO_ID\` VARCHAR(64) NOT NULL,
+        \`CACHORRO_NOME\` VARCHAR(160) NOT NULL,
+        \`CACHORRO_RACA\` VARCHAR(128) DEFAULT NULL,
+        \`CACHORRO_MICROCHIP\` VARCHAR(64) DEFAULT NULL,
+        \`APLICAR_TODOS_K9\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`MODALIDADE_LOCAL\` VARCHAR(16) NOT NULL DEFAULT 'Interno',
+        \`MODALIDADE_PARTICIPACAO\` VARCHAR(16) NOT NULL DEFAULT 'Sozinho',
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_TOPICO_K9\`),
+        KEY \`idx_rtk9_relatorio\` (\`ID_REL_TREINAMENTO\`),
+        KEY \`idx_rtk9_cachorro\` (\`CACHORRO_ID\`),
+        KEY \`idx_rtk9_topico\` (\`TOPICO\`),
+        KEY \`idx_rtk9_data\` (\`DATA_TREINAMENTO\`),
+        KEY \`idx_rtk9_cao_topico\` (\`CACHORRO_ID\`, \`TOPICO\`),
+        KEY \`idx_rtk9_condutor\` (\`CONDUTOR_ID\`),
+        KEY \`idx_rtk9_unit\` (\`UNIDADE_ID\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     relatoriosTreinamentoSchemaEnsured = true;
   } catch (err) {
-    console.warn('Aviso ao verificar coluna CACHORROS_JSON em RELATORIOS_TREINAMENTO_CANIL:', err);
+    console.warn('Aviso ao verificar schema de RELATORIOS_TREINAMENTO_CANIL:', err);
   }
 }
+
+apiRouter.get('/relatorios-treinamento-canil/topicos-por-animal', async (req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    const cachorroId = String(req.query.cachorroId || '').trim();
+    if (cachorroId) {
+      conditions.push('CACHORRO_ID = ?');
+      params.push(cachorroId);
+    }
+
+    const topico = String(req.query.topico || '').trim();
+    if (topico && VALID_TOPICOS_TREINAMENTO_CANIL.has(topico)) {
+      conditions.push('TOPICO = ?');
+      params.push(topico);
+    }
+
+    const dataInicio = String(req.query.dataInicio || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataInicio)) {
+      conditions.push('DATA_TREINAMENTO >= ?');
+      params.push(dataInicio);
+    }
+
+    const dataFim = String(req.query.dataFim || '').trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dataFim)) {
+      conditions.push('DATA_TREINAMENTO <= ?');
+      params.push(dataFim);
+    }
+
+    const unitId = String(req.query.unitId || '').trim();
+    if (unitId) {
+      conditions.push('UNIDADE_ID = ?');
+      params.push(unitId);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_TOPICO_K9 as id,
+        ID_REL_TREINAMENTO as relatorioId,
+        TOPICO as topico,
+        DATA_TREINAMENTO as dataTreinamento,
+        HORA_TREINAMENTO as horaTreinamento,
+        CONDUTOR_ID as condutorId,
+        CONDUTOR_NOME as condutorNome,
+        CONDUTOR_MASP as condutorMasp,
+        CONDUTOR_CARGO as condutorCargo,
+        CACHORRO_ID as cachorroId,
+        CACHORRO_NOME as cachorroNome,
+        CACHORRO_RACA as cachorroRaca,
+        CACHORRO_MICROCHIP as cachorroMicrochip,
+        APLICAR_TODOS_K9 as aplicarTodosK9,
+        MODALIDADE_LOCAL as modalidadeLocal,
+        MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt
+      FROM RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9
+      ${whereClause}
+      ORDER BY DATA_TREINAMENTO DESC, HORA_TREINAMENTO DESC, DATA_CRIACAO DESC`,
+      params
+    );
+
+    return res.json(
+      (rows || []).map((r: any) => ({
+        ...r,
+        aplicarTodosK9: Boolean(r.aplicarTodosK9)
+      }))
+    );
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Response) => {
   try {
@@ -12370,6 +12649,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
       SELECT
         ID_REL_TREINAMENTO as id,
         DATA_TREINAMENTO as dataTreinamento,
+        HORA_TREINAMENTO as horaTreinamento,
         CONDUTOR_ID as condutorId,
         CONDUTOR_NOME as condutorNome,
         CONDUTOR_MASP as condutorMasp,
@@ -12383,6 +12663,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
         DESCRICAO as descricao,
         PARTICIPANTES_JSON as participantesJson,
+        TOPICOS_TREINAMENTO_JSON as topicosTreinamentoJson,
         CONDUTOR_ASSINADO as condutorAssinado,
         DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
         DEPARTAMENTO_ID as departmentId,
@@ -12431,9 +12712,19 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
           }
         ];
       }
+      let topicosTreinamento: any[] = [];
+      if (r.topicosTreinamentoJson) {
+        try {
+          const parsedTopicos = JSON.parse(r.topicosTreinamentoJson);
+          if (Array.isArray(parsedTopicos)) topicosTreinamento = parsedTopicos;
+        } catch {
+          topicosTreinamento = [];
+        }
+      }
       return {
         id: r.id,
         dataTreinamento: r.dataTreinamento,
+        horaTreinamento: r.horaTreinamento || (r.createdAt ? String(r.createdAt).slice(11, 16) : undefined),
         condutorId: r.condutorId,
         condutorNome: r.condutorNome,
         condutorMasp: r.condutorMasp || '',
@@ -12447,6 +12738,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         modalidadeParticipacao: r.modalidadeParticipacao === 'Coletivo' ? 'Coletivo' : 'Sozinho',
         descricao: r.descricao || '',
         participantes,
+        topicosTreinamento,
         condutorAssinado: Boolean(r.condutorAssinado),
         condutorAssinadoEm: r.condutorAssinadoEm || undefined,
         departmentId: r.departmentId || undefined,
@@ -12557,6 +12849,16 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
     const dataTreinamento = /^\d{4}-\d{2}-\d{2}$/.test(String(body.dataTreinamento || ''))
       ? String(body.dataTreinamento)
       : todayBr;
+    const horaTreinamento = /^\d{2}:\d{2}$/.test(String(body.horaTreinamento || '').trim())
+      ? String(body.horaTreinamento).trim()
+      : getCurrentTimeBrHHmm();
+
+    const allReportDogs = collectAllDogsFromTraining(condutorCachorros, participantes);
+    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs);
+    if (topicosSanitized.error) {
+      return res.status(400).json({ error: topicosSanitized.error });
+    }
+    const topicosTreinamento = topicosSanitized.items;
 
     const pool = getPool();
     await ensureRelatoriosTreinamentoSchema(pool);
@@ -12566,14 +12868,15 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
 
     await pool.query(
       `INSERT INTO RELATORIOS_TREINAMENTO_CANIL (
-        ID_REL_TREINAMENTO, DATA_TREINAMENTO, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
+        ID_REL_TREINAMENTO, DATA_TREINAMENTO, HORA_TREINAMENTO, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
         CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP, CACHORROS_JSON,
-        MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO, DESCRICAO, PARTICIPANTES_JSON,
+        MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO, DESCRICAO, PARTICIPANTES_JSON, TOPICOS_TREINAMENTO_JSON,
         CONDUTOR_ASSINADO, CONDUTOR_ASSINADO_EM, DEPARTAMENTO_ID, UNIDADE_ID, DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
       [
         id,
         dataTreinamento,
+        horaTreinamento,
         condutorId,
         condutorNome,
         condutorMasp,
@@ -12587,14 +12890,34 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
         modalidadeParticipacao,
         descricao,
         JSON.stringify(participantes),
+        JSON.stringify(topicosTreinamento),
         departmentId,
         unitId
       ]
     );
 
+    await syncTopicosTreinamentoK9Table(
+      pool,
+      {
+        idRelTreinamento: id,
+        dataTreinamento,
+        horaTreinamento,
+        condutorId,
+        condutorNome,
+        condutorMasp,
+        condutorCargo: condutorCargo || null,
+        modalidadeLocal,
+        modalidadeParticipacao,
+        departmentId,
+        unitId
+      },
+      topicosTreinamento
+    );
+
     const createdRecord = {
       id,
       dataTreinamento,
+      horaTreinamento,
       condutorId,
       condutorNome,
       condutorMasp,
@@ -12608,6 +12931,7 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       modalidadeParticipacao,
       descricao,
       participantes,
+      topicosTreinamento,
       condutorAssinado: true,
       condutorAssinadoEm: new Date().toISOString(),
       departmentId: departmentId || undefined,
@@ -12647,6 +12971,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       `SELECT
         ID_REL_TREINAMENTO as id,
         DATA_TREINAMENTO as dataTreinamento,
+        HORA_TREINAMENTO as horaTreinamento,
         CONDUTOR_ID as condutorId,
         CONDUTOR_NOME as condutorNome,
         CONDUTOR_MASP as condutorMasp,
@@ -12777,6 +13102,16 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       }
     }
 
+    const allReportDogs = collectAllDogsFromTraining(condutorCachorros, participantes);
+    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs);
+    if (topicosSanitized.error) {
+      return res.status(400).json({ error: topicosSanitized.error });
+    }
+    const topicosTreinamento = topicosSanitized.items;
+    const horaTreinamento =
+      existing.horaTreinamento ||
+      (existing.createdAt ? String(existing.createdAt).slice(11, 16) : getCurrentTimeBrHHmm());
+
     await pool.query(
       `UPDATE RELATORIOS_TREINAMENTO_CANIL SET
         CACHORRO_ID = ?,
@@ -12788,6 +13123,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         MODALIDADE_PARTICIPACAO = ?,
         DESCRICAO = ?,
         PARTICIPANTES_JSON = ?,
+        TOPICOS_TREINAMENTO_JSON = ?,
         DATA_ATUALIZACAO = NOW()
       WHERE ID_REL_TREINAMENTO = ?`,
       [
@@ -12800,13 +13136,33 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         modalidadeParticipacao,
         descricao,
         JSON.stringify(participantes),
+        JSON.stringify(topicosTreinamento),
         id
       ]
+    );
+
+    await syncTopicosTreinamentoK9Table(
+      pool,
+      {
+        idRelTreinamento: String(existing.id),
+        dataTreinamento: String(existing.dataTreinamento),
+        horaTreinamento,
+        condutorId: String(existing.condutorId),
+        condutorNome: String(existing.condutorNome),
+        condutorMasp: String(existing.condutorMasp || ''),
+        condutorCargo: existing.condutorCargo || null,
+        modalidadeLocal,
+        modalidadeParticipacao,
+        departmentId: existing.departmentId || null,
+        unitId: existing.unitId || null
+      },
+      topicosTreinamento
     );
 
     const updatedRecord = {
       id: existing.id,
       dataTreinamento: existing.dataTreinamento,
+      horaTreinamento,
       condutorId: existing.condutorId,
       condutorNome: existing.condutorNome,
       condutorMasp: existing.condutorMasp || '',
@@ -12820,6 +13176,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       modalidadeParticipacao,
       descricao,
       participantes,
+      topicosTreinamento,
       condutorAssinado: Boolean(existing.condutorAssinado),
       condutorAssinadoEm: existing.condutorAssinadoEm || undefined,
       departmentId: existing.departmentId || undefined,
@@ -12934,6 +13291,8 @@ apiRouter.delete('/relatorios-treinamento-canil/:id', async (req: Request, res: 
       return res.status(403).json({ error: 'Apenas o condutor autor ou perfil Geral pode excluir este relatório.' });
     }
 
+    await ensureRelatoriosTreinamentoSchema(pool);
+    await pool.query('DELETE FROM RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9 WHERE ID_REL_TREINAMENTO = ?', [id]);
     await pool.query('DELETE FROM RELATORIOS_TREINAMENTO_CANIL WHERE ID_REL_TREINAMENTO = ?', [id]);
     await insertAuditLog(
       'Veterinário',
@@ -12960,9 +13319,12 @@ async function ensureRelatoriosOperacoesCanilTable(pool: any): Promise<void> {
         \`ID_REL_OPERACAO\` VARCHAR(64) NOT NULL,
         \`DATA_OPERACAO\` VARCHAR(10) NOT NULL,
         \`HORA_OPERACAO\` VARCHAR(5) NOT NULL DEFAULT '06:00',
+        \`ESTADO_OPERACAO\` VARCHAR(2) NOT NULL DEFAULT 'MG',
         \`COMARCA\` VARCHAR(160) NOT NULL,
         \`SOLICITACAO_TIPO\` ENUM('CEPOLC', 'SEI', 'Outros') NOT NULL DEFAULT 'CEPOLC',
         \`SOLICITACAO_OUTROS_DETALHES\` VARCHAR(255) DEFAULT NULL,
+        \`APOIO_OUTRO_DEPARTAMENTO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DEPARTAMENTOS_APOIO_JSON\` LONGTEXT DEFAULT NULL,
         \`MATERIAL_ENCONTRADO\` TINYINT(1) NOT NULL DEFAULT 0,
         \`MATERIAIS_ENCONTRADOS_JSON\` LONGTEXT DEFAULT NULL,
         \`OPERADORES_JSON\` LONGTEXT NOT NULL,
@@ -12978,20 +13340,29 @@ async function ensureRelatoriosOperacoesCanilTable(pool: any): Promise<void> {
         \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (\`ID_REL_OPERACAO\`),
         KEY \`idx_rel_op_data\` (\`DATA_OPERACAO\`),
+        KEY \`idx_rel_op_estado\` (\`ESTADO_OPERACAO\`),
         KEY \`idx_rel_op_comarca\` (\`COMARCA\`),
+        KEY \`idx_rel_op_apoio_dept\` (\`APOIO_OUTRO_DEPARTAMENTO\`),
         KEY \`idx_rel_op_criador\` (\`CRIADOR_ID\`),
         KEY \`idx_rel_op_unit\` (\`UNIDADE_ID\`),
         KEY \`idx_rel_op_criacao\` (\`DATA_CRIACAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
-    const [colRows]: any = await pool.query(
-      `SELECT COLUMN_NAME FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_OPERACOES_CANIL' AND COLUMN_NAME = 'VIATURAS_JSON'`
-    );
-    if (!colRows || colRows.length === 0) {
-      await pool.query(
-        'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `VIATURAS_JSON` LONGTEXT DEFAULT NULL AFTER `OPERADORES_JSON`'
+    const opColChecks: Array<[string, string]> = [
+      ['VIATURAS_JSON', 'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `VIATURAS_JSON` LONGTEXT DEFAULT NULL AFTER `OPERADORES_JSON`'],
+      ['ESTADO_OPERACAO', 'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `ESTADO_OPERACAO` VARCHAR(2) NOT NULL DEFAULT \'MG\' AFTER `HORA_OPERACAO`'],
+      ['APOIO_OUTRO_DEPARTAMENTO', 'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `APOIO_OUTRO_DEPARTAMENTO` TINYINT(1) NOT NULL DEFAULT 0 AFTER `SOLICITACAO_OUTROS_DETALHES`'],
+      ['DEPARTAMENTOS_APOIO_JSON', 'ALTER TABLE `RELATORIOS_OPERACOES_CANIL` ADD COLUMN `DEPARTAMENTOS_APOIO_JSON` LONGTEXT DEFAULT NULL AFTER `APOIO_OUTRO_DEPARTAMENTO`']
+    ];
+    for (const [colName, alterSql] of opColChecks) {
+      const [colRows]: any = await pool.query(
+        `SELECT COLUMN_NAME FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_OPERACOES_CANIL' AND COLUMN_NAME = ?`,
+        [colName]
       );
+      if (!colRows || colRows.length === 0) {
+        await pool.query(alterSql);
+      }
     }
     relatoriosOperacoesTableEnsured = true;
   } catch (err) {
@@ -13001,6 +13372,26 @@ async function ensureRelatoriosOperacoesCanilTable(pool: any): Promise<void> {
 
 const VALID_SOLICITACAO_OPERACAO = new Set(['CEPOLC', 'SEI', 'Outros']);
 const VALID_MATERIAIS_OPERACAO = new Set(['Droga', 'Arma', 'Munição', 'Explosivos']);
+const VALID_UFS_BR_CANIL = new Set([
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA',
+  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN',
+  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+]);
+
+function sanitizeDepartamentosApoioCanil(raw: any): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of raw) {
+    const clean = String(item || '').trim().slice(0, 200);
+    if (!clean) continue;
+    const key = clean.toUpperCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
+}
 
 function formatDateBrIso(value: unknown): string {
   const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' });
@@ -13131,6 +13522,7 @@ function mapOperacaoRow(r: any) {
   let operadores: any[] = [];
   let materiaisEncontrados: any[] = [];
   let viaturas: any[] = [];
+  let departamentosApoio: string[] = [];
   try {
     operadores = r.OPERADORES_JSON ? JSON.parse(r.OPERADORES_JSON) : [];
     if (!Array.isArray(operadores)) operadores = [];
@@ -13149,13 +13541,23 @@ function mapOperacaoRow(r: any) {
   } catch {
     viaturas = [];
   }
+  try {
+    departamentosApoio = r.DEPARTAMENTOS_APOIO_JSON ? JSON.parse(r.DEPARTAMENTOS_APOIO_JSON) : [];
+    if (!Array.isArray(departamentosApoio)) departamentosApoio = [];
+  } catch {
+    departamentosApoio = [];
+  }
+  const estadoOperacao = String(r.ESTADO_OPERACAO || 'MG').trim().toUpperCase() || 'MG';
   return {
     id: r.ID_REL_OPERACAO,
     dataOperacao: r.DATA_OPERACAO,
     horaOperacao: r.HORA_OPERACAO || '06:00',
+    estadoOperacao,
     comarca: r.COMARCA,
     solicitacaoTipo: r.SOLICITACAO_TIPO,
     solicitacaoOutrosDetalhes: r.SOLICITACAO_OUTROS_DETALHES || '',
+    apoioOutroDepartamento: Boolean(r.APOIO_OUTRO_DEPARTAMENTO),
+    departamentosApoio,
     materialEncontrado: Boolean(r.MATERIAL_ENCONTRADO),
     materiaisEncontrados,
     operadores,
@@ -13181,9 +13583,12 @@ apiRouter.get('/relatorios-operacoes-canil', async (_req: Request, res: Response
         ID_REL_OPERACAO,
         DATA_OPERACAO,
         HORA_OPERACAO,
+        ESTADO_OPERACAO,
         COMARCA,
         SOLICITACAO_TIPO,
         SOLICITACAO_OUTROS_DETALHES,
+        APOIO_OUTRO_DEPARTAMENTO,
+        DEPARTAMENTOS_APOIO_JSON,
         MATERIAL_ENCONTRADO,
         MATERIAIS_ENCONTRADOS_JSON,
         OPERADORES_JSON,
@@ -13226,9 +13631,13 @@ apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response
     const horaOperacao = /^\d{2}:\d{2}$/.test(String(b.horaOperacao || '').trim())
       ? String(b.horaOperacao).trim()
       : '06:00';
-    const comarca = String(b.comarca || '').trim();
+    const estadoOperacao = String(b.estadoOperacao || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR_CANIL.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado (UF) inválido para a operação.' });
+    }
+    const comarca = String(b.comarca || '').trim().slice(0, 160);
     if (!comarca) {
-      return res.status(400).json({ error: 'Informe a Comarca (município mineiro) da operação.' });
+      return res.status(400).json({ error: 'Informe a Comarca (município) da operação.' });
     }
 
     const solicitacaoTipo = String(b.solicitacaoTipo || 'CEPOLC').trim();
@@ -13239,6 +13648,12 @@ apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response
       solicitacaoTipo === 'Outros' ? String(b.solicitacaoOutrosDetalhes || '').trim().slice(0, 255) : '';
     if (solicitacaoTipo === 'Outros' && !solicitacaoOutrosDetalhes) {
       return res.status(400).json({ error: 'Informe brevemente o detalhe da solicitação em Outros.' });
+    }
+
+    const apoioOutroDepartamento = Boolean(b.apoioOutroDepartamento);
+    const departamentosApoio = apoioOutroDepartamento ? sanitizeDepartamentosApoioCanil(b.departamentosApoio) : [];
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um departamento apoiado quando "Apoio a outro departamento?" for Sim.' });
     }
 
     const operadores = sanitizeOperadoresOperacao(b.operadores);
@@ -13289,20 +13704,24 @@ apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response
 
     await pool.query(
       `INSERT INTO RELATORIOS_OPERACOES_CANIL (
-        ID_REL_OPERACAO, DATA_OPERACAO, HORA_OPERACAO, COMARCA,
+        ID_REL_OPERACAO, DATA_OPERACAO, HORA_OPERACAO, ESTADO_OPERACAO, COMARCA,
         SOLICITACAO_TIPO, SOLICITACAO_OUTROS_DETALHES,
+        APOIO_OUTRO_DEPARTAMENTO, DEPARTAMENTOS_APOIO_JSON,
         MATERIAL_ENCONTRADO, MATERIAIS_ENCONTRADOS_JSON,
         OPERADORES_JSON, VIATURAS_JSON, DETALHAMENTO,
         CRIADOR_ID, CRIADOR_NOME, CRIADOR_MASP, CRIADOR_CARGO,
         DEPARTAMENTO_ID, UNIDADE_ID
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         id,
         dataOperacao,
         horaOperacao,
+        estadoOperacao,
         comarca,
         solicitacaoTipo,
         solicitacaoOutrosDetalhes || null,
+        apoioOutroDepartamento ? 1 : 0,
+        JSON.stringify(departamentosApoio),
         materialEncontrado ? 1 : 0,
         JSON.stringify(materiaisEncontrados),
         JSON.stringify(operadores),
@@ -13320,7 +13739,7 @@ apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response
     await insertAuditLog(
       'Relatórios',
       'Criar Relatório de Operação Canil',
-      `Relatório de operação ${id} em ${comarca} (${dataOperacao} ${horaOperacao}) com ${operadores.length} operador(es) e ${viaturas.length} viatura(s)`,
+      `Relatório de operação ${id} em ${comarca}/${estadoOperacao} (${dataOperacao} ${horaOperacao}) com ${operadores.length} operador(es) e ${viaturas.length} viatura(s)`,
       actor,
       req.ip
     );
@@ -13336,9 +13755,12 @@ apiRouter.post('/relatorios-operacoes-canil', async (req: Request, res: Response
             id,
             dataOperacao,
             horaOperacao,
+            estadoOperacao,
             comarca,
             solicitacaoTipo,
             solicitacaoOutrosDetalhes,
+            apoioOutroDepartamento,
+            departamentosApoio,
             materialEncontrado,
             materiaisEncontrados,
             operadores,
@@ -13409,9 +13831,13 @@ apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Respo
     const horaOperacao = /^\d{2}:\d{2}$/.test(String(b.horaOperacao || '').trim())
       ? String(b.horaOperacao).trim()
       : existing.HORA_OPERACAO || '06:00';
-    const comarca = String(b.comarca || '').trim();
+    const estadoOperacao = String(b.estadoOperacao || existing.ESTADO_OPERACAO || 'MG').trim().toUpperCase();
+    if (!VALID_UFS_BR_CANIL.has(estadoOperacao)) {
+      return res.status(400).json({ error: 'Estado (UF) inválido para a operação.' });
+    }
+    const comarca = String(b.comarca || '').trim().slice(0, 160);
     if (!comarca) {
-      return res.status(400).json({ error: 'Informe a Comarca (município mineiro) da operação.' });
+      return res.status(400).json({ error: 'Informe a Comarca (município) da operação.' });
     }
 
     const solicitacaoTipo = String(b.solicitacaoTipo || existing.SOLICITACAO_TIPO || 'CEPOLC').trim();
@@ -13422,6 +13848,12 @@ apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Respo
       solicitacaoTipo === 'Outros' ? String(b.solicitacaoOutrosDetalhes || '').trim().slice(0, 255) : '';
     if (solicitacaoTipo === 'Outros' && !solicitacaoOutrosDetalhes) {
       return res.status(400).json({ error: 'Informe brevemente o detalhe da solicitação em Outros.' });
+    }
+
+    const apoioOutroDepartamento = Boolean(b.apoioOutroDepartamento);
+    const departamentosApoio = apoioOutroDepartamento ? sanitizeDepartamentosApoioCanil(b.departamentosApoio) : [];
+    if (apoioOutroDepartamento && departamentosApoio.length === 0) {
+      return res.status(400).json({ error: 'Selecione ao menos um departamento apoiado quando "Apoio a outro departamento?" for Sim.' });
     }
 
     const operadores = sanitizeOperadoresOperacao(b.operadores);
@@ -13467,9 +13899,12 @@ apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Respo
       `UPDATE RELATORIOS_OPERACOES_CANIL SET
         DATA_OPERACAO = ?,
         HORA_OPERACAO = ?,
+        ESTADO_OPERACAO = ?,
         COMARCA = ?,
         SOLICITACAO_TIPO = ?,
         SOLICITACAO_OUTROS_DETALHES = ?,
+        APOIO_OUTRO_DEPARTAMENTO = ?,
+        DEPARTAMENTOS_APOIO_JSON = ?,
         MATERIAL_ENCONTRADO = ?,
         MATERIAIS_ENCONTRADOS_JSON = ?,
         OPERADORES_JSON = ?,
@@ -13479,9 +13914,12 @@ apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Respo
       [
         dataOperacao,
         horaOperacao,
+        estadoOperacao,
         comarca,
         solicitacaoTipo,
         solicitacaoOutrosDetalhes || null,
+        apoioOutroDepartamento ? 1 : 0,
+        JSON.stringify(departamentosApoio),
         materialEncontrado ? 1 : 0,
         JSON.stringify(materiaisEncontrados),
         JSON.stringify(operadores),
@@ -13494,7 +13932,7 @@ apiRouter.put('/relatorios-operacoes-canil/:id', async (req: Request, res: Respo
     await insertAuditLog(
       'Relatórios',
       'Editar Relatório de Operação Canil',
-      `Usuário ${actor.name || actorId} editou o relatório de operação ${id} (${comarca} • ${dataOperacao} ${horaOperacao})`,
+      `Usuário ${actor.name || actorId} editou o relatório de operação ${id} (${comarca}/${estadoOperacao} • ${dataOperacao} ${horaOperacao})`,
       actor,
       req.ip
     );
