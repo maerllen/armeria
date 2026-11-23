@@ -13,12 +13,18 @@ import {
   SolicitacaoOperacaoCanil,
   MaterialEncontradoOperacaoCanil,
   OperadorOperacaoCanil,
-  ViaturaOperacaoCanil
+  ViaturaOperacaoCanil,
+  getSystemLogo
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
 import { normalizeCitySearch } from '../data/municipiosMG';
+import {
+  ESTADOS_BR,
+  getCachedMunicipiosPorUF,
+  fetchMunicipiosPorUF
+} from '../data/estadosMunicipiosBR';
 import { TopLayerAlert } from './TopLayerAlert';
 import { RelatorioOperacoesCanilForm } from './RelatorioOperacoesCanilForm';
 import {
@@ -182,12 +188,18 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const [unidadeTipoFilter, setUnidadeTipoFilter] = useState<'TODOS' | 'TREINAMENTO' | 'OPERACAO'>('TODOS');
   const [unidadeFilterDataInicio, setUnidadeFilterDataInicio] = useState('');
   const [unidadeFilterDataFim, setUnidadeFilterDataFim] = useState('');
+  const [unidadeFilterDeptId, setUnidadeFilterDeptId] = useState('');
+  const [unidadeFilterEstado, setUnidadeFilterEstado] = useState('');
   const [unidadeFilterPolicialId, setUnidadeFilterPolicialId] = useState('');
   const [unidadeFilterCachorroId, setUnidadeFilterCachorroId] = useState('');
+  const [unidadeFilterViatura, setUnidadeFilterViatura] = useState('');
   const [unidadeFilterLocal, setUnidadeFilterLocal] = useState<'TODOS' | 'Interno' | 'Externo'>('TODOS');
   const [unidadeFilterComarca, setUnidadeFilterComarca] = useState('');
   const [unidadeFilterMaterial, setUnidadeFilterMaterial] = useState<'TODOS' | 'SIM' | 'NAO'>('TODOS');
   const [unidadeFilterUnitId, setUnidadeFilterUnitId] = useState<string>('');
+  const [unidadeMunicipiosCache, setUnidadeMunicipiosCache] = useState<Record<string, string[]>>(() => ({
+    MG: getCachedMunicipiosPorUF('MG')
+  }));
   const [viewingTreinoReport, setViewingTreinoReport] = useState<RelatorioTreinamentoCanil | null>(null);
   const [editingOperacaoReport, setEditingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
   const [viewingOperacaoReport, setViewingOperacaoReport] = useState<RelatorioOperacaoCanil | null>(null);
@@ -685,10 +697,83 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [unitScopedReports, relatoriosOperacoes, unidadeFilterUnitId, allUsers, currentUser, canVerRelatoriosTodasEquipes]);
 
+  useEffect(() => {
+    if (!unidadeFilterEstado) return;
+    const uf = unidadeFilterEstado.toUpperCase();
+    if (unidadeMunicipiosCache[uf] && unidadeMunicipiosCache[uf].length > 30) return;
+    let active = true;
+    const cached = getCachedMunicipiosPorUF(uf);
+    if (cached.length > 0 && !unidadeMunicipiosCache[uf]) {
+      setUnidadeMunicipiosCache(prev => ({ ...prev, [uf]: cached }));
+    }
+    fetchMunicipiosPorUF(uf)
+      .then(list => {
+        if (active && list.length > 0) {
+          setUnidadeMunicipiosCache(prev => ({ ...prev, [uf]: list }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unidadeFilterEstado]);
+
+  const unidadeViaturasForFilter = useMemo(() => {
+    const map = new Map<string, { value: string; placa: string; descricao: string }>();
+    const register = (id: string, placa?: string, descricao?: string) => {
+      const cleanPlaca = String(placa || '').trim();
+      if (!cleanPlaca) return;
+      const key = normalizeCitySearch(cleanPlaca);
+      if (!map.has(key)) {
+        map.set(key, { value: id || cleanPlaca, placa: cleanPlaca, descricao: String(descricao || '').trim() });
+      }
+    };
+    for (const v of viaturas) {
+      if (!unidadeFilterUnitId || v.unitId === unidadeFilterUnitId) {
+        register(v.id, v.placa, v.descricao);
+      }
+    }
+    for (const op of relatoriosOperacoes) {
+      for (const v of op.viaturas || []) register(v.id, v.placa, v.descricao);
+    }
+    return Array.from(map.values()).sort((a, b) => a.placa.localeCompare(b.placa, 'pt-BR'));
+  }, [viaturas, relatoriosOperacoes, unidadeFilterUnitId]);
+
+  const unidadeCidadesForFilter = useMemo(() => {
+    const map = new Map<string, string>();
+    const addCity = (c?: string | null) => {
+      const clean = String(c || '').trim();
+      if (!clean) return;
+      const key = normalizeCitySearch(clean);
+      if (!map.has(key)) map.set(key, clean);
+    };
+    if (unidadeFilterEstado) {
+      for (const m of unidadeMunicipiosCache[unidadeFilterEstado] || getCachedMunicipiosPorUF(unidadeFilterEstado)) {
+        addCity(m);
+      }
+      if (unidadeFilterEstado === 'MG') {
+        for (const op of relatoriosOperacoes) addCity(op.comarca);
+      }
+    } else {
+      for (const op of relatoriosOperacoes) addCity(op.comarca);
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [unidadeFilterEstado, unidadeMunicipiosCache, relatoriosOperacoes]);
+
+  const hasCocOperationOnlyFilter = Boolean(
+    unidadeFilterEstado || unidadeFilterComarca.trim() || unidadeFilterViatura
+  );
+
   const filteredUnidadeReports = useMemo(() => {
+    if (hasCocOperationOnlyFilter) return [];
     return unitScopedReports.filter(r => {
       if (unidadeFilterDataInicio && r.dataTreinamento < unidadeFilterDataInicio) return false;
       if (unidadeFilterDataFim && r.dataTreinamento > unidadeFilterDataFim) return false;
+      if (unidadeFilterDeptId) {
+        const repDeptId = r.departmentId || units.find(u => u.id === r.unitId)?.departmentId || '';
+        if (repDeptId !== unidadeFilterDeptId) return false;
+      }
       if (unidadeFilterPolicialId) {
         const matchesCondutor = r.condutorId === unidadeFilterPolicialId;
         const matchesPart = (r.participantes || []).some(p => p.userId === unidadeFilterPolicialId);
@@ -705,9 +790,12 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       return true;
     });
   }, [
+    hasCocOperationOnlyFilter,
     unitScopedReports,
     unidadeFilterDataInicio,
     unidadeFilterDataFim,
+    unidadeFilterDeptId,
+    units,
     unidadeFilterPolicialId,
     unidadeFilterCachorroId,
     unidadeFilterLocal
@@ -1027,9 +1115,16 @@ ${infoTableHtml}
 
   const filteredUnidadeOperacoes = useMemo(() => {
     const comarcaQ = normalizeCitySearch(unidadeFilterComarca);
+    const selectedVtr = unidadeViaturasForFilter.find(v => v.value === unidadeFilterViatura) || null;
+    const selectedVtrPlacaNorm = selectedVtr ? normalizeCitySearch(selectedVtr.placa) : '';
     return unitScopedOperacoes.filter(r => {
       if (unidadeFilterDataInicio && r.dataOperacao < unidadeFilterDataInicio) return false;
       if (unidadeFilterDataFim && r.dataOperacao > unidadeFilterDataFim) return false;
+      if (unidadeFilterDeptId) {
+        const repDeptId = r.departmentId || units.find(u => u.id === r.unitId)?.departmentId || '';
+        if (repDeptId !== unidadeFilterDeptId) return false;
+      }
+      if (unidadeFilterEstado && unidadeFilterEstado !== 'MG') return false;
       if (unidadeFilterPolicialId) {
         const matchesCreator = r.criadorId === unidadeFilterPolicialId;
         const matchesOp = (r.operadores || []).some(op => op.userId === unidadeFilterPolicialId);
@@ -1044,6 +1139,12 @@ ${infoTableHtml}
         );
         if (!matchesOpDog && !matchesMatDog) return false;
       }
+      if (selectedVtr) {
+        const matchVtr = (r.viaturas || []).some(
+          v => v.id === selectedVtr.value || normalizeCitySearch(v.placa) === selectedVtrPlacaNorm
+        );
+        if (!matchVtr) return false;
+      }
       if (comarcaQ && !normalizeCitySearch(r.comarca).includes(comarcaQ)) return false;
       if (unidadeFilterMaterial === 'SIM' && !r.materialEncontrado) return false;
       if (unidadeFilterMaterial === 'NAO' && r.materialEncontrado) return false;
@@ -1053,8 +1154,13 @@ ${infoTableHtml}
     unitScopedOperacoes,
     unidadeFilterDataInicio,
     unidadeFilterDataFim,
+    unidadeFilterDeptId,
+    units,
+    unidadeFilterEstado,
     unidadeFilterPolicialId,
     unidadeFilterCachorroId,
+    unidadeFilterViatura,
+    unidadeViaturasForFilter,
     unidadeFilterComarca,
     unidadeFilterMaterial
   ]);
@@ -1325,6 +1431,236 @@ ${infoTableHtml}
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>
+</body>
+</html>`;
+
+    printDocumentInPage(html, docTitle);
+  };
+
+  const handlePrintRelatorioUnidadeHistoricoCompleto = () => {
+    const trains = unidadeTipoFilter !== 'OPERACAO' ? filteredUnidadeReports : [];
+    const ops = unidadeTipoFilter !== 'TREINAMENTO' ? filteredUnidadeOperacoes : [];
+    const totalCount = trains.length + ops.length;
+
+    if (totalCount === 0) {
+      notifyError('Nenhum relatório encontrado para os filtros selecionados.');
+      return;
+    }
+
+    const activeUnitObj = units.find(
+      u => u.id === (canVerRelatoriosTodasEquipes && unidadeFilterUnitId ? unidadeFilterUnitId : currentUser?.unitId)
+    );
+    const activeDeptObj = departments.find(
+      d => d.id === (unidadeFilterDeptId || activeUnitObj?.departmentId || currentUser?.departmentId)
+    );
+    const unitName = activeUnitObj?.name || 'COC • Canil K9';
+    const deptName = activeDeptObj?.name || 'Polícia Civil de Minas Gerais';
+    const logoUrl = getSystemLogo(activeUnitObj, activeDeptObj);
+    const docTitle = buildStandardDocumentTitle(
+      'Histórico de Relatórios da Unidade — Canil K9 (COC)',
+      unitName,
+      currentUser?.name || ''
+    );
+
+    const activeFilterTags: string[] = [];
+    if (unidadeTipoFilter !== 'TODOS') {
+      activeFilterTags.push(`Tipo: ${unidadeTipoFilter === 'TREINAMENTO' ? 'Treinamentos' : 'Operações'}`);
+    }
+    if (unidadeFilterDataInicio || unidadeFilterDataFim) {
+      activeFilterTags.push(
+        `Período: ${unidadeFilterDataInicio ? formatDateBr(unidadeFilterDataInicio) : 'Início'} até ${
+          unidadeFilterDataFim ? formatDateBr(unidadeFilterDataFim) : 'Atual'
+        }`
+      );
+    }
+    if (unidadeFilterDeptId) {
+      activeFilterTags.push(`Departamento: ${departments.find(d => d.id === unidadeFilterDeptId)?.name || unidadeFilterDeptId}`);
+    }
+    if (unidadeFilterUnitId) {
+      activeFilterTags.push(`Unidade: ${units.find(u => u.id === unidadeFilterUnitId)?.name || unidadeFilterUnitId}`);
+    }
+    if (unidadeFilterEstado) activeFilterTags.push(`Estado: ${unidadeFilterEstado}`);
+    if (unidadeFilterComarca.trim()) activeFilterTags.push(`Cidade: ${unidadeFilterComarca.trim()}`);
+    if (unidadeFilterPolicialId) {
+      const off = unitOfficersForFilter.find(o => o.id === unidadeFilterPolicialId);
+      activeFilterTags.push(
+        `Policial: ${off ? `${off.name}${off.masp ? ` (${formatMasp(off.masp)})` : ''}` : unidadeFilterPolicialId}`
+      );
+    }
+    if (unidadeFilterViatura) {
+      const vObj = unidadeViaturasForFilter.find(v => v.value === unidadeFilterViatura);
+      activeFilterTags.push(
+        `Veículo: ${vObj ? `${vObj.placa}${vObj.descricao ? ` — ${vObj.descricao}` : ''}` : unidadeFilterViatura}`
+      );
+    }
+    if (unidadeFilterCachorroId) {
+      const dog = cachorros.find(d => d.id === unidadeFilterCachorroId);
+      activeFilterTags.push(`Animal K9: ${dog ? `${dog.nome}${dog.raca ? ` (${dog.raca})` : ''}` : unidadeFilterCachorroId}`);
+    }
+    if (unidadeFilterLocal !== 'TODOS') activeFilterTags.push(`Local Treino: ${unidadeFilterLocal}`);
+    if (unidadeFilterMaterial !== 'TODOS') activeFilterTags.push(`Material Encontrado: ${unidadeFilterMaterial}`);
+
+    const filtersSummary =
+      activeFilterTags.length > 0 ? activeFilterTags.join(' • ') : 'Todos os registros (sem restrição de filtro)';
+
+    const trainsSectionHtml =
+      trains.length > 0
+        ? `
+      <div class="section-title">Relatórios de Treinamento K9 (${trains.length})</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:9%;">Data</th>
+            <th style="width:18%;">Condutor</th>
+            <th style="width:16%;">Animal(is) K9</th>
+            <th style="width:9%;">Local</th>
+            <th style="width:12%;">Participação</th>
+            <th style="width:36%;">Descrição do Treinamento</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${trains
+            .map(r => {
+              const condutorDogs = getRelatorioCondutorDogs(r);
+              const condutorDogsHtml = condutorDogs
+                .map(c => `<strong>${escapeHtmlText(c.nome)}</strong>${c.raca ? ` <span style="font-size:9px;color:#475569;">(${escapeHtmlText(c.raca)})</span>` : ''}`)
+                .join('<br/>');
+              const participantsSummary =
+                r.modalidadeParticipacao === 'Coletivo' && (r.participantes || []).length > 0
+                  ? `<br/><span style="font-size:9px;color:#475569;">${(r.participantes || [])
+                      .map(p => {
+                        const dogsTxt =
+                          p.cachorros && p.cachorros.length > 0 ? p.cachorros.map(c => c.nome).join(', ') : 'Sem animal';
+                        return `${escapeHtmlText(p.name)} (${escapeHtmlText(dogsTxt)})`;
+                      })
+                      .join('; ')}</span>`
+                  : '';
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
+                  <td><strong>${escapeHtmlText(r.condutorNome)}</strong>${r.condutorMasp ? `<br/><span style="font-size:9px;color:#475569;">MASP: ${escapeHtmlText(formatMasp(r.condutorMasp))}</span>` : ''}</td>
+                  <td>${condutorDogsHtml}${participantsSummary}</td>
+                  <td>${escapeHtmlText(r.modalidadeLocal)}</td>
+                  <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px;color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(r.descricao)}</td>
+                </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+    `
+        : '';
+
+    const opsSectionHtml =
+      ops.length > 0
+        ? `
+      <div class="section-title">Relatórios de Operações K9 (${ops.length})</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:8%;">Data/Hora</th>
+            <th style="width:11%;">Cidade / UF</th>
+            <th style="width:10%;">Solicitação</th>
+            <th style="width:14%;">Veículos / Viaturas</th>
+            <th style="width:14%;">Material Encontrado</th>
+            <th style="width:18%;">Operadores & Animais</th>
+            <th style="width:25%;">Detalhamento</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${ops
+            .map(r => {
+              const opsHtml = (r.operadores || [])
+                .map(op => {
+                  const dogsTxt = op.cachorros && op.cachorros.length > 0 ? op.cachorros.map(c => c.nome).join(', ') : 'Sem animal';
+                  return `<div><strong>${escapeHtmlText(op.name)}</strong> (${escapeHtmlText(dogsTxt)})</div>`;
+                })
+                .join('');
+              const vtrsHtml =
+                r.viaturas && r.viaturas.length > 0
+                  ? r.viaturas
+                      .map(v => `<div><strong style="font-family:monospace;">${escapeHtmlText(v.placa)}</strong> — ${escapeHtmlText(v.descricao)}</div>`)
+                      .join('')
+                  : '-';
+              const matHtml = !r.materialEncontrado
+                ? 'Não'
+                : (r.materiaisEncontrados || [])
+                    .map(m => `${escapeHtmlText(m.tipo)} (${escapeHtmlText((m.cachorros || []).map(c => c.nome).join(', ') || '-')})`)
+                    .join('<br/>');
+              const solTxt =
+                r.solicitacaoTipo === 'Outros' && r.solicitacaoOutrosDetalhes
+                  ? `Outros: ${r.solicitacaoOutrosDetalhes}`
+                  : r.solicitacaoTipo;
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataOperacao))}<br/>${escapeHtmlText(r.horaOperacao)}</td>
+                  <td><strong>${escapeHtmlText(r.comarca)}</strong> / MG</td>
+                  <td>${escapeHtmlText(solTxt)}</td>
+                  <td>${vtrsHtml}</td>
+                  <td>${matHtml}</td>
+                  <td>${opsHtml}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(r.detalhamento)}</td>
+                </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+    `
+        : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>${escapeHtmlText(docTitle)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; font-size: 10px; line-height: 1.4; }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header img { width: 46px; height: 46px; object-fit: contain; }
+    .header h1 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .header p { margin: 2px 0 0; font-size: 10px; color: #475569; }
+    .filters-box { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; font-size: 10px; }
+    .filters-box strong { color: #0f172a; text-transform: uppercase; font-size: 9px; }
+    .summary-bar { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; color: #334155; margin-bottom: 10px; }
+    .section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 12px 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #e2e8f0; text-transform: uppercase; font-size: 9px; font-weight: 800; }
+    tr { page-break-inside: avoid; }
+    .footer { margin-top: 12px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <img src="${escapeHtmlText(logoUrl)}" alt="Brasão" />
+      <div>
+        <h1>Polícia Civil de Minas Gerais — Histórico de Relatórios da Unidade (COC / Canil K9)</h1>
+        <p>${escapeHtmlText(deptName)} • Unidade: <strong>${escapeHtmlText(unitName)}</strong></p>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:9.5px;color:#334155;">
+      <div><strong>Emitido por:</strong> ${escapeHtmlText(currentUser?.name || '')}${currentUser?.masp ? ` (MASP ${escapeHtmlText(formatMasp(currentUser.masp))})` : ''}</div>
+      <div><strong>Emissão:</strong> ${escapeHtmlText(new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }))}</div>
+    </div>
+  </div>
+  <div class="filters-box">
+    <strong>Filtros Aplicados:</strong> ${escapeHtmlText(filtersSummary)}
+  </div>
+  <div class="summary-bar">
+    <span>Total de registros: <strong>${totalCount}</strong></span>
+    <span>Treinamentos: <strong>${trains.length}</strong></span>
+    <span>Operações: <strong>${ops.length}</strong></span>
+  </div>
+  ${trainsSectionHtml}
+  ${opsSectionHtml}
+  <div class="footer">
+    <span>Sistema ARMARIA — Polícia Civil de Minas Gerais</span>
+    <span>Histórico consolidado da unidade ${escapeHtmlText(unitName)}</span>
+  </div>
 </body>
 </html>`;
 
@@ -2693,8 +3029,11 @@ ${infoTableHtml}
                   onClick={() => {
                     setUnidadeFilterDataInicio('');
                     setUnidadeFilterDataFim('');
+                    setUnidadeFilterDeptId('');
+                    setUnidadeFilterEstado('');
                     setUnidadeFilterPolicialId('');
                     setUnidadeFilterCachorroId('');
+                    setUnidadeFilterViatura('');
                     setUnidadeFilterLocal('TODOS');
                     setUnidadeFilterComarca('');
                     setUnidadeFilterMaterial('TODOS');
@@ -2704,24 +3043,37 @@ ${infoTableHtml}
                 >
                   Limpar Filtros
                 </button>
+                <button
+                  type="button"
+                  onClick={handlePrintRelatorioUnidadeHistoricoCompleto}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                >
+                  <Printer className="w-4 h-4" />
+                  <span>
+                    Imprimir Histórico (
+                    {(unidadeTipoFilter !== 'OPERACAO' ? filteredUnidadeReports.length : 0) +
+                      (unidadeTipoFilter !== 'TREINAMENTO' ? filteredUnidadeOperacoes.length : 0)}
+                    )
+                  </span>
+                </button>
                 {unidadeTipoFilter !== 'OPERACAO' && (
                   <button
                     type="button"
                     onClick={handlePrintRelatorioUnidadeConsolidado}
-                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                    className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-amber-500/30 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
                   >
-                    <Printer className="w-4 h-4" />
-                    <span>Imprimir Treinamentos</span>
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Treinamentos</span>
                   </button>
                 )}
                 {unidadeTipoFilter !== 'TREINAMENTO' && (
                   <button
                     type="button"
                     onClick={handlePrintRelatorioUnidadeOperacoesConsolidado}
-                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-xl text-xs flex items-center space-x-1.5 shadow transition"
+                    className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/30 font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
                   >
-                    <Printer className="w-4 h-4" />
-                    <span>Imprimir Operações</span>
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Operações</span>
                   </button>
                 )}
               </div>
@@ -2759,21 +3111,7 @@ ${infoTableHtml}
               ))}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 text-xs pt-2 border-t border-slate-800">
-              <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unidade / Equipe</label>
-                <select
-                  value={unidadeFilterUnitId}
-                  onChange={(e) => setUnidadeFilterUnitId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
-                >
-                  <option value="">Todas as Unidades / Equipes</option>
-                  {units.map(u => (
-                    <option key={u.id} value={u.id}>{u.name}</option>
-                  ))}
-                </select>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs pt-2 border-t border-slate-800">
               <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Data Inicial</label>
                 <input
@@ -2795,6 +3133,72 @@ ${infoTableHtml}
               </div>
 
               <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Departamento</label>
+                <select
+                  value={unidadeFilterDeptId}
+                  onChange={(e) => {
+                    setUnidadeFilterDeptId(e.target.value);
+                    setUnidadeFilterUnitId('');
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Departamentos</option>
+                  {departments.map(d => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unidade / Equipe</label>
+                <select
+                  value={unidadeFilterUnitId}
+                  onChange={(e) => setUnidadeFilterUnitId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todas as Unidades / Equipes</option>
+                  {units
+                    .filter(u => !unidadeFilterDeptId || u.departmentId === unidadeFilterDeptId)
+                    .map(u => (
+                      <option key={u.id} value={u.id}>{u.name}</option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Estado (UF)</label>
+                <select
+                  value={unidadeFilterEstado}
+                  onChange={(e) => {
+                    setUnidadeFilterEstado(e.target.value);
+                    setUnidadeFilterComarca('');
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Estados</option>
+                  {ESTADOS_BR.map(uf => (
+                    <option key={uf.sigla} value={uf.sigla}>
+                      {uf.sigla} — {uf.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cidade / Comarca</label>
+                <select
+                  value={unidadeFilterComarca}
+                  onChange={(e) => setUnidadeFilterComarca(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todas as Cidades</option>
+                  {unidadeCidadesForFilter.map(city => (
+                    <option key={city} value={city}>{city}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Policial (Condutor / Operador)</label>
                 <select
                   value={unidadeFilterPolicialId}
@@ -2811,13 +3215,29 @@ ${infoTableHtml}
               </div>
 
               <div>
-                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Cachorro K9</label>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Veículo / Viatura</label>
+                <select
+                  value={unidadeFilterViatura}
+                  onChange={(e) => setUnidadeFilterViatura(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todos os Veículos</option>
+                  {unidadeViaturasForFilter.map(v => (
+                    <option key={v.value} value={v.value}>
+                      {v.placa}{v.descricao ? ` — ${v.descricao}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-bold text-amber-300 uppercase mb-1">Animal (Cachorro K9)</label>
                 <select
                   value={unidadeFilterCachorroId}
                   onChange={(e) => setUnidadeFilterCachorroId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                  className="w-full bg-slate-950 border border-amber-500/40 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
                 >
-                  <option value="">Todos os Cães</option>
+                  <option value="">Todos os Animais</option>
                   {cachorros.map(d => (
                     <option key={d.id} value={d.id}>
                       {d.nome} ({d.raca})
@@ -2842,30 +3262,18 @@ ${infoTableHtml}
               )}
 
               {unidadeTipoFilter !== 'TREINAMENTO' && (
-                <>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Operação: Comarca</label>
-                    <input
-                      type="text"
-                      value={unidadeFilterComarca}
-                      onChange={(e) => setUnidadeFilterComarca(e.target.value)}
-                      placeholder="Filtrar município MG..."
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Operação: Material?</label>
-                    <select
-                      value={unidadeFilterMaterial}
-                      onChange={(e) => setUnidadeFilterMaterial(e.target.value as any)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
-                    >
-                      <option value="TODOS">Todos</option>
-                      <option value="SIM">Com Material Encontrado</option>
-                      <option value="NAO">Sem Material Encontrado</option>
-                    </select>
-                  </div>
-                </>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Operação: Material?</label>
+                  <select
+                    value={unidadeFilterMaterial}
+                    onChange={(e) => setUnidadeFilterMaterial(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="TODOS">Todos</option>
+                    <option value="SIM">Com Material Encontrado</option>
+                    <option value="NAO">Sem Material Encontrado</option>
+                  </select>
+                </div>
               )}
             </div>
 

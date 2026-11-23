@@ -17,6 +17,11 @@ import {
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import {
+  ESTADOS_BR,
+  getCachedMunicipiosPorUF,
+  fetchMunicipiosPorUF
+} from '../data/estadosMunicipiosBR';
+import {
   printDocumentInPage,
   buildStandardDocumentTitle,
   buildStandardDocumentFilename
@@ -234,7 +239,15 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const [unitSearch, setUnitSearch] = useState<string>('');
   const [unitDateStart, setUnitDateStart] = useState<string>('');
   const [unitDateEnd, setUnitDateEnd] = useState<string>('');
+  const [unitDepartmentFilter, setUnitDepartmentFilter] = useState<string>('');
+  const [unitEstadoFilter, setUnitEstadoFilter] = useState<string>('');
+  const [unitCidadeFilter, setUnitCidadeFilter] = useState<string>('');
   const [unitOperatorId, setUnitOperatorId] = useState<string>('');
+  const [unitViaturaFilter, setUnitViaturaFilter] = useState<string>('');
+  const [unitAeronaveFilter, setUnitAeronaveFilter] = useState<string>('');
+  const [unitMunicipiosCache, setUnitMunicipiosCache] = useState<Record<string, string[]>>(() => ({
+    MG: getCachedMunicipiosPorUF('MG')
+  }));
   const [isUnitTrainSectionOpen, setIsUnitTrainSectionOpen] = useState<boolean>(false);
   const [isUnitOpsSectionOpen, setIsUnitOpsSectionOpen] = useState<boolean>(false);
   const [expandedUnitIds, setExpandedUnitIds] = useState<Record<string, boolean>>({});
@@ -568,12 +581,177 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [allUsers, effectiveUnitId, unitScopedTrainReports, unitScopedOpReports, unitScopedCatOpReports]);
 
+  // Carrega lista de municípios da UF selecionada no filtro da unidade
+  useEffect(() => {
+    if (!unitEstadoFilter) return;
+    const uf = unitEstadoFilter.toUpperCase();
+    if (unitMunicipiosCache[uf] && unitMunicipiosCache[uf].length > 30) return;
+    let active = true;
+    const cached = getCachedMunicipiosPorUF(uf);
+    if (cached.length > 0 && !unitMunicipiosCache[uf]) {
+      setUnitMunicipiosCache(prev => ({ ...prev, [uf]: cached }));
+    }
+    fetchMunicipiosPorUF(uf)
+      .then(list => {
+        if (active && list.length > 0) {
+          setUnitMunicipiosCache(prev => ({ ...prev, [uf]: list }));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitEstadoFilter]);
+
+  const unitDepartmentsForFilter = useMemo(() => {
+    const options: { value: string; label: string; deptId?: string; deptName: string }[] = [];
+    const seenNames = new Set<string>();
+    for (const d of [...departments].sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))) {
+      options.push({ value: `ID:${d.id}`, label: d.name, deptId: d.id, deptName: d.name });
+      seenNames.add(normalizeText(d.name));
+    }
+    for (const rel of unitScopedOpReports) {
+      for (const da of rel.departamentosApoio || []) {
+        const clean = String(da || '').trim();
+        if (!clean || seenNames.has(normalizeText(clean))) continue;
+        seenNames.add(normalizeText(clean));
+        options.push({ value: `APOIO:${clean}`, label: `${clean} (Apoio)`, deptName: clean });
+      }
+    }
+    for (const rel of unitScopedCatOpReports) {
+      for (const emb of rel.embarcadosExternos || []) {
+        const clean = String(emb.departmentName || '').trim();
+        if (!clean || seenNames.has(normalizeText(clean))) continue;
+        seenNames.add(normalizeText(clean));
+        options.push({ value: `APOIO:${clean}`, label: clean, deptName: clean });
+      }
+    }
+    return options;
+  }, [departments, unitScopedOpReports, unitScopedCatOpReports]);
+
+  const unitCidadesForFilter = useMemo(() => {
+    const map = new Map<string, string>();
+    const addCity = (city?: string | null) => {
+      const clean = String(city || '').trim();
+      if (!clean) return;
+      const key = normalizeText(clean);
+      if (!map.has(key)) map.set(key, clean);
+    };
+
+    if (unitEstadoFilter) {
+      for (const m of unitMunicipiosCache[unitEstadoFilter] || getCachedMunicipiosPorUF(unitEstadoFilter)) {
+        addCity(m);
+      }
+      for (const rel of unitScopedOpReports) {
+        if (rel.estadoOperacao === unitEstadoFilter) addCity(rel.municipioOperacao);
+        for (const om of rel.outrosMunicipios || []) {
+          if (om.uf === unitEstadoFilter) addCity(om.municipio);
+        }
+      }
+      for (const rel of unitScopedCatOpReports) {
+        if (rel.estadoOperacao === unitEstadoFilter) addCity(rel.municipioOperacao);
+        for (const om of rel.outrosMunicipios || []) {
+          if (om.uf === unitEstadoFilter) addCity(om.municipio);
+        }
+      }
+    } else {
+      for (const rel of unitScopedOpReports) {
+        addCity(rel.municipioOperacao);
+        for (const om of rel.outrosMunicipios || []) addCity(om.municipio);
+      }
+      for (const rel of unitScopedCatOpReports) {
+        addCity(rel.municipioOperacao);
+        for (const om of rel.outrosMunicipios || []) addCity(om.municipio);
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [unitEstadoFilter, unitMunicipiosCache, unitScopedOpReports, unitScopedCatOpReports]);
+
+  const unitViaturasForFilter = useMemo(() => {
+    const map = new Map<string, { value: string; placa: string; descricao: string }>();
+    const register = (id: string, placa?: string, descricao?: string) => {
+      const cleanPlaca = String(placa || '').trim();
+      if (!cleanPlaca) return;
+      const key = normalizeText(cleanPlaca);
+      if (!map.has(key)) {
+        map.set(key, { value: id || cleanPlaca, placa: cleanPlaca, descricao: String(descricao || '').trim() });
+      }
+    };
+    for (const v of storage.getViaturas()) {
+      if (!effectiveUnitId || v.unitId === effectiveUnitId) {
+        register(v.id, v.placa, v.descricao);
+      }
+    }
+    for (const rel of unitScopedOpReports) {
+      for (const v of rel.viaturas || []) register(v.id, v.placa, v.descricao);
+    }
+    for (const rel of unitScopedCatOpReports) {
+      for (const v of rel.viaturas || []) register(v.id, v.placa, v.descricao);
+    }
+    return Array.from(map.values()).sort((a, b) => a.placa.localeCompare(b.placa, 'pt-BR'));
+  }, [effectiveUnitId, unitScopedOpReports, unitScopedCatOpReports, dataVersion, localVersion]);
+
+  const unitAeronavesForFilter = useMemo(() => {
+    if (!isCatUnit) return [];
+    const map = new Map<string, { value: string; tipo: string; prefixo: string; descricao: string }>();
+    const register = (id: string, tipo?: string, prefixo?: string, descricao?: string) => {
+      const cleanPref = String(prefixo || '').trim();
+      if (!cleanPref) return;
+      const key = normalizeText(cleanPref);
+      if (!map.has(key)) {
+        map.set(key, {
+          value: id || cleanPref,
+          tipo: String(tipo || '').trim(),
+          prefixo: cleanPref,
+          descricao: String(descricao || '').trim()
+        });
+      }
+    };
+    for (const a of storage.getAeronaves()) {
+      if (!effectiveUnitId || a.unitId === effectiveUnitId) {
+        register(a.id, a.tipo, a.prefixo, a.descricao);
+      }
+    }
+    for (const rel of unitScopedCatOpReports) {
+      for (const a of rel.aeronaves || []) register(a.aeronaveId, a.tipo, a.prefixo, a.descricao);
+    }
+    return Array.from(map.values()).sort((a, b) => a.prefixo.localeCompare(b.prefixo, 'pt-BR'));
+  }, [isCatUnit, effectiveUnitId, unitScopedCatOpReports, dataVersion, localVersion]);
+
+  const selectedUnitDeptOpt = useMemo(
+    () => unitDepartmentsForFilter.find(d => d.value === unitDepartmentFilter) || null,
+    [unitDepartmentsForFilter, unitDepartmentFilter]
+  );
+  const selectedUnitViaturaOpt = useMemo(
+    () => unitViaturasForFilter.find(v => v.value === unitViaturaFilter) || null,
+    [unitViaturasForFilter, unitViaturaFilter]
+  );
+  const selectedUnitAeronaveOpt = useMemo(
+    () => unitAeronavesForFilter.find(a => a.value === unitAeronaveFilter) || null,
+    [unitAeronavesForFilter, unitAeronaveFilter]
+  );
+
+  const hasOperationOnlyUnitFilter = Boolean(
+    unitEstadoFilter || unitCidadeFilter || unitViaturaFilter || (isCatUnit && unitAeronaveFilter)
+  );
+
   const filteredUnitTrainReports = useMemo(() => {
+    if (hasOperationOnlyUnitFilter) return [];
     const q = normalizeText(unitSearch);
     return unitScopedTrainReports.filter(rel => {
       const dt = String(rel.dataTreinamento || '').slice(0, 10);
       if (unitDateStart && dt < unitDateStart) return false;
       if (unitDateEnd && dt > unitDateEnd) return false;
+      if (selectedUnitDeptOpt) {
+        if (!selectedUnitDeptOpt.deptId) return false;
+        const unitDeptId = rel.departmentId || units.find(u => u.id === rel.unitId)?.departmentId || effectiveDeptId;
+        const matchesMainDept = unitDeptId === selectedUnitDeptOpt.deptId;
+        const matchesOtherUnits = (rel.outrasUnidades || []).some(
+          ou => units.find(u => u.id === ou.id)?.departmentId === selectedUnitDeptOpt.deptId
+        );
+        if (!matchesMainDept && !matchesOtherUnits) return false;
+      }
       if (unitOperatorId) {
         const matchOp =
           rel.operadorId === unitOperatorId ||
@@ -590,19 +768,60 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       }
       return true;
     });
-  }, [unitScopedTrainReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
+  }, [
+    hasOperationOnlyUnitFilter,
+    unitScopedTrainReports,
+    unitSearch,
+    unitDateStart,
+    unitDateEnd,
+    selectedUnitDeptOpt,
+    units,
+    effectiveDeptId,
+    unitOperatorId
+  ]);
 
   const filteredUnitOpReports = useMemo(() => {
+    if (isCatUnit && unitAeronaveFilter) return [];
     const q = normalizeText(unitSearch);
+    const cityNorm = normalizeText(unitCidadeFilter);
     return unitScopedOpReports.filter(rel => {
       const dt = String(rel.dataOperacao || '').slice(0, 10);
       if (unitDateStart && dt < unitDateStart) return false;
       if (unitDateEnd && dt > unitDateEnd) return false;
+      if (selectedUnitDeptOpt) {
+        const unitDeptId = rel.departmentId || units.find(u => u.id === rel.unitId)?.departmentId || effectiveDeptId;
+        const deptNameNorm = normalizeText(selectedUnitDeptOpt.deptName);
+        const matchesMainDept = Boolean(selectedUnitDeptOpt.deptId && unitDeptId === selectedUnitDeptOpt.deptId);
+        const matchesApoio = (rel.departamentosApoio || []).some(da => {
+          const daNorm = normalizeText(da);
+          return daNorm === deptNameNorm || daNorm.includes(deptNameNorm) || deptNameNorm.includes(daNorm);
+        });
+        if (!matchesMainDept && !matchesApoio) return false;
+      }
+      if (unitEstadoFilter) {
+        const matchUf =
+          rel.estadoOperacao === unitEstadoFilter ||
+          (rel.outrosMunicipios || []).some(m => m.uf === unitEstadoFilter);
+        if (!matchUf) return false;
+      }
+      if (cityNorm) {
+        const matchCity =
+          normalizeText(rel.municipioOperacao) === cityNorm ||
+          (rel.outrosMunicipios || []).some(m => normalizeText(m.municipio) === cityNorm);
+        if (!matchCity) return false;
+      }
       if (unitOperatorId) {
         const matchOp =
           rel.criadorId === unitOperatorId ||
           (rel.operadores || []).some(o => o.userId === unitOperatorId);
         if (!matchOp) return false;
+      }
+      if (selectedUnitViaturaOpt) {
+        const placaNorm = normalizeText(selectedUnitViaturaOpt.placa);
+        const matchVtr = (rel.viaturas || []).some(
+          v => v.id === selectedUnitViaturaOpt.value || normalizeText(v.placa) === placaNorm
+        );
+        if (!matchVtr) return false;
       }
       if (q) {
         const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
@@ -624,19 +843,79 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       }
       return true;
     });
-  }, [unitScopedOpReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
+  }, [
+    isCatUnit,
+    unitAeronaveFilter,
+    unitScopedOpReports,
+    unitSearch,
+    unitDateStart,
+    unitDateEnd,
+    selectedUnitDeptOpt,
+    units,
+    effectiveDeptId,
+    unitEstadoFilter,
+    unitCidadeFilter,
+    unitOperatorId,
+    selectedUnitViaturaOpt
+  ]);
 
   const filteredUnitCatOpReports = useMemo(() => {
     const q = normalizeText(unitSearch);
+    const cityNorm = normalizeText(unitCidadeFilter);
     return unitScopedCatOpReports.filter(rel => {
       const dt = String(rel.dataOperacao || '').slice(0, 10);
       if (unitDateStart && dt < unitDateStart) return false;
       if (unitDateEnd && dt > unitDateEnd) return false;
+      if (selectedUnitDeptOpt) {
+        const unitDeptId = rel.departmentId || units.find(u => u.id === rel.unitId)?.departmentId || effectiveDeptId;
+        const deptNameNorm = normalizeText(selectedUnitDeptOpt.deptName);
+        const matchesMainDept = Boolean(selectedUnitDeptOpt.deptId && unitDeptId === selectedUnitDeptOpt.deptId);
+        const matchesEmb = (rel.embarcadosExternos || []).some(
+          e =>
+            (selectedUnitDeptOpt.deptId && e.departmentId === selectedUnitDeptOpt.deptId) ||
+            (e.departmentName && normalizeText(e.departmentName) === deptNameNorm)
+        );
+        if (!matchesMainDept && !matchesEmb) return false;
+      }
+      if (unitEstadoFilter) {
+        const matchUf =
+          rel.estadoOperacao === unitEstadoFilter ||
+          (rel.outrosMunicipios || []).some(m => m.uf === unitEstadoFilter);
+        if (!matchUf) return false;
+      }
+      if (cityNorm) {
+        const matchCity =
+          normalizeText(rel.municipioOperacao) === cityNorm ||
+          (rel.outrosMunicipios || []).some(m => normalizeText(m.municipio) === cityNorm);
+        if (!matchCity) return false;
+      }
       if (unitOperatorId) {
         const matchOp =
           rel.criadorId === unitOperatorId ||
-          (rel.operadores || []).some(o => o.userId === unitOperatorId);
+          (rel.operadores || []).some(o => o.userId === unitOperatorId) ||
+          (rel.aeronaves || []).some(a => a.pilotoId === unitOperatorId || a.copilotoId === unitOperatorId) ||
+          (rel.tripulantesOperacionais || []).some(t => t.userId === unitOperatorId) ||
+          (rel.tripulantesOutraUnidade || []).some(t => t.userId === unitOperatorId) ||
+          (rel.equipeSolo || []).some(s => s.userId === unitOperatorId) ||
+          (rel.viaturas || []).some(v => (v.operadores || []).some(o => o.userId === unitOperatorId)) ||
+          (rel.embarcadosExternos || []).some(e => e.userId === unitOperatorId);
         if (!matchOp) return false;
+      }
+      if (selectedUnitViaturaOpt) {
+        const placaNorm = normalizeText(selectedUnitViaturaOpt.placa);
+        const matchVtr = (rel.viaturas || []).some(
+          v => v.id === selectedUnitViaturaOpt.value || normalizeText(v.placa) === placaNorm
+        );
+        if (!matchVtr) return false;
+      }
+      if (selectedUnitAeronaveOpt) {
+        const prefNorm = normalizeText(selectedUnitAeronaveOpt.prefixo);
+        const matchAero =
+          rel.comEmpregoAeronave &&
+          (rel.aeronaves || []).some(
+            a => a.aeronaveId === selectedUnitAeronaveOpt.value || normalizeText(a.prefixo) === prefNorm
+          );
+        if (!matchAero) return false;
       }
       if (q) {
         const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
@@ -650,7 +929,368 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       }
       return true;
     });
-  }, [unitScopedCatOpReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
+  }, [
+    unitScopedCatOpReports,
+    unitSearch,
+    unitDateStart,
+    unitDateEnd,
+    selectedUnitDeptOpt,
+    units,
+    effectiveDeptId,
+    unitEstadoFilter,
+    unitCidadeFilter,
+    unitOperatorId,
+    selectedUnitViaturaOpt,
+    selectedUnitAeronaveOpt
+  ]);
+
+  const totalFilteredUnitHistoryCount =
+    (unitCategoryFilter !== 'OPERACOES' ? filteredUnitTrainReports.length : 0) +
+    (unitCategoryFilter !== 'TREINAMENTO'
+      ? filteredUnitOpReports.length + filteredUnitCatOpReports.length
+      : 0);
+
+  const hasActiveUnitFilters = Boolean(
+    unitSearch ||
+      unitDateStart ||
+      unitDateEnd ||
+      unitDepartmentFilter ||
+      unitEstadoFilter ||
+      unitCidadeFilter ||
+      unitOperatorId ||
+      unitViaturaFilter ||
+      (isCatUnit && unitAeronaveFilter) ||
+      unitCategoryFilter !== 'TODOS'
+  );
+
+  const clearUnitFilters = () => {
+    setUnitSearch('');
+    setUnitDateStart('');
+    setUnitDateEnd('');
+    setUnitDepartmentFilter('');
+    setUnitEstadoFilter('');
+    setUnitCidadeFilter('');
+    setUnitOperatorId('');
+    setUnitViaturaFilter('');
+    setUnitAeronaveFilter('');
+    setUnitCategoryFilter('TODOS');
+  };
+
+  const handlePrintUnitHistory = () => {
+    const trains = unitCategoryFilter !== 'OPERACOES' ? filteredUnitTrainReports : [];
+    const polOps = unitCategoryFilter !== 'TREINAMENTO' ? filteredUnitOpReports : [];
+    const catOps = unitCategoryFilter !== 'TREINAMENTO' ? filteredUnitCatOpReports : [];
+    const totalCount = trains.length + polOps.length + catOps.length;
+
+    if (totalCount === 0) {
+      setFeedback({
+        type: 'error',
+        message: 'Nenhum relatório encontrado para os filtros selecionados para impressão.'
+      });
+      return;
+    }
+
+    const unitObj = units.find(u => u.id === effectiveUnitId);
+    const deptObj = departments.find(d => d.id === effectiveDeptId);
+    const logoUrl = getSystemLogo(unitObj, deptObj);
+    const docTitle = buildStandardDocumentTitle(
+      `Histórico de Relatórios da Unidade — ${activeUnitName}`,
+      activeUnitName,
+      currentUser.name
+    );
+
+    const activeFilterTags: string[] = [];
+    if (unitCategoryFilter !== 'TODOS') {
+      activeFilterTags.push(
+        `Tipo: ${unitCategoryFilter === 'TREINAMENTO' ? 'Treinamento' : 'Operações'}`
+      );
+    }
+    if (unitDateStart || unitDateEnd) {
+      activeFilterTags.push(
+        `Período: ${unitDateStart ? formatDateBr(unitDateStart) : 'Início'} até ${
+          unitDateEnd ? formatDateBr(unitDateEnd) : 'Atual'
+        }`
+      );
+    }
+    if (selectedUnitDeptOpt) activeFilterTags.push(`Departamento: ${selectedUnitDeptOpt.label}`);
+    if (unitEstadoFilter) activeFilterTags.push(`Estado: ${unitEstadoFilter}`);
+    if (unitCidadeFilter) activeFilterTags.push(`Cidade: ${unitCidadeFilter}`);
+    if (unitOperatorId) {
+      const opObj = unitOperatorsForFilter.find(o => o.id === unitOperatorId);
+      activeFilterTags.push(
+        `Policial: ${opObj ? `${opObj.name}${opObj.masp ? ` (${formatMasp(opObj.masp)})` : ''}` : unitOperatorId}`
+      );
+    }
+    if (selectedUnitViaturaOpt) {
+      activeFilterTags.push(
+        `Veículo: ${selectedUnitViaturaOpt.placa}${
+          selectedUnitViaturaOpt.descricao ? ` — ${selectedUnitViaturaOpt.descricao}` : ''
+        }`
+      );
+    }
+    if (isCatUnit && selectedUnitAeronaveOpt) {
+      activeFilterTags.push(
+        `Aeronave: ${selectedUnitAeronaveOpt.tipo} ${selectedUnitAeronaveOpt.prefixo}`
+      );
+    }
+    if (unitSearch.trim()) activeFilterTags.push(`Busca: "${unitSearch.trim()}"`);
+
+    const filtersSummaryText =
+      activeFilterTags.length > 0 ? activeFilterTags.join(' • ') : 'Todos os registros da unidade (sem restrição de filtro)';
+
+    const totalCatFlightHours =
+      isCatUnit && catOps.length > 0
+        ? sumFlightHoursHHMM(catOps.flatMap(r => (r.comEmpregoAeronave ? r.aeronaves || [] : [])))
+        : '';
+
+    const trainTableHtml =
+      trains.length > 0
+        ? `
+      <div class="section-title">Relatórios de Treinamento da Unidade (${trains.length})</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:9%;">Data</th>
+            <th style="width:12%;">Título / Modalidade</th>
+            <th style="width:22%;">Operador Digitador e Participantes</th>
+            <th style="width:15%;">Outras Unidades</th>
+            <th style="width:42%;">Descrição</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${trains
+            .map(rel => {
+              const parts = rel.participantes || [];
+              const participantesHtml =
+                parts.length > 0
+                  ? `<div style="margin-top:3px;font-size:9px;color:#475569;">${parts
+                      .map(p => `${escapeHtmlText(p.name)}${p.unitName ? ` (${escapeHtmlText(p.unitName)})` : ''}`)
+                      .join('; ')}</div>`
+                  : '';
+              const outrasU = (rel.outrasUnidades || []).map(u => escapeHtmlText(u.name)).join(', ') || '-';
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(rel.dataTreinamento))}</td>
+                  <td><strong>${escapeHtmlText(rel.tituloTreinamento)}</strong><br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.modalidadeLocal)} • ${escapeHtmlText(rel.modalidadeParticipacao)}</span></td>
+                  <td><strong>${escapeHtmlText(rel.operadorNome)}</strong>${rel.operadorMasp ? `<br/><span style="font-size:9px;color:#475569;">MASP: ${escapeHtmlText(formatMasp(rel.operadorMasp))}</span>` : ''}${participantesHtml}</td>
+                  <td>${outrasU}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(rel.descricao)}</td>
+                </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+    `
+        : '';
+
+    const catOpsTableHtml =
+      catOps.length > 0
+        ? `
+      <div class="section-title">Relatórios de Operações CAT (${catOps.length})${
+        totalCatFlightHours ? ` — Total Horas de Voo: ${escapeHtmlText(totalCatFlightHours)}` : ''
+      }</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:9%;">Data / Horário</th>
+            <th style="width:13%;">Município(s) / UF</th>
+            <th style="width:12%;">Modalidade / Voo</th>
+            <th style="width:20%;">Aeronave e Tripulação</th>
+            <th style="width:15%;">Viaturas / Equipe</th>
+            <th style="width:31%;">Sinopse / Ocorrências</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${catOps
+            .map(rel => {
+              const muns = [
+                `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+                ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
+              ];
+              const aeroHtml =
+                rel.comEmpregoAeronave && (rel.aeronaves || []).length > 0
+                  ? (rel.aeronaves || [])
+                      .map(
+                        a =>
+                          `<div><strong>${escapeHtmlText(a.tipo)} ${escapeHtmlText(a.prefixo)}</strong> (${escapeHtmlText(a.horasVoo || '00:00')})<br/><span style="font-size:9px;color:#334155;">Piloto: ${escapeHtmlText(a.pilotoNome || '-')}${a.copilotoNome ? ` • Copiloto: ${escapeHtmlText(a.copilotoNome)}` : ''}</span></div>`
+                      )
+                      .join('') +
+                    ((rel.tripulantesOperacionais || []).length > 0
+                      ? `<div style="font-size:9px;color:#475569;margin-top:2px;"><strong>Op. Aerotáticos:</strong> ${(rel.tripulantesOperacionais || [])
+                          .map(t => escapeHtmlText(t.name))
+                          .join(', ')}</div>`
+                      : '')
+                  : '<span style="color:#64748b;">Sem emprego de aeronave</span>';
+              const vtrsHtml =
+                (rel.viaturas || []).length > 0
+                  ? (rel.viaturas || [])
+                      .map(
+                        v =>
+                          `<div><strong style="font-family:monospace;">${escapeHtmlText(v.placa)}</strong>${
+                            v.descricao ? ` (${escapeHtmlText(v.descricao)})` : ''
+                          }${(v.operadores || []).length > 0 ? `<br/><span style="font-size:9px;color:#475569;">${(v.operadores || []).map(o => escapeHtmlText(o.name)).join(', ')}</span>` : ''}</div>`
+                      )
+                      .join('')
+                  : !rel.comEmpregoAeronave && (rel.equipeSolo || []).length > 0
+                  ? (rel.equipeSolo || []).map(s => escapeHtmlText(s.name)).join(', ')
+                  : '-';
+              const dispBadge = rel.teveDisparosCat
+                ? `<div style="margin-top:4px;font-size:9px;color:#991b1b;"><strong>Disparos CAT:</strong> ${(rel.disparosCat || []).reduce((acc, d) => acc + (d.quantidadeTiros || 0), 0)} tiro(s)${
+                    rel.teveObito ? ` • <strong>Óbitos: ${Number(rel.quantidadeObitos || 0)}</strong>` : ''
+                  }</div>`
+                : '';
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(rel.dataOperacao))}<br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.horarioDecolagem)}–${escapeHtmlText(rel.horarioVooOperacao)}</span></td>
+                  <td>${muns.map(m => escapeHtmlText(m)).join('<br/>')}</td>
+                  <td><strong>${rel.comEmpregoAeronave ? 'Com Aeronave' : 'Sem Aeronave'}</strong>${
+                    rel.comEmpregoAeronave && rel.tipoVoo
+                      ? `<br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.tipoVoo)}</span>`
+                      : ''
+                  }</td>
+                  <td>${aeroHtml}</td>
+                  <td>${vtrsHtml}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(rel.sinopseVoo)}${dispBadge}</td>
+                </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+    `
+        : '';
+
+    const polOpsTableHtml =
+      polOps.length > 0
+        ? `
+      <div class="section-title">Relatórios de Operações da Unidade (${polOps.length})</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:9%;">Data / Hora</th>
+            <th style="width:13%;">Município(s) / UF</th>
+            <th style="width:15%;">Atendimento / Apoio</th>
+            <th style="width:13%;">Viaturas</th>
+            <th style="width:18%;">Policiais / Operadores</th>
+            <th style="width:32%;">Sinopse / Desfecho</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${polOps
+            .map(rel => {
+              const muns = [
+                `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+                ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
+              ];
+              const vtrsHtml =
+                (rel.viaturas || []).length > 0
+                  ? (rel.viaturas || [])
+                      .map(v => `<div><strong style="font-family:monospace;">${escapeHtmlText(v.placa)}</strong>${v.descricao ? ` — ${escapeHtmlText(v.descricao)}` : ''}</div>`)
+                      .join('')
+                  : '-';
+              const opsHtml = (rel.operadores || [])
+                .map(o => `<div><strong>${escapeHtmlText(o.name)}</strong>${o.masp ? ` <span style="font-size:9px;color:#475569;">(${escapeHtmlText(formatMasp(o.masp))})</span>` : ''}</div>`)
+                .join('');
+              const deptApoioTxt =
+                (rel.departamentosApoio || []).length > 0
+                  ? `<div style="font-size:9px;color:#475569;margin-top:2px;">Apoio: ${escapeHtmlText((rel.departamentosApoio || []).join(', '))}</div>`
+                  : '';
+              const extras: string[] = [];
+              if (rel.detalhesAdicionais?.mandadoPrisao?.ativo) {
+                extras.push(`Mandado de Prisão: ${formatMandadoPrisaoResumo(rel.detalhesAdicionais.mandadoPrisao)}`);
+              }
+              if (rel.detalhesAdicionais?.mandadoBusca?.ativo) {
+                extras.push(`Mandado de Busca: ${formatMandadoBuscaResumo(rel.detalhesAdicionais.mandadoBusca)}`);
+              }
+              if (rel.detalhesAdicionais?.gerenciamentoCrise?.ativo) {
+                extras.push(`Crise: ${formatGerenciamentoCriseResumo(rel.detalhesAdicionais.gerenciamentoCrise)}`);
+              }
+              if (rel.houveObito) {
+                extras.push(`Óbitos: ${rel.quantidadeObitos || 1}`);
+              }
+              const extrasHtml =
+                extras.length > 0
+                  ? `<div style="margin-top:4px;font-size:9px;color:#334155;"><strong>Detalhes:</strong> ${escapeHtmlText(extras.join(' | '))}</div>`
+                  : '';
+              return `
+                <tr>
+                  <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(rel.dataOperacao))}<br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.horarioOperacao)}</span></td>
+                  <td>${muns.map(m => escapeHtmlText(m)).join('<br/>')}</td>
+                  <td><strong>${escapeHtmlText(rel.tipoAtendimento)}</strong><br/><span style="font-size:9px;color:#475569;">Via: ${escapeHtmlText(rel.acionamentoVia)}</span>${deptApoioTxt}</td>
+                  <td>${vtrsHtml}</td>
+                  <td>${opsHtml || escapeHtmlText(rel.criadorNome)}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(rel.sinopse)}${extrasHtml}</td>
+                </tr>`;
+            })
+            .join('')}
+        </tbody>
+      </table>
+    `
+        : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtmlText(docTitle)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; font-size: 10px; line-height: 1.4; }
+    .header { display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 2px solid #0f172a; padding-bottom: 8px; margin-bottom: 10px; }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .header img { width: 46px; height: 46px; object-fit: contain; }
+    .header h1 { margin: 0; font-size: 14px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .header p { margin: 2px 0 0; font-size: 10px; color: #475569; }
+    .filters-box { border: 1px solid #cbd5e1; background: #f8fafc; border-radius: 6px; padding: 7px 10px; margin-bottom: 10px; font-size: 10px; }
+    .filters-box strong { color: #0f172a; text-transform: uppercase; font-size: 9px; }
+    .summary-bar { display: flex; flex-wrap: wrap; gap: 14px; font-size: 10px; color: #334155; margin-bottom: 10px; }
+    .section-title { font-size: 11px; font-weight: 800; text-transform: uppercase; color: #0f172a; border-bottom: 1px solid #cbd5e1; padding-bottom: 3px; margin: 12px 0 6px; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 10px; }
+    th, td { border: 1px solid #cbd5e1; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #e2e8f0; font-size: 9px; text-transform: uppercase; font-weight: 800; color: #1e293b; }
+    tr { page-break-inside: avoid; }
+    .footer { margin-top: 12px; border-top: 1px solid #cbd5e1; padding-top: 6px; font-size: 9px; color: #64748b; display: flex; justify-content: space-between; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="header-left">
+      <img src="${escapeHtmlText(logoUrl)}" alt="Brasão" />
+      <div>
+        <h1>Polícia Civil de Minas Gerais — Histórico de Relatórios da Unidade</h1>
+        <p>${escapeHtmlText(activeDeptName)} • Unidade: <strong>${escapeHtmlText(activeUnitName)}</strong></p>
+      </div>
+    </div>
+    <div style="text-align:right;font-size:9.5px;color:#334155;">
+      <div><strong>Emitido por:</strong> ${escapeHtmlText(currentUser.name)}${currentUser.masp ? ` (MASP ${escapeHtmlText(formatMasp(currentUser.masp))})` : ''}</div>
+      <div><strong>Emissão:</strong> ${escapeHtmlText(new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }))}</div>
+    </div>
+  </div>
+
+  <div class="filters-box">
+    <strong>Filtros Aplicados:</strong> ${escapeHtmlText(filtersSummaryText)}
+  </div>
+
+  <div class="summary-bar">
+    <span>Total de registros: <strong>${totalCount}</strong></span>
+    <span>Treinamentos: <strong>${trains.length}</strong></span>
+    <span>Operações: <strong>${polOps.length + catOps.length}</strong></span>
+    ${totalCatFlightHours ? `<span>Total Horas de Voo (CAT): <strong>${escapeHtmlText(totalCatFlightHours)}</strong></span>` : ''}
+  </div>
+
+  ${trainTableHtml}
+  ${catOpsTableHtml}
+  ${polOpsTableHtml}
+
+  <div class="footer">
+    <span>Sistema ARMARIA — Polícia Civil de Minas Gerais</span>
+    <span>Histórico consolidado da unidade ${escapeHtmlText(activeUnitName)}</span>
+  </div>
+</body>
+</html>`;
+
+    printDocumentInPage(html, docTitle);
+  };
 
   const resetForm = () => {
     setEditingReport(null);
@@ -2859,30 +3499,52 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       {/* ================================================================= */}
       {canViewUnitReports && subTab === 'RELATORIOS_UNIDADE' && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div>
               <h2 className="text-sm font-black text-slate-100 uppercase tracking-wider flex items-center space-x-2">
                 <Building2 className="w-4 h-4 text-amber-400" />
                 <span>Relatórios da Unidade • {activeUnitName}</span>
               </h2>
               <p className="text-xs text-slate-400 mt-0.5">
-                Consulte todos os relatórios de treinamento e de operações registrados na unidade {activeUnitName}.
+                Consulte, filtre e imprima o histórico de relatórios de treinamento e de operações da unidade {activeUnitName}.
               </p>
             </div>
 
-            <div className="relative w-full md:w-72">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-              <input
-                type="text"
-                value={unitSearch}
-                onChange={e => setUnitSearch(e.target.value)}
-                placeholder="Buscar por município, título, nome, viatura..."
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-amber-500"
-              />
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative w-full sm:w-64">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={unitSearch}
+                  onChange={e => setUnitSearch(e.target.value)}
+                  placeholder="Buscar por município, título, nome..."
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+                />
+              </div>
+
+              {hasActiveUnitFilters && (
+                <button
+                  type="button"
+                  onClick={clearUnitFilters}
+                  className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs flex items-center space-x-1.5 transition"
+                >
+                  <X className="w-3.5 h-3.5" />
+                  <span>Limpar Filtros</span>
+                </button>
+              )}
+
+              <button
+                type="button"
+                onClick={handlePrintUnitHistory}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center space-x-1.5 shadow transition"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Histórico ({totalFilteredUnitHistoryCount})</span>
+              </button>
             </div>
           </div>
 
-          {/* Filtros */}
+          {/* Filtros avançados do histórico da unidade */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs bg-slate-950/60 border border-slate-800 rounded-xl p-3.5">
             <div>
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Tipo de Relatório</label>
@@ -2898,22 +3560,6 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
             </div>
 
             <div>
-              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Policial / Operador</label>
-              <select
-                value={unitOperatorId}
-                onChange={e => setUnitOperatorId(e.target.value)}
-                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
-              >
-                <option value="">Todos os integrantes</option>
-                {unitOperatorsForFilter.map(op => (
-                  <option key={op.id} value={op.id}>
-                    {op.name}{op.masp ? ` (${formatMasp(op.masp)})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div>
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Data Inicial</label>
               <input
                 type="date"
@@ -2925,31 +3571,114 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
             <div>
               <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Data Final</label>
-              <div className="flex items-center space-x-1.5">
-                <input
-                  type="date"
-                  value={unitDateEnd}
-                  onChange={e => setUnitDateEnd(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
-                />
-                {(unitSearch || unitDateStart || unitDateEnd || unitOperatorId || unitCategoryFilter !== 'TODOS') && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setUnitSearch('');
-                      setUnitDateStart('');
-                      setUnitDateEnd('');
-                      setUnitOperatorId('');
-                      setUnitCategoryFilter('TODOS');
-                    }}
-                    className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold shrink-0"
-                    title="Limpar filtros"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                )}
-              </div>
+              <input
+                type="date"
+                value={unitDateEnd}
+                onChange={e => setUnitDateEnd(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
+              />
             </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Departamento</label>
+              <select
+                value={unitDepartmentFilter}
+                onChange={e => setUnitDepartmentFilter(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os Departamentos</option>
+                {unitDepartmentsForFilter.map(d => (
+                  <option key={d.value} value={d.value}>
+                    {d.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Estado (UF)</label>
+              <select
+                value={unitEstadoFilter}
+                onChange={e => {
+                  setUnitEstadoFilter(e.target.value);
+                  setUnitCidadeFilter('');
+                }}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os Estados</option>
+                {ESTADOS_BR.map(uf => (
+                  <option key={uf.sigla} value={uf.sigla}>
+                    {uf.sigla} — {uf.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Cidade</label>
+              <select
+                value={unitCidadeFilter}
+                onChange={e => setUnitCidadeFilter(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todas as Cidades</option>
+                {unitCidadesForFilter.map(city => (
+                  <option key={city} value={city}>
+                    {city}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Policial / Operador</label>
+              <select
+                value={unitOperatorId}
+                onChange={e => setUnitOperatorId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os Policiais</option>
+                {unitOperatorsForFilter.map(op => (
+                  <option key={op.id} value={op.id}>
+                    {op.name}{op.masp ? ` (${formatMasp(op.masp)})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Veículo / Viatura</label>
+              <select
+                value={unitViaturaFilter}
+                onChange={e => setUnitViaturaFilter(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os Veículos</option>
+                {unitViaturasForFilter.map(v => (
+                  <option key={v.value} value={v.value}>
+                    {v.placa}{v.descricao ? ` — ${v.descricao}` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {isCatUnit && (
+              <div>
+                <label className="block text-[10px] font-bold uppercase text-amber-300 mb-1">Aeronave (CAT)</label>
+                <select
+                  value={unitAeronaveFilter}
+                  onChange={e => setUnitAeronaveFilter(e.target.value)}
+                  className="w-full bg-slate-950 border border-amber-500/40 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+                >
+                  <option value="">Todas as Aeronaves</option>
+                  {unitAeronavesForFilter.map(a => (
+                    <option key={a.value} value={a.value}>
+                      {a.tipo} • {a.prefixo}{a.descricao ? ` — ${a.descricao}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
           </div>
 
           {/* Seção colapsável — Relatórios de Treinamento da Unidade (inicia oculta) */}
