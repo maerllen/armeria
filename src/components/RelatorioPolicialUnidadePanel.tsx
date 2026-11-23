@@ -69,7 +69,7 @@ interface RelatorioPolicialUnidadePanelProps {
   dataVersion?: number;
 }
 
-type PolicialSubTab = 'TREINAMENTO' | 'OPERACOES' | 'MEUS_RELATORIOS';
+type PolicialSubTab = 'TREINAMENTO' | 'OPERACOES' | 'MEUS_RELATORIOS' | 'RELATORIOS_UNIDADE';
 type MyReportFilter = 'TODOS' | 'CRIADOS' | 'ASSINADOS' | 'PENDENTES';
 type MyCategoryFilter = 'TODOS' | 'TREINAMENTO' | 'OPERACOES';
 
@@ -153,11 +153,21 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 }) => {
   const effectiveUnitId = activeUnitId || currentUser.unitId || '';
   const effectiveDeptId = activeDeptId || currentUser.departmentId || '';
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const canViewUnitReports =
+    effectiveRole === 'Armeiro' || effectiveRole === 'Administrador' || effectiveRole === 'Geral';
 
   const [subTab, setSubTab] = useState<PolicialSubTab>('TREINAMENTO');
   const [localVersion, setLocalVersion] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Reset tab if role does not permit RELATORIOS_UNIDADE
+  useEffect(() => {
+    if (!canViewUnitReports && subTab === 'RELATORIOS_UNIDADE') {
+      setSubTab('TREINAMENTO');
+    }
+  }, [canViewUnitReports, subTab]);
 
   // Countdown until end of day (Brasília timezone) + nowMs for 3-day operation countdown
   const [editCountdown, setEditCountdown] = useState(() => getRemainingSecondsTodayBrasilia());
@@ -200,6 +210,17 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const [isMyOpsSectionOpen, setIsMyOpsSectionOpen] = useState<boolean>(false);
   const [expandedIds, setExpandedIds] = useState<Record<string, boolean>>({});
   const [expandedOpIds, setExpandedOpIds] = useState<Record<string, boolean>>({});
+
+  // Relatórios da Unidade state (Armeiro / Administrador / Geral) — tudo inicia oculto
+  const [unitCategoryFilter, setUnitCategoryFilter] = useState<MyCategoryFilter>('TODOS');
+  const [unitSearch, setUnitSearch] = useState<string>('');
+  const [unitDateStart, setUnitDateStart] = useState<string>('');
+  const [unitDateEnd, setUnitDateEnd] = useState<string>('');
+  const [unitOperatorId, setUnitOperatorId] = useState<string>('');
+  const [isUnitTrainSectionOpen, setIsUnitTrainSectionOpen] = useState<boolean>(false);
+  const [isUnitOpsSectionOpen, setIsUnitOpsSectionOpen] = useState<boolean>(false);
+  const [expandedUnitIds, setExpandedUnitIds] = useState<Record<string, boolean>>({});
+
   const [viewModalReport, setViewModalReport] = useState<RelatorioTreinamentoPolicial | null>(null);
   const [viewModalOpReport, setViewModalOpReport] = useState<RelatorioOperacaoPolicial | null>(null);
   const [signingId, setSigningId] = useState<string | null>(null);
@@ -394,6 +415,111 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       return true;
     });
   }, [myOpReports, myFilter, mySearch, currentUser.id]);
+
+  // Relatórios da Unidade (escopo da unidade selecionada — visível para Armeiro, Administrador e Geral)
+  const unitScopedTrainReports = useMemo(() => {
+    if (!canViewUnitReports) return [];
+    return allReports.filter(rel => {
+      if (!effectiveUnitId) return true;
+      if (rel.unitId) return rel.unitId === effectiveUnitId;
+      const creator = allUsers.find(u => u.id === rel.operadorId);
+      return creator?.unitId === effectiveUnitId;
+    });
+  }, [canViewUnitReports, allReports, effectiveUnitId, allUsers]);
+
+  const unitScopedOpReports = useMemo(() => {
+    if (!canViewUnitReports) return [];
+    return allOpReports.filter(rel => {
+      if (!effectiveUnitId) return true;
+      if (rel.unitId) return rel.unitId === effectiveUnitId;
+      const creator = allUsers.find(u => u.id === rel.criadorId);
+      return creator?.unitId === effectiveUnitId;
+    });
+  }, [canViewUnitReports, allOpReports, effectiveUnitId, allUsers]);
+
+  const totalUnitReportsCount = unitScopedTrainReports.length + unitScopedOpReports.length;
+
+  const unitOperatorsForFilter = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; masp: string }>();
+    for (const u of allUsers) {
+      if (effectiveUnitId && u.unitId !== effectiveUnitId) continue;
+      if (u.id && !map.has(u.id)) {
+        map.set(u.id, { id: u.id, name: u.name, masp: u.masp || '' });
+      }
+    }
+    for (const rel of unitScopedTrainReports) {
+      if (rel.operadorId && !map.has(rel.operadorId)) {
+        map.set(rel.operadorId, { id: rel.operadorId, name: rel.operadorNome, masp: rel.operadorMasp || '' });
+      }
+      for (const p of rel.participantes || []) {
+        if (p.userId && !map.has(p.userId)) {
+          map.set(p.userId, { id: p.userId, name: p.name, masp: p.masp || '' });
+        }
+      }
+    }
+    for (const rel of unitScopedOpReports) {
+      if (rel.criadorId && !map.has(rel.criadorId)) {
+        map.set(rel.criadorId, { id: rel.criadorId, name: rel.criadorNome, masp: rel.criadorMasp || '' });
+      }
+      for (const o of rel.operadores || []) {
+        if (o.userId && !map.has(o.userId)) {
+          map.set(o.userId, { id: o.userId, name: o.name, masp: o.masp || '' });
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [allUsers, effectiveUnitId, unitScopedTrainReports, unitScopedOpReports]);
+
+  const filteredUnitTrainReports = useMemo(() => {
+    const q = normalizeText(unitSearch);
+    return unitScopedTrainReports.filter(rel => {
+      const dt = String(rel.dataTreinamento || '').slice(0, 10);
+      if (unitDateStart && dt < unitDateStart) return false;
+      if (unitDateEnd && dt > unitDateEnd) return false;
+      if (unitOperatorId) {
+        const matchOp =
+          rel.operadorId === unitOperatorId ||
+          (rel.participantes || []).some(p => p.userId === unitOperatorId);
+        if (!matchOp) return false;
+      }
+      if (q) {
+        const partNames = (rel.participantes || []).map(p => `${p.name} ${p.masp} ${p.unitName || ''}`).join(' ');
+        const otherUnitNames = (rel.outrasUnidades || []).map(u => u.name).join(' ');
+        const hay = normalizeText(
+          `${formatDateBr(rel.dataTreinamento)} ${rel.tituloTreinamento} ${rel.modalidadeLocal} ${rel.modalidadeParticipacao} ${rel.operadorNome} ${rel.operadorMasp} ${rel.unitName || ''} ${partNames} ${otherUnitNames} ${rel.descricao}`
+        );
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [unitScopedTrainReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
+
+  const filteredUnitOpReports = useMemo(() => {
+    const q = normalizeText(unitSearch);
+    return unitScopedOpReports.filter(rel => {
+      const dt = String(rel.dataOperacao || '').slice(0, 10);
+      if (unitDateStart && dt < unitDateStart) return false;
+      if (unitDateEnd && dt > unitDateEnd) return false;
+      if (unitOperatorId) {
+        const matchOp =
+          rel.criadorId === unitOperatorId ||
+          (rel.operadores || []).some(o => o.userId === unitOperatorId);
+        if (!matchOp) return false;
+      }
+      if (q) {
+        const munExtra = (rel.municipiosAdicionais || []).map(m => `${m.municipio} ${m.estado}`).join(' ');
+        const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
+        const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao}`).join(' ');
+        const deptApoio = (rel.departamentosApoio || []).join(' ');
+        const detalhesTxt = (rel.detalhesAdicionais || []).map(d => d.tipo).join(' ');
+        const hay = normalizeText(
+          `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoAtendimento} ${rel.acionamentoVia} ${rel.acionamentoOutrosDescricao || ''} ${deptApoio} ${rel.criadorNome} ${opNames} ${vtrText} ${detalhesTxt} ${rel.sinopse}`
+        );
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [unitScopedOpReports, unitSearch, unitDateStart, unitDateEnd, unitOperatorId]);
 
   const resetForm = () => {
     setEditingReport(null);
@@ -765,6 +891,10 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     setExpandedOpIds(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
+  const toggleExpandUnitItem = (key: string) => {
+    setExpandedUnitIds(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const handleStartEditOp = (rel: RelatorioOperacaoPolicial) => {
     setFeedback(null);
     setEditingOpReport(rel);
@@ -869,6 +999,30 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
             </span>
           )}
         </button>
+
+        {canViewUnitReports && (
+          <button
+            type="button"
+            onClick={() => setSubTab('RELATORIOS_UNIDADE')}
+            className={`px-4 py-2.5 text-xs font-bold rounded-xl transition flex items-center space-x-2 ${
+              subTab === 'RELATORIOS_UNIDADE'
+                ? 'bg-amber-500 text-slate-950 shadow'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Building2 className="w-4 h-4" />
+            <span>RELATÓRIOS DA UNIDADE</span>
+            <span
+              className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold ${
+                subTab === 'RELATORIOS_UNIDADE'
+                  ? 'bg-slate-950/20 text-slate-950'
+                  : 'bg-slate-800 text-slate-300'
+              }`}
+            >
+              {totalUnitReportsCount}
+            </span>
+          </button>
+        )}
       </div>
 
       {/* Feedback Banner */}
@@ -2233,6 +2387,525 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                               ? '✓ Assinado (30 dias)'
                                               : '✓ Assinado'
                                             : 'Pendente'}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ================================================================= */}
+      {/* GUIA 4: RELATÓRIOS DA UNIDADE (ARMEIRO / ADMINISTRADOR / GERAL)    */}
+      {/* ================================================================= */}
+      {canViewUnitReports && subTab === 'RELATORIOS_UNIDADE' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-black text-slate-100 uppercase tracking-wider flex items-center space-x-2">
+                <Building2 className="w-4 h-4 text-amber-400" />
+                <span>Relatórios da Unidade • {activeUnitName}</span>
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Consulte todos os relatórios de treinamento e de operações registrados na unidade {activeUnitName}.
+              </p>
+            </div>
+
+            <div className="relative w-full md:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={unitSearch}
+                onChange={e => setUnitSearch(e.target.value)}
+                placeholder="Buscar por município, título, nome, viatura..."
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl pl-9 pr-3 py-2 text-xs focus:outline-none focus:border-amber-500"
+              />
+            </div>
+          </div>
+
+          {/* Filtros */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs bg-slate-950/60 border border-slate-800 rounded-xl p-3.5">
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Tipo de Relatório</label>
+              <select
+                value={unitCategoryFilter}
+                onChange={e => setUnitCategoryFilter(e.target.value as MyCategoryFilter)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="TODOS">Todos ({totalUnitReportsCount})</option>
+                <option value="TREINAMENTO">Treinamento ({unitScopedTrainReports.length})</option>
+                <option value="OPERACOES">Operações ({unitScopedOpReports.length})</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Policial / Operador</label>
+              <select
+                value={unitOperatorId}
+                onChange={e => setUnitOperatorId(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs focus:outline-none focus:border-amber-500"
+              >
+                <option value="">Todos os integrantes</option>
+                {unitOperatorsForFilter.map(op => (
+                  <option key={op.id} value={op.id}>
+                    {op.name}{op.masp ? ` (${formatMasp(op.masp)})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Data Inicial</label>
+              <input
+                type="date"
+                value={unitDateStart}
+                onChange={e => setUnitDateStart(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">Data Final</label>
+              <div className="flex items-center space-x-1.5">
+                <input
+                  type="date"
+                  value={unitDateEnd}
+                  onChange={e => setUnitDateEnd(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-2.5 py-2 text-xs font-mono focus:outline-none focus:border-amber-500"
+                />
+                {(unitSearch || unitDateStart || unitDateEnd || unitOperatorId || unitCategoryFilter !== 'TODOS') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnitSearch('');
+                      setUnitDateStart('');
+                      setUnitDateEnd('');
+                      setUnitOperatorId('');
+                      setUnitCategoryFilter('TODOS');
+                    }}
+                    className="px-2.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold shrink-0"
+                    title="Limpar filtros"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Seção colapsável — Relatórios de Treinamento da Unidade (inicia oculta) */}
+          {unitCategoryFilter !== 'OPERACOES' && (
+            <div className="border border-slate-800 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIsUnitTrainSectionOpen(prev => !prev)}
+                className="w-full px-4 py-3 bg-slate-950/90 hover:bg-slate-950 flex items-center justify-between text-xs font-bold text-slate-200 transition"
+              >
+                <span className="flex items-center space-x-2">
+                  <FileText className="w-4 h-4 text-amber-400" />
+                  <span>RELATÓRIOS DE TREINAMENTO DA UNIDADE ({filteredUnitTrainReports.length})</span>
+                </span>
+                <span className="flex items-center space-x-1 text-slate-400">
+                  <span>{isUnitTrainSectionOpen ? 'Ocultar' : 'Abrir'}</span>
+                  {isUnitTrainSectionOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </span>
+              </button>
+
+              {isUnitTrainSectionOpen && (
+                <div className="p-3 space-y-2.5 bg-slate-900/60">
+                  {filteredUnitTrainReports.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">
+                      Nenhum relatório de treinamento encontrado para os filtros selecionados.
+                    </div>
+                  ) : (
+                    filteredUnitTrainReports.map(rel => {
+                      const itemKey = `ut-${rel.id}`;
+                      const isExpanded = Boolean(expandedUnitIds[itemKey]);
+                      const parts = rel.participantes || [];
+                      const isColetivoMulti = rel.modalidadeParticipacao === 'Coletivo' && parts.length > 0;
+                      const myPart = parts.find(p => p.userId === currentUser.id);
+                      const needsMySignature = Boolean(myPart && !myPart.signed);
+                      const allSignersTooltip = [
+                        `${rel.operadorNome} (Operador Digitador)`,
+                        ...parts.map(p => `${p.name}${p.signed ? ' ✓' : ' (Pendente)'}`)
+                      ].join('\n');
+
+                      return (
+                        <div
+                          key={rel.id}
+                          className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-3 text-xs"
+                        >
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-100">
+                                  {formatDateBr(rel.dataTreinamento)}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                                  {rel.tituloTreinamento}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-semibold">
+                                  {rel.modalidadeLocal}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-semibold">
+                                  {rel.modalidadeParticipacao}
+                                </span>
+                                {needsMySignature && (
+                                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                                    Assinatura Pendente
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-300">
+                                {isColetivoMulti ? (
+                                  <span>
+                                    <span className="text-slate-400">Operador digitador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.operadorNome}</span>{' '}
+                                    <span className="text-slate-400">e </span>
+                                    <span
+                                      title={allSignersTooltip}
+                                      className="font-bold text-cyan-300 underline decoration-dotted cursor-help"
+                                    >
+                                      OUTROS
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    <span className="text-slate-400">Operador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.operadorNome}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {needsMySignature && (
+                                <button
+                                  type="button"
+                                  disabled={signingId === rel.id}
+                                  onClick={() => handleSignReport(rel)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center space-x-1 transition disabled:opacity-50"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{signingId === rel.id ? 'Assinando...' : 'Assinar'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandUnitItem(itemKey)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <span>{isExpanded ? 'Fechar' : 'Abrir'}</span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setViewModalReport(rel)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Ver</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => handlePrintReport(rel)}
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                  Descrição do Treinamento
+                                </span>
+                                <p className="text-slate-200 whitespace-pre-wrap bg-slate-900/70 border border-slate-800 rounded-lg p-3">
+                                  {rel.descricao}
+                                </p>
+                              </div>
+
+                              {isColetivoMulti && (
+                                <div>
+                                  <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
+                                    Participantes ({parts.length + 1})
+                                  </span>
+                                  <div className="space-y-1.5">
+                                    <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5">
+                                      <span className="text-slate-100 font-semibold">
+                                        {rel.operadorNome}{' '}
+                                        <span className="text-[10px] text-cyan-300 font-bold">(Operador Digitador)</span>
+                                      </span>
+                                      <span className="text-emerald-400 font-bold text-[11px]">✓ Assinado</span>
+                                    </div>
+                                    {parts.map(p => (
+                                      <div
+                                        key={p.userId}
+                                        className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5"
+                                      >
+                                        <span className="text-slate-200">
+                                          <span className="font-semibold">{p.name}</span>
+                                          {p.unitName && (
+                                            <span className="text-[10px] text-slate-400"> • {p.unitName}</span>
+                                          )}
+                                        </span>
+                                        <span className={`font-bold text-[11px] ${p.signed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                          {p.signed ? '✓ Assinado' : 'Pendente'}
+                                        </span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Seção colapsável — Relatórios de Operações da Unidade (inicia oculta) */}
+          {unitCategoryFilter !== 'TREINAMENTO' && (
+            <div className="border border-slate-800 rounded-xl overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setIsUnitOpsSectionOpen(prev => !prev)}
+                className="w-full px-4 py-3 bg-slate-950/90 hover:bg-slate-950 flex items-center justify-between text-xs font-bold text-slate-200 transition"
+              >
+                <span className="flex items-center space-x-2">
+                  <Shield className="w-4 h-4 text-cyan-400" />
+                  <span>RELATÓRIOS DE OPERAÇÕES DA UNIDADE ({filteredUnitOpReports.length})</span>
+                </span>
+                <span className="flex items-center space-x-1 text-slate-400">
+                  <span>{isUnitOpsSectionOpen ? 'Ocultar' : 'Abrir'}</span>
+                  {isUnitOpsSectionOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                </span>
+              </button>
+
+              {isUnitOpsSectionOpen && (
+                <div className="p-3 space-y-2.5 bg-slate-900/60">
+                  {filteredUnitOpReports.length === 0 ? (
+                    <div className="p-6 text-center text-xs text-slate-400">
+                      Nenhum relatório de operação encontrado para os filtros selecionados.
+                    </div>
+                  ) : (
+                    filteredUnitOpReports.map(rel => {
+                      const itemKey = `uo-${rel.id}`;
+                      const isExpanded = Boolean(expandedUnitIds[itemKey]);
+                      const ops = rel.operadores || [];
+                      const myOp = ops.find(o => o.userId === currentUser.id);
+                      const myEff = myOp ? isPolOpOperatorEffectivelySigned(myOp, rel.createdAt) : null;
+                      const needsMySignature = Boolean(myOp && myEff && !myEff.signed);
+
+                      const municipiosLabel = [
+                        `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+                        ...(rel.municipiosAdicionais || []).map(m => `${m.municipio}/${m.estado}`)
+                      ].join(' • ');
+
+                      const otherOps = ops.filter(o => o.userId !== rel.criadorId);
+                      const allOpsTooltip = [
+                        `${rel.criadorNome} (Digitador)`,
+                        ...otherOps.map(o => {
+                          const st = isPolOpOperatorEffectivelySigned(o, rel.createdAt);
+                          return `${o.name}${st.signed ? (st.autoSigned ? ' ✓ (30d)' : ' ✓') : ' (Pendente)'}`;
+                        })
+                      ].join('\n');
+
+                      return (
+                        <div
+                          key={rel.id}
+                          className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 space-y-3 text-xs"
+                        >
+                          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="font-mono font-bold text-slate-100">
+                                  {formatDateBr(rel.dataOperacao)}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-mono">
+                                  {rel.horaSaidaBase} → {rel.horaOperacao}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold">
+                                  {municipiosLabel}
+                                </span>
+                                <span className="px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[10px] font-semibold">
+                                  {rel.tipoAtendimento}
+                                </span>
+                                {rel.houveObito && (
+                                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold inline-flex items-center space-x-1">
+                                    <Skull className="w-3 h-3" />
+                                    <span>Óbito</span>
+                                  </span>
+                                )}
+                                {needsMySignature && (
+                                  <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold">
+                                    Assinatura Pendente
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="text-[11px] text-slate-300">
+                                {otherOps.length > 0 ? (
+                                  <span>
+                                    <span className="text-slate-400">Digitador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>{' '}
+                                    <span className="text-slate-400">e </span>
+                                    <span
+                                      title={allOpsTooltip}
+                                      className="font-bold text-cyan-300 underline decoration-dotted cursor-help"
+                                    >
+                                      OUTROS ({otherOps.length})
+                                    </span>
+                                  </span>
+                                ) : (
+                                  <span>
+                                    <span className="text-slate-400">Operador: </span>
+                                    <span className="font-semibold text-slate-100">{rel.criadorNome}</span>
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                              {needsMySignature && (
+                                <button
+                                  type="button"
+                                  disabled={signingOpId === rel.id}
+                                  onClick={() => handleSignOpReport(rel)}
+                                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[11px] flex items-center space-x-1 transition disabled:opacity-50"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>{signingOpId === rel.id ? 'Assinando...' : 'Assinar'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => toggleExpandUnitItem(itemKey)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <span>{isExpanded ? 'Fechar' : 'Abrir'}</span>
+                                {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => setViewModalOpReport(rel)}
+                                className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Ver</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  printRelatorioOperacaoPolicial(
+                                    rel,
+                                    units,
+                                    departments,
+                                    activeUnitName,
+                                    activeDeptName
+                                  )
+                                }
+                                className="px-2.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] flex items-center space-x-1 transition"
+                              >
+                                <Printer className="w-3.5 h-3.5" />
+                                <span>Imprimir</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {isExpanded && (
+                            <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5">
+                                  <span className="block text-[10px] font-bold uppercase text-slate-400">
+                                    Acionamento via
+                                  </span>
+                                  <span className="text-slate-100 font-semibold">
+                                    {rel.acionamentoVia}
+                                    {rel.acionamentoVia === 'OUTROS' && rel.acionamentoOutrosDescricao
+                                      ? ` — ${rel.acionamentoOutrosDescricao}`
+                                      : ''}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5">
+                                  <span className="block text-[10px] font-bold uppercase text-slate-400">
+                                    Viaturas ({(rel.viaturas || []).length})
+                                  </span>
+                                  <span className="text-slate-100 font-mono text-[11px]">
+                                    {(rel.viaturas || []).length > 0
+                                      ? rel.viaturas.map(v => `${v.placa} (${v.descricao})`).join(' • ')
+                                      : 'Nenhuma informada'}
+                                  </span>
+                                </div>
+                                <div className="bg-slate-900/70 border border-slate-800 rounded-lg p-2.5">
+                                  <span className="block text-[10px] font-bold uppercase text-slate-400">
+                                    Apoio / Emergência
+                                  </span>
+                                  <span className="text-slate-200 text-[11px]">
+                                    {rel.tipoAtendimento === 'Emergencial'
+                                      ? rel.descricaoEmergencia || '-'
+                                      : (rel.departamentosApoio || []).join(', ') || '-'}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                  Sinopse da Operação
+                                </span>
+                                <p className="text-slate-200 whitespace-pre-wrap bg-slate-900/70 border border-slate-800 rounded-lg p-3">
+                                  {rel.sinopse}
+                                </p>
+                              </div>
+
+                              <div>
+                                <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
+                                  Operadores / Assinaturas ({ops.length})
+                                </span>
+                                <div className="space-y-1.5">
+                                  {ops.map(op => {
+                                    const st = isPolOpOperatorEffectivelySigned(op, rel.createdAt);
+                                    return (
+                                      <div
+                                        key={op.userId}
+                                        className="flex flex-wrap items-center justify-between gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5"
+                                      >
+                                        <span className="text-slate-200">
+                                          <span className="font-semibold">{op.name}</span>
+                                          {op.cargo && (
+                                            <span className="text-[10px] text-slate-400"> • {op.cargo}</span>
+                                          )}
+                                          {op.userId === rel.criadorId && (
+                                            <span className="text-[10px] text-cyan-300 font-bold"> (Digitador)</span>
+                                          )}
+                                        </span>
+                                        <span className={`font-bold text-[11px] ${st.signed ? 'text-emerald-400' : 'text-amber-400'}`}>
+                                          {st.signed ? (st.autoSigned ? '✓ Assinado (30 dias)' : '✓ Assinado') : 'Pendente'}
                                         </span>
                                       </div>
                                     );

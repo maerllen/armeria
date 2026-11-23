@@ -76,7 +76,10 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
   const canVerRelatoriosTodasEquipes =
-    isGeral || effectiveRole === 'Administrador' || Boolean(currentUser.canViewAllCanilReports);
+    isGeral ||
+    effectiveRole === 'Administrador' ||
+    effectiveRole === 'Armeiro' ||
+    Boolean(currentUser.canViewAllCanilReports);
 
   // Storage collections
   const cachorros = useMemo(() => storage.getCachorros(), [dataVersion, localVersion]);

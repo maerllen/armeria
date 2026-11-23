@@ -122,6 +122,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const isGeral = effectiveRole === 'Geral';
   const isOperadorCanino = effectiveRole === 'operador_canino';
   const isPolicialRole = effectiveRole === 'Policial';
+  const isArmeiroRole = effectiveRole === 'Armeiro';
+  const isAdministradorRole = effectiveRole === 'Administrador';
   const isExplosivistaRole =
     effectiveRole === 'Explosivista' ||
     (effectiveRole === 'Policial' && isUserExplosivista(currentUser));
@@ -132,8 +134,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     (hasCanilAccess &&
       !isGeral &&
       !isExplosivistaRole &&
-      effectiveRole !== 'Armeiro' &&
-      effectiveRole !== 'Administrador');
+      !isArmeiroRole &&
+      !isAdministradorRole);
   const isDeptScoped =
     !isGeral &&
     (effectiveRole === 'Administrador' ||
@@ -328,9 +330,11 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   }, [reportUnitButtons, activeUnitButtonId, isOperadorCanino, currentUser.unitId]);
 
   const isCocActive = Boolean(activeUnitButton?.isCoc);
-  const isCocAcervoView = isCocActive && !isOperadorCanino && cocSubView === 'ACERVO';
+  const canSeeCocAcervoTab = !isOperadorCanino && !isArmeiroRole && !isAdministradorRole;
+  const isCocAcervoView = isCocActive && canSeeCocAcervoTab && cocSubView === 'ACERVO';
   const isCanilTrainingView = isCocActive && !isCocAcervoView;
-  const isPolicialUnitReportView = isPolicialRole && !isCocActive;
+  const isPolicialUnitReportView =
+    (isPolicialRole || isArmeiroRole || isAdministradorRole) && !isCocActive;
   const canRenderCanilSection = hasCanilAccess || isCocActive;
 
   const handleSelectUnitButton = (btn: ReportUnitButton) => {
@@ -364,7 +368,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     if (activeUnitButton.isCoc) {
       setSelectedDept(activeUnitButton.departmentId || (isGeral ? 'ALL' : currentUser.departmentId || 'ALL'));
       setSelectedUnit(activeUnitButton.realUnitId || 'ALL');
-      if (isOperadorCanino || cocSubView === 'TREINAMENTO') {
+      if (!canSeeCocAcervoTab || cocSubView === 'TREINAMENTO') {
         if (activeTab !== 'TREINAMENTO_CANIL') setActiveTab('TREINAMENTO_CANIL');
       } else if (activeTab !== 'CANIL') {
         setActiveTab('CANIL');
@@ -379,6 +383,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     activeUnitButton,
     activeUnitButtonId,
     cocSubView,
+    canSeeCocAcervoTab,
     isGeral,
     isOperadorCanino,
     currentUser.departmentId
@@ -2303,12 +2308,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   };
 
   const tabsConfig = useMemo(() => {
+    const hideInventoryTabs = isArmeiroRole || isAdministradorRole;
     const allTabs: { id: ReportTab; label: string; icon: React.ReactNode; visible: boolean }[] = [
       {
         id: 'TODOS',
         label: 'Relatório Geral (Completo)',
         icon: <FileText className="w-4 h-4" />,
-        visible: !isExplosivistaRole && !isCanilOnly
+        visible: !hideInventoryTabs && !isExplosivistaRole && !isCanilOnly
       },
       {
         id: 'COFRES',
@@ -2316,41 +2322,43 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           ? `Cofres de Explosivos (${screenData.cofres.length})`
           : `Cofres (${screenData.cofres.length})`,
         icon: <Vault className="w-4 h-4" />,
-        visible: !isCanilOnly
+        visible: !hideInventoryTabs && !isCanilOnly
       },
       {
         id: 'ARMAS',
         label: `Armas (${screenData.armas.length} / ${screenData.armaHistorico.length})`,
         icon: <Crosshair className="w-4 h-4" />,
-        visible: !isExplosivistaRole && !isCanilOnly
+        visible: !hideInventoryTabs && !isExplosivistaRole && !isCanilOnly
       },
       {
         id: 'MUNICIONAL',
         label: `Munições (${screenData.municoesEstoque.length} / ${screenData.municaoHistorico.length})`,
         icon: <Disc className="w-4 h-4" />,
-        visible: !isExplosivistaRole && !isCanilOnly
+        visible: !hideInventoryTabs && !isExplosivistaRole && !isCanilOnly
       },
       {
         id: 'MATERIAIS',
         label: `Materiais (${screenData.materiais.length} / ${screenData.materialHistorico.length})`,
         icon: <Package className="w-4 h-4" />,
-        visible: !isExplosivistaRole && !isCanilOnly
+        visible: !hideInventoryTabs && !isExplosivistaRole && !isCanilOnly
       },
       {
         id: 'EXPLOSIVOS',
         label: `Explosivos (${screenData.explosivos.length} / ${screenData.explosivoHistorico.length})`,
         icon: <Flame className="w-4 h-4" />,
-        visible: !isCanilOnly
+        visible: !hideInventoryTabs && !isCanilOnly
       },
       {
         id: 'CANIL',
         label: `Canil — Acervo (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
         icon: <Dog className="w-4 h-4" />,
-        visible: isCanilOnly
+        visible: !hideInventoryTabs && isCanilOnly
       }
     ];
     return allTabs.filter(t => t.visible);
   }, [
+    isArmeiroRole,
+    isAdministradorRole,
     isExplosivistaRole,
     isCanilOnly,
     screenData.cofres.length,
@@ -2399,6 +2407,20 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       };
     }
     if (isPolicialUnitReportView) {
+      if (isArmeiroRole) {
+        return {
+          sectorName: `Armeiro • Relatórios da Unidade ${activeUnitDisplayName}`,
+          description:
+            `Relatórios de treinamento, operações, Meus Relatórios e Relatórios da Unidade vinculados à unidade ${activeUnitDisplayName}.`
+        };
+      }
+      if (isAdministradorRole) {
+        return {
+          sectorName: `Administrador • Relatórios da Unidade ${activeUnitDisplayName}`,
+          description:
+            `Relatórios de treinamento, operações, Meus Relatórios e Relatórios da Unidade vinculados à unidade ${activeUnitDisplayName}.`
+        };
+      }
       return {
         sectorName: `Policial • Relatórios da Unidade ${activeUnitDisplayName}`,
         description:
@@ -2412,26 +2434,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           `Relatórios da unidade ${activeUnitDisplayName} vinculados ao setor de Explosivos: cofres de explosivos, acervo de explosivos e histórico completo de movimentações.`
       };
     }
-    if (effectiveRole === 'Armeiro') {
-      return {
-        sectorName: 'Armaria / Material Bélico',
-        description:
-          `Relatórios da unidade ${activeUnitDisplayName} vinculados ao setor de Armaria: cofres, armas, munições, materiais, explosivos e histórico completo de movimentações.`
-      };
-    }
-    if (effectiveRole === 'Administrador') {
-      return {
-        sectorName: 'Administração da Unidade / Departamento',
-        description:
-          `Relatórios integrados da unidade ${activeUnitDisplayName}: cofres, armas, munições, materiais, explosivos e movimentações operacionais.`
-      };
-    }
     return {
       sectorName: `Gestão Geral • Unidade ${activeUnitDisplayName}`,
       description:
         `Relatórios gerenciais e operacionais separados por unidade. Exibindo dados exclusivos da unidade ${activeUnitDisplayName}.`
     };
-  }, [isCocActive, isPolicialUnitReportView, isExplosivistaRole, effectiveRole, activeUnitDisplayName]);
+  }, [isCocActive, isPolicialUnitReportView, isArmeiroRole, isAdministradorRole, isExplosivistaRole, activeUnitDisplayName]);
 
   const handlePanelRefresh = () => {
     storage
@@ -2567,8 +2575,8 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       </div>
 
-      {/* Sub-navegação COC para perfis gestores (Relatórios vs Acervo/Farmácia Canil) */}
-      {isCocActive && !isOperadorCanino && (
+      {/* Sub-navegação COC (ocultada para Operador Canino, Armeiro e Administrador) */}
+      {isCocActive && canSeeCocAcervoTab && (
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
           <button
             type="button"
