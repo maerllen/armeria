@@ -224,6 +224,32 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     return [];
   };
 
+  const getRelatorioAllDogs = (rel: RelatorioTreinamentoCanil): ParticipanteTreinamentoCachorro[] => {
+    const map = new Map<string, ParticipanteTreinamentoCachorro>();
+    for (const dog of getRelatorioCondutorDogs(rel)) {
+      const key = dog.id || dog.nome;
+      if (key && !map.has(key)) map.set(key, dog);
+    }
+    if (rel.modalidadeParticipacao === 'Coletivo' || (rel.participantes && rel.participantes.length > 0)) {
+      for (const p of rel.participantes || []) {
+        for (const dog of p.cachorros || []) {
+          const key = dog.id || dog.nome;
+          if (key && !map.has(key)) map.set(key, dog);
+        }
+      }
+    }
+    return Array.from(map.values());
+  };
+
+  const getRelatorioAllSignerNames = (rel: RelatorioTreinamentoCanil): string[] => {
+    const names: string[] = [];
+    if (rel.condutorNome) names.push(rel.condutorNome);
+    for (const p of rel.participantes || []) {
+      if (p.name && !names.includes(p.name)) names.push(p.name);
+    }
+    return names;
+  };
+
   const getDefaultDogsForUser = (userId?: string) => {
     if (!userId) return [];
     const active = cachorros.filter(
@@ -2368,11 +2394,13 @@ ${infoTableHtml}
 
           {/* SEÇÃO: MEUS RELATÓRIOS DE TREINAMENTO (INICIA OCULTA) */}
           {(meusTipoFilter === 'TREINAMENTO' || meusTipoFilter === 'TODOS') && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-visible shadow-lg">
               <button
                 type="button"
                 onClick={() => setMeusTreinamentosSectionOpen(v => !v)}
-                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+                className={`w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left ${
+                  meusTreinamentosSectionOpen ? 'rounded-t-2xl' : 'rounded-2xl'
+                }`}
               >
                 <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
                   {meusTreinamentosSectionOpen ? (
@@ -2406,11 +2434,15 @@ ${infoTableHtml}
                       const needsMySignature = !isCreator && Boolean(myParticipantEntry && !myParticipantEntry.signed);
                       const iSignedJoint = !isCreator && Boolean(myParticipantEntry?.signed);
                       const isItemOpen = Boolean(expandedReportIds[`meus-tr-${rel.id}`]);
+                      const isColetivo = rel.modalidadeParticipacao === 'Coletivo';
+                      const allDogs = getRelatorioAllDogs(rel);
+                      const condutorDogs = getRelatorioCondutorDogs(rel);
+                      const allSignerNames = getRelatorioAllSignerNames(rel);
 
                       return (
                         <div
                           key={rel.id}
-                          className={`bg-slate-950/60 border rounded-xl overflow-hidden ${
+                          className={`bg-slate-950/60 border rounded-xl overflow-visible ${
                             needsMySignature ? 'border-amber-500/60' : 'border-slate-800'
                           }`}
                         >
@@ -2429,8 +2461,8 @@ ${infoTableHtml}
                                     {formatDateBr(rel.dataTreinamento)}
                                   </span>
                                   <span className="font-black text-slate-100 text-sm flex items-center space-x-1.5">
-                                    <Dog className="w-4 h-4 text-amber-400" />
-                                    <span>{getRelatorioCondutorDogs(rel).map(c => c.nome).join(', ')}</span>
+                                    <Dog className="w-4 h-4 text-amber-400 shrink-0" />
+                                    <span>{allDogs.length > 0 ? allDogs.map(c => c.nome).join(', ') : 'Sem cachorro'}</span>
                                   </span>
                                   <span
                                     className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
@@ -2452,7 +2484,7 @@ ${infoTableHtml}
                                   </span>
                                   {isCreator && (
                                     <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                                      Autor / Condutor
+                                      {isColetivo ? 'Condutor Digitador' : 'Autor / Condutor'}
                                     </span>
                                   )}
                                   {iSignedJoint && (
@@ -2466,10 +2498,40 @@ ${infoTableHtml}
                                     </span>
                                   )}
                                 </div>
-                                <p className="text-xs text-slate-400">
-                                  Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
-                                  {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
-                                </p>
+                                {isColetivo ? (
+                                  <div className="text-xs text-slate-400 flex flex-wrap items-center gap-1">
+                                    <span>
+                                      Condutor digitador: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                      {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''} e
+                                    </span>
+                                    <span
+                                      className="relative inline-block group/outros"
+                                      title={allSignerNames.join('\n')}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold uppercase text-[10px] cursor-help underline decoration-dotted underline-offset-2">
+                                        OUTROS
+                                      </span>
+                                      <div className="hidden group-hover/outros:block absolute left-0 bottom-full mb-1.5 z-50 w-64 p-2.5 rounded-xl bg-slate-950 border border-cyan-500/40 shadow-2xl text-[11px] text-slate-200 pointer-events-none">
+                                        <p className="text-[10px] font-black uppercase text-cyan-300 mb-1 border-b border-slate-800 pb-1">
+                                          Usuários que assinam ({allSignerNames.length})
+                                        </p>
+                                        <ul className="space-y-0.5">
+                                          {allSignerNames.map((nome, idx) => (
+                                            <li key={`${rel.id}-signer-${idx}`} className="truncate">
+                                              • {nome}{idx === 0 ? ' (Digitador)' : ''}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <p className="text-xs text-slate-400">
+                                    Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                    {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
+                                  </p>
+                                )}
                               </div>
                             </button>
 
@@ -2534,15 +2596,32 @@ ${infoTableHtml}
                           </div>
 
                           {isItemOpen && (
-                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50">
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 rounded-b-xl">
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
 
-                              {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
-                                <div className="pt-1 flex flex-wrap gap-1.5 text-[11px]">
-                                  <span className="text-slate-400 font-semibold mr-1">Participantes ({rel.participantes.length}):</span>
-                                  {rel.participantes.map(p => (
+                              {isColetivo && (
+                                <div className="pt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <span className="text-slate-400 font-semibold mr-1">
+                                    Participantes ({1 + (rel.participantes || []).length}):
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-lg border ${
+                                      rel.condutorAssinado
+                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {rel.condutorNome} (Digitador):{' '}
+                                    <span className="text-amber-300">
+                                      {condutorDogs.length > 0
+                                        ? condutorDogs.map(c => c.nome).join(', ')
+                                        : 'Sem cachorro'}
+                                    </span>{' '}
+                                    {rel.condutorAssinado ? '✓ Assinado' : '• Pendente'}
+                                  </span>
+                                  {(rel.participantes || []).map(p => (
                                     <span
                                       key={p.userId}
                                       className={`px-2 py-0.5 rounded-lg border ${
@@ -2551,10 +2630,12 @@ ${infoTableHtml}
                                           : 'bg-slate-950 border-slate-800 text-slate-400'
                                       }`}
                                     >
-                                      {p.name}
-                                      {p.cachorros && p.cachorros.length > 0
-                                        ? ` • Cão(s): ${p.cachorros.map(c => c.nome).join(', ')}`
-                                        : ' • Sem cachorro'}{' '}
+                                      {p.name}:{' '}
+                                      <span className="text-amber-300">
+                                        {p.cachorros && p.cachorros.length > 0
+                                          ? p.cachorros.map(c => c.nome).join(', ')
+                                          : 'Sem cachorro'}
+                                      </span>{' '}
                                       {p.signed ? '✓ Assinado' : '• Pendente'}
                                     </span>
                                   ))}
@@ -2995,11 +3076,13 @@ ${infoTableHtml}
 
           {/* SEÇÃO: RELATÓRIOS DE TREINAMENTO DA UNIDADE (INICIA OCULTA) */}
           {(unidadeTipoFilter === 'TREINAMENTO' || unidadeTipoFilter === 'TODOS') && (
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-visible shadow-lg">
               <button
                 type="button"
                 onClick={() => setUnidadeTreinamentosSectionOpen(v => !v)}
-                className="w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left"
+                className={`w-full px-4 py-3.5 bg-slate-950/70 hover:bg-slate-950 transition flex items-center justify-between gap-3 text-left ${
+                  unidadeTreinamentosSectionOpen ? 'rounded-t-2xl' : 'rounded-2xl'
+                }`}
               >
                 <span className="text-xs font-black text-amber-300 uppercase font-mono flex items-center space-x-2">
                   {unidadeTreinamentosSectionOpen ? (
@@ -3024,10 +3107,14 @@ ${infoTableHtml}
                   ) : (
                     filteredUnidadeReports.map(rel => {
                       const isItemOpen = Boolean(expandedReportIds[`unid-tr-${rel.id}`]);
+                      const isColetivo = rel.modalidadeParticipacao === 'Coletivo';
+                      const allDogs = getRelatorioAllDogs(rel);
+                      const condutorDogs = getRelatorioCondutorDogs(rel);
+                      const allSignerNames = getRelatorioAllSignerNames(rel);
                       return (
                         <div
                           key={rel.id}
-                          className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-hidden"
+                          className="bg-slate-950/60 border border-slate-800 rounded-xl overflow-visible"
                         >
                           <div className="p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
                             <button
@@ -3044,8 +3131,8 @@ ${infoTableHtml}
                                     {formatDateBr(rel.dataTreinamento)}
                                   </span>
                                   <span className="font-bold text-slate-100 text-xs flex items-center space-x-1">
-                                    <Dog className="w-3.5 h-3.5 text-amber-400" />
-                                    <span>{getRelatorioCondutorDogs(rel).map(d => d.nome).join(', ')}</span>
+                                    <Dog className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                                    <span>{allDogs.length > 0 ? allDogs.map(d => d.nome).join(', ') : 'Sem cachorro'}</span>
                                   </span>
                                   <span
                                     className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
@@ -3066,13 +3153,40 @@ ${infoTableHtml}
                                     {rel.modalidadeParticipacao}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-slate-400">
-                                  Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
-                                  {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
-                                  {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0
-                                    ? ` • +${rel.participantes.length} participante(s)`
-                                    : ''}
-                                </p>
+                                {isColetivo ? (
+                                  <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-1">
+                                    <span>
+                                      Condutor digitador: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                      {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''} e
+                                    </span>
+                                    <span
+                                      className="relative inline-block group/outros"
+                                      title={allSignerNames.join('\n')}
+                                      onClick={(e) => e.stopPropagation()}
+                                    >
+                                      <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold uppercase text-[10px] cursor-help underline decoration-dotted underline-offset-2">
+                                        OUTROS
+                                      </span>
+                                      <div className="hidden group-hover/outros:block absolute left-0 bottom-full mb-1.5 z-50 w-64 p-2.5 rounded-xl bg-slate-950 border border-cyan-500/40 shadow-2xl text-[11px] text-slate-200 pointer-events-none">
+                                        <p className="text-[10px] font-black uppercase text-cyan-300 mb-1 border-b border-slate-800 pb-1">
+                                          Usuários que assinam ({allSignerNames.length})
+                                        </p>
+                                        <ul className="space-y-0.5">
+                                          {allSignerNames.map((nome, idx) => (
+                                            <li key={`${rel.id}-unid-signer-${idx}`} className="truncate">
+                                              • {nome}{idx === 0 ? ' (Digitador)' : ''}
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <p className="text-[11px] text-slate-400">
+                                    Condutor: <strong className="text-slate-200">{rel.condutorNome}</strong>
+                                    {rel.condutorMasp ? ` (MASP: ${formatMasp(rel.condutorMasp)})` : ''}
+                                  </p>
+                                )}
                               </div>
                             </button>
 
@@ -3114,15 +3228,32 @@ ${infoTableHtml}
                           </div>
 
                           {isItemOpen && (
-                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs">
+                            <div className="px-4 pb-4 pt-3 border-t border-slate-800/80 space-y-3 bg-slate-900/50 text-xs rounded-b-xl">
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
 
-                              {rel.modalidadeParticipacao === 'Coletivo' && (rel.participantes || []).length > 0 && (
-                                <div className="flex flex-wrap gap-1.5 text-[11px]">
-                                  <span className="text-slate-400 font-semibold mr-1">Participantes ({rel.participantes.length}):</span>
-                                  {rel.participantes.map(p => (
+                              {isColetivo && (
+                                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                                  <span className="text-slate-400 font-semibold mr-1">
+                                    Participantes ({1 + (rel.participantes || []).length}):
+                                  </span>
+                                  <span
+                                    className={`px-2 py-0.5 rounded-lg border ${
+                                      rel.condutorAssinado
+                                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                                        : 'bg-slate-950 border-slate-800 text-slate-400'
+                                    }`}
+                                  >
+                                    {rel.condutorNome} (Digitador):{' '}
+                                    <span className="text-amber-300">
+                                      {condutorDogs.length > 0
+                                        ? condutorDogs.map(c => c.nome).join(', ')
+                                        : 'Sem cachorro'}
+                                    </span>{' '}
+                                    {rel.condutorAssinado ? '✓ Assinado' : '• Pendente'}
+                                  </span>
+                                  {(rel.participantes || []).map(p => (
                                     <span
                                       key={p.userId}
                                       className={`px-2 py-0.5 rounded-lg border ${
@@ -3176,29 +3307,33 @@ ${infoTableHtml}
 
             <div className="p-5 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">Condutor</span>
-                  <p className="font-bold text-slate-100 text-sm">{viewingTreinoReport.condutorNome}</p>
-                  {viewingTreinoReport.condutorMasp && (
-                    <p className="font-mono text-slate-400">MASP: {formatMasp(viewingTreinoReport.condutorMasp)}</p>
-                  )}
-                </div>
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
-                  <span className="text-[10px] text-slate-400 uppercase font-bold">
-                    {getRelatorioCondutorDogs(viewingTreinoReport).length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}
-                  </span>
-                  <div className="space-y-1 mt-0.5">
-                    {getRelatorioCondutorDogs(viewingTreinoReport).map(dog => (
-                      <div key={dog.id}>
-                        <p className="font-bold text-slate-100 text-sm">{dog.nome}</p>
-                        <p className="text-slate-400">
-                          {dog.raca || 'K9'}
-                          {dog.microchip ? ` • Chip: ${dog.microchip}` : ''}
-                        </p>
+                {viewingTreinoReport.modalidadeParticipacao !== 'Coletivo' && (
+                  <>
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold">Condutor</span>
+                      <p className="font-bold text-slate-100 text-sm">{viewingTreinoReport.condutorNome}</p>
+                      {viewingTreinoReport.condutorMasp && (
+                        <p className="font-mono text-slate-400">MASP: {formatMasp(viewingTreinoReport.condutorMasp)}</p>
+                      )}
+                    </div>
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold">
+                        {getRelatorioCondutorDogs(viewingTreinoReport).length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}
+                      </span>
+                      <div className="space-y-1 mt-0.5">
+                        {getRelatorioCondutorDogs(viewingTreinoReport).map(dog => (
+                          <div key={dog.id}>
+                            <p className="font-bold text-slate-100 text-sm">{dog.nome}</p>
+                            <p className="text-slate-400">
+                              {dog.raca || 'K9'}
+                              {dog.microchip ? ` • Chip: ${dog.microchip}` : ''}
+                            </p>
+                          </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </div>
+                    </div>
+                  </>
+                )}
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3">
                   <span className="text-[10px] text-slate-400 uppercase font-bold">Local</span>
                   <p className="font-bold text-slate-100">{viewingTreinoReport.modalidadeLocal}</p>
@@ -3219,10 +3354,39 @@ ${infoTableHtml}
               {viewingTreinoReport.modalidadeParticipacao === 'Coletivo' && (
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
                   <span className="text-[10px] text-slate-400 uppercase font-bold block">
-                    Participantes para Assinatura ({viewingTreinoReport.participantes.length})
+                    Participantes para Assinatura ({1 + (viewingTreinoReport.participantes || []).length})
                   </span>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {viewingTreinoReport.participantes.map(p => (
+                    <div className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-bold text-slate-200">{viewingTreinoReport.condutorNome}</p>
+                        {viewingTreinoReport.condutorMasp && (
+                          <p className="text-[10px] font-mono text-slate-400">
+                            MASP: {formatMasp(viewingTreinoReport.condutorMasp)}
+                          </p>
+                        )}
+                        <p className="text-[10px] text-amber-300 mt-0.5">
+                          {getRelatorioCondutorDogs(viewingTreinoReport).length > 0
+                            ? `Cão(s): ${getRelatorioCondutorDogs(viewingTreinoReport).map(c => c.nome).join(', ')}`
+                            : 'Sem cachorro'}
+                        </p>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                            viewingTreinoReport.condutorAssinado
+                              ? 'bg-emerald-500/15 text-emerald-300'
+                              : 'bg-amber-500/15 text-amber-300'
+                          }`}
+                        >
+                          {viewingTreinoReport.condutorAssinado ? 'Assinado' : 'Pendente'}
+                        </span>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+                          Digitador
+                        </span>
+                      </div>
+                    </div>
+                    {(viewingTreinoReport.participantes || []).map(p => (
                       <div key={p.userId} className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 flex items-start justify-between gap-2">
                         <div>
                           <p className="font-bold text-slate-200">{p.name}</p>
