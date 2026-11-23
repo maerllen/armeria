@@ -191,7 +191,7 @@ export const ManualModule: React.FC<ManualModuleProps> = ({
       const filename = buildStandardDocumentFilename(
         'Manual do Usuário Policial',
         `Unidade ${ctx.unitSigla}`,
-        loggedName,
+        `${loggedName} - ${uniquePrintCode}`,
         'pdf'
       );
       pdf.save(filename);

@@ -47,6 +47,15 @@ let lastMonotonicCounter = 0n;
 const issuedPrintCodesInSession = new Set<string>();
 let globalPrintHookInitialized = false;
 let activeWindowPrintCode: string | null = null;
+let directPrintPreviousTitle: string | null = null;
+
+export function appendPrintCodeToTitle(baseTitle: string, printCode: string): string {
+  const cleanBase = sanitizeDocumentName(baseTitle) || 'Documento - Sistema Armaria PCMG';
+  const cleanCode = sanitizeDocumentName(printCode);
+  if (!cleanCode) return cleanBase;
+  if (cleanBase.includes(cleanCode)) return cleanBase;
+  return sanitizeDocumentName(`${cleanBase} - ${cleanCode}`);
+}
 
 function readPersistedCounter(): bigint {
   try {
@@ -254,12 +263,20 @@ export function initGlobalPrintCodeHook(): void {
 
   window.addEventListener('beforeprint', () => {
     if (!activeWindowPrintCode) {
-      attachWindowPrintCodeStamp();
+      const code = attachWindowPrintCodeStamp();
+      if (typeof document !== 'undefined') {
+        directPrintPreviousTitle = document.title;
+        document.title = appendPrintCodeToTitle(document.title || 'Documento - Sistema Armaria PCMG', code);
+      }
     }
   });
 
   window.addEventListener('afterprint', () => {
     setTimeout(() => {
+      if (directPrintPreviousTitle !== null && typeof document !== 'undefined') {
+        document.title = directPrintPreviousTitle;
+        directPrintPreviousTitle = null;
+      }
       removeWindowPrintCodeStamp();
     }, 150);
   });
@@ -284,6 +301,9 @@ export function injectUniquePrintCodeIntoHtml(htmlContent: string, printCode?: s
   const doc = new DOMParser().parseFromString(htmlContent, 'text/html');
   if (!doc.body || doc.querySelector('[data-armaria-print-code]')) {
     return htmlContent;
+  }
+  if (doc.title) {
+    doc.title = appendPrintCodeToTitle(doc.title, code);
   }
 
   const stampStyle = doc.createElement('style');
@@ -378,11 +398,16 @@ export function injectUniquePrintCodeIntoHtml(htmlContent: string, printCode?: s
 }
 
 export function printWithWindowTitle(docTitle: string) {
-  const safeTitle = sanitizeDocumentName(docTitle);
+  const uniquePrintCode = generateUniquePrintCode();
+  const baseTitle =
+    sanitizeDocumentName(docTitle) ||
+    sanitizeDocumentName(typeof document !== 'undefined' ? document.title : '') ||
+    'Documento - Sistema Armaria PCMG';
+  const safeTitle = appendPrintCodeToTitle(baseTitle, uniquePrintCode);
   const previousTitle = typeof document !== 'undefined' ? document.title : '';
   let restored = false;
 
-  attachWindowPrintCodeStamp(generateUniquePrintCode());
+  attachWindowPrintCodeStamp(uniquePrintCode);
 
   const restoreTitle = () => {
     if (restored) return;
@@ -526,7 +551,8 @@ export function printDocumentInPage(htmlContent: string, overrideTitle?: string)
   frameDoc.write(processedHtml);
   frameDoc.close();
 
-  const parsedDocTitle = sanitizeDocumentName(overrideTitle || frameDoc.title || '');
+  const baseDocTitle = sanitizeDocumentName(overrideTitle || frameDoc.title || 'Documento - Sistema Armaria PCMG');
+  const parsedDocTitle = appendPrintCodeToTitle(baseDocTitle, uniquePrintCode);
   if (parsedDocTitle) {
     frameDoc.title = parsedDocTitle;
   }

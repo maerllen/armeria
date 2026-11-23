@@ -1,6 +1,6 @@
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib';
 import QRCode from 'qrcode';
-import { generateUniquePrintCode } from './printHelper';
+import { appendPrintCodeToTitle, generateUniquePrintCode } from './printHelper';
 
 export interface StampOptions {
   authCode: string;
@@ -174,9 +174,12 @@ export async function stampPdfWithQrCode(
   };
 }
 
-async function stampUniquePrintCodeOnPdfBytes(byteArray: Uint8Array): Promise<Uint8Array> {
+async function stampUniquePrintCodeOnPdfBytes(
+  byteArray: Uint8Array,
+  forcedPrintCode?: string
+): Promise<Uint8Array> {
   try {
-    const printCode = generateUniquePrintCode();
+    const printCode = forcedPrintCode || generateUniquePrintCode();
     const issuedAt = new Date().toLocaleString('pt-BR', {
       timeZone: 'America/Sao_Paulo',
       day: '2-digit',
@@ -238,10 +241,8 @@ async function stampUniquePrintCodeOnPdfBytes(byteArray: Uint8Array): Promise<Ui
  * Utility to print a PDF by stamping a non-repeating unique code and loading it into a temporary iframe
  */
 export function printPdfFromBase64(base64Data: string, title?: string) {
-  const safeTitle = String(title ?? '')
-    .replace(/[\\/:*?"<>|]+/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const uniquePrintCode = generateUniquePrintCode();
+  const safeTitle = appendPrintCodeToTitle(title || 'Certificado - Sistema Armaria PCMG', uniquePrintCode);
 
   void (async () => {
     try {
@@ -252,7 +253,7 @@ export function printPdfFromBase64(base64Data: string, title?: string) {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       const rawByteArray = new Uint8Array(byteNumbers);
-      const stampedBytes = await stampUniquePrintCodeOnPdfBytes(rawByteArray);
+      const stampedBytes = await stampUniquePrintCodeOnPdfBytes(rawByteArray, uniquePrintCode);
       const pdfBytes = new Uint8Array(stampedBytes);
       const blob = new Blob([pdfBytes], { type: 'application/pdf' });
       const blobUrl = URL.createObjectURL(blob);

@@ -693,6 +693,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       'Unidade Operacional Canil K9';
     const deptName = departments.find(d => d.id === rel.departmentId)?.name || 'Polícia Civil de Minas Gerais';
     const isSozinho = rel.modalidadeParticipacao === 'Sozinho';
+    const hasMultipleSigners = !isSozinho || (Array.isArray(rel.participantes) && rel.participantes.length > 0);
+    const isSoloReport = !hasMultipleSigners;
     const condutorDogs = getRelatorioCondutorDogs(rel);
     const dogsTitleText = condutorDogs.map(c => c.nome).join(', ') || rel.cachorroNome;
     const docTitle = buildStandardDocumentTitle(
@@ -701,7 +703,14 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       rel.condutorNome
     );
 
-    const participantBoxesHtml = isSozinho
+    const creatorDogsText =
+      condutorDogs.length > 0
+        ? condutorDogs
+            .map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}${c.microchip ? ` [Chip: ${c.microchip}]` : ''}`)
+            .join(', ')
+        : 'Sem cachorro';
+
+    const participantBoxesHtml = isSoloReport
       ? `
         <div class="sig-grid-single">
           <div class="sig-box">
@@ -717,12 +726,12 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
           <div class="sig-box">
             ${rel.condutorAssinado ? '<div class="sig-digital">Assinado eletronicamente</div>' : '<div class="sig-space"></div>'}
             <div class="sig-line">${escapeHtmlText(rel.condutorNome)}</div>
-            <div class="sig-meta">${rel.condutorMasp ? `MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))}` : ''}</div>
-            <div class="sig-role">Condutor Responsável</div>
+            <div class="sig-meta">${rel.condutorMasp ? `MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))}` : ''} ${rel.condutorCargo ? `• ${escapeHtmlText(rel.condutorCargo)}` : ''}</div>
+            <div class="sig-role">Condutor Responsável • Cão(s): ${escapeHtmlText(creatorDogsText)}</div>
           </div>
           ${(rel.participantes || []).slice(0, 15).map((p, idx) => {
             const dogsText = (p.cachorros && p.cachorros.length > 0)
-              ? p.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}`).join(', ')
+              ? p.cachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}${c.microchip ? ` [Chip: ${c.microchip}]` : ''}`).join(', ')
               : 'Sem cachorro';
             return `
             <div class="sig-box">
@@ -735,6 +744,56 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
           }).join('')}
         </div>
       `;
+
+    const infoTableHtml = isSoloReport
+      ? `
+  <table class="grid-info">
+    <tr>
+      <td style="width: 25%;">
+        <span class="lbl">Data do Treinamento</span>
+        <span class="val" style="font-family: monospace;">${escapeHtmlText(formatDateBr(rel.dataTreinamento))}</span>
+      </td>
+      <td style="width: 45%;">
+        <span class="lbl">Condutor</span>
+        <span class="val">${escapeHtmlText(rel.condutorNome)}${rel.condutorMasp ? ` (MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))})` : ''}</span>
+      </td>
+      <td style="width: 30%;">
+        <span class="lbl">${condutorDogs.length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}</span>
+        <span class="val">${condutorDogs.map(c => `${escapeHtmlText(c.nome)}${c.raca ? ` (${escapeHtmlText(c.raca)})` : ''}`).join('<br/>')}</span>
+      </td>
+    </tr>
+    <tr>
+      <td>
+        <span class="lbl">Local do Treinamento</span>
+        <span class="val">${escapeHtmlText(rel.modalidadeLocal)}</span>
+      </td>
+      <td>
+        <span class="lbl">Modalidade de Participação</span>
+        <span class="val">${escapeHtmlText(rel.modalidadeParticipacao)}</span>
+      </td>
+      <td>
+        <span class="lbl">${condutorDogs.length > 1 ? 'Microchips' : 'Microchip'}</span>
+        <span class="val" style="font-family: monospace;">${escapeHtmlText(condutorDogs.map(c => c.microchip).filter(Boolean).join(', ') || 'N/A')}</span>
+      </td>
+    </tr>
+  </table>`
+      : `
+  <table class="grid-info">
+    <tr>
+      <td style="width: 30%;">
+        <span class="lbl">Data do Treinamento</span>
+        <span class="val" style="font-family: monospace;">${escapeHtmlText(formatDateBr(rel.dataTreinamento))}</span>
+      </td>
+      <td style="width: 35%;">
+        <span class="lbl">Local do Treinamento</span>
+        <span class="val">${escapeHtmlText(rel.modalidadeLocal)}</span>
+      </td>
+      <td style="width: 35%;">
+        <span class="lbl">Modalidade de Participação</span>
+        <span class="val">${escapeHtmlText(rel.modalidadeParticipacao)} (${1 + (rel.participantes?.length || 0)} participantes)</span>
+      </td>
+    </tr>
+  </table>`;
 
     const html = `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -777,44 +836,14 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     <h1>Relatório Diário de Treinamento K9</h1>
     <div class="doc-id">Registro: ${escapeHtmlText(rel.id)}</div>
   </div>
-
-  <table class="grid-info">
-    <tr>
-      <td style="width: 25%;">
-        <span class="lbl">Data do Treinamento</span>
-        <span class="val" style="font-family: monospace;">${escapeHtmlText(formatDateBr(rel.dataTreinamento))}</span>
-      </td>
-      <td style="width: 45%;">
-        <span class="lbl">Condutor</span>
-        <span class="val">${escapeHtmlText(rel.condutorNome)}${rel.condutorMasp ? ` (MASP: ${escapeHtmlText(formatMasp(rel.condutorMasp))})` : ''}</span>
-      </td>
-      <td style="width: 30%;">
-        <span class="lbl">${condutorDogs.length > 1 ? 'Cães Policiais K9' : 'Cão Policial K9'}</span>
-        <span class="val">${condutorDogs.map(c => `${escapeHtmlText(c.nome)}${c.raca ? ` (${escapeHtmlText(c.raca)})` : ''}`).join('<br/>')}</span>
-      </td>
-    </tr>
-    <tr>
-      <td>
-        <span class="lbl">Local do Treinamento</span>
-        <span class="val">${escapeHtmlText(rel.modalidadeLocal)}</span>
-      </td>
-      <td>
-        <span class="lbl">Modalidade de Participação</span>
-        <span class="val">${escapeHtmlText(rel.modalidadeParticipacao)}${!isSozinho ? ` (${1 + (rel.participantes?.length || 0)} participantes)` : ''}</span>
-      </td>
-      <td>
-        <span class="lbl">${condutorDogs.length > 1 ? 'Microchips' : 'Microchip'}</span>
-        <span class="val" style="font-family: monospace;">${escapeHtmlText(condutorDogs.map(c => c.microchip).filter(Boolean).join(', ') || 'N/A')}</span>
-      </td>
-    </tr>
-  </table>
+${infoTableHtml}
 
   <div class="desc-box">
     <div class="desc-title">Descrição do Treinamento do Dia</div>
     <div class="desc-text">${escapeHtmlText(rel.descricao)}</div>
   </div>
 
-  <div class="sig-section-title">Assinaturas</div>
+  <div class="sig-section-title">${isSoloReport ? 'Assinaturas' : 'Equipe'}</div>
   ${participantBoxesHtml}
 
   <div class="footer">
