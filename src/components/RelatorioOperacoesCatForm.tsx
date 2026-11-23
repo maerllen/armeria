@@ -38,6 +38,7 @@ import {
   formatRemainingCountdown,
   isPolOpOperatorEffectivelySigned
 } from './RelatorioOperacoesPolicialForm';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Plane,
   Calendar,
@@ -246,10 +247,47 @@ export function printRelatorioOperacaoCat(
     rel.dataOperacao
   );
 
+  const vantPilotIds = new Set<string>(
+    rel.teveEquipeSolo ? (rel.equipeSolo || []).map(s => s.userId).filter(Boolean) : []
+  );
+  const formatVantSuffix = (userId?: string): string =>
+    rel.comEmpregoAeronave && userId && vantPilotIds.has(userId)
+      ? ' — <strong>Piloto de aeronave não tripulada</strong>'
+      : '';
+
+  const catTripulantesList =
+    rel.comEmpregoAeronave && rel.teveTripulanteOperacional && Array.isArray(rel.tripulantesOperacionais)
+      ? rel.tripulantesOperacionais
+      : [];
+  const coeTripulantesList =
+    rel.comEmpregoAeronave && rel.teveTripulanteOutraUnidade && Array.isArray(rel.tripulantesOutraUnidade)
+      ? rel.tripulantesOutraUnidade
+      : [];
+
+  const operadoresAerotaticosRowsHtml =
+    catTripulantesList.length > 0 || coeTripulantesList.length > 0
+      ? [
+          ...catTripulantesList.map(
+            t =>
+              `<div style="margin:2px 0;"><strong>Operador Aerotático:</strong> ${escapeHtmlText(t.name)}${
+                t.masp ? ` • MASP: ${escapeHtmlText(formatMasp(t.masp))}` : ''
+              }${formatVantSuffix(t.userId)}</div>`
+          ),
+          ...coeTripulantesList.map(
+            t =>
+              `<div style="margin:2px 0;"><strong>Operador Aerotático (COE${
+                t.unitName ? ` — ${escapeHtmlText(t.unitName)}` : ''
+              }):</strong> ${escapeHtmlText(t.name)}${
+                t.masp ? ` • MASP: ${escapeHtmlText(formatMasp(t.masp))}` : ''
+              }${formatVantSuffix(t.userId)}</div>`
+          )
+        ].join('')
+      : '<span style="color:#64748b;">Nenhum operador aerotático registrado</span>';
+
   const aeronavesHtml =
     rel.comEmpregoAeronave && (rel.aeronaves || []).length > 0
       ? `
-      <div class="section-title">Aeronave(s) Empregada(s) e Tripulação de Comando</div>
+      <div class="section-title">Aeronave Empregada e Tripulação</div>
       <table class="data-table">
         <thead>
           <tr>
@@ -274,6 +312,12 @@ export function printRelatorioOperacaoCat(
           `
             )
             .join('')}
+          <tr>
+            <th colspan="5">Operadores Aerotáticos</th>
+          </tr>
+          <tr>
+            <td colspan="5">${operadoresAerotaticosRowsHtml}</td>
+          </tr>
         </tbody>
       </table>
       <div style="text-align:right;font-size:11.5px;font-weight:700;margin-top:4px;color:#0f172a;">
@@ -290,7 +334,12 @@ export function printRelatorioOperacaoCat(
         ${(rel.viaturas || [])
           .map(v => {
             const opsText = (v.operadores || [])
-              .map(o => `${escapeHtmlText(o.name)}${o.masp ? ` (MASP ${escapeHtmlText(formatMasp(o.masp))})` : ''}`)
+              .map(
+                o =>
+                  `${escapeHtmlText(o.name)}${
+                    o.masp ? ` (MASP ${escapeHtmlText(formatMasp(o.masp))})` : ''
+                  }${formatVantSuffix(o.userId)}`
+              )
               .join(', ');
             return `
               <li>
@@ -305,19 +354,31 @@ export function printRelatorioOperacaoCat(
     `
       : '';
 
-  const tripulantesCatHtml =
-    rel.comEmpregoAeronave && rel.teveTripulanteOperacional && (rel.tripulantesOperacionais || []).length > 0
+  const hasExplicitDesembarque = catTripulantesList.some(t => typeof t.desembarcou === 'boolean');
+  const operadoresDesembarcados =
+    rel.comEmpregoAeronave && rel.tripulantesDesembarcaram
+      ? hasExplicitDesembarque
+        ? catTripulantesList.filter(t => t.desembarcou === true)
+        : catTripulantesList
+      : [];
+
+  const equipeSoloSemAeronaveHtml =
+    !rel.comEmpregoAeronave && rel.teveEquipeSolo && (rel.equipeSolo || []).length > 0
       ? `
       <div style="margin-bottom:6px;">
         <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#475569;margin-bottom:3px;">
-          Tripulantes Operacionais (CAT) — ${(rel.tripulantesOperacionais || []).length}
+          Equipe CAT Solo — ${(rel.equipeSolo || []).length}
         </div>
         <ul class="clean-list">
-          ${(rel.tripulantesOperacionais || [])
+          ${(rel.equipeSolo || [])
             .map(
-              t =>
-                `<li><strong>${escapeHtmlText(t.name)}</strong>${t.cargo ? ` — ${escapeHtmlText(t.cargo)}` : ''}${
-                  t.masp ? ` • MASP: ${escapeHtmlText(formatMasp(t.masp))}` : ''
+              s =>
+                `<li><strong>${escapeHtmlText(s.name)}</strong>${
+                  s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
+                } — <strong>${escapeHtmlText(s.operacaoSolo)}</strong>${
+                  s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
+                    ? `: ${escapeHtmlText(s.apoioLogisticoDescricao)}`
+                    : ''
                 }</li>`
             )
             .join('')}
@@ -326,62 +387,25 @@ export function printRelatorioOperacaoCat(
     `
       : '';
 
-  const tripulantesCoeHtml =
-    rel.comEmpregoAeronave && rel.teveTripulanteOutraUnidade && (rel.tripulantesOutraUnidade || []).length > 0
+  const equipeExtraSectionHtml = rel.comEmpregoAeronave
+    ? operadoresDesembarcados.length > 0
       ? `
-      <div style="margin-bottom:6px;">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#475569;margin-bottom:3px;">
-          Tripulantes de Outra Unidade (Departamento COE) — ${(rel.tripulantesOutraUnidade || []).length}
-        </div>
-        <ul class="clean-list">
-          ${(rel.tripulantesOutraUnidade || [])
-            .map(
-              t =>
-                `<li><strong>${escapeHtmlText(t.name)}</strong>${t.unitName ? ` (${escapeHtmlText(t.unitName)})` : ''}${
-                  t.cargo ? ` — ${escapeHtmlText(t.cargo)}` : ''
-                }${t.masp ? ` • MASP: ${escapeHtmlText(formatMasp(t.masp))}` : ''}</li>`
-            )
-            .join('')}
-        </ul>
-      </div>
+      <div class="section-title">Tripulação Operacional — Operadores Aerotáticos que Desembarcaram</div>
+      <ul class="clean-list">
+        ${operadoresDesembarcados
+          .map(
+            t =>
+              `<li><strong>${escapeHtmlText(t.name)}</strong>${
+                t.masp ? ` • MASP: ${escapeHtmlText(formatMasp(t.masp))}` : ''
+              }${formatVantSuffix(t.userId)}</li>`
+          )
+          .join('')}
+      </ul>
     `
-      : '';
-
-  const equipeSoloHtml =
-    rel.teveEquipeSolo && (rel.equipeSolo || []).length > 0
-      ? `
-      <div style="margin-bottom:6px;">
-        <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#475569;margin-bottom:3px;">
-          ${rel.comEmpregoAeronave ? 'Apoio de Aeronave Não Tripulada' : 'Equipe CAT Solo'} — ${(rel.equipeSolo || []).length}
-        </div>
-        <ul class="clean-list">
-          ${(rel.equipeSolo || [])
-            .map(s => {
-              if (rel.comEmpregoAeronave) {
-                return `<li><strong>${escapeHtmlText(s.name)}</strong>${
-                  s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
-                }</li>`;
-              }
-              return `<li><strong>${escapeHtmlText(s.name)}</strong>${
-                s.masp ? ` (MASP: ${escapeHtmlText(formatMasp(s.masp))})` : ''
-              } — <strong>${escapeHtmlText(s.operacaoSolo)}</strong>${
-                s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
-                  ? `: ${escapeHtmlText(s.apoioLogisticoDescricao)}`
-                  : ''
-              }</li>`;
-            })
-            .join('')}
-        </ul>
-      </div>
-    `
-      : '';
-
-  const equipeExtraSectionHtml =
-    tripulantesCatHtml || tripulantesCoeHtml || equipeSoloHtml
-      ? `<div class="section-title">${
-          rel.comEmpregoAeronave ? 'Tripulação Operacional e Apoio de Aeronave Não Tripulada' : 'Equipe'
-        }</div>${tripulantesCatHtml}${tripulantesCoeHtml}${equipeSoloHtml}`
-      : '';
+      : ''
+    : equipeSoloSemAeronaveHtml
+    ? `<div class="section-title">Equipe</div>${equipeSoloSemAeronaveHtml}`
+    : '';
 
   const embarcadosHtml =
     rel.comEmpregoAeronave && rel.teveEmbarcadoExterno && (rel.embarcadosExternos || []).length > 0
@@ -650,7 +674,10 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
   const [editingReport, setEditingReport] = useState<RelatorioOperacaoCat | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedbackState] = useState<{ id: number; type: 'success' | 'error'; message: string } | null>(null);
+  const setFeedback = (fb: { type: 'success' | 'error'; message: string } | null) => {
+    setFeedbackState(fb ? { ...fb, id: Date.now() + Math.random() } : null);
+  };
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // 1. Modalidade (TOPO ANTES DE DATA E HORA)
@@ -710,6 +737,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
   // 8. Desembarque & Captura / Localização
   const [tripulantesDesembarcaram, setTripulantesDesembarcaram] = useState<boolean>(false);
+  const [tripulantesDesembarcadosIds, setTripulantesDesembarcadosIds] = useState<string[]>([]);
   const [participouCapturaLocalizacao, setParticipouCapturaLocalizacao] = useState<boolean>(false);
   const [capturasLocalizacoes, setCapturasLocalizacoes] = useState<CapturaLocalizacaoCatItem[]>([]);
   const [capturaTipoDraft, setCapturaTipoDraft] = useState<TipoCapturaLocalizacaoCat>('Pessoa(s)');
@@ -869,7 +897,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
       .sort((a, b) => a.placa.localeCompare(b.placa, 'pt-BR'));
   }, [viaturasSelecionadas, effectiveUnitId, dataVersion]);
 
-  // Ocupantes inseridos nas viaturas selecionadas (usado em "Apoio de aeronave não tripulada?" quando COM aeronave)
+  // Ocupantes inseridos nas viaturas selecionadas
   const viaturaOcupantes = useMemo(() => {
     const map = new Map<string, { userId: string; name: string; masp: string; cargo?: string }>();
     for (const v of viaturasSelecionadas) {
@@ -882,15 +910,64 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
   }, [viaturasSelecionadas]);
 
-  // Sincroniza "Apoio de aeronave não tripulada" caso ocupantes sejam removidos da viatura
+  // Operadores Aerotáticos selecionados no relatório (modo COM aeronave)
+  const selectedOperadoresAerotaticos = useMemo(() => {
+    if (!comEmpregoAeronave || !teveTripulanteOperacional) return [];
+    const seen = new Set<string>();
+    const list: { userId: string; name: string; masp: string; cargo?: string }[] = [];
+    for (const uid of tripulantesOpSlots) {
+      if (!uid || seen.has(uid)) continue;
+      seen.add(uid);
+      const u = allUsers.find(usr => usr.id === uid);
+      if (u) {
+        list.push({ userId: u.id, name: u.name, masp: u.masp || '', cargo: u.cargo || '' });
+      }
+    }
+    return list;
+  }, [comEmpregoAeronave, teveTripulanteOperacional, tripulantesOpSlots, allUsers]);
+
+  // Candidatos a Piloto de aeronave não tripulada (Integrantes da viatura OU Operadores Aerotáticos)
+  const vantCandidates = useMemo(() => {
+    const map = new Map<
+      string,
+      { userId: string; name: string; masp: string; cargo?: string; origens: string[] }
+    >();
+    for (const op of viaturaOcupantes) {
+      map.set(op.userId, { ...op, origens: ['Integrante da viatura'] });
+    }
+    for (const op of selectedOperadoresAerotaticos) {
+      const existing = map.get(op.userId);
+      if (existing) {
+        if (!existing.origens.includes('Operador Aerotático')) {
+          existing.origens.push('Operador Aerotático');
+        }
+      } else {
+        map.set(op.userId, { ...op, origens: ['Operador Aerotático'] });
+      }
+    }
+    return Array.from(map.values())
+      .map(item => ({ ...item, origemLabel: item.origens.join(' / ') }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'));
+  }, [viaturaOcupantes, selectedOperadoresAerotaticos]);
+
+  // Sincroniza "Piloto de aeronave não tripulada" caso integrantes/operadores sejam removidos
   useEffect(() => {
     if (!comEmpregoAeronave) return;
-    const validIds = new Set(viaturaOcupantes.map(o => o.userId));
+    const validIds = new Set(vantCandidates.map(o => o.userId));
     setEquipeSolo(prev => {
       const next = prev.filter(item => validIds.has(item.userId));
       return next.length === prev.length ? prev : next;
     });
-  }, [comEmpregoAeronave, viaturaOcupantes]);
+  }, [comEmpregoAeronave, vantCandidates]);
+
+  // Sincroniza operadores que desembarcaram caso algum Operador Aerotático seja removido
+  useEffect(() => {
+    const validIds = new Set(selectedOperadoresAerotaticos.map(o => o.userId));
+    setTripulantesDesembarcadosIds(prev => {
+      const next = prev.filter(id => validIds.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [selectedOperadoresAerotaticos]);
 
   // Mapa de armas acauteladas para os usuários selecionados em EQUIPE CAT SOLO (usado no modo SEM aeronave)
   const soloAcauteladasInfo = useMemo(() => {
@@ -1026,6 +1103,14 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setEmbarcadosExternos(Boolean(rel.comEmpregoAeronave) ? embs : []);
 
     setTripulantesDesembarcaram(Boolean(rel.tripulantesDesembarcaram));
+    if (Boolean(rel.tripulantesDesembarcaram) && trips.length > 0) {
+      const hasExplicit = trips.some(t => typeof t.desembarcou === 'boolean');
+      setTripulantesDesembarcadosIds(
+        hasExplicit ? trips.filter(t => t.desembarcou === true).map(t => t.userId) : trips.map(t => t.userId)
+      );
+    } else {
+      setTripulantesDesembarcadosIds([]);
+    }
     setParticipouCapturaLocalizacao(Boolean(rel.participouCapturaLocalizacao));
     setCapturasLocalizacoes(Array.isArray(rel.capturasLocalizacoes) ? rel.capturasLocalizacoes : []);
 
@@ -1096,6 +1181,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     setEmbNomeForaDraft('');
     setEmbMaspForaDraft('');
     setTripulantesDesembarcaram(false);
+    setTripulantesDesembarcadosIds([]);
     setParticipouCapturaLocalizacao(false);
     setCapturasLocalizacoes([]);
     setCapturaTipoDraft('Pessoa(s)');
@@ -1280,7 +1366,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
     if (!userId) return;
     if (equipeSolo.some(s => s.userId === userId)) return;
     const u = comEmpregoAeronave
-      ? viaturaOcupantes.find(op => op.userId === userId)
+      ? vantCandidates.find(op => op.userId === userId)
       : catUnitUsers.find(usr => usr.id === userId);
     if (!u) return;
     const resolvedId = 'userId' in u ? u.userId : u.id;
@@ -1620,10 +1706,26 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
             cargo: u.cargo || '',
             unitId: u.unitId || effectiveUnitId,
             unitName: activeUnitName,
-            origem: 'CAT'
+            origem: 'CAT',
+            desembarcou: Boolean(
+              comEmpregoAeronave && tripulantesDesembarcaram && tripulantesDesembarcadosIds.includes(u.id)
+            )
           });
         }
       }
+    }
+
+    if (
+      comEmpregoAeronave &&
+      tripulantesDesembarcaram &&
+      tripulantesCatResolvidos.length > 0 &&
+      !tripulantesCatResolvidos.some(t => t.desembarcou)
+    ) {
+      setFeedback({
+        type: 'error',
+        message: 'Selecione ao menos um Operador Aerotático que desceu da aeronave.'
+      });
+      return;
     }
 
     if (comEmpregoAeronave && teveTripulanteOutraUnidade && tripulantesOutraUnidade.length === 0) {
@@ -1639,7 +1741,7 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
         setFeedback({
           type: 'error',
           message: comEmpregoAeronave
-            ? 'Selecione ao menos um ocupante da viatura para o Apoio de Aeronave Não Tripulada ou marque "Não".'
+            ? 'Selecione ao menos um Integrante da viatura ou Operador Aerotático como Piloto de aeronave não tripulada ou marque "Não".'
             : 'Selecione ao menos um operador em EQUIPE CAT SOLO ou marque "Não".'
         });
         return;
@@ -1845,27 +1947,15 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
   return (
     <div className="space-y-5">
-      {/* Feedback */}
+      {/* Feedback (Alerta padrão do sistema — 3 segundos) */}
       {feedback && (
-        <div
-          className={`rounded-xl px-4 py-3 border text-xs font-semibold flex items-center justify-between gap-2 ${
-            feedback.type === 'success'
-              ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-200'
-              : 'bg-red-500/15 border-red-500/40 text-red-200'
-          }`}
-        >
-          <div className="flex items-center space-x-2">
-            {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-            )}
-            <span>{feedback.message}</span>
-          </div>
-          <button type="button" onClick={() => setFeedback(null)} className="opacity-70 hover:opacity-100">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <TopLayerAlert
+          key={feedback.id}
+          type={feedback.type}
+          message={feedback.message}
+          autoHideMs={3000}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {/* Relatórios recentes editáveis (janela de 3 dias) */}
@@ -2903,27 +2993,27 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
 
             {teveEquipeSolo && comEmpregoAeronave && (
               <div className="space-y-3">
-                {viaturaOcupantes.length === 0 ? (
+                {vantCandidates.length === 0 ? (
                   <p className="text-[11px] text-amber-300/90 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-                    Nenhum ocupante de viatura informado ainda. Adicione uma viatura e seus ocupantes no bloco acima para selecionar os operadores do apoio de aeronave não tripulada.
+                    Nenhum integrante de viatura ou operador aerotático informado ainda. Adicione integrantes em uma viatura ou selecione operadores aerotáticos acima para escolher o Piloto de aeronave não tripulada.
                   </p>
                 ) : (
                   <>
-                    <div className="sm:w-96">
+                    <div className="sm:w-[28rem]">
                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                        Selecionar ocupante(s) da viatura no apoio de aeronave não tripulada *
+                        Selecionar Piloto de aeronave não tripulada (Integrante da viatura ou Operador Aerotático) *
                       </label>
                       <select
                         value=""
                         onChange={e => handleAddEquipeSolo(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                       >
-                        <option value="">Selecione um ocupante da viatura...</option>
-                        {viaturaOcupantes
+                        <option value="">Selecione um integrante da viatura ou operador aerotático...</option>
+                        {vantCandidates
                           .filter(op => !equipeSolo.some(s => s.userId === op.userId))
                           .map(op => (
                             <option key={op.userId} value={op.userId}>
-                              {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''}
+                              {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''} — {op.origemLabel}
                             </option>
                           ))}
                       </select>
@@ -2934,10 +3024,11 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                         {equipeSolo.map(s => (
                           <span
                             key={s.userId}
-                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px] font-semibold"
+                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-500/30 text-cyan-200 text-[11px]"
                           >
                             <span>
-                              {s.name} {s.masp ? `(MASP ${formatMasp(s.masp)})` : ''}
+                              {s.name} {s.masp ? `(MASP ${formatMasp(s.masp)})` : ''} —{' '}
+                              <strong className="font-bold text-white">Piloto de aeronave não tripulada</strong>
                             </span>
                             <button
                               type="button"
@@ -3431,7 +3522,17 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                 </label>
                 <select
                   value={tripulantesDesembarcaram ? 'SIM' : 'NAO'}
-                  onChange={e => setTripulantesDesembarcaram(e.target.value === 'SIM')}
+                  onChange={e => {
+                    const yes = e.target.value === 'SIM';
+                    setTripulantesDesembarcaram(yes);
+                    if (yes) {
+                      setTripulantesDesembarcadosIds(prev =>
+                        prev.length > 0 ? prev : selectedOperadoresAerotaticos.map(o => o.userId)
+                      );
+                    } else {
+                      setTripulantesDesembarcadosIds([]);
+                    }
+                  }}
                   className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs focus:outline-none focus:border-amber-500"
                 >
                   <option value="NAO">Não</option>
@@ -3457,6 +3558,51 @@ export const RelatorioOperacoesCatForm: React.FC<RelatorioOperacoesCatFormProps>
                 </select>
               </div>
             </div>
+
+            {tripulantesDesembarcaram && (
+              <div className="space-y-2 bg-slate-900/70 border border-slate-800 rounded-xl p-3.5">
+                <label className="block text-[10px] font-bold uppercase text-amber-300">
+                  Operadores Aerotáticos que desceram da aeronave *
+                </label>
+                {selectedOperadoresAerotaticos.length === 0 ? (
+                  <p className="text-[11px] text-slate-400">
+                    Nenhum Operador Aerotático selecionado na seção de tripulação acima.
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedOperadoresAerotaticos.map(op => {
+                      const checked = tripulantesDesembarcadosIds.includes(op.userId);
+                      return (
+                        <label
+                          key={op.userId}
+                          className={`inline-flex items-center space-x-2 px-3 py-1.5 rounded-lg border text-[11px] font-semibold cursor-pointer transition ${
+                            checked
+                              ? 'bg-amber-500/20 border-amber-500/50 text-amber-200'
+                              : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() =>
+                              setTripulantesDesembarcadosIds(prev =>
+                                prev.includes(op.userId)
+                                  ? prev.filter(id => id !== op.userId)
+                                  : [...prev, op.userId]
+                              )
+                            }
+                            className="accent-amber-500 rounded"
+                          />
+                          <span>
+                            {op.name} {op.masp ? `(MASP ${formatMasp(op.masp)})` : ''}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {participouCapturaLocalizacao && (
               <div className="space-y-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3.5">

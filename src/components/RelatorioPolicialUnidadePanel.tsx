@@ -36,6 +36,7 @@ import {
   printRelatorioOperacaoCat,
   sumFlightHoursHHMM
 } from './RelatorioOperacoesCatForm';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   PenTool,
   ClipboardList,
@@ -172,7 +173,10 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const [subTab, setSubTab] = useState<PolicialSubTab>('TREINAMENTO');
   const [localVersion, setLocalVersion] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedbackState] = useState<{ id: number; type: 'success' | 'error'; message: string } | null>(null);
+  const setFeedback = (fb: { type: 'success' | 'error'; message: string } | null) => {
+    setFeedbackState(fb ? { ...fb, id: Date.now() + Math.random() } : null);
+  };
 
   // Reset tab if role does not permit RELATORIOS_UNIDADE
   useEffect(() => {
@@ -1200,31 +1204,15 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
         )}
       </div>
 
-      {/* Feedback Banner */}
+      {/* Feedback (Alerta padrão do sistema — 3 segundos) */}
       {feedback && (
-        <div
-          className={`rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between border ${
-            feedback.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-              : 'bg-red-500/10 border-red-500/40 text-red-300'
-          }`}
-        >
-          <div className="flex items-center space-x-2">
-            {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-            )}
-            <span>{feedback.message}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setFeedback(null)}
-            className="text-current opacity-70 hover:opacity-100"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <TopLayerAlert
+          key={feedback.id}
+          type={feedback.type}
+          message={feedback.message}
+          autoHideMs={3000}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {/* ================================================================= */}
@@ -4190,103 +4178,186 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                       )}
                     </div>
 
-                    {viewModalCatOpReport.comEmpregoAeronave &&
-                      (viewModalCatOpReport.aeronaves || []).length > 0 && (
-                        <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <span className="text-[10px] font-bold uppercase text-amber-300">
-                              Aeronave(s) Empregada(s) e Tripulação de Comando
-                            </span>
-                            <span className="text-[11px] font-mono font-bold text-amber-200">
-                              Total: {viewModalCatOpReport.horasTotaisVoo || sumFlightHoursHHMM(viewModalCatOpReport.aeronaves || [])}h
-                            </span>
-                          </div>
-                          {viewModalCatOpReport.aeronaves.map(a => (
-                            <div
-                              key={a.aeronaveId}
-                              className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
-                            >
-                              <div className="font-bold text-amber-200">
-                                {a.tipo} • {a.prefixo} {a.descricao ? `— ${a.descricao}` : ''}
+                    {(() => {
+                      const vantPilotIds = new Set<string>(
+                        viewModalCatOpReport.teveEquipeSolo
+                          ? (viewModalCatOpReport.equipeSolo || []).map(s => s.userId).filter(Boolean)
+                          : []
+                      );
+                      const catTrips =
+                        viewModalCatOpReport.comEmpregoAeronave &&
+                        viewModalCatOpReport.teveTripulanteOperacional
+                          ? viewModalCatOpReport.tripulantesOperacionais || []
+                          : [];
+                      const coeTrips =
+                        viewModalCatOpReport.comEmpregoAeronave &&
+                        viewModalCatOpReport.teveTripulanteOutraUnidade
+                          ? viewModalCatOpReport.tripulantesOutraUnidade || []
+                          : [];
+                      const hasExplicitDesembarque = catTrips.some(t => typeof t.desembarcou === 'boolean');
+                      const desembarcados =
+                        viewModalCatOpReport.comEmpregoAeronave &&
+                        viewModalCatOpReport.tripulantesDesembarcaram
+                          ? hasExplicitDesembarque
+                            ? catTrips.filter(t => t.desembarcou === true)
+                            : catTrips
+                          : [];
+
+                      return (
+                        <>
+                          {viewModalCatOpReport.comEmpregoAeronave &&
+                            (viewModalCatOpReport.aeronaves || []).length > 0 && (
+                              <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[10px] font-bold uppercase text-amber-300">
+                                    Aeronave Empregada e Tripulação
+                                  </span>
+                                  <span className="text-[11px] font-mono font-bold text-amber-200">
+                                    Total:{' '}
+                                    {viewModalCatOpReport.horasTotaisVoo ||
+                                      sumFlightHoursHHMM(viewModalCatOpReport.aeronaves || [])}
+                                    h
+                                  </span>
+                                </div>
+                                {viewModalCatOpReport.aeronaves.map(a => (
+                                  <div
+                                    key={a.aeronaveId}
+                                    className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
+                                  >
+                                    <div className="font-bold text-amber-200">
+                                      {a.tipo} • {a.prefixo} {a.descricao ? `— ${a.descricao}` : ''}
+                                    </div>
+                                    <div className="text-[11px] text-slate-300">
+                                      Piloto: <strong>{a.pilotoNome || 'Não informado'}</strong>
+                                      {a.copilotoNome ? ` • Copiloto: ${a.copilotoNome}` : ''} • Horas de Voo:{' '}
+                                      <strong className="font-mono">{a.horasVoo || '00:00'}</strong>
+                                    </div>
+                                  </div>
+                                ))}
+                                {(catTrips.length > 0 || coeTrips.length > 0) && (
+                                  <div className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 space-y-1">
+                                    <span className="block text-[10px] font-bold uppercase text-amber-300/90">
+                                      Operadores Aerotáticos
+                                    </span>
+                                    {catTrips.map(t => (
+                                      <div key={`cat-t-${t.userId}`} className="text-[11px] text-slate-200">
+                                        <strong>Operador Aerotático:</strong> {t.name}{' '}
+                                        {t.masp ? `• MASP: ${formatMasp(t.masp)}` : ''}
+                                        {vantPilotIds.has(t.userId) && (
+                                          <>
+                                            {' — '}
+                                            <strong className="text-cyan-200">
+                                              Piloto de aeronave não tripulada
+                                            </strong>
+                                          </>
+                                        )}
+                                      </div>
+                                    ))}
+                                    {coeTrips.map(t => (
+                                      <div key={`coe-t-${t.userId}`} className="text-[11px] text-slate-200">
+                                        <strong>
+                                          Operador Aerotático (COE{t.unitName ? ` — ${t.unitName}` : ''}):
+                                        </strong>{' '}
+                                        {t.name} {t.masp ? `• MASP: ${formatMasp(t.masp)}` : ''}
+                                        {vantPilotIds.has(t.userId) && (
+                                          <>
+                                            {' — '}
+                                            <strong className="text-cyan-200">
+                                              Piloto de aeronave não tripulada
+                                            </strong>
+                                          </>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
                               </div>
-                              <div className="text-[11px] text-slate-300">
-                                Piloto: <strong>{a.pilotoNome || 'Não informado'}</strong>
-                                {a.copilotoNome ? ` • Copiloto: ${a.copilotoNome}` : ''} • Horas de Voo:{' '}
-                                <strong className="font-mono">{a.horasVoo || '00:00'}</strong>
+                            )}
+
+                          {(viewModalCatOpReport.viaturas || []).length > 0 && (
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
+                              <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                                Viatura(s) Empregada(s) ({viewModalCatOpReport.viaturas.length})
+                              </span>
+                              {viewModalCatOpReport.viaturas.map(v => (
+                                <div
+                                  key={v.id}
+                                  className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
+                                >
+                                  <div className="font-mono font-bold">
+                                    {v.placa} {v.descricao ? `— ${v.descricao}` : ''}
+                                  </div>
+                                  <div className="text-[11px] text-slate-300">
+                                    Integrante(s):{' '}
+                                    {(v.operadores || []).length > 0
+                                      ? (v.operadores || []).map((o, idx) => (
+                                          <React.Fragment key={o.userId || idx}>
+                                            {idx > 0 ? ', ' : ''}
+                                            {o.name}
+                                            {o.masp ? ` (MASP ${formatMasp(o.masp)})` : ''}
+                                            {viewModalCatOpReport.comEmpregoAeronave &&
+                                              vantPilotIds.has(o.userId) && (
+                                                <>
+                                                  {' — '}
+                                                  <strong className="text-cyan-200">
+                                                    Piloto de aeronave não tripulada
+                                                  </strong>
+                                                </>
+                                              )}
+                                          </React.Fragment>
+                                        ))
+                                      : 'Não informado'}
+                                  </div>
+                                  <div className="text-[11px] text-slate-400">
+                                    Apoio: {v.tipoApoio || '-'}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {viewModalCatOpReport.comEmpregoAeronave && desembarcados.length > 0 && (
+                            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                              <span className="block text-[10px] font-bold uppercase text-slate-400">
+                                Operadores Aerotáticos que Desembarcaram ({desembarcados.length})
+                              </span>
+                              {desembarcados.map(t => (
+                                <div key={`desemb-${t.userId}`} className="text-[11px] text-slate-200">
+                                  <strong>{t.name}</strong> {t.masp ? `• MASP: ${formatMasp(t.masp)}` : ''}
+                                  {vantPilotIds.has(t.userId) && (
+                                    <>
+                                      {' — '}
+                                      <strong className="text-cyan-200">
+                                        Piloto de aeronave não tripulada
+                                      </strong>
+                                    </>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {!viewModalCatOpReport.comEmpregoAeronave &&
+                            viewModalCatOpReport.teveEquipeSolo &&
+                            (viewModalCatOpReport.equipeSolo || []).length > 0 && (
+                              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                                <span className="block text-[10px] font-bold uppercase text-slate-400">
+                                  Equipe CAT Solo ({viewModalCatOpReport.equipeSolo.length})
+                                </span>
+                                {viewModalCatOpReport.equipeSolo.map(s => (
+                                  <div key={s.userId} className="text-[11px] text-slate-200">
+                                    <strong>{s.name}</strong> —{' '}
+                                    <strong>{s.operacaoSolo}</strong>
+                                    {s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
+                                      ? `: ${s.apoioLogisticoDescricao}`
+                                      : ''}
+                                  </div>
+                                ))}
                               </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                    {(viewModalCatOpReport.viaturas || []).length > 0 && (
-                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                        <span className="block text-[10px] font-bold uppercase text-cyan-300">
-                          Viatura(s) Empregada(s) ({viewModalCatOpReport.viaturas.length})
-                        </span>
-                        {viewModalCatOpReport.viaturas.map(v => (
-                          <div
-                            key={v.id}
-                            className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-slate-200 space-y-0.5"
-                          >
-                            <div className="font-mono font-bold">
-                              {v.placa} {v.descricao ? `— ${v.descricao}` : ''}
-                            </div>
-                            <div className="text-[11px] text-slate-300">
-                              Integrante(s): {(v.operadores || []).map(o => o.name).join(', ') || 'Não informado'}
-                            </div>
-                            <div className="text-[11px] text-slate-400">Apoio: {v.tipoApoio || '-'}</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {viewModalCatOpReport.comEmpregoAeronave &&
-                      ((viewModalCatOpReport.tripulantesOperacionais || []).length > 0 ||
-                        (viewModalCatOpReport.tripulantesOutraUnidade || []).length > 0) && (
-                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2">
-                          <span className="block text-[10px] font-bold uppercase text-slate-400">
-                            Tripulantes Operacionais
-                          </span>
-                          {(viewModalCatOpReport.tripulantesOperacionais || []).map(t => (
-                            <div key={`cat-t-${t.userId}`} className="text-[11px] text-slate-200">
-                              <strong>[CAT]</strong> {t.name}{' '}
-                              {t.masp ? `(MASP ${formatMasp(t.masp)})` : ''}
-                            </div>
-                          ))}
-                          {(viewModalCatOpReport.tripulantesOutraUnidade || []).map(t => (
-                            <div key={`coe-t-${t.userId}`} className="text-[11px] text-slate-200">
-                              <strong>[COE{t.unitName ? ` — ${t.unitName}` : ''}]</strong> {t.name}{' '}
-                              {t.masp ? `(MASP ${formatMasp(t.masp)})` : ''}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                    {viewModalCatOpReport.teveEquipeSolo &&
-                      (viewModalCatOpReport.equipeSolo || []).length > 0 && (
-                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                          <span className="block text-[10px] font-bold uppercase text-slate-400">
-                            {viewModalCatOpReport.comEmpregoAeronave
-                              ? `Apoio de Aeronave Não Tripulada (${viewModalCatOpReport.equipeSolo.length})`
-                              : `Equipe CAT Solo (${viewModalCatOpReport.equipeSolo.length})`}
-                          </span>
-                          {viewModalCatOpReport.equipeSolo.map(s => (
-                            <div key={s.userId} className="text-[11px] text-slate-200">
-                              <strong>{s.name}</strong>
-                              {!viewModalCatOpReport.comEmpregoAeronave && (
-                                <>
-                                  {' — '}
-                                  {s.operacaoSolo}
-                                  {s.operacaoSolo === 'Apoio logístico' && s.apoioLogisticoDescricao
-                                    ? `: ${s.apoioLogisticoDescricao}`
-                                    : ''}
-                                </>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
+                            )}
+                        </>
+                      );
+                    })()}
 
                     {viewModalCatOpReport.comEmpregoAeronave &&
                       viewModalCatOpReport.teveEmbarcadoExterno &&

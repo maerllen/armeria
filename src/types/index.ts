@@ -1765,6 +1765,7 @@ export interface TripulanteOperacionalCat {
   unitId?: string;
   unitName?: string;
   origem: 'CAT' | 'COE';
+  desembarcou?: boolean;
 }
 
 export interface EquipeSoloOperacaoCat {

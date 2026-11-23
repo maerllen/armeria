@@ -102,20 +102,18 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   };
 
   // Messages & Loading state
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<{ id: number; text: string } | null>(null);
+  const [errorMsg, setErrorMsg] = useState<{ id: number; text: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const notifySuccess = (msg: string) => {
-    setSuccessMsg(msg);
+    setSuccessMsg({ id: Date.now() + Math.random(), text: msg });
     setErrorMsg(null);
-    setTimeout(() => setSuccessMsg(null), 5000);
   };
 
   const notifyError = (msg: string) => {
-    setErrorMsg(msg);
+    setErrorMsg({ id: Date.now() + Math.random(), text: msg });
     setSuccessMsg(null);
-    setTimeout(() => setErrorMsg(null), 6000);
   };
 
   // Relatório de Treinamento state
@@ -1421,9 +1419,25 @@ ${infoTableHtml}
 
   return (
     <div className="space-y-5">
-      {/* Notifications */}
-      <TopLayerAlert type="success" message={successMsg} onClose={() => setSuccessMsg(null)} />
-      <TopLayerAlert type="error" message={errorMsg} onClose={() => setErrorMsg(null)} />
+      {/* Notifications (3 segundos) */}
+      {successMsg && (
+        <TopLayerAlert
+          key={successMsg.id}
+          type="success"
+          message={successMsg.text}
+          autoHideMs={3000}
+          onClose={() => setSuccessMsg(null)}
+        />
+      )}
+      {errorMsg && (
+        <TopLayerAlert
+          key={errorMsg.id}
+          type="error"
+          message={errorMsg.text}
+          autoHideMs={3000}
+          onClose={() => setErrorMsg(null)}
+        />
+      )}
 
       {/* Sub-Tabs Navigation */}
       <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">

@@ -21177,7 +21177,8 @@ function sanitizeCatOpTripulantes(raw: any, origem: 'CAT' | 'COE') {
       cargo: String(t?.cargo || '').trim().slice(0, 128),
       unitId: String(t?.unitId || '').trim().slice(0, 64),
       unitName: String(t?.unitName || '').trim().slice(0, 255),
-      origem
+      origem,
+      ...(typeof t?.desembarcou === 'boolean' ? { desembarcou: t.desembarcou } : {})
     });
     if (out.length >= 50) break;
   }

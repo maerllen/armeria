@@ -36,6 +36,7 @@ import {
   buildStandardDocumentTitle,
   buildStandardDocumentFilename
 } from '../utils/printHelper';
+import { TopLayerAlert } from './TopLayerAlert';
 import {
   Shield,
   Calendar,
@@ -538,7 +539,10 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [feedback, setFeedbackState] = useState<{ id: number; type: 'success' | 'error'; message: string } | null>(null);
+  const setFeedback = (fb: { type: 'success' | 'error'; message: string } | null) => {
+    setFeedbackState(fb ? { ...fb, id: Date.now() + Math.random() } : null);
+  };
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   // Editing target
@@ -1435,27 +1439,15 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
 
   return (
     <div className="space-y-5">
-      {/* Feedback */}
+      {/* Feedback (Alerta padrão do sistema — 3 segundos) */}
       {feedback && (
-        <div
-          className={`rounded-xl px-4 py-3 text-xs font-semibold flex items-center justify-between border ${
-            feedback.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-              : 'bg-red-500/10 border-red-500/40 text-red-300'
-          }`}
-        >
-          <div className="flex items-center space-x-2">
-            {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-            )}
-            <span>{feedback.message}</span>
-          </div>
-          <button type="button" onClick={() => setFeedback(null)} className="opacity-70 hover:opacity-100">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
+        <TopLayerAlert
+          key={feedback.id}
+          type={feedback.type}
+          message={feedback.message}
+          autoHideMs={3000}
+          onClose={() => setFeedback(null)}
+        />
       )}
 
       {/* Relatórios Editáveis (Janela de 3 dias a contar da criação) */}
