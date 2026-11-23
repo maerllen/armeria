@@ -49,6 +49,7 @@ import {
   MovimentacaoVeterinaria,
   RelatorioTreinamentoCanil,
   RelatorioOperacaoCanil,
+  RelatorioTreinamentoPolicial,
   ViaturaUnidade,
   CautelaArma,
   CautelaMunicao,
@@ -103,6 +104,7 @@ export interface AppState {
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
   relatoriosTreinamentoCanil: RelatorioTreinamentoCanil[];
   relatoriosOperacoesCanil: RelatorioOperacaoCanil[];
+  relatoriosTreinamentoPolicial: RelatorioTreinamentoPolicial[];
   viaturas: ViaturaUnidade[];
   cautelasArmas: CautelaArma[];
   cautelasMunicoes: CautelaMunicao[];
@@ -158,6 +160,7 @@ class StorageService {
     movimentacoesVeterinarias: [],
     relatoriosTreinamentoCanil: [],
     relatoriosOperacoesCanil: [],
+    relatoriosTreinamentoPolicial: [],
     viaturas: [],
     cautelasArmas: [],
     cautelasMunicoes: [],
@@ -224,6 +227,7 @@ class StorageService {
         movimentacoesVeterinariasRes,
         relatoriosTreinamentoCanilRes,
         relatoriosOperacoesCanilRes,
+        relatoriosTreinamentoPolicialRes,
         viaturasRes,
         cautelasArmasRes,
         cautelasMunicoesRes,
@@ -272,6 +276,7 @@ class StorageService {
         fetchSync('/api/movimentacoes-veterinarias'),
         fetchSync('/api/relatorios-treinamento-canil'),
         fetchSync('/api/relatorios-operacoes-canil'),
+        fetchSync('/api/relatorios-treinamento-policial'),
         fetchSync('/api/viaturas'),
         fetchSync('/api/cautelas-armas'),
         fetchSync('/api/cautelas-municoes'),
@@ -321,6 +326,7 @@ class StorageService {
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
       this.state.relatoriosTreinamentoCanil = relatoriosTreinamentoCanilRes || [];
       this.state.relatoriosOperacoesCanil = relatoriosOperacoesCanilRes || [];
+      this.state.relatoriosTreinamentoPolicial = relatoriosTreinamentoPolicialRes || [];
       this.state.viaturas = viaturasRes || [];
       this.state.cautelasArmas = cautelasArmasRes || [];
       this.state.cautelasMunicoes = cautelasMunicoesRes || [];
@@ -3813,6 +3819,82 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório de operação.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Relatórios de Treinamento Policial (Unidades não-COC)
+  public getRelatoriosTreinamentoPolicial(): RelatorioTreinamentoPolicial[] {
+    return this.state.relatoriosTreinamentoPolicial || [];
+  }
+
+  public async saveRelatorioTreinamentoPolicial(
+    rel: Partial<RelatorioTreinamentoPolicial>
+  ): Promise<{ success: boolean; error?: string; id?: string; data?: RelatorioTreinamentoPolicial }> {
+    try {
+      const res = await fetch('/api/relatorios-treinamento-policial', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao salvar relatório de treinamento.' };
+      await this.refreshFromServer();
+      return { success: true, id: data.id, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateRelatorioTreinamentoPolicial(
+    id: string,
+    rel: Partial<RelatorioTreinamentoPolicial>
+  ): Promise<{ success: boolean; error?: string; data?: RelatorioTreinamentoPolicial }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-policial/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...rel, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao atualizar relatório de treinamento.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async assinarRelatorioTreinamentoPolicial(
+    id: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-policial/${id}/assinar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao assinar relatório.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteRelatorioTreinamentoPolicial(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/relatorios-treinamento-policial/${id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir relatório.' };
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {

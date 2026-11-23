@@ -1421,6 +1421,49 @@ export interface RelatorioOperacaoCanil {
   updatedAt?: string;
 }
 
+export type TituloTreinamentoPolicial = 'Operacional' | 'Tático' | 'Físico' | '3C';
+export type LocalTreinamentoPolicial = 'Interno' | 'Externo';
+export type ParticipacaoTreinamentoPolicial = 'Sozinho' | 'Coletivo';
+
+export interface UnidadeParticipanteTreinamento {
+  id: string;
+  name: string;
+}
+
+export interface ParticipanteTreinamentoPolicial {
+  userId: string;
+  name: string;
+  masp: string;
+  cargo?: string;
+  unitId?: string;
+  unitName?: string;
+  signed: boolean;
+  signedAt?: string | null;
+}
+
+export interface RelatorioTreinamentoPolicial {
+  id: string;
+  dataTreinamento: string; // YYYY-MM-DD
+  operadorId: string;
+  operadorNome: string;
+  operadorMasp: string;
+  operadorCargo?: string;
+  modalidadeLocal: LocalTreinamentoPolicial;
+  tituloTreinamento: TituloTreinamentoPolicial;
+  modalidadeParticipacao: ParticipacaoTreinamentoPolicial;
+  participacaoOutrasUnidades: boolean;
+  outrasUnidades: UnidadeParticipanteTreinamento[];
+  participantes: ParticipanteTreinamentoPolicial[];
+  descricao: string; // Máximo 1000 caracteres
+  operadorAssinado: boolean;
+  operadorAssinadoEm?: string | null;
+  departmentId?: string;
+  unitId?: string;
+  unitName?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type CautelaArmaStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'RECUSADA';
 export type CautelaMunicaoStatus = 'PENDENTE' | 'AUTORIZADA' | 'DEVOLUCAO_PENDENTE' | 'DEVOLVIDA' | 'CONSUMIDA' | 'RECUSADA' | 'CONSOLIDADA';
 
@@ -1653,11 +1696,11 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'cautela-armas',
       'cautela-municoes',
       'cautela-materiais',
+      'relatorio',
       'manual'
     ];
     if (isUserExplosivista(user)) {
       policeModules.push('explosivos');
-      policeModules.push('relatorio');
     }
     return appendCoordinatorModules(policeModules);
   }

@@ -1347,6 +1347,38 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 34E. RELATORIOS_TREINAMENTO_POLICIAL (Unidades Policiais — exceto COC Canil)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_TREINAMENTO_POLICIAL\` (
+        \`ID_REL_TREIN_POL\` VARCHAR(64) NOT NULL,
+        \`DATA_TREINAMENTO\` VARCHAR(10) NOT NULL,
+        \`OPERADOR_ID\` VARCHAR(64) NOT NULL,
+        \`OPERADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`OPERADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`OPERADOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`MODALIDADE_LOCAL\` ENUM('Interno', 'Externo') NOT NULL DEFAULT 'Interno',
+        \`TITULO_TREINAMENTO\` ENUM('Operacional', 'Tático', 'Físico', '3C') NOT NULL DEFAULT 'Operacional',
+        \`MODALIDADE_PARTICIPACAO\` ENUM('Sozinho', 'Coletivo') NOT NULL DEFAULT 'Sozinho',
+        \`PARTICIPACAO_OUTRAS_UNIDADES\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`OUTRAS_UNIDADES_JSON\` LONGTEXT DEFAULT NULL,
+        \`PARTICIPANTES_JSON\` LONGTEXT DEFAULT NULL,
+        \`DESCRICAO\` TEXT NOT NULL,
+        \`OPERADOR_ASSINADO\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`OPERADOR_ASSINADO_EM\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_REL_TREIN_POL\`),
+        KEY \`idx_rel_trein_pol_data\` (\`DATA_TREINAMENTO\`),
+        KEY \`idx_rel_trein_pol_operador\` (\`OPERADOR_ID\`),
+        KEY \`idx_rel_trein_pol_unit\` (\`UNIDADE_ID\`),
+        KEY \`idx_rel_trein_pol_titulo\` (\`TITULO_TREINAMENTO\`),
+        KEY \`idx_rel_trein_pol_criacao\` (\`DATA_CRIACAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // 35. ACAUTELAR_ARMAS
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`ACAUTELAR_ARMAS\` (

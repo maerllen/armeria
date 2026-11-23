@@ -17920,6 +17920,693 @@ apiRouter.put('/cautelas-municoes/:id/devolver', async (req: Request, res: Respo
   }
 });
 
+// =============================================================
+// MODULO: RELATORIOS DE TREINAMENTO POLICIAL (UNIDADES NÃO-COC)
+// =============================================================
+const POL_TREINO_ALLOWED_LOCAIS = new Set(['Interno', 'Externo']);
+const POL_TREINO_ALLOWED_TITULOS = new Set(['Operacional', 'Tático', 'Físico', '3C']);
+const POL_TREINO_ALLOWED_PARTICIPACOES = new Set(['Sozinho', 'Coletivo']);
+const POL_TREINO_MAX_PARTICIPANTES = 100;
+
+let relatoriosTreinamentoPolicialEnsured = false;
+async function ensureRelatoriosTreinamentoPolicialTable(pool: any): Promise<void> {
+  if (relatoriosTreinamentoPolicialEnsured) return;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`RELATORIOS_TREINAMENTO_POLICIAL\` (
+        \`ID_REL_TREIN_POL\` VARCHAR(64) NOT NULL,
+        \`DATA_TREINAMENTO\` VARCHAR(10) NOT NULL,
+        \`OPERADOR_ID\` VARCHAR(64) NOT NULL,
+        \`OPERADOR_NOME\` VARCHAR(255) NOT NULL,
+        \`OPERADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
+        \`OPERADOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`MODALIDADE_LOCAL\` ENUM('Interno', 'Externo') NOT NULL DEFAULT 'Interno',
+        \`TITULO_TREINAMENTO\` ENUM('Operacional', 'Tático', 'Físico', '3C') NOT NULL DEFAULT 'Operacional',
+        \`MODALIDADE_PARTICIPACAO\` ENUM('Sozinho', 'Coletivo') NOT NULL DEFAULT 'Sozinho',
+        \`PARTICIPACAO_OUTRAS_UNIDADES\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`OUTRAS_UNIDADES_JSON\` LONGTEXT DEFAULT NULL,
+        \`PARTICIPANTES_JSON\` LONGTEXT DEFAULT NULL,
+        \`DESCRICAO\` TEXT NOT NULL,
+        \`OPERADOR_ASSINADO\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`OPERADOR_ASSINADO_EM\` DATETIME DEFAULT CURRENT_TIMESTAMP,
+        \`DEPARTAMENTO_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_ID\` VARCHAR(64) DEFAULT NULL,
+        \`UNIDADE_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_REL_TREIN_POL\`),
+        KEY \`idx_rel_trein_pol_data\` (\`DATA_TREINAMENTO\`),
+        KEY \`idx_rel_trein_pol_operador\` (\`OPERADOR_ID\`),
+        KEY \`idx_rel_trein_pol_unit\` (\`UNIDADE_ID\`),
+        KEY \`idx_rel_trein_pol_titulo\` (\`TITULO_TREINAMENTO\`),
+        KEY \`idx_rel_trein_pol_criacao\` (\`DATA_CRIACAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+    relatoriosTreinamentoPolicialEnsured = true;
+  } catch (err) {
+    console.error('[API] Erro ao garantir tabela RELATORIOS_TREINAMENTO_POLICIAL:', err);
+  }
+}
+
+function sanitizePolTreinoOutrasUnidades(raw: any): Array<{ id: string; name: string }> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const cleaned: Array<{ id: string; name: string }> = [];
+  for (const item of raw) {
+    const id = String(item?.id || '').trim().slice(0, 64);
+    const name = String(item?.name || '').trim().slice(0, 180);
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    cleaned.push({ id, name });
+    if (cleaned.length >= 100) break;
+  }
+  return cleaned;
+}
+
+function sanitizePolTreinoParticipantes(
+  raw: any,
+  operadorId: string,
+  existingMap?: Map<string, any>
+): Array<{
+  userId: string;
+  name: string;
+  masp: string;
+  cargo: string;
+  unitId: string;
+  unitName: string;
+  signed: boolean;
+  signedAt: string | null;
+}> {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const cleaned: Array<{
+    userId: string;
+    name: string;
+    masp: string;
+    cargo: string;
+    unitId: string;
+    unitName: string;
+    signed: boolean;
+    signedAt: string | null;
+  }> = [];
+
+  for (const p of raw) {
+    const userId = String(p?.userId || '').trim().slice(0, 64);
+    const name = String(p?.name || '').trim().slice(0, 255);
+    if (!userId || !name || userId === operadorId || seen.has(userId)) continue;
+    seen.add(userId);
+    const prev = existingMap?.get(userId);
+    cleaned.push({
+      userId,
+      name,
+      masp: String(p?.masp || prev?.masp || '').trim().slice(0, 32),
+      cargo: String(p?.cargo || prev?.cargo || '').trim().slice(0, 128),
+      unitId: String(p?.unitId || prev?.unitId || '').trim().slice(0, 64),
+      unitName: String(p?.unitName || prev?.unitName || '').trim().slice(0, 255),
+      signed: prev ? Boolean(prev.signed) : false,
+      signedAt: prev?.signedAt || null
+    });
+    if (cleaned.length >= POL_TREINO_MAX_PARTICIPANTES) break;
+  }
+  return cleaned;
+}
+
+async function resolveDbActorForPolTreino(pool: any, actorId: string) {
+  if (!actorId) return null;
+  const [rows]: any = await pool.query(
+    `SELECT
+      ID_USUARIOS as id,
+      NOME_USUARIOS as name,
+      MASP_USUARIOS as masp,
+      CARGO_USUARIOS as cargo,
+      PERFIL_USUARIOS as role,
+      PERFIS_USUARIOS as rolesJson,
+      UNIDADE_ID_USUARIOS as unitId,
+      DEPARTAMENTO_ID_USUARIOS as departmentId
+    FROM USUARIOS
+    WHERE ID_USUARIOS = ?
+    LIMIT 1`,
+    [actorId]
+  );
+  if (!rows || rows.length === 0) return null;
+  const u = rows[0];
+  let rolesList: string[] = [];
+  try {
+    const parsed = u.rolesJson ? JSON.parse(u.rolesJson) : [];
+    if (Array.isArray(parsed)) rolesList = parsed.map((r: any) => String(r));
+  } catch {
+    rolesList = [];
+  }
+  return {
+    id: String(u.id),
+    name: String(u.name || ''),
+    masp: String(u.masp || ''),
+    cargo: String(u.cargo || ''),
+    role: String(u.role || ''),
+    roles: rolesList,
+    unitId: u.unitId ? String(u.unitId) : null,
+    departmentId: u.departmentId ? String(u.departmentId) : null
+  };
+}
+
+function mapPolTreinoRow(r: any) {
+  let outrasUnidades: any[] = [];
+  try {
+    const parsed = r.outrasUnidadesJson ? JSON.parse(r.outrasUnidadesJson) : [];
+    if (Array.isArray(parsed)) outrasUnidades = parsed;
+  } catch {
+    outrasUnidades = [];
+  }
+  let participantes: any[] = [];
+  try {
+    const parsed = r.participantesJson ? JSON.parse(r.participantesJson) : [];
+    if (Array.isArray(parsed)) participantes = parsed;
+  } catch {
+    participantes = [];
+  }
+  return {
+    id: String(r.id),
+    dataTreinamento: String(r.dataTreinamento || '').slice(0, 10),
+    operadorId: String(r.operadorId || ''),
+    operadorNome: String(r.operadorNome || ''),
+    operadorMasp: String(r.operadorMasp || ''),
+    operadorCargo: r.operadorCargo ? String(r.operadorCargo) : '',
+    modalidadeLocal: POL_TREINO_ALLOWED_LOCAIS.has(r.modalidadeLocal) ? r.modalidadeLocal : 'Interno',
+    tituloTreinamento: POL_TREINO_ALLOWED_TITULOS.has(r.tituloTreinamento) ? r.tituloTreinamento : 'Operacional',
+    modalidadeParticipacao: POL_TREINO_ALLOWED_PARTICIPACOES.has(r.modalidadeParticipacao)
+      ? r.modalidadeParticipacao
+      : 'Sozinho',
+    participacaoOutrasUnidades: Boolean(r.participacaoOutrasUnidades),
+    outrasUnidades,
+    participantes,
+    descricao: String(r.descricao || ''),
+    operadorAssinado: Boolean(r.operadorAssinado),
+    operadorAssinadoEm: r.operadorAssinadoEm || null,
+    departmentId: r.departmentId || undefined,
+    unitId: r.unitId || undefined,
+    unitName: r.unitName || undefined,
+    createdAt: r.createdAt || new Date().toISOString(),
+    updatedAt: r.updatedAt || undefined
+  };
+}
+
+apiRouter.get('/relatorios-treinamento-policial', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoPolicialTable(pool);
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_REL_TREIN_POL as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        OPERADOR_ID as operadorId,
+        OPERADOR_NOME as operadorNome,
+        OPERADOR_MASP as operadorMasp,
+        OPERADOR_CARGO as operadorCargo,
+        MODALIDADE_LOCAL as modalidadeLocal,
+        TITULO_TREINAMENTO as tituloTreinamento,
+        MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
+        PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
+        OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
+        PARTICIPANTES_JSON as participantesJson,
+        DESCRICAO as descricao,
+        OPERADOR_ASSINADO as operadorAssinado,
+        DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        UNIDADE_NOME as unitName,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
+      FROM RELATORIOS_TREINAMENTO_POLICIAL
+      ORDER BY DATA_TREINAMENTO DESC, DATA_CRIACAO DESC`
+    );
+    return res.json((rows || []).map(mapPolTreinoRow));
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Response) => {
+  try {
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || body.operadorId || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Operador digitador não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão para criar relatório.' });
+    }
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const rawDate = String(body.dataTreinamento || '').trim();
+    const dataTreinamento = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : todayBr;
+
+    const modalidadeLocal = String(body.modalidadeLocal || '').trim();
+    if (!POL_TREINO_ALLOWED_LOCAIS.has(modalidadeLocal)) {
+      return res.status(400).json({ error: 'Local do treinamento inválido. Selecione Interno ou Externo.' });
+    }
+
+    const tituloTreinamento = String(body.tituloTreinamento || '').trim();
+    if (!POL_TREINO_ALLOWED_TITULOS.has(tituloTreinamento)) {
+      return res.status(400).json({ error: 'Título do treinamento inválido. Selecione Operacional, Tático, Físico ou 3C.' });
+    }
+
+    const modalidadeParticipacao = String(body.modalidadeParticipacao || '').trim();
+    if (!POL_TREINO_ALLOWED_PARTICIPACOES.has(modalidadeParticipacao)) {
+      return res.status(400).json({ error: 'Formato de participação inválido. Selecione Sozinho ou Coletivo.' });
+    }
+
+    const descricao = String(body.descricao || '').trim();
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição do treinamento do dia.' });
+    }
+    if (descricao.length > 1000) {
+      return res.status(400).json({ error: 'A descrição do treinamento não pode exceder 1000 caracteres.' });
+    }
+
+    const rawParticipantes = Array.isArray(body.participantes) ? body.participantes : [];
+    if (modalidadeParticipacao === 'Coletivo' && rawParticipantes.length > POL_TREINO_MAX_PARTICIPANTES) {
+      return res.status(400).json({ error: `O limite máximo é de ${POL_TREINO_MAX_PARTICIPANTES} participantes.` });
+    }
+
+    const participacaoOutrasUnidades =
+      modalidadeParticipacao === 'Coletivo' && Boolean(body.participacaoOutrasUnidades);
+    const outrasUnidades = participacaoOutrasUnidades
+      ? sanitizePolTreinoOutrasUnidades(body.outrasUnidades)
+      : [];
+    const participantes =
+      modalidadeParticipacao === 'Coletivo'
+        ? sanitizePolTreinoParticipantes(rawParticipantes, dbActor.id)
+        : [];
+
+    const unitId = String(body.unitId || dbActor.unitId || '').trim().slice(0, 64) || null;
+    const departmentId = String(body.departmentId || dbActor.departmentId || '').trim().slice(0, 64) || null;
+    let unitName = String(body.unitName || '').trim().slice(0, 255) || null;
+    if (!unitName && unitId) {
+      try {
+        const [uRows]: any = await pool.query(
+          'SELECT NOME_UNIDADES as name FROM UNIDADES WHERE ID_UNIDADES = ? LIMIT 1',
+          [unitId]
+        );
+        if (uRows && uRows.length > 0) unitName = String(uRows[0].name || '');
+      } catch (_) {}
+    }
+
+    const id = `rel-tpol-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+
+    await pool.query(
+      `INSERT INTO RELATORIOS_TREINAMENTO_POLICIAL (
+        ID_REL_TREIN_POL,
+        DATA_TREINAMENTO,
+        OPERADOR_ID,
+        OPERADOR_NOME,
+        OPERADOR_MASP,
+        OPERADOR_CARGO,
+        MODALIDADE_LOCAL,
+        TITULO_TREINAMENTO,
+        MODALIDADE_PARTICIPACAO,
+        PARTICIPACAO_OUTRAS_UNIDADES,
+        OUTRAS_UNIDADES_JSON,
+        PARTICIPANTES_JSON,
+        DESCRICAO,
+        OPERADOR_ASSINADO,
+        OPERADOR_ASSINADO_EM,
+        DEPARTAMENTO_ID,
+        UNIDADE_ID,
+        UNIDADE_NOME,
+        DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, ?, NOW())`,
+      [
+        id,
+        dataTreinamento,
+        dbActor.id,
+        dbActor.name,
+        dbActor.masp,
+        dbActor.cargo || null,
+        modalidadeLocal,
+        tituloTreinamento,
+        modalidadeParticipacao,
+        participacaoOutrasUnidades ? 1 : 0,
+        JSON.stringify(outrasUnidades),
+        JSON.stringify(participantes),
+        descricao,
+        departmentId,
+        unitId,
+        unitName
+      ]
+    );
+
+    const [createdRows]: any = await pool.query(
+      `SELECT
+        ID_REL_TREIN_POL as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        OPERADOR_ID as operadorId,
+        OPERADOR_NOME as operadorNome,
+        OPERADOR_MASP as operadorMasp,
+        OPERADOR_CARGO as operadorCargo,
+        MODALIDADE_LOCAL as modalidadeLocal,
+        TITULO_TREINAMENTO as tituloTreinamento,
+        MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
+        PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
+        OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
+        PARTICIPANTES_JSON as participantesJson,
+        DESCRICAO as descricao,
+        OPERADOR_ASSINADO as operadorAssinado,
+        DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        UNIDADE_NOME as unitName,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
+      FROM RELATORIOS_TREINAMENTO_POLICIAL
+      WHERE ID_REL_TREIN_POL = ?
+      LIMIT 1`,
+      [id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Relatório de Treinamento Policial',
+      `Criado relatório de treinamento policial (${tituloTreinamento} / ${modalidadeLocal} / ${modalidadeParticipacao}) por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(createdRows && createdRows.length > 0 ? mapPolTreinoRow(createdRows[0]) : { id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const body = req.body || {};
+    const actor = body.actor || {};
+    const actorId = String(actor.id || body.editorId || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário editor não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário editor não autorizado.' });
+    }
+
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_REL_TREIN_POL as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        OPERADOR_ID as operadorId,
+        OPERADOR_NOME as operadorNome,
+        PARTICIPANTES_JSON as participantesJson
+      FROM RELATORIOS_TREINAMENTO_POLICIAL
+      WHERE ID_REL_TREIN_POL = ?
+      LIMIT 1`,
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de treinamento não encontrado.' });
+    }
+
+    const existing = rows[0];
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    if (String(existing.dataTreinamento || '').slice(0, 10) !== todayBr) {
+      return res.status(403).json({
+        error: 'O relatório de treinamento só pode ser modificado durante o mesmo dia em que foi criado.'
+      });
+    }
+
+    let existingParticipantes: any[] = [];
+    try {
+      const parsed = existing.participantesJson ? JSON.parse(existing.participantesJson) : [];
+      if (Array.isArray(parsed)) existingParticipantes = parsed;
+    } catch {
+      existingParticipantes = [];
+    }
+
+    const isCreator = String(existing.operadorId) === dbActor.id;
+    const isSignedParticipant = existingParticipantes.some(
+      (p: any) => String(p?.userId) === dbActor.id && Boolean(p?.signed)
+    );
+    const isGeralDb = dbActor.role === 'Geral' || dbActor.roles.includes('Geral');
+
+    if (!isCreator && !isSignedParticipant && !isGeralDb) {
+      return res.status(403).json({
+        error: 'Apenas o operador digitador ou participantes que já assinaram podem editar este relatório no dia de hoje.'
+      });
+    }
+
+    const modalidadeLocal = String(body.modalidadeLocal || '').trim();
+    if (!POL_TREINO_ALLOWED_LOCAIS.has(modalidadeLocal)) {
+      return res.status(400).json({ error: 'Local do treinamento inválido.' });
+    }
+
+    const tituloTreinamento = String(body.tituloTreinamento || '').trim();
+    if (!POL_TREINO_ALLOWED_TITULOS.has(tituloTreinamento)) {
+      return res.status(400).json({ error: 'Título do treinamento inválido.' });
+    }
+
+    const modalidadeParticipacao = String(body.modalidadeParticipacao || '').trim();
+    if (!POL_TREINO_ALLOWED_PARTICIPACOES.has(modalidadeParticipacao)) {
+      return res.status(400).json({ error: 'Formato de participação inválido.' });
+    }
+
+    const descricao = String(body.descricao || '').trim();
+    if (!descricao) {
+      return res.status(400).json({ error: 'Informe a descrição do treinamento do dia.' });
+    }
+    if (descricao.length > 1000) {
+      return res.status(400).json({ error: 'A descrição do treinamento não pode exceder 1000 caracteres.' });
+    }
+
+    const rawParticipantes = Array.isArray(body.participantes) ? body.participantes : [];
+    if (modalidadeParticipacao === 'Coletivo' && rawParticipantes.length > POL_TREINO_MAX_PARTICIPANTES) {
+      return res.status(400).json({ error: `O limite máximo é de ${POL_TREINO_MAX_PARTICIPANTES} participantes.` });
+    }
+
+    const existingMap = new Map<string, any>();
+    for (const ep of existingParticipantes) {
+      if (ep?.userId) existingMap.set(String(ep.userId), ep);
+    }
+
+    const participacaoOutrasUnidades =
+      modalidadeParticipacao === 'Coletivo' && Boolean(body.participacaoOutrasUnidades);
+    const outrasUnidades = participacaoOutrasUnidades
+      ? sanitizePolTreinoOutrasUnidades(body.outrasUnidades)
+      : [];
+    const participantes =
+      modalidadeParticipacao === 'Coletivo'
+        ? sanitizePolTreinoParticipantes(rawParticipantes, String(existing.operadorId), existingMap)
+        : [];
+
+    await pool.query(
+      `UPDATE RELATORIOS_TREINAMENTO_POLICIAL
+       SET MODALIDADE_LOCAL = ?,
+           TITULO_TREINAMENTO = ?,
+           MODALIDADE_PARTICIPACAO = ?,
+           PARTICIPACAO_OUTRAS_UNIDADES = ?,
+           OUTRAS_UNIDADES_JSON = ?,
+           PARTICIPANTES_JSON = ?,
+           DESCRICAO = ?
+       WHERE ID_REL_TREIN_POL = ?`,
+      [
+        modalidadeLocal,
+        tituloTreinamento,
+        modalidadeParticipacao,
+        participacaoOutrasUnidades ? 1 : 0,
+        JSON.stringify(outrasUnidades),
+        JSON.stringify(participantes),
+        descricao,
+        id
+      ]
+    );
+
+    const [updatedRows]: any = await pool.query(
+      `SELECT
+        ID_REL_TREIN_POL as id,
+        DATA_TREINAMENTO as dataTreinamento,
+        OPERADOR_ID as operadorId,
+        OPERADOR_NOME as operadorNome,
+        OPERADOR_MASP as operadorMasp,
+        OPERADOR_CARGO as operadorCargo,
+        MODALIDADE_LOCAL as modalidadeLocal,
+        TITULO_TREINAMENTO as tituloTreinamento,
+        MODALIDADE_PARTICIPACAO as modalidadeParticipacao,
+        PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
+        OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
+        PARTICIPANTES_JSON as participantesJson,
+        DESCRICAO as descricao,
+        OPERADOR_ASSINADO as operadorAssinado,
+        DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,
+        DEPARTAMENTO_ID as departmentId,
+        UNIDADE_ID as unitId,
+        UNIDADE_NOME as unitName,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
+      FROM RELATORIOS_TREINAMENTO_POLICIAL
+      WHERE ID_REL_TREIN_POL = ?
+      LIMIT 1`,
+      [id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Editar Relatório de Treinamento Policial',
+      `Relatório de treinamento policial ${id} editado por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+
+    return res.json(updatedRows && updatedRows.length > 0 ? mapPolTreinoRow(updatedRows[0]) : { id });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/relatorios-treinamento-policial/:id/assinar', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const signerId = String(actor.id || req.body?.userId || '').trim();
+    if (!signerId) {
+      return res.status(401).json({ error: 'Usuário assinante não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, signerId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário assinante inválido.' });
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT ID_REL_TREIN_POL, OPERADOR_ID, TITULO_TREINAMENTO, PARTICIPANTES_JSON FROM RELATORIOS_TREINAMENTO_POLICIAL WHERE ID_REL_TREIN_POL = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório de treinamento não encontrado.' });
+    }
+
+    const row = rows[0];
+    let participantes: any[] = [];
+    try {
+      const parsed = row.PARTICIPANTES_JSON ? JSON.parse(row.PARTICIPANTES_JSON) : [];
+      if (Array.isArray(parsed)) participantes = parsed;
+    } catch {
+      participantes = [];
+    }
+
+    let updated = false;
+    const nowIso = new Date().toISOString();
+
+    if (String(row.OPERADOR_ID) === dbActor.id) {
+      await pool.query(
+        'UPDATE RELATORIOS_TREINAMENTO_POLICIAL SET OPERADOR_ASSINADO = 1, OPERADOR_ASSINADO_EM = NOW() WHERE ID_REL_TREIN_POL = ?',
+        [id]
+      );
+      updated = true;
+    }
+
+    const nextParticipantes = participantes.map((p: any) => {
+      if (String(p.userId) === dbActor.id) {
+        updated = true;
+        return {
+          ...p,
+          signed: true,
+          signedAt: p.signedAt || nowIso
+        };
+      }
+      return p;
+    });
+
+    if (!updated) {
+      return res.status(403).json({ error: 'Você não está listado como participante ou operador deste relatório.' });
+    }
+
+    await pool.query(
+      'UPDATE RELATORIOS_TREINAMENTO_POLICIAL SET PARTICIPANTES_JSON = ? WHERE ID_REL_TREIN_POL = ?',
+      [JSON.stringify(nextParticipantes), id]
+    );
+
+    await insertAuditLog(
+      'Relatórios',
+      'Assinar Relatório de Treinamento Policial',
+      `Usuário ${dbActor.name} assinou o relatório de treinamento policial ${id} (${row.TITULO_TREINAMENTO})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, participantes: nextParticipantes });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/relatorios-treinamento-policial/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const actor = req.body?.actor || {};
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não identificado.' });
+    }
+
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoPolicialTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não autorizado.' });
+    }
+
+    const [rows]: any = await pool.query(
+      'SELECT ID_REL_TREIN_POL, DATA_TREINAMENTO, OPERADOR_ID, TITULO_TREINAMENTO FROM RELATORIOS_TREINAMENTO_POLICIAL WHERE ID_REL_TREIN_POL = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Relatório não encontrado.' });
+    }
+
+    const row = rows[0];
+    const isGeralDb = dbActor.role === 'Geral' || dbActor.roles.includes('Geral');
+    const isCreator = String(row.OPERADOR_ID) === dbActor.id;
+
+    if (!isGeralDb && !isCreator) {
+      return res.status(403).json({ error: 'Apenas o operador digitador ou perfil Geral pode excluir este relatório.' });
+    }
+
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    if (!isGeralDb && String(row.DATA_TREINAMENTO || '').slice(0, 10) !== todayBr) {
+      return res.status(403).json({
+        error: 'O relatório só pode ser excluído durante o mesmo dia em que foi criado.'
+      });
+    }
+
+    await pool.query('DELETE FROM RELATORIOS_TREINAMENTO_POLICIAL WHERE ID_REL_TREIN_POL = ?', [id]);
+    await insertAuditLog(
+      'Relatórios',
+      'Excluir Relatório de Treinamento Policial',
+      `Excluído relatório de treinamento policial ${id} (${row.TITULO_TREINAMENTO}) por ${dbActor.name}`,
+      actor,
+      req.ip
+    );
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+
 
 
 

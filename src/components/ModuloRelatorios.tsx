@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 import { RelatorioTreinamentoCanilPanel } from './RelatorioTreinamentoCanilPanel';
+import { RelatorioPolicialUnidadePanel } from './RelatorioPolicialUnidadePanel';
 
 interface ReportModuleProps {
   currentUser: User;
@@ -120,6 +121,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
   const isOperadorCanino = effectiveRole === 'operador_canino';
+  const isPolicialRole = effectiveRole === 'Policial';
   const isExplosivistaRole =
     effectiveRole === 'Explosivista' ||
     (effectiveRole === 'Policial' && isUserExplosivista(currentUser));
@@ -328,6 +330,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const isCocActive = Boolean(activeUnitButton?.isCoc);
   const isCocAcervoView = isCocActive && !isOperadorCanino && cocSubView === 'ACERVO';
   const isCanilTrainingView = isCocActive && !isCocAcervoView;
+  const isPolicialUnitReportView = isPolicialRole && !isCocActive;
   const canRenderCanilSection = hasCanilAccess || isCocActive;
 
   const handleSelectUnitButton = (btn: ReportUnitButton) => {
@@ -2395,6 +2398,13 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           'Unidade COC com lógica integral dos relatórios do Canil: criação e edição ao longo do dia de Relatório de Treinamento e Relatório de Operações, acompanhamento em Meus Relatórios e consulta filtrada em Relatórios da Unidade.'
       };
     }
+    if (isPolicialUnitReportView) {
+      return {
+        sectorName: `Policial • Relatórios da Unidade ${activeUnitDisplayName}`,
+        description:
+          `Relatórios de treinamento, operações e acompanhamento em Meus Relatórios vinculados à unidade ${activeUnitDisplayName}.`
+      };
+    }
     if (isExplosivistaRole) {
       return {
         sectorName: 'Explosivos / Esquadrão Antibombas',
@@ -2421,7 +2431,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       description:
         `Relatórios gerenciais e operacionais separados por unidade. Exibindo dados exclusivos da unidade ${activeUnitDisplayName}.`
     };
-  }, [isCocActive, isExplosivistaRole, effectiveRole, activeUnitDisplayName]);
+  }, [isCocActive, isPolicialUnitReportView, isExplosivistaRole, effectiveRole, activeUnitDisplayName]);
 
   const handlePanelRefresh = () => {
     storage
@@ -2455,7 +2465,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </div>
           </div>
 
-          {!isCanilTrainingView && (
+          {!isCanilTrainingView && !isPolicialUnitReportView && (
             <div className="flex items-center space-x-3 shrink-0">
               <button
                 type="button"
@@ -2594,7 +2604,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
       )}
 
       {/* Main Sector Tabs (for non-COC units) */}
-      {!isCocActive && (
+      {!isCocActive && !isPolicialUnitReportView && (
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
           {tabsConfig.map(t => (
             <button
@@ -2624,6 +2634,19 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           onRefresh={handlePanelRefresh}
           dataVersion={dataVersion}
           defaultUnitId={activeUnitButton?.realUnitId}
+        />
+      ) : isPolicialUnitReportView ? (
+        <RelatorioPolicialUnidadePanel
+          currentUser={currentUser}
+          departments={allDepartments}
+          units={allUnits}
+          allUsers={allUsersList}
+          activeUnitId={activeUnitButton?.realUnitId || currentUser.unitId}
+          activeUnitName={activeUnitDisplayName}
+          activeDeptId={activeUnitButton?.departmentId || currentUser.departmentId}
+          activeDeptName={activeDeptDisplayName}
+          onRefresh={handlePanelRefresh}
+          dataVersion={dataVersion}
         />
       ) : (
         <>
