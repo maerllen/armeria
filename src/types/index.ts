@@ -1493,20 +1493,75 @@ export type TipoAtendimentoOperacao = 'Operação prevista' | 'Operação extrao
 export type MaterialArrecadadoBusca = 'ARMA' | 'DROGA' | 'ELETRÔNICOS' | 'VEÍCULOS' | 'MENOR' | 'OUTROS';
 export type TipoCriseOperacao = 'DISTÚRBIO' | 'SUICÍDIO' | 'OUTROS';
 
+export type TipoArmaApreendidaBusca =
+  | 'Pistola'
+  | 'Revolver'
+  | 'Espingarda'
+  | 'Carabina'
+  | 'Fuzil'
+  | 'Metralhadora'
+  | 'Artesanal';
+
+export type TipoDrogaApreendidaBusca =
+  | 'MACONHA'
+  | 'COCAINA'
+  | 'SINTÉTICA'
+  | 'DESCONHECIDA';
+
+export type UnidadeDrogaBusca = 'kg' | 't';
+
+export type TipoVeiculoApreendidoBusca =
+  | 'Carro'
+  | 'Moto'
+  | 'Caminhonete'
+  | 'Embarcação';
+
+export type AtuacaoSuicidioOperacao =
+  | 'Negociador'
+  | 'Arma de incapacitação'
+  | 'Outros';
+
+export interface ArmaApreendidaBuscaItem {
+  tipo: TipoArmaApreendidaBusca;
+  quantidade: number;
+}
+
+export interface DrogaApreendidaBuscaItem {
+  tipo: TipoDrogaApreendidaBusca;
+  quantidade: number;
+  unidade: UnidadeDrogaBusca;
+}
+
+export interface VeiculoApreendidoBuscaItem {
+  tipo: TipoVeiculoApreendidoBusca;
+  quantidade: number;
+}
+
 export interface DetalheAdicionalOperacao {
   mandadoPrisao?: {
     ativo: boolean;
     foragidoPreso: boolean;
+    quantidadeAlvos?: number;
+    quantidadePresos?: number;
+    foragidoNoLocalChegada?: boolean;
+    quantidadeFugiram?: number;
+    descricaoFuga?: string;
   };
   mandadoBusca?: {
     ativo: boolean;
     materialArrecadado: boolean;
     materiais: MaterialArrecadadoBusca[];
+    armasArrecadadas?: ArmaApreendidaBuscaItem[];
+    drogasArrecadadas?: DrogaApreendidaBuscaItem[];
+    veiculosArrecadados?: VeiculoApreendidoBuscaItem[];
     outrosDetalhes?: string;
   };
   gerenciamentoCrise?: {
     ativo: boolean;
     tipo: TipoCriseOperacao;
+    suicidioConsumado?: boolean;
+    atuacaoAdotada?: AtuacaoSuicidioOperacao;
+    atuacaoOutrosDescricao?: string;
     outrosDetalhes?: string;
   };
 }
@@ -1559,7 +1614,10 @@ export interface RelatorioOperacaoPolicial {
   utilizouArmaEletrica: boolean;
   armasEletricas: ArmaEletricaUtilizadaOperacao[];
   houveObito: boolean;
-  sinopseObito?: string; // Máx 600 caracteres
+  quantidadeObitos?: number;
+  mesmaSinopseObito?: boolean;
+  sinopseObito?: string; // Máx 600 caracteres (sinopse única)
+  sinopsesObitos?: string[]; // N sinopses quando mesmaSinopseObito === false
   criadorId: string;
   criadorNome: string;
   criadorMasp: string;

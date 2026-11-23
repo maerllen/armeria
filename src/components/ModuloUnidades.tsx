@@ -37,12 +37,11 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const [selectedDeptId, setSelectedDeptId] = useState('');
   const [unitLogoUrl, setUnitLogoUrl] = useState('');
 
-  // Viatura form & filter states
+  // Viatura form & unit selection states
   const [viaturaPlaca, setViaturaPlaca] = useState('');
   const [viaturaDescricao, setViaturaDescricao] = useState('');
   const [viaturaUnitId, setViaturaUnitId] = useState('');
-  const [viaturaUnitFilter, setViaturaUnitFilter] = useState('');
-  const [isViaturasOpen, setIsViaturasOpen] = useState(true);
+  const [selectedUnitIdForViaturas, setSelectedUnitIdForViaturas] = useState<string | null>(null);
   const [savingViatura, setSavingViatura] = useState(false);
 
   const [errorMsg, setErrorMsg] = useState('');
@@ -51,9 +50,11 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
   const effectiveRole = currentUser.activeRole || currentUser.role;
   const isGeral = effectiveRole === 'Geral';
   const isAdmin = effectiveRole === 'Administrador';
-  const isAdminOrArmeiro = isAdmin || effectiveRole === 'Armeiro';
+  const isArmeiro = effectiveRole === 'Armeiro';
+  const isAdminOrArmeiro = isAdmin || isArmeiro;
   const isPolicial = effectiveRole === 'Policial';
-  const canManageViaturas = isGeral || isAdmin;
+  const canManageViaturas = isGeral || isAdmin || isArmeiro;
+  const canDeleteViaturas = isGeral || isAdmin;
 
   // Helper for reading image files as Base64 Data URL
   const handleImageUpload = (file: File, setter: (val: string) => void) => {
@@ -321,16 +322,6 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
               </button>
             )}
 
-            {canManageViaturas && (
-              <button
-                onClick={() => handleOpenViaturaModal()}
-                className="bg-cyan-500/15 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 font-bold text-xs px-3.5 py-2.5 rounded-xl transition flex items-center space-x-1.5"
-              >
-                <Car className="w-4 h-4" />
-                <span>Nova Viatura</span>
-              </button>
-            )}
-
             <button
               onClick={() => handleOpenUnitModal()}
               className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
@@ -457,12 +448,24 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                         {deptUnits.map((unit) => {
                           const unitUserCount = storage.getAllUsers().filter(u => u.unitId === unit.id).length;
                           const unitWeaponCount = storage.getAllWeaponsForAdmin({ role: 'Geral' } as User).filter(w => w.unitId === unit.id).length;
+                          const unitViaturaCount = storage.getViaturas().filter(v => v.unitId === unit.id).length;
                           const effectiveUnitLogo = getSystemLogo(unit, dept);
+                          const isSelectedUnit = selectedUnitIdForViaturas === unit.id;
 
                           return (
                             <div
                               key={unit.id}
-                              className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between space-y-3 hover:border-slate-700 transition"
+                              onClick={() => {
+                                if (!canManageViaturas) return;
+                                setSelectedUnitIdForViaturas(prev => (prev === unit.id ? null : unit.id));
+                              }}
+                              className={`bg-slate-900 border rounded-xl p-4 flex flex-col justify-between space-y-3 transition ${
+                                canManageViaturas ? 'cursor-pointer' : ''
+                              } ${
+                                isSelectedUnit
+                                  ? 'border-cyan-400 ring-1 ring-cyan-400/40 shadow-md shadow-cyan-500/10'
+                                  : 'border-slate-800 hover:border-slate-700'
+                              }`}
                             >
                               <div>
                                 <div className="flex items-start justify-between">
@@ -514,15 +517,21 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
                                 </p>
                               </div>
 
-                              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px] text-slate-400">
-                                <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
-                                <span>Armas: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
-                                <span>
-                                  Viaturas:{' '}
-                                  <strong className="text-cyan-400">
-                                    {storage.getViaturas().filter(v => v.unitId === unit.id).length}
-                                  </strong>
-                                </span>
+                              <div className="pt-2 border-t border-slate-800/80 space-y-1.5">
+                                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                                  <span>Policiais: <strong className="text-slate-200">{unitUserCount}</strong></span>
+                                  <span>Armas: <strong className="text-amber-400">{unitWeaponCount}</strong></span>
+                                  <span>
+                                    Viaturas: <strong className="text-cyan-400">{unitViaturaCount}</strong>
+                                  </span>
+                                </div>
+                                {canManageViaturas && (
+                                  <div className="flex items-center justify-between text-[10px] pt-1">
+                                    <span className={isSelectedUnit ? 'text-cyan-300 font-bold' : 'text-slate-500'}>
+                                      {isSelectedUnit ? '✓ Unidade selecionada — Viaturas abaixo' : 'Clique para gerenciar viaturas'}
+                                    </span>
+                                  </div>
+                                )}
                               </div>
                             </div>
                           );
@@ -538,132 +547,103 @@ export const UnitModule: React.FC<UnitModuleProps> = ({
         )}
       </div>
 
-      {/* Gestão de Viaturas por Unidade (Administrador e Geral) */}
+      {/* Gestão de Viaturas da Unidade — Visível APENAS quando uma unidade é selecionada */}
       {canManageViaturas && (() => {
-        const visibleUnitIds = new Set(visibleUnits.map(u => u.id));
-        const unitNameById = new Map<string, string>(units.map(u => [u.id, u.name]));
-        const allScopedViaturas = storage
+        const selectedUnitForViaturas = visibleUnits.find(u => u.id === selectedUnitIdForViaturas) || null;
+        if (!selectedUnitForViaturas) return null;
+
+        const unitViaturas = storage
           .getViaturas()
-          .filter(v => isGeral || visibleUnitIds.has(v.unitId));
-        const filteredViaturas = allScopedViaturas.filter(v => {
-          if (viaturaUnitFilter && v.unitId !== viaturaUnitFilter) return false;
-          if (!term) return true;
-          const uName = (unitNameById.get(v.unitId) || '').toLowerCase();
-          return (
-            v.placa.toLowerCase().includes(term) ||
-            v.descricao.toLowerCase().includes(term) ||
-            uName.includes(term)
-          );
-        });
+          .filter(v => v.unitId === selectedUnitForViaturas.id);
 
         return (
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-            <div
-              onClick={() => setIsViaturasOpen(prev => !prev)}
-              className="bg-slate-800/80 hover:bg-slate-800 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3 cursor-pointer select-none transition"
-            >
+          <div className="bg-slate-900 border border-cyan-500/40 rounded-2xl overflow-hidden shadow-md">
+            <div className="bg-slate-800/80 px-6 py-4 border-b border-slate-700/60 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center space-x-3">
                 <div className="p-2.5 bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 rounded-xl">
                   <Car className="w-5 h-5" />
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-slate-100">
-                    Viaturas das Unidades ({filteredViaturas.length})
+                    Viaturas — {selectedUnitForViaturas.name} ({unitViaturas.length})
                   </h2>
                   <p className="text-[11px] text-slate-400">
-                    Cadastre viaturas e vincule cada veículo à unidade correspondente para uso nos relatórios de operações.
+                    Acrescente ou edite as viaturas vinculadas à unidade selecionada para uso nos relatórios de operações.
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2" onClick={(e) => e.stopPropagation()}>
-                <select
-                  value={viaturaUnitFilter}
-                  onChange={(e) => setViaturaUnitFilter(e.target.value)}
-                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500"
-                >
-                  <option value="">Todas as Unidades</option>
-                  {visibleUnits
-                    .slice()
-                    .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR'))
-                    .map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.name}
-                      </option>
-                    ))}
-                </select>
+              <div className="flex items-center space-x-2">
                 <button
                   type="button"
-                  onClick={() => handleOpenViaturaModal(undefined, viaturaUnitFilter || undefined)}
-                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-3 py-1.5 rounded-xl flex items-center space-x-1 transition"
+                  onClick={() => handleOpenViaturaModal(undefined, selectedUnitForViaturas.id)}
+                  className="bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs px-3.5 py-2 rounded-xl flex items-center space-x-1.5 transition"
                 >
                   <Plus className="w-3.5 h-3.5" />
                   <span>Adicionar Viatura</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setIsViaturasOpen(prev => !prev)}
-                  className="text-slate-400 bg-slate-950/60 p-2 rounded-xl border border-slate-800"
+                  onClick={() => setSelectedUnitIdForViaturas(null)}
+                  className="text-slate-400 hover:text-slate-200 bg-slate-950/60 p-2 rounded-xl border border-slate-800 transition"
+                  title="Fechar painel de viaturas"
                 >
-                  {isViaturasOpen ? <ChevronUp className="w-4 h-4 text-cyan-400" /> : <ChevronDown className="w-4 h-4" />}
+                  <CloseIcon className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            {isViaturasOpen && (
-              <div className="p-5 bg-slate-950/40">
-                {filteredViaturas.length === 0 ? (
-                  <p className="text-xs text-slate-500 italic text-center py-4">
-                    Nenhuma viatura cadastrada para os critérios selecionados.
-                  </p>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {filteredViaturas.map(v => {
-                      const uName = unitNameById.get(v.unitId) || 'Unidade não identificada';
-                      return (
-                        <div
-                          key={v.id}
-                          className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
-                        >
-                          <div className="min-w-0 space-y-1">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
-                                {v.placa}
-                              </span>
-                              <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold truncate max-w-[180px]">
-                                {uName}
-                              </span>
-                            </div>
-                            <p className="text-xs font-semibold text-slate-200 truncate" title={v.descricao}>
-                              {v.descricao}
-                            </p>
-                          </div>
-
-                          <div className="flex items-center space-x-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={() => handleOpenViaturaModal(v)}
-                              className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Editar Viatura"
-                            >
-                              <Edit2 className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteViatura(v)}
-                              className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
-                              title="Excluir Viatura"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
+            <div className="p-5 bg-slate-950/40">
+              {unitViaturas.length === 0 ? (
+                <p className="text-xs text-slate-500 italic text-center py-4">
+                  Nenhuma viatura cadastrada nesta unidade. Clique em &ldquo;Adicionar Viatura&rdquo; para cadastrar.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {unitViaturas.map(v => (
+                    <div
+                      key={v.id}
+                      className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start justify-between gap-2 hover:border-slate-700 transition"
+                    >
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-bold text-xs px-2 py-0.5 rounded bg-cyan-500/15 border border-cyan-500/30 text-cyan-300">
+                            {v.placa}
+                          </span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 font-semibold truncate max-w-[180px]">
+                            {selectedUnitForViaturas.name}
+                          </span>
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+                        <p className="text-xs font-semibold text-slate-200 truncate" title={v.descricao}>
+                          {v.descricao}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center space-x-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleOpenViaturaModal(v)}
+                          className="p-1.5 text-slate-400 hover:text-cyan-400 hover:bg-slate-800 rounded-lg transition"
+                          title="Editar Viatura"
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        {canDeleteViaturas && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteViatura(v)}
+                            className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-slate-800 rounded-lg transition"
+                            title="Excluir Viatura"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         );
       })()}

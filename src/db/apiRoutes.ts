@@ -13324,12 +13324,28 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
   try {
     const b = req.body || {};
     const actor = b.actor || {};
-    const roles = getActorRolesSet(actor);
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
+    }
+
+    const pool = getPool();
+    await ensureViaturasUnidadeTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
     const isGeral = roles.has('Geral');
     const isAdmin = roles.has('Administrador');
+    const isArmeiro = roles.has('Armeiro');
 
-    if (!isGeral && !isAdmin) {
-      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem cadastrar viaturas.' });
+    if (!isGeral && !isAdmin && !isArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas usuários com perfil Administrador ou Armeiro podem cadastrar viaturas.'
+      });
     }
 
     const placa = formatPlacaViaturaServer(b.placa || '');
@@ -13344,16 +13360,13 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Informe a descrição (marca e modelo) da viatura.' });
     }
 
-    const actorUnitId = String(actor.unitId || '').trim();
-    const actorDeptId = String(actor.departmentId || '').trim();
+    const actorUnitId = String(dbActor.unitId || '').trim();
+    const actorDeptId = String(dbActor.departmentId || '').trim();
     const requestedUnitId = String(b.unitId || '').trim();
     const unitId = requestedUnitId || actorUnitId;
     if (!unitId) {
       return res.status(400).json({ error: 'Informe a unidade à qual a viatura pertence.' });
     }
-
-    const pool = getPool();
-    await ensureViaturasUnidadeTable(pool);
 
     let resolvedDeptId = String(b.departmentId || actorDeptId || '').trim() || null;
     try {
@@ -13366,7 +13379,7 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
         if (!isGeral && unitId !== actorUnitId) {
           if (!actorDeptId || targetUnitDeptId !== actorDeptId) {
             return res.status(403).json({
-              error: 'Administradores só podem cadastrar viaturas em unidades vinculadas ao seu departamento.'
+              error: 'Você só pode cadastrar viaturas em unidades vinculadas ao seu departamento.'
             });
           }
         }
@@ -13396,7 +13409,7 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
         ID_VIATURA, PLACA_VIATURA, DESCRICAO_VIATURA,
         DEPARTAMENTO_ID, UNIDADE_ID, CRIADO_POR_ID, CRIADO_POR_NOME
       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [id, placa, descricao, departmentId, unitId, actor.id || null, actor.name || null]
+      [id, placa, descricao, departmentId, unitId, dbActor.id || null, dbActor.name || null]
     );
 
     await insertAuditLog(
@@ -13420,8 +13433,8 @@ apiRouter.post('/viaturas', async (req: Request, res: Response) => {
             descricao,
             departmentId: departmentId || '',
             unitId,
-            criadoPorId: actor.id || '',
-            criadoPorNome: actor.name || ''
+            criadoPorId: dbActor.id || '',
+            criadoPorNome: dbActor.name || ''
           }
     );
   } catch (err: any) {
@@ -13434,16 +13447,29 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const b = req.body || {};
     const actor = b.actor || {};
-    const roles = getActorRolesSet(actor);
-    const isGeral = roles.has('Geral');
-    const isAdmin = roles.has('Administrador');
-
-    if (!isGeral && !isAdmin) {
-      return res.status(403).json({ error: 'Apenas usuários com perfil Administrador podem editar viaturas.' });
+    const actorId = String(actor.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não autenticado.' });
     }
 
     const pool = getPool();
     await ensureViaturasUnidadeTable(pool);
+
+    const dbActor = await resolveDbActorForPolTreino(pool, actorId);
+    if (!dbActor) {
+      return res.status(403).json({ error: 'Usuário não encontrado ou sem permissão.' });
+    }
+
+    const roles = new Set<string>([dbActor.role, ...(dbActor.roles || [])].filter(Boolean));
+    const isGeral = roles.has('Geral');
+    const isAdmin = roles.has('Administrador');
+    const isArmeiro = roles.has('Armeiro');
+
+    if (!isGeral && !isAdmin && !isArmeiro) {
+      return res.status(403).json({
+        error: 'Apenas usuários com perfil Administrador ou Armeiro podem editar viaturas.'
+      });
+    }
 
     const [existingRows]: any = await pool.query(
       'SELECT * FROM VIATURAS_UNIDADE WHERE ID_VIATURA = ? LIMIT 1',
@@ -13454,8 +13480,8 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
     }
     const existing = existingRows[0];
 
-    const actorUnitId = String(actor.unitId || '').trim();
-    const actorDeptId = String(actor.departmentId || '').trim();
+    const actorUnitId = String(dbActor.unitId || '').trim();
+    const actorDeptId = String(dbActor.departmentId || '').trim();
     const targetUnitId = String(b.unitId || existing.UNIDADE_ID || '').trim();
     let targetDeptId = existing.DEPARTAMENTO_ID || actorDeptId || null;
 
@@ -13471,7 +13497,7 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
         } catch (_) {}
       }
       if (!existingAllowed) {
-        return res.status(403).json({ error: 'Administradores só podem editar viaturas de unidades vinculadas ao seu departamento.' });
+        return res.status(403).json({ error: 'Você só pode editar viaturas de unidades vinculadas ao seu departamento.' });
       }
 
       if (targetUnitId !== existing.UNIDADE_ID) {
@@ -13480,7 +13506,7 @@ apiRouter.put('/viaturas/:id', async (req: Request, res: Response) => {
           [targetUnitId]
         );
         if (!tu || tu.length === 0 || (actorDeptId && String(tu[0].DEPARTAMENTO_ID_UNIDADES || '') !== actorDeptId)) {
-          return res.status(403).json({ error: 'Administradores só podem mover viaturas para unidades do seu departamento.' });
+          return res.status(403).json({ error: 'Você só pode mover viaturas para unidades do seu departamento.' });
         }
         targetDeptId = tu[0].DEPARTAMENTO_ID_UNIDADES || targetDeptId;
       }
@@ -18829,6 +18855,19 @@ const POL_OP_ALLOWED_MATERIAIS_BUSCA = new Set([
   'OUTROS'
 ]);
 const POL_OP_ALLOWED_TIPOS_CRISE = new Set(['DISTÚRBIO', 'SUICÍDIO', 'OUTROS']);
+const POL_OP_ALLOWED_TIPOS_ARMA_BUSCA = new Set([
+  'Pistola',
+  'Revolver',
+  'Espingarda',
+  'Carabina',
+  'Fuzil',
+  'Metralhadora',
+  'Artesanal'
+]);
+const POL_OP_ALLOWED_TIPOS_DROGA_BUSCA = new Set(['MACONHA', 'COCAINA', 'SINTÉTICA', 'DESCONHECIDA']);
+const POL_OP_ALLOWED_UNIDADES_DROGA_BUSCA = new Set(['kg', 't']);
+const POL_OP_ALLOWED_TIPOS_VEICULO_BUSCA = new Set(['Carro', 'Moto', 'Caminhonete', 'Embarcação']);
+const POL_OP_ALLOWED_ATUACOES_SUICIDIO = new Set(['Negociador', 'Arma de incapacitação', 'Outros']);
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -18862,7 +18901,10 @@ async function ensureRelatoriosOperacoesPolicialTable(pool: any): Promise<void> 
         \`UTILIZOU_ARMA_ELETRICA\` TINYINT(1) NOT NULL DEFAULT 0,
         \`ARMAS_ELETRICAS_JSON\` LONGTEXT DEFAULT NULL,
         \`HOUVE_OBITO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`QUANTIDADE_OBITOS\` INT NOT NULL DEFAULT 0,
+        \`MESMA_SINOPSE_OBITO\` TINYINT(1) NOT NULL DEFAULT 1,
         \`SINOPSE_OBITO\` TEXT DEFAULT NULL,
+        \`SINOPSES_OBITOS_JSON\` LONGTEXT DEFAULT NULL,
         \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
         \`CRIADOR_NOME\` VARCHAR(255) NOT NULL,
         \`CRIADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
@@ -18882,6 +18924,37 @@ async function ensureRelatoriosOperacoesPolicialTable(pool: any): Promise<void> 
         KEY \`idx_rel_op_pol_criacao\` (\`DATA_CRIACAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    const colsToCheck: Array<{ name: string; ddl: string }> = [
+      {
+        name: 'QUANTIDADE_OBITOS',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `QUANTIDADE_OBITOS` INT NOT NULL DEFAULT 0 AFTER `HOUVE_OBITO`'
+      },
+      {
+        name: 'MESMA_SINOPSE_OBITO',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `MESMA_SINOPSE_OBITO` TINYINT(1) NOT NULL DEFAULT 1 AFTER `QUANTIDADE_OBITOS`'
+      },
+      {
+        name: 'SINOPSES_OBITOS_JSON',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `SINOPSES_OBITOS_JSON` LONGTEXT DEFAULT NULL AFTER `SINOPSE_OBITO`'
+      }
+    ];
+    for (const col of colsToCheck) {
+      try {
+        const [exists]: any = await pool.query(
+          `SELECT COUNT(*) AS cnt
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'RELATORIOS_OPERACOES_POLICIAL'
+             AND COLUMN_NAME = ?`,
+          [col.name]
+        );
+        if (Number(exists?.[0]?.cnt || 0) === 0) {
+          await pool.query(col.ddl);
+        }
+      } catch (_) {}
+    }
+
     relatoriosOperacoesPolicialEnsured = true;
   } catch (err) {
     console.error('[API] Erro ao garantir tabela RELATORIOS_OPERACOES_POLICIAL:', err);
@@ -19000,9 +19073,36 @@ function sanitizePolOpDetalhesAdicionais(raw: any) {
 
   const res: any = {};
   if (mp?.ativo) {
+    const rawAlvos = Number(mp.quantidadeAlvos);
+    const quantidadeAlvos = Number.isFinite(rawAlvos) && rawAlvos >= 1
+      ? Math.min(99, Math.floor(rawAlvos))
+      : 1;
+    const hasPresosField = mp.quantidadePresos !== undefined && mp.quantidadePresos !== null && mp.quantidadePresos !== '';
+    const rawPresos = hasPresosField ? Number(mp.quantidadePresos) : (mp.foragidoPreso ? quantidadeAlvos : 0);
+    const quantidadePresos = Number.isFinite(rawPresos)
+      ? Math.max(0, Math.min(quantidadeAlvos, Math.floor(rawPresos)))
+      : 0;
+    const foragidosRestantes = Math.max(0, quantidadeAlvos - quantidadePresos);
+    const foragidoNoLocalChegada = foragidosRestantes > 0 ? Boolean(mp.foragidoNoLocalChegada) : false;
+    let quantidadeFugiram = 0;
+    let descricaoFuga = '';
+    if (foragidosRestantes > 0 && foragidoNoLocalChegada) {
+      const rawFug = Number(mp.quantidadeFugiram);
+      quantidadeFugiram = Number.isFinite(rawFug) && rawFug >= 1
+        ? Math.min(foragidosRestantes, Math.floor(rawFug))
+        : 1;
+      descricaoFuga = String(mp.descricaoFuga || '').trim().slice(0, 500);
+    }
+
     res.mandadoPrisao = {
       ativo: true,
-      foragidoPreso: Boolean(mp.foragidoPreso)
+      foragidoPreso: quantidadePresos >= quantidadeAlvos,
+      quantidadeAlvos,
+      quantidadePresos,
+      ...(foragidosRestantes > 0 ? { foragidoNoLocalChegada } : {}),
+      ...(foragidosRestantes > 0 && foragidoNoLocalChegada
+        ? { quantidadeFugiram, descricaoFuga }
+        : {})
     };
   }
   if (mb?.ativo) {
@@ -19010,10 +19110,59 @@ function sanitizePolOpDetalhesAdicionais(raw: any) {
     const materiais = materialArrecadado && Array.isArray(mb.materiais)
       ? Array.from(new Set(mb.materiais.map((m: any) => String(m)).filter((m: string) => POL_OP_ALLOWED_MATERIAIS_BUSCA.has(m))))
       : [];
+
+    const armasMap = new Map<string, number>();
+    if (materialArrecadado && materiais.includes('ARMA') && Array.isArray(mb.armasArrecadadas)) {
+      for (const item of mb.armasArrecadadas) {
+        const tipo = String(item?.tipo || '').trim();
+        const qtd = Math.floor(Number(item?.quantidade) || 0);
+        if (!POL_OP_ALLOWED_TIPOS_ARMA_BUSCA.has(tipo) || qtd < 1) continue;
+        armasMap.set(tipo, Math.min(9999, (armasMap.get(tipo) || 0) + qtd));
+      }
+    }
+    const armasArrecadadas = Array.from(armasMap.entries()).map(([tipo, quantidade]) => ({ tipo, quantidade }));
+
+    const drogasArrecadadas: Array<{ tipo: string; quantidade: number; unidade: 'kg' | 't' }> = [];
+    if (materialArrecadado && materiais.includes('DROGA') && Array.isArray(mb.drogasArrecadadas)) {
+      for (const item of mb.drogasArrecadadas) {
+        const tipo = String(item?.tipo || '').trim();
+        const unidade = String(item?.unidade || 'kg').trim() as 'kg' | 't';
+        const qtd = Number(item?.quantidade);
+        if (
+          !POL_OP_ALLOWED_TIPOS_DROGA_BUSCA.has(tipo) ||
+          !POL_OP_ALLOWED_UNIDADES_DROGA_BUSCA.has(unidade) ||
+          !Number.isFinite(qtd) ||
+          qtd <= 0
+        ) {
+          continue;
+        }
+        drogasArrecadadas.push({
+          tipo,
+          quantidade: Math.min(999999, Math.round(qtd * 1000) / 1000),
+          unidade
+        });
+        if (drogasArrecadadas.length >= 50) break;
+      }
+    }
+
+    const veiculosMap = new Map<string, number>();
+    if (materialArrecadado && materiais.includes('VEÍCULOS') && Array.isArray(mb.veiculosArrecadados)) {
+      for (const item of mb.veiculosArrecadados) {
+        const tipo = String(item?.tipo || '').trim();
+        const qtd = Math.floor(Number(item?.quantidade) || 0);
+        if (!POL_OP_ALLOWED_TIPOS_VEICULO_BUSCA.has(tipo) || qtd < 1) continue;
+        veiculosMap.set(tipo, Math.min(9999, (veiculosMap.get(tipo) || 0) + qtd));
+      }
+    }
+    const veiculosArrecadados = Array.from(veiculosMap.entries()).map(([tipo, quantidade]) => ({ tipo, quantidade }));
+
     res.mandadoBusca = {
       ativo: true,
       materialArrecadado,
       materiais,
+      ...(armasArrecadadas.length > 0 ? { armasArrecadadas } : {}),
+      ...(drogasArrecadadas.length > 0 ? { drogasArrecadadas } : {}),
+      ...(veiculosArrecadados.length > 0 ? { veiculosArrecadados } : {}),
       outrosDetalhes:
         materialArrecadado && materiais.includes('OUTROS')
           ? String(mb.outrosDetalhes || '').trim().slice(0, 250)
@@ -19024,9 +19173,23 @@ function sanitizePolOpDetalhesAdicionais(raw: any) {
     const tipo = POL_OP_ALLOWED_TIPOS_CRISE.has(String(gc.tipo || ''))
       ? String(gc.tipo)
       : 'DISTÚRBIO';
+    const isSuicidio = tipo === 'SUICÍDIO';
+    const suicidioConsumado = isSuicidio ? Boolean(gc.suicidioConsumado) : undefined;
+    const rawAtuacao = String(gc.atuacaoAdotada || '').trim();
+    const atuacaoAdotada = isSuicidio && POL_OP_ALLOWED_ATUACOES_SUICIDIO.has(rawAtuacao)
+      ? rawAtuacao
+      : undefined;
+    const atuacaoOutrosDescricao =
+      isSuicidio && atuacaoAdotada === 'Outros'
+        ? String(gc.atuacaoOutrosDescricao || '').trim().slice(0, 250)
+        : '';
+
     res.gerenciamentoCrise = {
       ativo: true,
       tipo,
+      ...(isSuicidio ? { suicidioConsumado } : {}),
+      ...(isSuicidio && atuacaoAdotada ? { atuacaoAdotada } : {}),
+      ...(isSuicidio && atuacaoAdotada === 'Outros' ? { atuacaoOutrosDescricao } : {}),
       outrosDetalhes: tipo === 'OUTROS' ? String(gc.outrosDetalhes || '').trim().slice(0, 250) : ''
     };
   }
@@ -19260,7 +19423,10 @@ function mapPolOpRow(r: any) {
     utilizouArmaEletrica: Boolean(r.utilizouArmaEletrica),
     armasEletricas: Array.isArray(safeParse(r.armasEletricasJson, [])) ? safeParse(r.armasEletricasJson, []) : [],
     houveObito: Boolean(r.houveObito),
+    quantidadeObitos: Boolean(r.houveObito) ? Math.max(1, Number(r.quantidadeObitos) || 1) : 0,
+    mesmaSinopseObito: r.mesmaSinopseObito === undefined || r.mesmaSinopseObito === null ? true : Boolean(r.mesmaSinopseObito),
     sinopseObito: r.sinopseObito ? String(r.sinopseObito) : '',
+    sinopsesObitos: Array.isArray(safeParse(r.sinopsesObitosJson, [])) ? safeParse(r.sinopsesObitosJson, []) : [],
     criadorId: String(r.criadorId || ''),
     criadorNome: String(r.criadorNome || ''),
     criadorMasp: String(r.criadorMasp || ''),
@@ -19298,7 +19464,10 @@ const POL_OP_SELECT_COLS = `
   UTILIZOU_ARMA_ELETRICA as utilizouArmaEletrica,
   ARMAS_ELETRICAS_JSON as armasEletricasJson,
   HOUVE_OBITO as houveObito,
+  QUANTIDADE_OBITOS as quantidadeObitos,
+  MESMA_SINOPSE_OBITO as mesmaSinopseObito,
   SINOPSE_OBITO as sinopseObito,
+  SINOPSES_OBITOS_JSON as sinopsesObitosJson,
   CRIADOR_ID as criadorId,
   CRIADOR_NOME as criadorNome,
   CRIADOR_MASP as criadorMasp,
@@ -19428,12 +19597,34 @@ apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Respo
     }
 
     const houveObito = Boolean(body.houveObito);
-    const sinopseObito = houveObito ? String(body.sinopseObito || '').trim() : '';
-    if (houveObito && !sinopseObito) {
-      return res.status(400).json({ error: 'Informe a sinopse sobre o momento do óbito.' });
-    }
-    if (sinopseObito.length > 600) {
-      return res.status(400).json({ error: 'A sinopse sobre o momento do óbito não pode exceder 600 caracteres.' });
+    const quantidadeObitos = houveObito
+      ? Math.max(1, Math.min(99, Math.floor(Number(body.quantidadeObitos) || 1)))
+      : 0;
+    const mesmaSinopseObito = !houveObito ? true : body.mesmaSinopseObito !== false;
+    let sinopseObito = '';
+    let sinopsesObitos: string[] = [];
+
+    if (houveObito) {
+      if (mesmaSinopseObito) {
+        sinopseObito = String(body.sinopseObito || '').trim();
+        if (!sinopseObito) {
+          return res.status(400).json({ error: 'Informe a sinopse sobre o momento do óbito.' });
+        }
+        if (sinopseObito.length > 600) {
+          return res.status(400).json({ error: 'A sinopse sobre o momento do óbito não pode exceder 600 caracteres.' });
+        }
+      } else {
+        const rawList = Array.isArray(body.sinopsesObitos) ? body.sinopsesObitos : [];
+        sinopsesObitos = Array.from({ length: quantidadeObitos }, (_, idx) =>
+          String(rawList[idx] || '').trim().slice(0, 600)
+        );
+        const emptyIdx = sinopsesObitos.findIndex(s => !s);
+        if (emptyIdx !== -1) {
+          return res.status(400).json({
+            error: `Informe a sinopse individual do Óbito ${emptyIdx + 1} (máx. 600 caracteres).`
+          });
+        }
+      }
     }
 
     const unitId = String(body.unitId || dbActor.unitId || '').trim().slice(0, 64) || null;
@@ -19459,6 +19650,27 @@ apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Respo
       unitName
     });
     const detalhesAdicionais = sanitizePolOpDetalhesAdicionais(body.detalhesAdicionais);
+
+    if (
+      detalhesAdicionais.mandadoPrisao?.ativo &&
+      (detalhesAdicionais.mandadoPrisao.quantidadePresos || 0) < (detalhesAdicionais.mandadoPrisao.quantidadeAlvos || 1) &&
+      detalhesAdicionais.mandadoPrisao.foragidoNoLocalChegada &&
+      !detalhesAdicionais.mandadoPrisao.descricaoFuga
+    ) {
+      return res.status(400).json({
+        error: 'Informe como ocorreu a fuga do(s) foragido(s) (até 500 caracteres).'
+      });
+    }
+    if (
+      detalhesAdicionais.gerenciamentoCrise?.ativo &&
+      detalhesAdicionais.gerenciamentoCrise.tipo === 'SUICÍDIO' &&
+      detalhesAdicionais.gerenciamentoCrise.atuacaoAdotada === 'Outros' &&
+      !detalhesAdicionais.gerenciamentoCrise.atuacaoOutrosDescricao
+    ) {
+      return res.status(400).json({
+        error: 'Descreva a atuação adotada em Outros no Gerenciamento de Crise (até 250 caracteres).'
+      });
+    }
 
     const utilizouArma = Boolean(body.utilizouArmaFogoOuEletrica);
     const utilizouArmaFogo = utilizouArma && Boolean(body.utilizouArmaFogo);
@@ -19494,7 +19706,10 @@ apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Respo
         UTILIZOU_ARMA_ELETRICA,
         ARMAS_ELETRICAS_JSON,
         HOUVE_OBITO,
+        QUANTIDADE_OBITOS,
+        MESMA_SINOPSE_OBITO,
         SINOPSE_OBITO,
+        SINOPSES_OBITOS_JSON,
         CRIADOR_ID,
         CRIADOR_NOME,
         CRIADOR_MASP,
@@ -19503,7 +19718,7 @@ apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Respo
         UNIDADE_ID,
         UNIDADE_NOME,
         DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         id,
         dataOperacao,
@@ -19529,7 +19744,10 @@ apiRouter.post('/relatorios-operacoes-policial', async (req: Request, res: Respo
         utilizouArmaEletrica ? 1 : 0,
         JSON.stringify(armasEletricas),
         houveObito ? 1 : 0,
+        quantidadeObitos,
+        mesmaSinopseObito ? 1 : 0,
         sinopseObito || null,
+        sinopsesObitos.length > 0 ? JSON.stringify(sinopsesObitos) : null,
         dbActor.id,
         dbActor.name,
         dbActor.masp,
@@ -19700,9 +19918,31 @@ apiRouter.put('/relatorios-operacoes-policial/:id', async (req: Request, res: Re
     }
 
     const houveObito = Boolean(body.houveObito);
-    const sinopseObito = houveObito ? String(body.sinopseObito || '').trim() : '';
-    if (houveObito && (!sinopseObito || sinopseObito.length > 600)) {
-      return res.status(400).json({ error: 'A sinopse sobre o momento do óbito é obrigatória (máx. 600 caracteres).' });
+    const quantidadeObitos = houveObito
+      ? Math.max(1, Math.min(99, Math.floor(Number(body.quantidadeObitos) || 1)))
+      : 0;
+    const mesmaSinopseObito = !houveObito ? true : body.mesmaSinopseObito !== false;
+    let sinopseObito = '';
+    let sinopsesObitos: string[] = [];
+
+    if (houveObito) {
+      if (mesmaSinopseObito) {
+        sinopseObito = String(body.sinopseObito || '').trim();
+        if (!sinopseObito || sinopseObito.length > 600) {
+          return res.status(400).json({ error: 'A sinopse sobre o momento do óbito é obrigatória (máx. 600 caracteres).' });
+        }
+      } else {
+        const rawList = Array.isArray(body.sinopsesObitos) ? body.sinopsesObitos : [];
+        sinopsesObitos = Array.from({ length: quantidadeObitos }, (_, idx) =>
+          String(rawList[idx] || '').trim().slice(0, 600)
+        );
+        const emptyIdx = sinopsesObitos.findIndex(s => !s);
+        if (emptyIdx !== -1) {
+          return res.status(400).json({
+            error: `Informe a sinopse individual do Óbito ${emptyIdx + 1} (máx. 600 caracteres).`
+          });
+        }
+      }
     }
 
     const existingOpMap = new Map<string, any>();
@@ -19724,6 +19964,27 @@ apiRouter.put('/relatorios-operacoes-policial/:id', async (req: Request, res: Re
       existingOpMap
     );
     const detalhesAdicionais = sanitizePolOpDetalhesAdicionais(body.detalhesAdicionais);
+
+    if (
+      detalhesAdicionais.mandadoPrisao?.ativo &&
+      (detalhesAdicionais.mandadoPrisao.quantidadePresos || 0) < (detalhesAdicionais.mandadoPrisao.quantidadeAlvos || 1) &&
+      detalhesAdicionais.mandadoPrisao.foragidoNoLocalChegada &&
+      !detalhesAdicionais.mandadoPrisao.descricaoFuga
+    ) {
+      return res.status(400).json({
+        error: 'Informe como ocorreu a fuga do(s) foragido(s) (até 500 caracteres).'
+      });
+    }
+    if (
+      detalhesAdicionais.gerenciamentoCrise?.ativo &&
+      detalhesAdicionais.gerenciamentoCrise.tipo === 'SUICÍDIO' &&
+      detalhesAdicionais.gerenciamentoCrise.atuacaoAdotada === 'Outros' &&
+      !detalhesAdicionais.gerenciamentoCrise.atuacaoOutrosDescricao
+    ) {
+      return res.status(400).json({
+        error: 'Descreva a atuação adotada em Outros no Gerenciamento de Crise (até 250 caracteres).'
+      });
+    }
 
     let oldArmasFogo: any[] = [];
     try {
@@ -19764,7 +20025,10 @@ apiRouter.put('/relatorios-operacoes-policial/:id', async (req: Request, res: Re
            UTILIZOU_ARMA_ELETRICA = ?,
            ARMAS_ELETRICAS_JSON = ?,
            HOUVE_OBITO = ?,
-           SINOPSE_OBITO = ?
+           QUANTIDADE_OBITOS = ?,
+           MESMA_SINOPSE_OBITO = ?,
+           SINOPSE_OBITO = ?,
+           SINOPSES_OBITOS_JSON = ?
        WHERE ID_REL_OP_POL = ?`,
       [
         dataOperacao,
@@ -19790,7 +20054,10 @@ apiRouter.put('/relatorios-operacoes-policial/:id', async (req: Request, res: Re
         utilizouArmaEletrica ? 1 : 0,
         JSON.stringify(armasEletricas),
         houveObito ? 1 : 0,
+        quantidadeObitos,
+        mesmaSinopseObito ? 1 : 0,
         sinopseObito || null,
+        sinopsesObitos.length > 0 ? JSON.stringify(sinopsesObitos) : null,
         id
       ]
     );

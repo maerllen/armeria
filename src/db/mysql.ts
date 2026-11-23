@@ -1406,7 +1406,10 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`UTILIZOU_ARMA_ELETRICA\` TINYINT(1) NOT NULL DEFAULT 0,
         \`ARMAS_ELETRICAS_JSON\` LONGTEXT DEFAULT NULL,
         \`HOUVE_OBITO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`QUANTIDADE_OBITOS\` INT NOT NULL DEFAULT 0,
+        \`MESMA_SINOPSE_OBITO\` TINYINT(1) NOT NULL DEFAULT 1,
         \`SINOPSE_OBITO\` TEXT DEFAULT NULL,
+        \`SINOPSES_OBITOS_JSON\` LONGTEXT DEFAULT NULL,
         \`CRIADOR_ID\` VARCHAR(64) NOT NULL,
         \`CRIADOR_NOME\` VARCHAR(255) NOT NULL,
         \`CRIADOR_MASP\` VARCHAR(32) NOT NULL DEFAULT '',
@@ -1426,6 +1429,37 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         KEY \`idx_rel_op_pol_criacao\` (\`DATA_CRIACAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+
+    // Migração idempotente das colunas de múltiplos óbitos em bancos já existentes
+    const obitoColsToEnsure: Array<{ name: string; ddl: string }> = [
+      {
+        name: 'QUANTIDADE_OBITOS',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `QUANTIDADE_OBITOS` INT NOT NULL DEFAULT 0 AFTER `HOUVE_OBITO`'
+      },
+      {
+        name: 'MESMA_SINOPSE_OBITO',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `MESMA_SINOPSE_OBITO` TINYINT(1) NOT NULL DEFAULT 1 AFTER `QUANTIDADE_OBITOS`'
+      },
+      {
+        name: 'SINOPSES_OBITOS_JSON',
+        ddl: 'ALTER TABLE `RELATORIOS_OPERACOES_POLICIAL` ADD COLUMN `SINOPSES_OBITOS_JSON` LONGTEXT DEFAULT NULL AFTER `SINOPSE_OBITO`'
+      }
+    ];
+    for (const col of obitoColsToEnsure) {
+      try {
+        const [colCheck]: any = await connection.query(
+          `SELECT COUNT(*) AS cnt
+           FROM INFORMATION_SCHEMA.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE()
+             AND TABLE_NAME = 'RELATORIOS_OPERACOES_POLICIAL'
+             AND COLUMN_NAME = ?`,
+          [col.name]
+        );
+        if (Number(colCheck?.[0]?.cnt || 0) === 0) {
+          await connection.query(col.ddl);
+        }
+      } catch (_) {}
+    }
 
     // 35. ACAUTELAR_ARMAS
     await connection.query(`

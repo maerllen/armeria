@@ -24,7 +24,10 @@ import {
   printRelatorioOperacaoPolicial,
   getPolOpRemainingEditMs,
   formatRemainingCountdown,
-  isPolOpOperatorEffectivelySigned
+  isPolOpOperatorEffectivelySigned,
+  formatMandadoPrisaoResumo,
+  formatMandadoBuscaResumo,
+  formatGerenciamentoCriseResumo
 } from './RelatorioOperacoesPolicialForm';
 import {
   PenTool,
@@ -402,11 +405,18 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       if (myFilter === 'PENDENTES' && !isPendingForMe) return false;
 
       if (q) {
-        const munExtra = (rel.municipiosAdicionais || []).map(m => `${m.municipio} ${m.estado}`).join(' ');
+        const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
         const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
         const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao}`).join(' ');
         const deptApoio = (rel.departamentosApoio || []).join(' ');
-        const detalhesTxt = (rel.detalhesAdicionais || []).map(d => d.tipo).join(' ');
+        const detObj = rel.detalhesAdicionais || {};
+        const detalhesTxt = [
+          detObj.mandadoPrisao?.ativo ? `Mandado de Prisão ${formatMandadoPrisaoResumo(detObj.mandadoPrisao)}` : '',
+          detObj.mandadoBusca?.ativo ? `Mandado de Busca ${formatMandadoBuscaResumo(detObj.mandadoBusca)}` : '',
+          detObj.gerenciamentoCrise?.ativo ? `Gerenciamento de Crise ${formatGerenciamentoCriseResumo(detObj.gerenciamentoCrise)}` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
         const hay = normalizeText(
           `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoAtendimento} ${rel.acionamentoVia} ${rel.acionamentoOutrosDescricao || ''} ${deptApoio} ${rel.criadorNome} ${opNames} ${vtrText} ${detalhesTxt} ${rel.sinopse}`
         );
@@ -507,11 +517,18 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
         if (!matchOp) return false;
       }
       if (q) {
-        const munExtra = (rel.municipiosAdicionais || []).map(m => `${m.municipio} ${m.estado}`).join(' ');
+        const munExtra = (rel.outrosMunicipios || []).map(m => `${m.municipio} ${m.uf}`).join(' ');
         const opNames = (rel.operadores || []).map(o => `${o.name} ${o.masp} ${o.cargo || ''}`).join(' ');
         const vtrText = (rel.viaturas || []).map(v => `${v.placa} ${v.descricao}`).join(' ');
         const deptApoio = (rel.departamentosApoio || []).join(' ');
-        const detalhesTxt = (rel.detalhesAdicionais || []).map(d => d.tipo).join(' ');
+        const detObj = rel.detalhesAdicionais || {};
+        const detalhesTxt = [
+          detObj.mandadoPrisao?.ativo ? `Mandado de Prisão ${formatMandadoPrisaoResumo(detObj.mandadoPrisao)}` : '',
+          detObj.mandadoBusca?.ativo ? `Mandado de Busca ${formatMandadoBuscaResumo(detObj.mandadoBusca)}` : '',
+          detObj.gerenciamentoCrise?.ativo ? `Gerenciamento de Crise ${formatGerenciamentoCriseResumo(detObj.gerenciamentoCrise)}` : ''
+        ]
+          .filter(Boolean)
+          .join(' ');
         const hay = normalizeText(
           `${formatDateBr(rel.dataOperacao)} ${rel.municipioOperacao} ${rel.estadoOperacao} ${munExtra} ${rel.tipoAtendimento} ${rel.acionamentoVia} ${rel.acionamentoOutrosDescricao || ''} ${deptApoio} ${rel.criadorNome} ${opNames} ${vtrText} ${detalhesTxt} ${rel.sinopse}`
         );
@@ -2084,7 +2101,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
                       const municipiosLabel = [
                         `${rel.municipioOperacao}/${rel.estadoOperacao}`,
-                        ...(rel.municipiosAdicionais || []).map(m => `${m.municipio}/${m.estado}`)
+                        ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
                       ].join(' • ');
 
                       const otherOps = ops.filter(o => o.userId !== rel.criadorId);
@@ -2119,7 +2136,9 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                 {rel.houveObito && (
                                   <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold inline-flex items-center space-x-1">
                                     <Skull className="w-3 h-3" />
-                                    <span>Óbito</span>
+                                    <span>
+                                      Óbito{(rel.quantidadeObitos || 1) > 1 ? ` (${rel.quantidadeObitos})` : ''}
+                                    </span>
                                   </span>
                                 )}
                                 {needsMySignature && (
@@ -2298,48 +2317,55 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                 </p>
                               </div>
 
-                              {(rel.detalhesAdicionais || []).length > 0 && (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {rel.detalhesAdicionais.map(det => (
-                                    <span
-                                      key={det.tipo}
-                                      className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-[11px]"
-                                    >
-                                      <strong className="text-amber-300">{det.tipo}:</strong>{' '}
-                                      {det.tipo === 'MANDADO DE PRISÃO'
-                                        ? `Foragido preso: ${det.foragidoPreso ? 'SIM' : 'NÃO'}`
-                                        : det.tipo === 'MANDADO DE BUSCA'
-                                        ? det.materialArrecadado
-                                          ? `Arrecadado (${(det.materiais || []).join(', ')})`
-                                          : 'Sem material arrecadado'
-                                        : `Tipo: ${det.tipoCrise || '-'}`}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
+                              {(() => {
+                                const detObj = rel.detalhesAdicionais || {};
+                                const items: Array<{ label: string; text: string }> = [];
+                                if (detObj.mandadoPrisao?.ativo) {
+                                  items.push({ label: 'MANDADO DE PRISÃO', text: formatMandadoPrisaoResumo(detObj.mandadoPrisao) });
+                                }
+                                if (detObj.mandadoBusca?.ativo) {
+                                  items.push({ label: 'MANDADO DE BUSCA', text: formatMandadoBuscaResumo(detObj.mandadoBusca) });
+                                }
+                                if (detObj.gerenciamentoCrise?.ativo) {
+                                  items.push({ label: 'GERENCIAMENTO DE CRISE', text: formatGerenciamentoCriseResumo(detObj.gerenciamentoCrise) });
+                                }
+                                if (items.length === 0) return null;
+                                return (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {items.map(it => (
+                                      <span
+                                        key={it.label}
+                                        className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-[11px]"
+                                      >
+                                        <strong className="text-amber-300">{it.label}:</strong> {it.text}
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
 
-                              {rel.utilizouArmaOuEletrica && (
+                              {rel.utilizouArmaFogoOuEletrica && (
                                 <div className="bg-slate-900/70 border border-amber-500/30 rounded-lg p-2.5 space-y-1.5">
                                   <span className="block text-[10px] font-bold uppercase text-amber-300">
                                     Armamento / Incapacitação Elétrica Utilizado
                                   </span>
-                                  {(rel.armasFogoUtilizadas || []).map((af, idx) => (
-                                    <div key={idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
+                                  {(rel.armasFogo || []).map((af, idx) => (
+                                    <div key={af.id || idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
                                       <Crosshair className="w-3 h-3 text-amber-400 shrink-0" />
                                       <span>
                                         {af.origem === 'ACERVO'
-                                          ? `Acervo • Nº Série ${af.serialNumber} (${af.marca} ${af.modelo}) — ${af.quantidadeTiros || 0} tiro(s)`
-                                          : `Fora do Acervo • ${af.marca} ${af.modelo} • Nº Série ${af.serialNumber} • Cal. ${af.calibre}`}
+                                          ? `Acervo • Nº Série ${af.numeroSerie} (${af.marca} ${af.modelo}) — ${af.quantidadeTiros || 0} tiro(s)`
+                                          : `Fora do Acervo • ${af.marca} ${af.modelo} • Nº Série ${af.numeroSerie} • Cal. ${af.calibre} — ${af.quantidadeTiros || 0} tiro(s)`}
                                       </span>
                                     </div>
                                   ))}
-                                  {(rel.armasEletricasUtilizadas || []).map((ae, idx) => (
-                                    <div key={idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
+                                  {(rel.armasEletricas || []).map((ae, idx) => (
+                                    <div key={ae.key || idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
                                       <Zap className="w-3 h-3 text-cyan-400 shrink-0" />
                                       <span>
-                                        {ae.tipo} • {ae.nome} (Nº Série: {ae.serialNumber || 'S/N'})
-                                        {ae.acautelado && ae.acauteladoPorNome
-                                          ? ` — Acautelado por ${ae.acauteladoPorNome}`
+                                        {ae.tipo} • {ae.nome} (Nº Série: {ae.numeroSerie || 'S/N'})
+                                        {ae.acautelado && ae.usuarioCautelaNome
+                                          ? ` — Acautelado por ${ae.usuarioCautelaNome}`
                                           : ' — Disponível'}
                                       </span>
                                     </div>
@@ -2347,12 +2373,27 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                 </div>
                               )}
 
-                              {rel.houveObito && rel.sinopseObito && (
-                                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5">
-                                  <span className="block text-[10px] font-bold uppercase text-red-300 mb-1">
-                                    Sinopse sobre o Momento do Óbito
+                              {rel.houveObito && (
+                                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 space-y-2">
+                                  <span className="block text-[10px] font-bold uppercase text-red-300">
+                                    Óbito no Atendimento — Quantidade: {Math.max(1, Number(rel.quantidadeObitos) || 1)}
                                   </span>
-                                  <p className="text-slate-200 whitespace-pre-wrap text-[11px]">{rel.sinopseObito}</p>
+                                  {rel.mesmaSinopseObito === false && (rel.sinopsesObitos || []).length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      {(rel.sinopsesObitos || []).map((txt, idx) => (
+                                        <div key={idx} className="bg-slate-950/60 border border-red-500/20 rounded-md p-2">
+                                          <span className="block text-[9px] font-bold uppercase text-red-300 mb-0.5">
+                                            Óbito {idx + 1}
+                                          </span>
+                                          <p className="text-slate-200 whitespace-pre-wrap text-[11px]">{txt}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    rel.sinopseObito && (
+                                      <p className="text-slate-200 whitespace-pre-wrap text-[11px]">{rel.sinopseObito}</p>
+                                    )
+                                  )}
                                 </div>
                               )}
 
@@ -2721,7 +2762,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
                       const municipiosLabel = [
                         `${rel.municipioOperacao}/${rel.estadoOperacao}`,
-                        ...(rel.municipiosAdicionais || []).map(m => `${m.municipio}/${m.estado}`)
+                        ...(!rel.apenasUmMunicipio ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`) : [])
                       ].join(' • ');
 
                       const otherOps = ops.filter(o => o.userId !== rel.criadorId);
@@ -2756,7 +2797,9 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                 {rel.houveObito && (
                                   <span className="px-2 py-0.5 rounded bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-bold inline-flex items-center space-x-1">
                                     <Skull className="w-3 h-3" />
-                                    <span>Óbito</span>
+                                    <span>
+                                      Óbito{(rel.quantidadeObitos || 1) > 1 ? ` (${rel.quantidadeObitos})` : ''}
+                                    </span>
                                   </span>
                                 )}
                                 {needsMySignature && (
@@ -2882,6 +2925,86 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                                   {rel.sinopse}
                                 </p>
                               </div>
+
+                              {(() => {
+                                const detObj = rel.detalhesAdicionais || {};
+                                const items: Array<{ label: string; text: string }> = [];
+                                if (detObj.mandadoPrisao?.ativo) {
+                                  items.push({ label: 'MANDADO DE PRISÃO', text: formatMandadoPrisaoResumo(detObj.mandadoPrisao) });
+                                }
+                                if (detObj.mandadoBusca?.ativo) {
+                                  items.push({ label: 'MANDADO DE BUSCA', text: formatMandadoBuscaResumo(detObj.mandadoBusca) });
+                                }
+                                if (detObj.gerenciamentoCrise?.ativo) {
+                                  items.push({ label: 'GERENCIAMENTO DE CRISE', text: formatGerenciamentoCriseResumo(detObj.gerenciamentoCrise) });
+                                }
+                                if (items.length === 0) return null;
+                                return (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {items.map(it => (
+                                      <span
+                                        key={it.label}
+                                        className="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-700 text-slate-200 text-[11px]"
+                                      >
+                                        <strong className="text-amber-300">{it.label}:</strong> {it.text}
+                                      </span>
+                                    ))}
+                                  </div>
+                                );
+                              })()}
+
+                              {rel.utilizouArmaFogoOuEletrica && (
+                                <div className="bg-slate-900/70 border border-amber-500/30 rounded-lg p-2.5 space-y-1.5">
+                                  <span className="block text-[10px] font-bold uppercase text-amber-300">
+                                    Armamento / Incapacitação Elétrica Utilizado
+                                  </span>
+                                  {(rel.armasFogo || []).map((af, idx) => (
+                                    <div key={af.id || idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
+                                      <Crosshair className="w-3 h-3 text-amber-400 shrink-0" />
+                                      <span>
+                                        {af.origem === 'ACERVO'
+                                          ? `Acervo • Nº Série ${af.numeroSerie} (${af.marca} ${af.modelo}) — ${af.quantidadeTiros || 0} tiro(s)`
+                                          : `Fora do Acervo • ${af.marca} ${af.modelo} • Nº Série ${af.numeroSerie} • Cal. ${af.calibre} — ${af.quantidadeTiros || 0} tiro(s)`}
+                                      </span>
+                                    </div>
+                                  ))}
+                                  {(rel.armasEletricas || []).map((ae, idx) => (
+                                    <div key={ae.key || idx} className="text-[11px] text-slate-200 flex items-center space-x-1.5">
+                                      <Zap className="w-3 h-3 text-cyan-400 shrink-0" />
+                                      <span>
+                                        {ae.tipo} • {ae.nome} (Nº Série: {ae.numeroSerie || 'S/N'})
+                                        {ae.acautelado && ae.usuarioCautelaNome
+                                          ? ` — Acautelado por ${ae.usuarioCautelaNome}`
+                                          : ' — Disponível'}
+                                      </span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {rel.houveObito && (
+                                <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-2.5 space-y-2">
+                                  <span className="block text-[10px] font-bold uppercase text-red-300">
+                                    Óbito no Atendimento — Quantidade: {Math.max(1, Number(rel.quantidadeObitos) || 1)}
+                                  </span>
+                                  {rel.mesmaSinopseObito === false && (rel.sinopsesObitos || []).length > 0 ? (
+                                    <div className="space-y-1.5">
+                                      {(rel.sinopsesObitos || []).map((txt, idx) => (
+                                        <div key={idx} className="bg-slate-950/60 border border-red-500/20 rounded-md p-2">
+                                          <span className="block text-[9px] font-bold uppercase text-red-300 mb-0.5">
+                                            Óbito {idx + 1}
+                                          </span>
+                                          <p className="text-slate-200 whitespace-pre-wrap text-[11px]">{txt}</p>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : (
+                                    rel.sinopseObito && (
+                                      <p className="text-slate-200 whitespace-pre-wrap text-[11px]">{rel.sinopseObito}</p>
+                                    )
+                                  )}
+                                </div>
+                              )}
 
                               <div>
                                 <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">
@@ -3145,7 +3268,9 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                 const needsSign = Boolean(myOp && myEff && !myEff.signed);
                 const allMunicipios = [
                   `${viewModalOpReport.municipioOperacao}/${viewModalOpReport.estadoOperacao}`,
-                  ...(viewModalOpReport.municipiosAdicionais || []).map(m => `${m.municipio}/${m.estado}`)
+                  ...(!viewModalOpReport.apenasUmMunicipio
+                    ? (viewModalOpReport.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`)
+                    : [])
                 ];
 
                 return (
@@ -3226,43 +3351,50 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                       </p>
                     </div>
 
-                    {(viewModalOpReport.detalhesAdicionais || []).length > 0 && (
-                      <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
-                        <span className="block text-[10px] font-bold uppercase text-slate-400">
-                          Detalhes Adicionais
-                        </span>
-                        {viewModalOpReport.detalhesAdicionais.map(det => (
-                          <div key={det.tipo} className="text-slate-200">
-                            <strong className="text-amber-300">{det.tipo}:</strong>{' '}
-                            {det.tipo === 'MANDADO DE PRISÃO'
-                              ? `Foragido preso? ${det.foragidoPreso ? 'SIM' : 'NÃO'}`
-                              : det.tipo === 'MANDADO DE BUSCA'
-                              ? det.materialArrecadado
-                                ? `Material arrecadado: SIM (${(det.materiais || []).join(', ')})`
-                                : 'Material arrecadado: NÃO'
-                              : `Tipo de crise: ${det.tipoCrise || '-'}`}
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {(() => {
+                      const detObj = viewModalOpReport.detalhesAdicionais || {};
+                      const items: Array<{ label: string; text: string }> = [];
+                      if (detObj.mandadoPrisao?.ativo) {
+                        items.push({ label: 'MANDADO DE PRISÃO', text: formatMandadoPrisaoResumo(detObj.mandadoPrisao) });
+                      }
+                      if (detObj.mandadoBusca?.ativo) {
+                        items.push({ label: 'MANDADO DE BUSCA', text: formatMandadoBuscaResumo(detObj.mandadoBusca) });
+                      }
+                      if (detObj.gerenciamentoCrise?.ativo) {
+                        items.push({ label: 'GERENCIAMENTO DE CRISE', text: formatGerenciamentoCriseResumo(detObj.gerenciamentoCrise) });
+                      }
+                      if (items.length === 0) return null;
+                      return (
+                        <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-1.5">
+                          <span className="block text-[10px] font-bold uppercase text-slate-400">
+                            Detalhes Adicionais
+                          </span>
+                          {items.map(it => (
+                            <div key={it.label} className="text-slate-200">
+                              <strong className="text-amber-300">{it.label}:</strong> {it.text}
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
 
-                    {viewModalOpReport.utilizouArmaOuEletrica && (
+                    {viewModalOpReport.utilizouArmaFogoOuEletrica && (
                       <div className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2">
                         <span className="block text-[10px] font-bold uppercase text-amber-300">
                           Arma de Fogo / Incapacitação Elétrica Utilizada
                         </span>
-                        {(viewModalOpReport.armasFogoUtilizadas || []).map((af, i) => (
-                          <div key={i} className="text-slate-200 bg-slate-900 border border-slate-800 rounded-lg p-2">
+                        {(viewModalOpReport.armasFogo || []).map((af, i) => (
+                          <div key={af.id || i} className="text-slate-200 bg-slate-900 border border-slate-800 rounded-lg p-2">
                             {af.origem === 'ACERVO'
-                              ? `Arma do Acervo • Nº Série: ${af.serialNumber} • ${af.marca} ${af.modelo} (${af.calibre}) • Tiros disparados: ${af.quantidadeTiros || 0}`
-                              : `Arma Fora do Acervo • ${af.marca} ${af.modelo} • Nº Série: ${af.serialNumber} • Calibre: ${af.calibre}`}
+                              ? `Arma do Acervo • Nº Série: ${af.numeroSerie} • ${af.marca} ${af.modelo} (${af.calibre}) • Tiros disparados: ${af.quantidadeTiros || 0}`
+                              : `Arma Fora do Acervo • ${af.marca} ${af.modelo} • Nº Série: ${af.numeroSerie} • Calibre: ${af.calibre} • Tiros: ${af.quantidadeTiros || 0}`}
                           </div>
                         ))}
-                        {(viewModalOpReport.armasEletricasUtilizadas || []).map((ae, i) => (
-                          <div key={i} className="text-slate-200 bg-slate-900 border border-slate-800 rounded-lg p-2">
-                            {ae.tipo} • {ae.nome} • Nº Série: {ae.serialNumber || 'S/N'}
-                            {ae.acautelado && ae.acauteladoPorNome
-                              ? ` • Acautelado por: ${ae.acauteladoPorNome}`
+                        {(viewModalOpReport.armasEletricas || []).map((ae, i) => (
+                          <div key={ae.key || i} className="text-slate-200 bg-slate-900 border border-slate-800 rounded-lg p-2">
+                            {ae.tipo} • {ae.nome} • Nº Série: {ae.numeroSerie || 'S/N'}
+                            {ae.acautelado && ae.usuarioCautelaNome
+                              ? ` • Acautelado por: ${ae.usuarioCautelaNome}`
                               : ' • Disponível na Unidade'}
                           </div>
                         ))}
@@ -3270,13 +3402,26 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                     )}
 
                     {viewModalOpReport.houveObito && (
-                      <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-3.5">
-                        <span className="block text-[10px] font-bold uppercase text-red-300 mb-1">
-                          Óbito no Atendimento ou em Decorrência Dele — SIM
+                      <div className="bg-red-500/10 border border-red-500/40 rounded-xl p-3.5 space-y-2">
+                        <span className="block text-[10px] font-bold uppercase text-red-300">
+                          Óbito no Atendimento ou em Decorrência Dele — SIM (Quantidade: {Math.max(1, Number(viewModalOpReport.quantidadeObitos) || 1)})
                         </span>
-                        <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">
-                          {viewModalOpReport.sinopseObito}
-                        </p>
+                        {viewModalOpReport.mesmaSinopseObito === false && (viewModalOpReport.sinopsesObitos || []).length > 0 ? (
+                          <div className="space-y-2">
+                            {(viewModalOpReport.sinopsesObitos || []).map((txt, idx) => (
+                              <div key={idx} className="bg-slate-950/70 border border-red-500/30 rounded-lg p-2.5">
+                                <span className="block text-[10px] font-bold uppercase text-red-300 mb-1">
+                                  Sinopse — Óbito {idx + 1}
+                                </span>
+                                <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">{txt}</p>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+                            {viewModalOpReport.sinopseObito}
+                          </p>
+                        )}
                       </div>
                     )}
 

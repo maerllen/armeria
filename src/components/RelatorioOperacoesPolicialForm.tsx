@@ -11,6 +11,14 @@ import {
   TipoAtendimentoOperacao,
   MaterialArrecadadoBusca,
   TipoCriseOperacao,
+  TipoArmaApreendidaBusca,
+  TipoDrogaApreendidaBusca,
+  UnidadeDrogaBusca,
+  TipoVeiculoApreendidoBusca,
+  AtuacaoSuicidioOperacao,
+  ArmaApreendidaBuscaItem,
+  DrogaApreendidaBuscaItem,
+  VeiculoApreendidoBuscaItem,
   ArmaFogoUtilizadaOperacao,
   ArmaEletricaUtilizadaOperacao,
   getSystemLogo
@@ -70,6 +78,7 @@ const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_SINOPSE = 1000;
 const MAX_DESC_CURTA = 250;
+const MAX_DESC_FUGA = 500;
 const MAX_SINOPSE_OBITO = 600;
 
 const MATERIAIS_BUSCA_OPCOES: MaterialArrecadadoBusca[] = [
@@ -81,7 +90,107 @@ const MATERIAIS_BUSCA_OPCOES: MaterialArrecadadoBusca[] = [
   'OUTROS'
 ];
 
+const TIPOS_ARMA_BUSCA_OPCOES: TipoArmaApreendidaBusca[] = [
+  'Pistola',
+  'Revolver',
+  'Espingarda',
+  'Carabina',
+  'Fuzil',
+  'Metralhadora',
+  'Artesanal'
+];
+
+const TIPOS_DROGA_BUSCA_OPCOES: TipoDrogaApreendidaBusca[] = [
+  'MACONHA',
+  'COCAINA',
+  'SINTÉTICA',
+  'DESCONHECIDA'
+];
+
+const TIPOS_VEICULO_BUSCA_OPCOES: TipoVeiculoApreendidoBusca[] = [
+  'Carro',
+  'Moto',
+  'Caminhonete',
+  'Embarcação'
+];
+
 const TIPOS_CRISE_OPCOES: TipoCriseOperacao[] = ['DISTÚRBIO', 'SUICÍDIO', 'OUTROS'];
+
+const ATUACOES_SUICIDIO_OPCOES: AtuacaoSuicidioOperacao[] = [
+  'Negociador',
+  'Arma de incapacitação',
+  'Outros'
+];
+
+export const formatMandadoPrisaoResumo = (
+  mp?: RelatorioOperacaoPolicial['detalhesAdicionais']['mandadoPrisao']
+): string => {
+  if (!mp?.ativo) return '';
+  if (typeof mp.quantidadeAlvos === 'number' && mp.quantidadeAlvos > 0) {
+    const alvos = mp.quantidadeAlvos;
+    const presos = typeof mp.quantidadePresos === 'number' ? mp.quantidadePresos : mp.foragidoPreso ? alvos : 0;
+    const foragidos = Math.max(0, alvos - presos);
+    const presosTxt = `${presos} ${presos === 1 ? 'preso' : 'presos'}`;
+    if (foragidos === 0) {
+      return `Alvos: ${alvos} — ${presosTxt} (todos presos)`;
+    }
+    const foragTxt = `${foragidos} ${foragidos === 1 ? 'permanece foragido' : 'permanecem foragidos'}`;
+    let extra = '';
+    if (mp.foragidoNoLocalChegada) {
+      const fug = mp.quantidadeFugiram || foragidos;
+      extra = ` • No local na chegada: SIM (${fug} ${fug === 1 ? 'fugiu' : 'fugiram'}${
+        mp.descricaoFuga ? `: ${mp.descricaoFuga}` : ''
+      })`;
+    } else if (mp.foragidoNoLocalChegada === false) {
+      extra = ' • No local na chegada: NÃO';
+    }
+    return `Alvos: ${alvos} — ${presosTxt} — ${foragTxt}${extra}`;
+  }
+  return `Foragido preso: ${mp.foragidoPreso ? 'SIM' : 'NÃO'}`;
+};
+
+export const formatMandadoBuscaResumo = (
+  mb?: RelatorioOperacaoPolicial['detalhesAdicionais']['mandadoBusca']
+): string => {
+  if (!mb?.ativo) return '';
+  if (!mb.materialArrecadado) return 'Material arrecadado: NÃO';
+  const partes: string[] = [];
+  for (const m of mb.materiais || []) {
+    if (m === 'ARMA') {
+      const list = (mb.armasArrecadadas || []).map(a => `${a.quantidade} ${a.tipo}`);
+      partes.push(list.length > 0 ? `ARMA (${list.join(', ')})` : 'ARMA');
+    } else if (m === 'DROGA') {
+      const list = (mb.drogasArrecadadas || []).map(
+        d => `${d.quantidade} ${d.unidade === 't' ? 't' : 'kg'} de ${d.tipo}`
+      );
+      partes.push(list.length > 0 ? `DROGA (${list.join(', ')})` : 'DROGA');
+    } else if (m === 'VEÍCULOS') {
+      const list = (mb.veiculosArrecadados || []).map(v => `${v.quantidade} ${v.tipo}`);
+      partes.push(list.length > 0 ? `VEÍCULOS (${list.join(', ')})` : 'VEÍCULOS');
+    } else if (m === 'OUTROS') {
+      partes.push(mb.outrosDetalhes ? `OUTROS (${mb.outrosDetalhes})` : 'OUTROS');
+    } else {
+      partes.push(m);
+    }
+  }
+  return partes.length > 0 ? `Material arrecadado: SIM — ${partes.join(' • ')}` : 'Material arrecadado: SIM';
+};
+
+export const formatGerenciamentoCriseResumo = (
+  gc?: RelatorioOperacaoPolicial['detalhesAdicionais']['gerenciamentoCrise']
+): string => {
+  if (!gc?.ativo) return '';
+  if (gc.tipo === 'SUICÍDIO') {
+    const consumado = gc.suicidioConsumado ? 'SIM' : 'NÃO';
+    const atuacao = gc.atuacaoAdotada
+      ? ` • Atuação adotada: ${gc.atuacaoAdotada}${
+          gc.atuacaoAdotada === 'Outros' && gc.atuacaoOutrosDescricao ? ` (${gc.atuacaoOutrosDescricao})` : ''
+        }`
+      : '';
+    return `Tipo: SUICÍDIO • Consumado: ${consumado}${atuacao}`;
+  }
+  return `Tipo: ${gc.tipo}${gc.outrosDetalhes ? ` (${gc.outrosDetalhes})` : ''}`;
+};
 
 const getTodayBrasilia = (): string => {
   try {
@@ -219,25 +328,17 @@ export function printRelatorioOperacaoPolicial(
   const detalhesLinhas: string[] = [];
   if (det.mandadoPrisao?.ativo) {
     detalhesLinhas.push(
-      `<li><strong>Mandado de Prisão:</strong> Foragido preso: ${det.mandadoPrisao.foragidoPreso ? 'SIM' : 'NÃO'}</li>`
+      `<li><strong>Mandado de Prisão:</strong> ${escapeHtmlText(formatMandadoPrisaoResumo(det.mandadoPrisao))}</li>`
     );
   }
   if (det.mandadoBusca?.ativo) {
-    const mats =
-      det.mandadoBusca.materialArrecadado && (det.mandadoBusca.materiais || []).length > 0
-        ? ` — Materiais: ${(det.mandadoBusca.materiais || []).map(m => escapeHtmlText(m)).join(', ')}${
-            det.mandadoBusca.outrosDetalhes ? ` (${escapeHtmlText(det.mandadoBusca.outrosDetalhes)})` : ''
-          }`
-        : '';
     detalhesLinhas.push(
-      `<li><strong>Mandado de Busca:</strong> Material arrecadado: ${det.mandadoBusca.materialArrecadado ? 'SIM' : 'NÃO'}${mats}</li>`
+      `<li><strong>Mandado de Busca:</strong> ${escapeHtmlText(formatMandadoBuscaResumo(det.mandadoBusca))}</li>`
     );
   }
   if (det.gerenciamentoCrise?.ativo) {
     detalhesLinhas.push(
-      `<li><strong>Gerenciamento de Crise:</strong> Tipo: ${escapeHtmlText(det.gerenciamentoCrise.tipo)}${
-        det.gerenciamentoCrise.outrosDetalhes ? ` (${escapeHtmlText(det.gerenciamentoCrise.outrosDetalhes)})` : ''
-      }</li>`
+      `<li><strong>Gerenciamento de Crise:</strong> ${escapeHtmlText(formatGerenciamentoCriseResumo(det.gerenciamentoCrise))}</li>`
     );
   }
 
@@ -278,10 +379,29 @@ export function printRelatorioOperacaoPolicial(
     `;
   }
 
+  const qtdObitosPrint = rel.houveObito ? Math.max(1, Number(rel.quantidadeObitos) || 1) : 0;
+  const mesmaSinopsePrint = rel.mesmaSinopseObito !== false;
+  const obitoSinopsesList = Array.isArray(rel.sinopsesObitos) ? rel.sinopsesObitos : [];
   const obitoHtml = rel.houveObito
     ? `
-      <div class="section-title" style="color:#991b1b;border-color:#fca5a5;">Registro de Óbito no Atendimento / Em Decorrência Dele</div>
-      <div class="desc-box" style="border-color:#fca5a5;background:#fef2f2;">${escapeHtmlText(rel.sinopseObito || '')}</div>
+      <div class="section-title" style="color:#991b1b;border-color:#fca5a5;">
+        Registro de Óbito no Atendimento / Em Decorrência Dele — Quantidade: ${qtdObitosPrint}
+      </div>
+      ${
+        !mesmaSinopsePrint && obitoSinopsesList.length > 0
+          ? obitoSinopsesList
+              .map(
+                (txt, idx) => `
+              <div style="margin-bottom:8px;">
+                <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#991b1b;margin-bottom:3px;">
+                  Sinopse — Óbito ${idx + 1}
+                </div>
+                <div class="desc-box" style="border-color:#fca5a5;background:#fef2f2;min-height:42px;">${escapeHtmlText(txt)}</div>
+              </div>`
+              )
+              .join('')
+          : `<div class="desc-box" style="border-color:#fca5a5;background:#fef2f2;">${escapeHtmlText(rel.sinopseObito || '')}</div>`
+      }
     `
     : `
       <div class="info-box full" style="margin-top:10px;">
@@ -291,9 +411,9 @@ export function printRelatorioOperacaoPolicial(
     `;
 
   const operadoresList = rel.operadores || [];
-  // Assinaturas: Nome -> abaixo Cargo -> abaixo MASP
+  // Assinaturas: sem bordas, linha horizontal acima do nome para assinatura física + dados abaixo
   const assinaturasHtml = `
-    <div class="section-title">Assinaturas Eletrônicas da Equipe (${operadoresList.length})</div>
+    <div class="section-title">Assinaturas</div>
     <div class="sig-grid">
       ${operadoresList
         .map(op => {
@@ -305,6 +425,7 @@ export function printRelatorioOperacaoPolicial(
             : 'Pendente de assinatura (prazo de 30 dias)';
           return `
             <div class="sig-card">
+              <div class="sig-line"></div>
               <div class="sig-name">${escapeHtmlText(op.name)}</div>
               <div class="sig-cargo">${escapeHtmlText(op.cargo || 'Policial Civil')}</div>
               <div class="sig-masp">MASP: ${escapeHtmlText(op.masp ? formatMasp(op.masp) : 'N/A')}</div>
@@ -339,12 +460,13 @@ export function printRelatorioOperacaoPolicial(
         .desc-box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; background: #ffffff; white-space: pre-wrap; min-height: 64px; font-size: 12px; }
         .clean-list { margin: 4px 0 8px 18px; padding: 0; font-size: 11.5px; }
         .clean-list li { margin-bottom: 4px; }
-        .sig-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 8px; }
-        .sig-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; page-break-inside: avoid; background: #f8fafc; text-align: center; }
+        .sig-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px 20px; margin-top: 14px; }
+        .sig-card { border: none; background: transparent; padding: 20px 10px 6px; page-break-inside: avoid; text-align: center; }
+        .sig-line { border-top: 1px solid #0f172a; width: 88%; margin: 0 auto 6px; }
         .sig-name { font-size: 12.5px; font-weight: 700; color: #0f172a; }
         .sig-cargo { font-size: 11px; font-weight: 600; color: #334155; margin-top: 2px; }
         .sig-masp { font-size: 10.5px; font-family: monospace; color: #475569; margin-top: 2px; }
-        .sig-status { font-size: 9.5px; font-weight: 700; margin-top: 6px; padding-top: 5px; border-top: 1px dashed #cbd5e1; }
+        .sig-status { font-size: 9.5px; font-weight: 700; margin-top: 4px; }
         .sig-status.signed { color: #047857; }
         .sig-status.pending { color: #b45309; }
       </style>
@@ -469,13 +591,32 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
 
   // 6. Detalhe Adicional (múltiplo)
   const [hasMandadoPrisao, setHasMandadoPrisao] = useState<boolean>(false);
-  const [foragidoPreso, setForagidoPreso] = useState<boolean>(true);
+  const [quantidadeAlvosStr, setQuantidadeAlvosStr] = useState<string>('1');
+  const [quantidadePresosStr, setQuantidadePresosStr] = useState<string>('1');
+  const [foragidoNoLocalChegada, setForagidoNoLocalChegada] = useState<boolean>(false);
+  const [quantidadeFugiramStr, setQuantidadeFugiramStr] = useState<string>('1');
+  const [descricaoFuga, setDescricaoFuga] = useState<string>('');
+
   const [hasMandadoBusca, setHasMandadoBusca] = useState<boolean>(false);
   const [materialArrecadado, setMaterialArrecadado] = useState<boolean>(false);
   const [materiaisBusca, setMateriaisBusca] = useState<MaterialArrecadadoBusca[]>([]);
+  const [armasBusca, setArmasBusca] = useState<ArmaApreendidaBuscaItem[]>([]);
+  const [armaBuscaTipoDraft, setArmaBuscaTipoDraft] = useState<TipoArmaApreendidaBusca>('Pistola');
+  const [armaBuscaQtdDraft, setArmaBuscaQtdDraft] = useState<string>('1');
+  const [drogasBusca, setDrogasBusca] = useState<DrogaApreendidaBuscaItem[]>([]);
+  const [drogaBuscaTipoDraft, setDrogaBuscaTipoDraft] = useState<TipoDrogaApreendidaBusca>('MACONHA');
+  const [drogaBuscaQtdDraft, setDrogaBuscaQtdDraft] = useState<string>('');
+  const [drogaBuscaUnidadeDraft, setDrogaBuscaUnidadeDraft] = useState<UnidadeDrogaBusca>('kg');
+  const [veiculosBusca, setVeiculosBusca] = useState<VeiculoApreendidoBuscaItem[]>([]);
+  const [veiculoBuscaTipoDraft, setVeiculoBuscaTipoDraft] = useState<TipoVeiculoApreendidoBusca>('Carro');
+  const [veiculoBuscaQtdDraft, setVeiculoBuscaQtdDraft] = useState<string>('1');
   const [materiaisBuscaOutros, setMateriaisBuscaOutros] = useState<string>('');
+
   const [hasGerenciamentoCrise, setHasGerenciamentoCrise] = useState<boolean>(false);
   const [tipoCrise, setTipoCrise] = useState<TipoCriseOperacao>('DISTÚRBIO');
+  const [suicidioConsumado, setSuicidioConsumado] = useState<boolean>(false);
+  const [atuacaoSuicidio, setAtuacaoSuicidio] = useState<AtuacaoSuicidioOperacao>('Negociador');
+  const [atuacaoSuicidioOutros, setAtuacaoSuicidioOutros] = useState<string>('');
   const [tipoCriseOutros, setTipoCriseOutros] = useState<string>('');
 
   // 7. Uso de Arma de Fogo ou Incapacitação Elétrica
@@ -497,7 +638,10 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
 
   // 8. Óbito
   const [houveObito, setHouveObito] = useState<boolean>(false);
+  const [quantidadeObitosStr, setQuantidadeObitosStr] = useState<string>('1');
+  const [mesmaSinopseObito, setMesmaSinopseObito] = useState<boolean>(true);
   const [sinopseObito, setSinopseObito] = useState<string>('');
+  const [sinopsesObitos, setSinopsesObitos] = useState<string[]>(['']);
 
   // Tick every second for 3-day countdown
   useEffect(() => {
@@ -607,23 +751,21 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
     return DEPARTAMENTOS_APOIO_OPERACAO.filter(d => !selected.has(d));
   }, [departamentosApoio]);
 
-  // Weapons from Acervo (prioritize unit weapons first, allow searching by serial number across acervo)
+  // Weapons from Acervo — mostra armas disponíveis na unidade e filtra ao vivo por série, marca, modelo, calibre ou descrição
   const filteredAcervoWeapons = useMemo(() => {
     const allW = storage.getAllWeaponsForLookup();
     const q = normalizeText(weaponSearchDraft);
-    return allW
+    const unitFiltered = effectiveUnitId ? allW.filter(w => w.unitId === effectiveUnitId) : allW;
+    const baseList = unitFiltered.length > 0 ? unitFiltered : allW;
+    return baseList
       .filter(w => {
-        if (!q) return !effectiveUnitId || w.unitId === effectiveUnitId;
-        const hay = normalizeText(`${w.serialNumber} ${w.manufacturer} ${w.model} ${w.caliber} ${w.type}`);
+        if (!q) return true;
+        const hay = normalizeText(
+          `${w.serialNumber} ${w.manufacturer} ${w.model} ${w.caliber} ${w.type} ${w.status || ''} ${w.maintenanceReason || ''} ${(w as { observations?: string; description?: string }).observations || ''} ${(w as { observations?: string; description?: string }).description || ''}`
+        );
         return hay.includes(q);
       })
-      .sort((a, b) => {
-        const aOwn = a.unitId === effectiveUnitId ? 0 : 1;
-        const bOwn = b.unitId === effectiveUnitId ? 0 : 1;
-        if (aOwn !== bOwn) return aOwn - bOwn;
-        return (a.serialNumber || '').localeCompare(b.serialNumber || '', 'pt-BR');
-      })
-      .slice(0, 60);
+      .sort((a, b) => (a.serialNumber || '').localeCompare(b.serialNumber || '', 'pt-BR'));
   }, [weaponSearchDraft, effectiveUnitId, dataVersion]);
 
   // Unit electrical incapacitation / materials — ACAUTELADOS first, then unit available
@@ -737,13 +879,30 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
     setDescricaoEmergencia('');
     setSinopse('');
     setHasMandadoPrisao(false);
-    setForagidoPreso(true);
+    setQuantidadeAlvosStr('1');
+    setQuantidadePresosStr('1');
+    setForagidoNoLocalChegada(false);
+    setQuantidadeFugiramStr('1');
+    setDescricaoFuga('');
     setHasMandadoBusca(false);
     setMaterialArrecadado(false);
     setMateriaisBusca([]);
+    setArmasBusca([]);
+    setArmaBuscaTipoDraft('Pistola');
+    setArmaBuscaQtdDraft('1');
+    setDrogasBusca([]);
+    setDrogaBuscaTipoDraft('MACONHA');
+    setDrogaBuscaQtdDraft('');
+    setDrogaBuscaUnidadeDraft('kg');
+    setVeiculosBusca([]);
+    setVeiculoBuscaTipoDraft('Carro');
+    setVeiculoBuscaQtdDraft('1');
     setMateriaisBuscaOutros('');
     setHasGerenciamentoCrise(false);
     setTipoCrise('DISTÚRBIO');
+    setSuicidioConsumado(false);
+    setAtuacaoSuicidio('Negociador');
+    setAtuacaoSuicidioOutros('');
     setTipoCriseOutros('');
     setUtilizouArma(false);
     setUtilizouArmaFogo(false);
@@ -760,7 +919,10 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
     setArmasEletricas([]);
     setElectricSearch('');
     setHouveObito(false);
+    setQuantidadeObitosStr('1');
+    setMesmaSinopseObito(true);
     setSinopseObito('');
+    setSinopsesObitos(['']);
   };
 
   const populateFormForEdit = (rel: RelatorioOperacaoPolicial) => {
@@ -785,13 +947,32 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
 
     const det = rel.detalhesAdicionais || {};
     setHasMandadoPrisao(Boolean(det.mandadoPrisao?.ativo));
-    setForagidoPreso(det.mandadoPrisao?.foragidoPreso !== false);
+    const alvosEdit = Math.max(1, Math.min(99, Number(det.mandadoPrisao?.quantidadeAlvos) || 1));
+    const presosEdit =
+      det.mandadoPrisao?.quantidadePresos !== undefined
+        ? Math.max(0, Math.min(alvosEdit, Number(det.mandadoPrisao.quantidadePresos) || 0))
+        : det.mandadoPrisao?.foragidoPreso !== false
+        ? alvosEdit
+        : 0;
+    setQuantidadeAlvosStr(String(alvosEdit));
+    setQuantidadePresosStr(String(presosEdit));
+    setForagidoNoLocalChegada(Boolean(det.mandadoPrisao?.foragidoNoLocalChegada));
+    setQuantidadeFugiramStr(String(Math.max(1, Number(det.mandadoPrisao?.quantidadeFugiram) || Math.max(1, alvosEdit - presosEdit))));
+    setDescricaoFuga(det.mandadoPrisao?.descricaoFuga || '');
+
     setHasMandadoBusca(Boolean(det.mandadoBusca?.ativo));
     setMaterialArrecadado(Boolean(det.mandadoBusca?.materialArrecadado));
     setMateriaisBusca(Array.isArray(det.mandadoBusca?.materiais) ? det.mandadoBusca!.materiais : []);
+    setArmasBusca(Array.isArray(det.mandadoBusca?.armasArrecadadas) ? det.mandadoBusca!.armasArrecadadas! : []);
+    setDrogasBusca(Array.isArray(det.mandadoBusca?.drogasArrecadadas) ? det.mandadoBusca!.drogasArrecadadas! : []);
+    setVeiculosBusca(Array.isArray(det.mandadoBusca?.veiculosArrecadados) ? det.mandadoBusca!.veiculosArrecadados! : []);
     setMateriaisBuscaOutros(det.mandadoBusca?.outrosDetalhes || '');
+
     setHasGerenciamentoCrise(Boolean(det.gerenciamentoCrise?.ativo));
     setTipoCrise(det.gerenciamentoCrise?.tipo || 'DISTÚRBIO');
+    setSuicidioConsumado(Boolean(det.gerenciamentoCrise?.suicidioConsumado));
+    setAtuacaoSuicidio(det.gerenciamentoCrise?.atuacaoAdotada || 'Negociador');
+    setAtuacaoSuicidioOutros(det.gerenciamentoCrise?.atuacaoOutrosDescricao || '');
     setTipoCriseOutros(det.gerenciamentoCrise?.outrosDetalhes || '');
 
     setUtilizouArma(Boolean(rel.utilizouArmaFogoOuEletrica));
@@ -799,8 +980,19 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
     setArmasFogo(Array.isArray(rel.armasFogo) ? rel.armasFogo : []);
     setUtilizouArmaEletrica(Boolean(rel.utilizouArmaEletrica));
     setArmasEletricas(Array.isArray(rel.armasEletricas) ? rel.armasEletricas : []);
-    setHouveObito(Boolean(rel.houveObito));
+
+    const hasOb = Boolean(rel.houveObito);
+    const qtdOb = hasOb ? Math.max(1, Math.min(99, Number(rel.quantidadeObitos) || 1)) : 1;
+    const mesmaOb = rel.mesmaSinopseObito !== false;
+    setHouveObito(hasOb);
+    setQuantidadeObitosStr(String(qtdOb));
+    setMesmaSinopseObito(mesmaOb);
     setSinopseObito(rel.sinopseObito || '');
+    setSinopsesObitos(
+      !mesmaOb && Array.isArray(rel.sinopsesObitos) && rel.sinopsesObitos.length > 0
+        ? Array.from({ length: qtdOb }, (_, i) => rel.sinopsesObitos?.[i] || '')
+        : Array.from({ length: qtdOb }, () => '')
+    );
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -927,10 +1119,61 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
       setFeedback({ type: 'error', message: 'Preencha a Sinopse da operação.' });
       return;
     }
-    if (hasMandadoBusca && materialArrecadado && materiaisBusca.length === 0) {
-      setFeedback({ type: 'error', message: 'Selecione ao menos um tipo de material arrecadado no Mandado de Busca.' });
+    const alvosNum = Math.max(1, Math.min(99, parseInt(quantidadeAlvosStr || '0', 10) || 0));
+    const presosNum = Math.max(0, Math.min(alvosNum, parseInt(quantidadePresosStr || '0', 10) || 0));
+    const foragidosRestantes = Math.max(0, alvosNum - presosNum);
+    const fugiramNum = Math.max(1, Math.min(Math.max(1, foragidosRestantes), parseInt(quantidadeFugiramStr || '1', 10) || 1));
+
+    if (hasMandadoPrisao) {
+      if (!quantidadeAlvosStr || parseInt(quantidadeAlvosStr, 10) < 1) {
+        setFeedback({ type: 'error', message: 'Informe quantos eram os alvos no Mandado de Prisão (1 a 99).' });
+        return;
+      }
+      if (quantidadePresosStr === '' || parseInt(quantidadePresosStr, 10) > alvosNum) {
+        setFeedback({ type: 'error', message: 'A quantidade de presos não pode ser maior que a quantidade de alvos.' });
+        return;
+      }
+      if (foragidosRestantes > 0 && foragidoNoLocalChegada && !descricaoFuga.trim()) {
+        setFeedback({
+          type: 'error',
+          message: 'Descreva como ocorreu a fuga do(s) foragido(s) (até 500 caracteres).'
+        });
+        return;
+      }
+    }
+
+    if (hasMandadoBusca && materialArrecadado) {
+      if (materiaisBusca.length === 0) {
+        setFeedback({ type: 'error', message: 'Selecione ao menos um tipo de material arrecadado no Mandado de Busca.' });
+        return;
+      }
+      if (materiaisBusca.includes('ARMA') && armasBusca.length === 0) {
+        setFeedback({ type: 'error', message: 'Adicione ao menos um tipo e quantidade de arma apreendida no Mandado de Busca.' });
+        return;
+      }
+      if (materiaisBusca.includes('DROGA') && drogasBusca.length === 0) {
+        setFeedback({ type: 'error', message: 'Adicione ao menos um tipo, quantidade e unidade de droga apreendida no Mandado de Busca.' });
+        return;
+      }
+      if (materiaisBusca.includes('VEÍCULOS') && veiculosBusca.length === 0) {
+        setFeedback({ type: 'error', message: 'Adicione ao menos um tipo e quantidade de veículo apreendido no Mandado de Busca.' });
+        return;
+      }
+    }
+
+    if (
+      hasGerenciamentoCrise &&
+      tipoCrise === 'SUICÍDIO' &&
+      atuacaoSuicidio === 'Outros' &&
+      !atuacaoSuicidioOutros.trim()
+    ) {
+      setFeedback({
+        type: 'error',
+        message: 'Descreva a atuação adotada em Outros no Gerenciamento de Crise (até 250 caracteres).'
+      });
       return;
     }
+
     if (utilizouArma && !utilizouArmaFogo && !utilizouArmaEletrica) {
       setFeedback({
         type: 'error',
@@ -946,9 +1189,29 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
       setFeedback({ type: 'error', message: 'Selecione ao menos uma arma de incapacitação elétrica.' });
       return;
     }
-    if (houveObito && !sinopseObito.trim()) {
-      setFeedback({ type: 'error', message: 'Informe a sinopse sobre o momento do óbito.' });
-      return;
+
+    const qtdObitosNum = houveObito ? Math.max(1, Math.min(99, parseInt(quantidadeObitosStr || '1', 10) || 1)) : 0;
+    const sinopsesObitosTrim = Array.from({ length: qtdObitosNum }, (_, i) => (sinopsesObitos[i] || '').trim());
+    if (houveObito) {
+      if (!quantidadeObitosStr || parseInt(quantidadeObitosStr, 10) < 1) {
+        setFeedback({ type: 'error', message: 'Informe a quantidade de mortos (1 a 99).' });
+        return;
+      }
+      if (mesmaSinopseObito) {
+        if (!sinopseObito.trim()) {
+          setFeedback({ type: 'error', message: 'Informe a sinopse sobre o momento do óbito.' });
+          return;
+        }
+      } else {
+        const emptyIdx = sinopsesObitosTrim.findIndex(s => !s);
+        if (emptyIdx !== -1) {
+          setFeedback({
+            type: 'error',
+            message: `Preencha a sinopse individual do Óbito ${emptyIdx + 1}.`
+          });
+          return;
+        }
+      }
     }
 
     const payload: Partial<RelatorioOperacaoPolicial> = {
@@ -972,13 +1235,29 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
       descricaoEmergencia: tipoAtendimento === 'Emergencial' ? descricaoEmergencia.trim() : '',
       sinopse: sinopse.trim(),
       detalhesAdicionais: {
-        ...(hasMandadoPrisao ? { mandadoPrisao: { ativo: true, foragidoPreso } } : {}),
+        ...(hasMandadoPrisao
+          ? {
+              mandadoPrisao: {
+                ativo: true,
+                foragidoPreso: presosNum >= alvosNum,
+                quantidadeAlvos: alvosNum,
+                quantidadePresos: presosNum,
+                ...(foragidosRestantes > 0 ? { foragidoNoLocalChegada } : {}),
+                ...(foragidosRestantes > 0 && foragidoNoLocalChegada
+                  ? { quantidadeFugiram: fugiramNum, descricaoFuga: descricaoFuga.trim() }
+                  : {})
+              }
+            }
+          : {}),
         ...(hasMandadoBusca
           ? {
               mandadoBusca: {
                 ativo: true,
                 materialArrecadado,
                 materiais: materialArrecadado ? materiaisBusca : [],
+                armasArrecadadas: materialArrecadado && materiaisBusca.includes('ARMA') ? armasBusca : [],
+                drogasArrecadadas: materialArrecadado && materiaisBusca.includes('DROGA') ? drogasBusca : [],
+                veiculosArrecadados: materialArrecadado && materiaisBusca.includes('VEÍCULOS') ? veiculosBusca : [],
                 outrosDetalhes:
                   materialArrecadado && materiaisBusca.includes('OUTROS') ? materiaisBuscaOutros.trim() : ''
               }
@@ -989,6 +1268,13 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
               gerenciamentoCrise: {
                 ativo: true,
                 tipo: tipoCrise,
+                ...(tipoCrise === 'SUICÍDIO'
+                  ? {
+                      suicidioConsumado,
+                      atuacaoAdotada: atuacaoSuicidio,
+                      atuacaoOutrosDescricao: atuacaoSuicidio === 'Outros' ? atuacaoSuicidioOutros.trim() : ''
+                    }
+                  : {}),
                 outrosDetalhes: tipoCrise === 'OUTROS' ? tipoCriseOutros.trim() : ''
               }
             }
@@ -1000,7 +1286,10 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
       utilizouArmaEletrica: utilizouArma && utilizouArmaEletrica,
       armasEletricas: utilizouArma && utilizouArmaEletrica ? armasEletricas : [],
       houveObito,
-      sinopseObito: houveObito ? sinopseObito.trim() : '',
+      quantidadeObitos: qtdObitosNum,
+      mesmaSinopseObito: houveObito ? mesmaSinopseObito : true,
+      sinopseObito: houveObito && mesmaSinopseObito ? sinopseObito.trim() : '',
+      sinopsesObitos: houveObito && !mesmaSinopseObito ? sinopsesObitosTrim : [],
       departmentId: effectiveDeptId || undefined,
       unitId: effectiveUnitId || undefined,
       unitName: activeUnitName || undefined
@@ -1053,7 +1342,95 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
   };
 
   const toggleMaterialBusca = (m: MaterialArrecadadoBusca) => {
-    setMateriaisBusca(prev => (prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]));
+    setMateriaisBusca(prev => {
+      const removing = prev.includes(m);
+      if (removing) {
+        if (m === 'ARMA') setArmasBusca([]);
+        if (m === 'DROGA') setDrogasBusca([]);
+        if (m === 'VEÍCULOS') setVeiculosBusca([]);
+        if (m === 'OUTROS') setMateriaisBuscaOutros('');
+        return prev.filter(x => x !== m);
+      }
+      return [...prev, m];
+    });
+  };
+
+  const handleAddArmaBusca = () => {
+    const qtd = Math.max(1, Math.min(9999, parseInt(armaBuscaQtdDraft || '1', 10) || 1));
+    setArmasBusca(prev => {
+      const idx = prev.findIndex(item => item.tipo === armaBuscaTipoDraft);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], quantidade: copy[idx].quantidade + qtd };
+        return copy;
+      }
+      return [...prev, { tipo: armaBuscaTipoDraft, quantidade: qtd }];
+    });
+    setArmaBuscaQtdDraft('1');
+  };
+
+  const handleAddDrogaBusca = () => {
+    const parsed = parseFloat(drogaBuscaQtdDraft.replace(',', '.'));
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setFeedback({ type: 'error', message: 'Informe uma quantidade válida de droga apreendida (maior que 0).' });
+      return;
+    }
+    setFeedback(null);
+    const rounded = Math.round(parsed * 1000) / 1000;
+    setDrogasBusca(prev => [
+      ...prev,
+      { tipo: drogaBuscaTipoDraft, quantidade: rounded, unidade: drogaBuscaUnidadeDraft }
+    ]);
+    setDrogaBuscaQtdDraft('');
+  };
+
+  const handleAddVeiculoBusca = () => {
+    const qtd = Math.max(1, Math.min(9999, parseInt(veiculoBuscaQtdDraft || '1', 10) || 1));
+    setVeiculosBusca(prev => {
+      const idx = prev.findIndex(item => item.tipo === veiculoBuscaTipoDraft);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], quantidade: copy[idx].quantidade + qtd };
+        return copy;
+      }
+      return [...prev, { tipo: veiculoBuscaTipoDraft, quantidade: qtd }];
+    });
+    setVeiculoBuscaQtdDraft('1');
+  };
+
+  const handleQuantidadeAlvosChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    setQuantidadeAlvosStr(digits);
+    // Inicialmente o número de presos acompanha o número de alvos, podendo ser alterado depois
+    setQuantidadePresosStr(digits);
+    setForagidoNoLocalChegada(false);
+    setQuantidadeFugiramStr('1');
+    setDescricaoFuga('');
+  };
+
+  const handleQuantidadePresosChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    if (digits === '') {
+      setQuantidadePresosStr('');
+      return;
+    }
+    const maxAlvos = Math.max(0, parseInt(quantidadeAlvosStr || '0', 10) || 0);
+    const val = Math.min(maxAlvos, parseInt(digits, 10) || 0);
+    setQuantidadePresosStr(String(val));
+    const rem = Math.max(0, maxAlvos - val);
+    if (rem === 0) {
+      setForagidoNoLocalChegada(false);
+      setDescricaoFuga('');
+    } else {
+      setQuantidadeFugiramStr(String(rem));
+    }
+  };
+
+  const handleQuantidadeObitosChange = (raw: string) => {
+    const digits = raw.replace(/\D/g, '').slice(0, 2);
+    setQuantidadeObitosStr(digits);
+    const n = Math.max(1, Math.min(99, parseInt(digits || '1', 10) || 1));
+    setSinopsesObitos(prev => Array.from({ length: n }, (_, i) => prev[i] || ''));
   };
 
   return (
@@ -1787,22 +2164,144 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
             </button>
           </div>
 
-          {hasMandadoPrisao && (
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="font-bold text-amber-300">Mandado de Prisão — Foragido preso?</span>
-              <select
-                value={foragidoPreso ? 'SIM' : 'NAO'}
-                onChange={e => setForagidoPreso(e.target.value === 'SIM')}
-                className="bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold"
-              >
-                <option value="SIM">SIM</option>
-                <option value="NAO">NÃO</option>
-              </select>
-            </div>
-          )}
+          {hasMandadoPrisao && (() => {
+            const alvosVal = Math.max(0, parseInt(quantidadeAlvosStr || '0', 10) || 0);
+            const presosVal = Math.max(0, Math.min(alvosVal, parseInt(quantidadePresosStr || '0', 10) || 0));
+            const foragidosRestantes = Math.max(0, alvosVal - presosVal);
+
+            return (
+              <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-amber-300">Mandado de Prisão</span>
+                  {alvosVal > 0 && quantidadePresosStr !== '' && (
+                    <span
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                        foragidosRestantes > 0
+                          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                          : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                      }`}
+                    >
+                      {foragidosRestantes > 0
+                        ? `${presosVal} ${presosVal === 1 ? 'preso' : 'presos'} — ${foragidosRestantes} ${
+                            foragidosRestantes === 1 ? 'permanece foragido' : 'permanecem foragidos'
+                          }`
+                        : `${presosVal} ${presosVal === 1 ? 'preso' : 'presos'} — Todos os alvos capturados`}
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                      Quantos eram os alvos? (máx. 2 dígitos) *
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={quantidadeAlvosStr}
+                      onChange={e => handleQuantidadeAlvosChange(e.target.value)}
+                      placeholder="Ex.: 3"
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-2 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                      Quantos foram presos? *
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={2}
+                      value={quantidadePresosStr}
+                      onChange={e => handleQuantidadePresosChange(e.target.value)}
+                      placeholder="Ex.: 2"
+                      className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-2 font-mono text-xs focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {alvosVal > 0 && quantidadePresosStr !== '' && foragidosRestantes > 0 && (
+                  <div className="pt-2.5 border-t border-slate-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <span className="font-semibold text-amber-200">
+                        O(s) foragido(s) estava(m) no local na hora da chegada da equipe?
+                      </span>
+                      <select
+                        value={foragidoNoLocalChegada ? 'SIM' : 'NAO'}
+                        onChange={e => {
+                          const yes = e.target.value === 'SIM';
+                          setForagidoNoLocalChegada(yes);
+                          if (yes) {
+                            setQuantidadeFugiramStr(String(foragidosRestantes));
+                          } else {
+                            setDescricaoFuga('');
+                          }
+                        }}
+                        className="bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold"
+                      >
+                        <option value="NAO">NÃO</option>
+                        <option value="SIM">SIM</option>
+                      </select>
+                    </div>
+
+                    {foragidoNoLocalChegada && (
+                      <div className="space-y-2.5 bg-slate-950/60 border border-amber-500/30 rounded-xl p-3">
+                        <div className="sm:max-w-[240px]">
+                          <label className="block text-[10px] font-bold text-amber-300 uppercase mb-1">
+                            Quantos fugiram? (máx. {foragidosRestantes}) *
+                          </label>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            maxLength={2}
+                            value={quantidadeFugiramStr}
+                            onChange={e => {
+                              const digits = e.target.value.replace(/\D/g, '').slice(0, 2);
+                              if (!digits) {
+                                setQuantidadeFugiramStr('');
+                                return;
+                              }
+                              const num = Math.max(1, Math.min(foragidosRestantes, parseInt(digits, 10) || 1));
+                              setQuantidadeFugiramStr(String(num));
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 font-mono text-xs focus:outline-none focus:border-amber-400"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-amber-300 uppercase">
+                              Explicação de como ocorreu a fuga *
+                            </label>
+                            <span
+                              className={`font-mono text-[10px] font-bold ${
+                                descricaoFuga.length >= MAX_DESC_FUGA ? 'text-red-400' : 'text-slate-400'
+                              }`}
+                            >
+                              {descricaoFuga.length} / {MAX_DESC_FUGA}
+                            </span>
+                          </div>
+                          <textarea
+                            rows={3}
+                            maxLength={MAX_DESC_FUGA}
+                            value={descricaoFuga}
+                            onChange={e => setDescricaoFuga(e.target.value.slice(0, MAX_DESC_FUGA))}
+                            placeholder="Explique as circunstâncias da fuga no momento da chegada da equipe..."
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg p-2.5 text-xs focus:outline-none focus:border-amber-400 resize-y"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {hasMandadoBusca && (
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 space-y-2.5">
+            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3.5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="font-bold text-amber-300">Mandado de Busca — Material arrecadado?</span>
                 <select
@@ -1812,6 +2311,9 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
                     setMaterialArrecadado(yes);
                     if (!yes) {
                       setMateriaisBusca([]);
+                      setArmasBusca([]);
+                      setDrogasBusca([]);
+                      setVeiculosBusca([]);
                       setMateriaisBuscaOutros('');
                     }
                   }}
@@ -1823,7 +2325,7 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
               </div>
 
               {materialArrecadado && (
-                <div className="space-y-2 pt-2 border-t border-slate-800">
+                <div className="space-y-3 pt-2.5 border-t border-slate-800">
                   <span className="block text-[10px] font-bold uppercase text-slate-400">
                     Qual material arrecadado? (pode selecionar mais de um)
                   </span>
@@ -1847,6 +2349,208 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
                     })}
                   </div>
 
+                  {/* ARMA — Tipo + Quantidade (múltiplos tipos) */}
+                  {materiaisBusca.includes('ARMA') && (
+                    <div className="bg-slate-950/70 border border-cyan-500/30 rounded-xl p-3 space-y-2.5">
+                      <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                        Armas Arrecadadas — Tipo e Quantidade (pode adicionar mais de um tipo)
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                        <div className="sm:col-span-6">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo</label>
+                          <select
+                            value={armaBuscaTipoDraft}
+                            onChange={e => setArmaBuscaTipoDraft(e.target.value as TipoArmaApreendidaBusca)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs"
+                          >
+                            {TIPOS_ARMA_BUSCA_OPCOES.map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Quantidade</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={9999}
+                            value={armaBuscaQtdDraft}
+                            onChange={e => setArmaBuscaQtdDraft(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <button
+                            type="button"
+                            onClick={handleAddArmaBusca}
+                            className="w-full py-1.5 px-3 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-xs flex items-center justify-center space-x-1 transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Adicionar</span>
+                          </button>
+                        </div>
+                      </div>
+                      {armasBusca.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {armasBusca.map(a => (
+                            <span
+                              key={a.tipo}
+                              className="inline-flex items-center space-x-1.5 bg-slate-900 border border-cyan-500/40 text-cyan-200 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                            >
+                              <span>{a.quantidade} {a.tipo}</span>
+                              <button
+                                type="button"
+                                onClick={() => setArmasBusca(prev => prev.filter(x => x.tipo !== a.tipo))}
+                                className="hover:text-red-400"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* DROGA — Tipo + Quantidade + Unidade (kg / t) */}
+                  {materiaisBusca.includes('DROGA') && (
+                    <div className="bg-slate-950/70 border border-cyan-500/30 rounded-xl p-3 space-y-2.5">
+                      <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                        Drogas Arrecadadas — Tipo, Quantidade e Unidade de Medida
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                        <div className="sm:col-span-4">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo</label>
+                          <select
+                            value={drogaBuscaTipoDraft}
+                            onChange={e => setDrogaBuscaTipoDraft(e.target.value as TipoDrogaApreendidaBusca)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs"
+                          >
+                            {TIPOS_DROGA_BUSCA_OPCOES.map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Quantidade</label>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={drogaBuscaQtdDraft}
+                            onChange={e => setDrogaBuscaQtdDraft(e.target.value.replace(/[^0-9.,]/g, ''))}
+                            placeholder="Ex.: 2,5"
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Unidade</label>
+                          <select
+                            value={drogaBuscaUnidadeDraft}
+                            onChange={e => setDrogaBuscaUnidadeDraft(e.target.value as UnidadeDrogaBusca)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs"
+                          >
+                            <option value="kg">Quilos (kg)</option>
+                            <option value="t">Toneladas (t)</option>
+                          </select>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <button
+                            type="button"
+                            onClick={handleAddDrogaBusca}
+                            className="w-full py-1.5 px-2.5 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-xs flex items-center justify-center space-x-1 transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Incluir</span>
+                          </button>
+                        </div>
+                      </div>
+                      {drogasBusca.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {drogasBusca.map((d, idx) => (
+                            <span
+                              key={`${d.tipo}-${idx}`}
+                              className="inline-flex items-center space-x-1.5 bg-slate-900 border border-cyan-500/40 text-cyan-200 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                            >
+                              <span>
+                                {d.quantidade} {d.unidade === 't' ? 'tonelada(s)' : 'kg'} — {d.tipo}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setDrogasBusca(prev => prev.filter((_, i) => i !== idx))}
+                                className="hover:text-red-400"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* VEÍCULOS — Tipo + Quantidade */}
+                  {materiaisBusca.includes('VEÍCULOS') && (
+                    <div className="bg-slate-950/70 border border-cyan-500/30 rounded-xl p-3 space-y-2.5">
+                      <span className="block text-[10px] font-bold uppercase text-cyan-300">
+                        Veículos Arrecadados — Tipo e Quantidade
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                        <div className="sm:col-span-6">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Tipo</label>
+                          <select
+                            value={veiculoBuscaTipoDraft}
+                            onChange={e => setVeiculoBuscaTipoDraft(e.target.value as TipoVeiculoApreendidoBusca)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs"
+                          >
+                            {TIPOS_VEICULO_BUSCA_OPCOES.map(t => (
+                              <option key={t} value={t}>{t}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="sm:col-span-3">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">Quantidade</label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={9999}
+                            value={veiculoBuscaQtdDraft}
+                            onChange={e => setVeiculoBuscaQtdDraft(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <button
+                            type="button"
+                            onClick={handleAddVeiculoBusca}
+                            className="w-full py-1.5 px-3 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-500/40 text-cyan-200 font-bold text-xs flex items-center justify-center space-x-1 transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Adicionar</span>
+                          </button>
+                        </div>
+                      </div>
+                      {veiculosBusca.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                          {veiculosBusca.map(v => (
+                            <span
+                              key={v.tipo}
+                              className="inline-flex items-center space-x-1.5 bg-slate-900 border border-cyan-500/40 text-cyan-200 rounded-lg px-2.5 py-1 text-[11px] font-semibold"
+                            >
+                              <span>{v.quantidade} {v.tipo}</span>
+                              <button
+                                type="button"
+                                onClick={() => setVeiculosBusca(prev => prev.filter(x => x.tipo !== v.tipo))}
+                                className="hover:text-red-400"
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {materiaisBusca.includes('OUTROS') && (
                     <input
                       type="text"
@@ -1863,7 +2567,7 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
           )}
 
           {hasGerenciamentoCrise && (
-            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3 space-y-2">
+            <div className="bg-slate-900/90 border border-slate-700 rounded-xl p-3.5 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <span className="font-bold text-amber-300">Gerenciamento de Crise — Qual tipo?</span>
                 <select
@@ -1872,6 +2576,11 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
                     const val = e.target.value as TipoCriseOperacao;
                     setTipoCrise(val);
                     if (val !== 'OUTROS') setTipoCriseOutros('');
+                    if (val !== 'SUICÍDIO') {
+                      setSuicidioConsumado(false);
+                      setAtuacaoSuicidio('Negociador');
+                      setAtuacaoSuicidioOutros('');
+                    }
                   }}
                   className="bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-1.5 text-xs font-bold"
                 >
@@ -1882,6 +2591,69 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
                   ))}
                 </select>
               </div>
+
+              {tipoCrise === 'SUICÍDIO' && (
+                <div className="pt-2.5 border-t border-slate-800 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        Consumado? *
+                      </label>
+                      <select
+                        value={suicidioConsumado ? 'SIM' : 'NAO'}
+                        onChange={e => setSuicidioConsumado(e.target.value === 'SIM')}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-2 text-xs font-bold"
+                      >
+                        <option value="NAO">NÃO</option>
+                        <option value="SIM">SIM</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                        Atuação adotada? *
+                      </label>
+                      <select
+                        value={atuacaoSuicidio}
+                        onChange={e => {
+                          const val = e.target.value as AtuacaoSuicidioOperacao;
+                          setAtuacaoSuicidio(val);
+                          if (val !== 'Outros') setAtuacaoSuicidioOutros('');
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-lg px-3 py-2 text-xs font-bold"
+                      >
+                        {ATUACOES_SUICIDIO_OPCOES.map(opt => (
+                          <option key={opt} value={opt}>
+                            {opt}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {atuacaoSuicidio === 'Outros' && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-amber-300 uppercase">
+                          Descrição da Atuação Adotada *
+                        </label>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          {atuacaoSuicidioOutros.length} / {MAX_DESC_CURTA}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        maxLength={MAX_DESC_CURTA}
+                        value={atuacaoSuicidioOutros}
+                        onChange={e => setAtuacaoSuicidioOutros(e.target.value.slice(0, MAX_DESC_CURTA))}
+                        placeholder="Ex.: parente convenceu a vítima a se submeter à condução ao hospital"
+                        className="w-full bg-slate-950 border border-amber-500/40 text-slate-100 rounded-lg px-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+
               {tipoCrise === 'OUTROS' && (
                 <input
                   type="text"
@@ -1985,61 +2757,108 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
                   </div>
 
                   {armaOrigemDraft === 'ACERVO' ? (
-                    <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
-                      <div className="sm:col-span-4">
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                          Buscar por Nº da Arma / Série
-                        </label>
-                        <input
-                          type="text"
-                          value={weaponSearchDraft}
-                          onChange={e => setWeaponSearchDraft(e.target.value)}
-                          placeholder="Digite o nº de série..."
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs"
-                        />
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                        <div className="sm:col-span-7">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                            Filtrar Armas Disponíveis na Unidade ({filteredAcervoWeapons.length})
+                          </label>
+                          <div className="relative">
+                            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                            <input
+                              type="text"
+                              value={weaponSearchDraft}
+                              onChange={e => setWeaponSearchDraft(e.target.value)}
+                              placeholder="Digite nº de série, marca, modelo, calibre ou descrição..."
+                              className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl pl-8 pr-3 py-2 text-xs focus:outline-none focus:border-amber-400"
+                            />
+                          </div>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
+                            Qtd. Tiros *
+                          </label>
+                          <input
+                            type="number"
+                            min={0}
+                            max={10000}
+                            value={tirosDraft}
+                            onChange={e => setTirosDraft(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 font-mono text-xs"
+                          />
+                        </div>
+                        <div className="sm:col-span-3">
+                          <button
+                            type="button"
+                            disabled={!selectedWeaponIdDraft}
+                            onClick={handleAddArmaFogo}
+                            className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1 transition"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Incluir Arma</span>
+                          </button>
+                        </div>
                       </div>
-                      <div className="sm:col-span-4">
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                          Selecionar Arma *
-                        </label>
-                        <select
-                          value={selectedWeaponIdDraft}
-                          onChange={e => setSelectedWeaponIdDraft(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs"
-                        >
-                          <option value="">Selecione pelo nº da arma...</option>
-                          {filteredAcervoWeapons.map(w => (
-                            <option key={w.id} value={w.id}>
-                              {w.serialNumber} — {w.manufacturer} {w.model} ({w.caliber})
-                            </option>
-                          ))}
-                        </select>
+
+                      {/* Lista ao vivo das armas disponíveis na unidade */}
+                      <div className="max-h-48 overflow-y-auto bg-slate-950/80 border border-slate-800 rounded-xl divide-y divide-slate-800/70">
+                        {filteredAcervoWeapons.length === 0 ? (
+                          <div className="p-3.5 text-center text-slate-400 text-xs">
+                            Nenhuma arma encontrada na unidade para o filtro informado.
+                          </div>
+                        ) : (
+                          filteredAcervoWeapons.map(w => {
+                            const isSelected = selectedWeaponIdDraft === w.id;
+                            const descExtra = (w as any).observations || (w as any).description || w.location || '';
+                            return (
+                              <button
+                                key={w.id}
+                                type="button"
+                                onClick={() => setSelectedWeaponIdDraft(w.id)}
+                                className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 transition ${
+                                  isSelected
+                                    ? 'bg-amber-500/20 border-l-2 border-amber-400'
+                                    : 'hover:bg-amber-500/10'
+                                }`}
+                              >
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="font-mono font-bold text-amber-300 text-xs">
+                                      Nº {w.serialNumber}
+                                    </span>
+                                    <span className="font-bold text-slate-100">
+                                      {w.manufacturer} {w.model}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-300 text-[10px]">
+                                      {w.caliber}
+                                    </span>
+                                    {w.type && (
+                                      <span className="text-[10px] text-slate-400">• {w.type}</span>
+                                    )}
+                                  </div>
+                                  {descExtra && (
+                                    <span className="text-[10px] text-slate-400 block truncate mt-0.5">
+                                      {descExtra}
+                                    </span>
+                                  )}
+                                </div>
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded shrink-0 ${
+                                    isSelected
+                                      ? 'bg-amber-500 text-slate-950'
+                                      : 'bg-slate-800 text-slate-400'
+                                  }`}
+                                >
+                                  {isSelected ? 'Selecionada' : 'Selecionar'}
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
                       </div>
-                      <div className="sm:col-span-2">
-                        <label className="block text-[10px] font-bold text-slate-400 uppercase mb-1">
-                          Qtd. Tiros *
-                        </label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={10000}
-                          value={tirosDraft}
-                          onChange={e => setTirosDraft(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 font-mono text-xs"
-                        />
-                      </div>
-                      <div className="sm:col-span-2">
-                        <button
-                          type="button"
-                          onClick={handleAddArmaFogo}
-                          className="w-full py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center justify-center space-x-1"
-                        >
-                          <Plus className="w-3.5 h-3.5" />
-                          <span>Incluir</span>
-                        </button>
-                      </div>
-                      <p className="sm:col-span-12 text-[10px] text-amber-300/90">
-                        * Para armas do acervo, a quantidade de tiros informada será acrescentada automaticamente ao registro de tiros da arma ao salvar.
+
+                      <p className="text-[10px] text-amber-300/90">
+                        * Selecione uma arma na lista acima, informe a quantidade de tiros e clique em &ldquo;Incluir Arma&rdquo;. A quantidade informada será acrescentada automaticamente ao registro de tiros da arma ao salvar.
                       </p>
                     </div>
                   ) : (
@@ -2263,7 +3082,12 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
               onChange={e => {
                 const yes = e.target.value === 'SIM';
                 setHouveObito(yes);
-                if (!yes) setSinopseObito('');
+                if (!yes) {
+                  setQuantidadeObitosStr('1');
+                  setMesmaSinopseObito(true);
+                  setSinopseObito('');
+                  setSinopsesObitos(['']);
+                }
               }}
               className="bg-slate-900 border border-slate-700 text-slate-100 rounded-xl px-3 py-2 text-xs font-bold"
             >
@@ -2273,27 +3097,110 @@ export const RelatorioOperacoesPolicialForm: React.FC<RelatorioOperacoesPolicial
           </div>
 
           {houveObito && (
-            <div className="space-y-1.5 pt-2 border-t border-slate-800">
-              <div className="flex items-center justify-between">
-                <label className="text-[10px] font-bold text-red-300 uppercase">
-                  Sinopse sobre o momento do óbito *
-                </label>
-                <span
-                  className={`font-mono text-[10px] font-bold ${
-                    sinopseObito.length >= MAX_SINOPSE_OBITO ? 'text-red-400' : 'text-slate-400'
-                  }`}
-                >
-                  {sinopseObito.length} / {MAX_SINOPSE_OBITO} caracteres
-                </span>
+            <div className="space-y-3 pt-2.5 border-t border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[10px] font-bold text-red-300 uppercase mb-1">
+                    Quantidade de mortos *
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={2}
+                    value={quantidadeObitosStr}
+                    onChange={e => handleQuantidadeObitosChange(e.target.value)}
+                    placeholder="Ex.: 2"
+                    className="w-full bg-slate-900 border border-red-500/40 text-slate-100 rounded-xl px-3 py-2 font-mono text-xs focus:outline-none focus:border-red-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-red-300 uppercase mb-1">
+                    Mesma sinopse? *
+                  </label>
+                  <select
+                    value={mesmaSinopseObito ? 'SIM' : 'NAO'}
+                    onChange={e => {
+                      const same = e.target.value === 'SIM';
+                      setMesmaSinopseObito(same);
+                      if (!same) {
+                        const n = Math.max(1, Math.min(99, parseInt(quantidadeObitosStr || '1', 10) || 1));
+                        setSinopsesObitos(prev => Array.from({ length: n }, (_, i) => prev[i] || ''));
+                      }
+                    }}
+                    className="w-full bg-slate-900 border border-red-500/40 text-slate-100 rounded-xl px-3 py-2 text-xs font-bold focus:outline-none focus:border-red-400"
+                  >
+                    <option value="SIM">SIM</option>
+                    <option value="NAO">NÃO</option>
+                  </select>
+                </div>
               </div>
-              <textarea
-                rows={3}
-                maxLength={MAX_SINOPSE_OBITO}
-                value={sinopseObito}
-                onChange={e => setSinopseObito(e.target.value.slice(0, MAX_SINOPSE_OBITO))}
-                placeholder="Faça uma breve sinopse sobre o momento e as circunstâncias do óbito..."
-                className="w-full bg-slate-900 border border-red-500/40 text-slate-100 rounded-xl p-3 text-xs focus:outline-none focus:border-red-400 resize-y"
-              />
+
+              {mesmaSinopseObito ? (
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[10px] font-bold text-red-300 uppercase">
+                      Sinopse sobre o momento do óbito *
+                    </label>
+                    <span
+                      className={`font-mono text-[10px] font-bold ${
+                        sinopseObito.length >= MAX_SINOPSE_OBITO ? 'text-red-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {sinopseObito.length} / {MAX_SINOPSE_OBITO} caracteres
+                    </span>
+                  </div>
+                  <textarea
+                    rows={3}
+                    maxLength={MAX_SINOPSE_OBITO}
+                    value={sinopseObito}
+                    onChange={e => setSinopseObito(e.target.value.slice(0, MAX_SINOPSE_OBITO))}
+                    placeholder="Faça uma breve sinopse sobre o momento e as circunstâncias do(s) óbito(s)..."
+                    className="w-full bg-slate-900 border border-red-500/40 text-slate-100 rounded-xl p-3 text-xs focus:outline-none focus:border-red-400 resize-y"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {Array.from(
+                    { length: Math.max(1, Math.min(99, parseInt(quantidadeObitosStr || '1', 10) || 1)) },
+                    (_, idx) => {
+                      const val = sinopsesObitos[idx] || '';
+                      return (
+                        <div key={idx} className="space-y-1.5 bg-slate-900/60 border border-red-500/30 rounded-xl p-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-bold text-red-300 uppercase">
+                              Sinopse — Óbito {idx + 1} *
+                            </label>
+                            <span
+                              className={`font-mono text-[10px] font-bold ${
+                                val.length >= MAX_SINOPSE_OBITO ? 'text-red-400' : 'text-slate-400'
+                              }`}
+                            >
+                              {val.length} / {MAX_SINOPSE_OBITO} caracteres
+                            </span>
+                          </div>
+                          <textarea
+                            rows={3}
+                            maxLength={MAX_SINOPSE_OBITO}
+                            value={val}
+                            onChange={e => {
+                              const nextText = e.target.value.slice(0, MAX_SINOPSE_OBITO);
+                              setSinopsesObitos(prev => {
+                                const n = Math.max(1, Math.min(99, parseInt(quantidadeObitosStr || '1', 10) || 1));
+                                const copy = Array.from({ length: n }, (_, i) => prev[i] || '');
+                                copy[idx] = nextText;
+                                return copy;
+                              });
+                            }}
+                            placeholder={`Descreva o momento e as circunstâncias do Óbito ${idx + 1}...`}
+                            className="w-full bg-slate-950 border border-red-500/40 text-slate-100 rounded-xl p-3 text-xs focus:outline-none focus:border-red-400 resize-y"
+                          />
+                        </div>
+                      );
+                    }
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
