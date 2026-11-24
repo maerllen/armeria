@@ -777,6 +777,11 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       return;
     }
 
+    if (treinoForm.topicosTreinamento.length === 0) {
+      notifyError('Selecione ao menos um Tópico de Treinamento K9 antes de salvar o relatório.');
+      return;
+    }
+
     const validFormDogIds = new Set(allFormDogs.map(d => d.id));
     for (const item of treinoForm.topicosTreinamento) {
       if (!item.aplicarTodosK9) {
@@ -2758,22 +2763,32 @@ ${infoTableHtml}
               </div>
             )}
 
-            {/* Tópicos de Treinamento K9 */}
-            <div className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-4 space-y-3.5 text-xs">
+            {/* Tópicos de Treinamento K9 (Obrigatório) */}
+            <div
+              className={`bg-slate-950/80 border rounded-xl p-4 space-y-3.5 text-xs transition ${
+                treinoForm.topicosTreinamento.length === 0
+                  ? 'border-amber-500/50'
+                  : 'border-emerald-500/35'
+              }`}
+            >
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                 <div>
                   <h3 className="font-bold text-amber-300 uppercase flex items-center space-x-2">
                     <Tag className="w-4 h-4" />
-                    <span>Tópico(s) de Treinamento K9</span>
+                    <span>Tópico(s) de Treinamento K9 *</span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Selecione um ou mais tópicos realizados e defina se foram aplicados a <strong>todos os K9 do relatório</strong> ou apenas a <strong>K9 específicos</strong>.
+                    <strong className="text-amber-300">Obrigatório:</strong> selecione ao menos um tópico realizado e defina se foi aplicado a <strong>todos os K9 do relatório</strong> ou apenas a <strong>K9 específicos</strong>.
                   </p>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {treinoForm.topicosTreinamento.length > 0 && (
-                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[11px]">
+                  {treinoForm.topicosTreinamento.length > 0 ? (
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/35 text-emerald-300 font-mono font-bold text-[11px]">
                       {treinoForm.topicosTreinamento.length} tópico(s)
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 font-bold uppercase text-[10px]">
+                      Obrigatório
                     </span>
                   )}
                   {canManageTopicosTreinamento && (

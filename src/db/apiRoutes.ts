@@ -11722,6 +11722,15 @@ async function ensureCachorrosDossierSchema(pool: any) {
       );
     }
 
+    const [fotoCol]: any = await pool.query(
+      `SELECT DATA_TYPE as dataType FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CACHORROS_CANIL' AND COLUMN_NAME = 'FOTO_URL_CACHORRO' LIMIT 1`
+    );
+    const fotoType = String(fotoCol?.[0]?.dataType || '').toLowerCase();
+    if (fotoType && fotoType !== 'mediumtext' && fotoType !== 'longtext') {
+      await pool.query('ALTER TABLE `CACHORROS_CANIL` MODIFY COLUMN `FOTO_URL_CACHORRO` MEDIUMTEXT DEFAULT NULL');
+    }
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS \`CACHORROS_CANIL_HISTORICO_CONDUTORES\` (
         \`ID_HIST_CONDUTOR\` VARCHAR(64) NOT NULL,
@@ -12059,6 +12068,63 @@ const validateKennelCapacity = async (pool: any, canilFisicoId: string | null | 
   return { ok: true as const };
 };
 
+const MAX_DOG_PHOTO_DATA_URI_CHARS = 3_500_000; // ~2.5MB imagem binária
+
+function sanitizeCachorroFotoUrl(raw: unknown): { ok: boolean; value?: string | null; error?: string } {
+  if (raw === undefined || raw === null) return { ok: true, value: null };
+  const trimmed = String(raw).trim();
+  if (!trimmed) return { ok: true, value: null };
+
+  if (trimmed.startsWith('data:')) {
+    if (trimmed.length > MAX_DOG_PHOTO_DATA_URI_CHARS) {
+      return { ok: false, error: 'A foto do animal excede o tamanho máximo permitido (2,5 MB).' };
+    }
+    if (!/^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=\r\n]+$/i.test(trimmed)) {
+      return { ok: false, error: 'Formato de foto inválido. Envie apenas imagens JPG, PNG, WebP ou GIF.' };
+    }
+    return { ok: true, value: trimmed.replace(/[\r\n]+/g, '') };
+  }
+
+  if (trimmed.length > 1024) {
+    return { ok: false, error: 'A URL da foto do animal é muito longa (máximo 1024 caracteres).' };
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return { ok: false, error: 'A URL da foto deve iniciar com http:// ou https://.' };
+    }
+    return { ok: true, value: parsed.href };
+  } catch {
+    return { ok: false, error: 'Informe uma URL válida para a foto do animal ou envie um arquivo de imagem.' };
+  }
+}
+
+async function verifyCanManageCachorros(pool: any, actorId: string): Promise<{ allowed: boolean }> {
+  const cleanId = String(actorId || '').trim();
+  if (!cleanId) return { allowed: false };
+  const [rows]: any = await pool.query(
+    `SELECT PERFIL_USUARIOS as role, ROLES_USUARIOS as rolesJson,
+            PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as canManageCanilAndAnimals
+     FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1`,
+    [cleanId]
+  );
+  const u = rows?.[0];
+  if (!u) return { allowed: false };
+  let parsedRoles: string[] = [String(u.role || '')];
+  if (u.rolesJson) {
+    try {
+      const arr = typeof u.rolesJson === 'string' ? JSON.parse(u.rolesJson) : u.rolesJson;
+      if (Array.isArray(arr)) parsedRoles = [...parsedRoles, ...arr.map(String)];
+    } catch (_) {}
+  }
+  const normalized = parsedRoles.map(r => r.toLowerCase());
+  const allowed =
+    normalized.includes('geral') ||
+    normalized.includes('administrador') ||
+    Boolean(u.canManageCanilAndAnimals);
+  return { allowed };
+}
+
 apiRouter.post('/cachorros', async (req: Request, res: Response) => {
   try {
     const dog = req.body;
@@ -12066,6 +12132,22 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'O nome do cão é obrigatório.' });
     }
     const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const actorId = String(dog?.actor?.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Sessão de usuário obrigatória para cadastrar animais.' });
+    }
+    const perm = await verifyCanManageCachorros(pool, actorId);
+    if (!perm.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para cadastrar animais.' });
+    }
+
+    const fotoSanitized = sanitizeCachorroFotoUrl(dog.fotoUrl);
+    if (!fotoSanitized.ok) {
+      return res.status(400).json({ error: fotoSanitized.error });
+    }
+
     const resolved = await validateAndResolveDogHandlers(pool, dog);
     if (!resolved.ok) {
       return res.status(400).json({ error: resolved.error });
@@ -12113,7 +12195,7 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
       dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoOrgao || null) : null,
       dog.departmentId || null,
       dog.unitId || null,
-      dog.fotoUrl || null,
+      fotoSanitized.value,
       dog.observacoes || null
     ]);
 
@@ -12121,7 +12203,7 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
     await syncCachorroCondutorSlotHistory(pool, id, 2, resolved.c2);
 
     await insertAuditLog('Veterinário', 'Cadastrar Cão', `Cadastrado cão K9: ${dog.nome} (Raça: ${dog.raca})`, dog.actor, req.ip);
-    return res.json({ id, ...dog });
+    return res.json({ id, ...dog, fotoUrl: fotoSanitized.value || '' });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }
@@ -12132,6 +12214,27 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
     const { id } = req.params;
     const dog = req.body;
     const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const actorId = String(dog?.actor?.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Sessão de usuário obrigatória para editar animais.' });
+    }
+    const perm = await verifyCanManageCachorros(pool, actorId);
+    if (!perm.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para editar animais.' });
+    }
+
+    const hasFotoField = Object.prototype.hasOwnProperty.call(dog || {}, 'fotoUrl');
+    let sanitizedFotoValue: string | null = null;
+    if (hasFotoField) {
+      const fotoSanitized = sanitizeCachorroFotoUrl(dog.fotoUrl);
+      if (!fotoSanitized.ok) {
+        return res.status(400).json({ error: fotoSanitized.error });
+      }
+      sanitizedFotoValue = fotoSanitized.value;
+    }
+
     const resolved = await validateAndResolveDogHandlers(pool, dog);
     if (!resolved.ok) {
       return res.status(400).json({ error: resolved.error });
@@ -12167,7 +12270,7 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
         RESPONSAVEL_EXTERNO_ORGAO_CACHORRO = ?,
         DEPARTAMENTO_ID_CACHORRO = ?,
         UNIDADE_ID_CACHORRO = ?,
-        FOTO_URL_CACHORRO = COALESCE(?, FOTO_URL_CACHORRO),
+        FOTO_URL_CACHORRO = IF(?, ?, FOTO_URL_CACHORRO),
         OBSERVACOES_CACHORRO = ?
       WHERE ID_CACHORRO = ?
     `, [
@@ -12195,7 +12298,8 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
       dog.tipoVinculo === 'EXTERNO' ? (dog.responsavelExternoOrgao || null) : null,
       dog.departmentId || null,
       dog.unitId || null,
-      dog.fotoUrl !== undefined ? dog.fotoUrl : null,
+      hasFotoField ? 1 : 0,
+      sanitizedFotoValue,
       dog.observacoes?.trim() || null,
       id
     ]);
@@ -13668,6 +13772,11 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       return res.status(400).json({ error: topicosSanitized.error });
     }
     const topicosTreinamento = topicosSanitized.items;
+    if (topicosTreinamento.length === 0) {
+      return res.status(400).json({
+        error: 'É obrigatório selecionar ao menos um Tópico de Treinamento K9 para salvar o relatório.'
+      });
+    }
 
     const id = `rel-trein-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const departmentId = body.departmentId || actor.departmentId || null;
@@ -13916,6 +14025,11 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       return res.status(400).json({ error: topicosSanitized.error });
     }
     const topicosTreinamento = topicosSanitized.items;
+    if (topicosTreinamento.length === 0) {
+      return res.status(400).json({
+        error: 'É obrigatório selecionar ao menos um Tópico de Treinamento K9 para salvar o relatório.'
+      });
+    }
     const horaTreinamento =
       existing.horaTreinamento ||
       (existing.createdAt ? String(existing.createdAt).slice(11, 16) : getCurrentTimeBrHHmm());

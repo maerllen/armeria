@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   User,
   Department,
@@ -45,8 +45,72 @@ import {
   DollarSign,
   ShieldAlert,
   Sparkles,
-  Info
+  Info,
+  Camera,
+  Upload
 } from 'lucide-react';
+
+function getSafeDogPhotoUrl(url?: string | null): string | null {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  if (/^data:image\/(jpeg|jpg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+const ALLOWED_DOG_PHOTO_TYPES = new Set(['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif']);
+
+async function compressDogPhotoFile(file: File): Promise<string> {
+  if (!ALLOWED_DOG_PHOTO_TYPES.has((file.type || '').toLowerCase())) {
+    throw new Error('Formato não suportado. Envie uma imagem JPG, PNG, WebP ou GIF.');
+  }
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('A imagem selecionada excede 10 MB.');
+  }
+
+  const dataUrl: string = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Falha ao ler o arquivo de imagem.'));
+    reader.readAsDataURL(file);
+  });
+
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxDim = 800;
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+      if (width > maxDim || height > maxDim) {
+        if (width >= height) {
+          height = Math.round((height * maxDim) / width);
+          width = maxDim;
+        } else {
+          width = Math.round((width * maxDim) / height);
+          height = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, width);
+      canvas.height = Math.max(1, height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(dataUrl);
+        return;
+      }
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      const compressed = canvas.toDataURL('image/jpeg', 0.82);
+      resolve(compressed);
+    };
+    img.onerror = () => reject(new Error('Não foi possível processar a imagem selecionada.'));
+    img.src = dataUrl;
+  });
+}
 
 interface ModuloVeterinarioProps {
   currentUser: User | null;
@@ -137,6 +201,8 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
   // 2. Cachorro Modal
   const [showDogModal, setShowDogModal] = useState(false);
   const [editingDog, setEditingDog] = useState<Cachorro | null>(null);
+  const dogPhotoInputRef = useRef<HTMLInputElement | null>(null);
+  const [processingDogPhoto, setProcessingDogPhoto] = useState(false);
   const [dogForm, setDogForm] = useState({
     nome: '',
     raca: 'Pastor Belga Malinois',
@@ -159,6 +225,21 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
     fotoUrl: '',
     observacoes: ''
   });
+
+  const handleDogPhotoSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setProcessingDogPhoto(true);
+    try {
+      const compressedDataUrl = await compressDogPhotoFile(file);
+      setDogForm(prev => ({ ...prev, fotoUrl: compressedDataUrl }));
+    } catch (err: any) {
+      notifyError(err?.message || 'Erro ao carregar foto do animal.');
+    } finally {
+      setProcessingDogPhoto(false);
+    }
+  };
 
   // 3. Produto Modal
   const [showProdModal, setShowProdModal] = useState(false);
@@ -1043,8 +1124,12 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                       {/* Dog Avatar + Name */}
                       <div className="flex items-center space-x-3.5 mb-3">
                         <div className="w-14 h-14 rounded-2xl bg-slate-950 border border-amber-500/30 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
-                          {dog.fotoUrl ? (
-                            <img src={dog.fotoUrl} alt={dog.nome} className="w-full h-full object-cover" />
+                          {getSafeDogPhotoUrl(dog.fotoUrl) ? (
+                            <img
+                              src={getSafeDogPhotoUrl(dog.fotoUrl)!}
+                              alt={dog.nome}
+                              className="w-full h-full object-cover"
+                            />
                           ) : (
                             <Dog className="w-8 h-8 text-amber-400" />
                           )}
@@ -1840,15 +1925,84 @@ export const ModuloVeterinario: React.FC<ModuloVeterinarioProps> = ({
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-slate-300 font-bold uppercase mb-1">Foto URL (ou Avatar)</label>
-                  <input
-                    type="text"
-                    value={dogForm.fotoUrl}
-                    onChange={(e) => setDogForm({ ...dogForm, fotoUrl: e.target.value })}
-                    placeholder="URL da foto do cão"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-slate-100 focus:outline-none focus:border-amber-500"
-                  />
+                {/* Upload e Pré-visualização de Foto do Animal */}
+                <div className="sm:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                    <div className="w-24 h-24 rounded-2xl bg-slate-900 border border-amber-500/35 flex items-center justify-center overflow-hidden shrink-0 shadow-inner">
+                      {getSafeDogPhotoUrl(dogForm.fotoUrl) ? (
+                        <img
+                          src={getSafeDogPhotoUrl(dogForm.fotoUrl)!}
+                          alt={dogForm.nome || 'Foto do animal'}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center text-slate-500">
+                          <Camera className="w-7 h-7 text-amber-400/70" />
+                          <span className="text-[10px] mt-1 font-semibold">Sem foto</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 space-y-2.5 w-full">
+                      <div>
+                        <label className="block text-slate-200 font-bold uppercase">Foto do Animal</label>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Envie uma foto do cão (JPG, PNG, WebP ou GIF) do computador ou celular. A imagem é otimizada automaticamente.
+                        </p>
+                      </div>
+
+                      <input
+                        ref={dogPhotoInputRef}
+                        type="file"
+                        accept="image/jpeg,image/png,image/webp,image/gif"
+                        onChange={handleDogPhotoSelected}
+                        className="hidden"
+                      />
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          disabled={processingDogPhoto}
+                          onClick={() => dogPhotoInputRef.current?.click()}
+                          className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs inline-flex items-center gap-1.5 transition shadow"
+                        >
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>
+                            {processingDogPhoto
+                              ? 'Processando foto...'
+                              : dogForm.fotoUrl
+                              ? 'Alterar Foto'
+                              : 'Selecionar Foto'}
+                          </span>
+                        </button>
+
+                        {dogForm.fotoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setDogForm(prev => ({ ...prev, fotoUrl: '' }))}
+                            className="px-3 py-2 rounded-xl bg-red-500/15 hover:bg-red-500/25 border border-red-500/35 text-red-300 font-bold text-xs inline-flex items-center gap-1.5 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                            <span>Remover Foto</span>
+                          </button>
+                        )}
+                      </div>
+
+                      <div>
+                        <input
+                          type="text"
+                          value={dogForm.fotoUrl.startsWith('data:') ? '' : dogForm.fotoUrl}
+                          onChange={(e) => setDogForm({ ...dogForm, fotoUrl: e.target.value })}
+                          placeholder={
+                            dogForm.fotoUrl.startsWith('data:')
+                              ? 'Foto carregada do dispositivo (ou cole aqui um link https://... para substituir)'
+                              : 'Opcional: ou cole uma URL externa da foto (https://...)'
+                          }
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-[11px] text-slate-200 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
