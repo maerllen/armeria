@@ -19,7 +19,8 @@ import {
   ShieldCheck,
   Package,
   Bomb,
-  Dog
+  Dog,
+  MessageCircle
 } from 'lucide-react';
 import { formatMasp } from '../utils/masks';
 import { ThemeToggle } from './AlternadorTema';
@@ -191,6 +192,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       label: 'Relatórios',
       icon: FileText,
       visible: allowedModules.includes('relatorio')
+    },
+    {
+      id: 'whatsapp',
+      label: 'WhatsApp',
+      icon: MessageCircle,
+      visible: allowedModules.includes('whatsapp')
     },
     {
       id: 'manual',

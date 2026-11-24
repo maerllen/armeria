@@ -12,7 +12,16 @@ async function startServer() {
   const app = express();
   const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
 
-  app.use(express.json({ limit: '50mb' }));
+  app.use(
+    express.json({
+      limit: '50mb',
+      verify: (req: any, _res, buf) => {
+        if (buf && buf.length > 0) {
+          req.rawBody = buf;
+        }
+      }
+    })
+  );
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Mount MySQL CRUD endpoints

@@ -21,7 +21,8 @@ export type ModuleType =
   | 'iniciar-aula-mobile'
   | 'calendario'
   | 'certificados'
-  | 'veterinario';
+  | 'veterinario'
+  | 'whatsapp';
 
 export type UserCargo = 
   | 'DELEGADO' 
@@ -2120,6 +2121,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'certificados',
       'veterinario',
       'relatorio',
+      'whatsapp',
       'manual'
     ]);
   }
@@ -2159,6 +2161,7 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
       'cofre',
       'materiais',
       'relatorio',
+      'whatsapp',
       'manual'
     ]);
   }
@@ -2214,4 +2217,109 @@ export const getAllowedModulesForUser = (user?: User | null): ModuleType[] => {
     'manual'
   ]);
 };
+
+// --- MÓDULO WHATSAPP (META WHATSAPP BUSINESS CLOUD API) ---
+export type WhatsappAmbiente = 'TESTE' | 'PRODUCAO';
+export type WhatsappTemplateCategoria = 'UTILITY' | 'AUTHENTICATION' | 'MARKETING';
+export type WhatsappTemplateHeaderTipo = 'NONE' | 'TEXT' | 'IMAGE' | 'DOCUMENT' | 'VIDEO';
+export type WhatsappDestinatarioTipo =
+  | 'USUARIO_DESTINO'
+  | 'RESPONSAVEL_UNIDADE'
+  | 'ADMINISTRADORES'
+  | 'NUMERO_FIXO';
+
+export interface WhatsappApiConfig {
+  id: string;
+  ambiente: WhatsappAmbiente;
+  ativo: boolean;
+  nomePerfilExibicao: string;
+  numeroTelefoneExibicao: string;
+  apiVersion: string;
+  phoneNumberId: string;
+  wabaId: string;
+  metaAppId: string;
+  hasAccessToken: boolean;
+  accessTokenMasked: string;
+  hasAppSecret: boolean;
+  appSecretMasked: string;
+  webhookVerifyToken: string;
+  callbackUrlPublica: string;
+  numeroTestePadrao: string;
+  ultimoTesteStatus: 'CONECTADO' | 'ERRO' | 'NAO_TESTADO';
+  ultimoTesteMensagem: string;
+  ultimoTesteEm?: string | null;
+  atualizadoPorNome?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WhatsappTemplate {
+  id: string;
+  metaTemplateId?: string | null;
+  nome: string;
+  idioma: string;
+  categoria: WhatsappTemplateCategoria;
+  statusMeta: string;
+  cabecalhoTipo: WhatsappTemplateHeaderTipo;
+  cabecalhoTexto?: string | null;
+  corpoTexto: string;
+  rodapeTexto?: string | null;
+  variaveisExemplo: string[];
+  botoes?: Array<{ type: string; text: string; url?: string }>;
+  origem: 'LOCAL' | 'META_SYNC';
+  ativo: boolean;
+  criadoPorNome?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WhatsappRegraComunicacao {
+  id: string;
+  eventoSistema: string;
+  nomeExibicao: string;
+  descricao?: string | null;
+  templateId?: string | null;
+  templateNome?: string | null;
+  destinatarioTipo: WhatsappDestinatarioTipo;
+  numeroDestinoFixo?: string | null;
+  mapeamentoVariaveis: string[];
+  horarioInicio: string;
+  horarioFim: string;
+  respeitarSilencio: boolean;
+  maxTentativas: number;
+  ativo: boolean;
+  atualizadoPorNome?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WhatsappMensagemLog {
+  id: string;
+  direcao: 'SAIDA' | 'ENTRADA';
+  telefoneDestino: string;
+  telefoneOrigem?: string | null;
+  usuarioDestinoId?: string | null;
+  usuarioDestinoNome?: string | null;
+  tipoMensagem: string;
+  templateNome?: string | null;
+  eventoSistema?: string | null;
+  conteudoResumo?: string | null;
+  metaMessageId?: string | null;
+  statusEntrega: string;
+  erroCodigo?: string | null;
+  erroMensagem?: string | null;
+  enviadoPorNome?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface WhatsappWebhookEvento {
+  id: string;
+  tipoEvento: string;
+  assinaturaValida: boolean;
+  wabaId?: string | null;
+  phoneNumberId?: string | null;
+  resumo?: string | null;
+  payloadJson?: string | null;
+  dataRecebimento?: string | null;
+}
+
 

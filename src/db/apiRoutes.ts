@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { getPool, dbConfig } from './mysql';
+import { registerWhatsappRoutes } from './whatsappRoutes';
 import crypto from 'crypto';
 
 export const apiRouter = Router();
@@ -23748,6 +23749,10 @@ apiRouter.delete('/relatorios-operacoes-cat/:id', async (req: Request, res: Resp
     return res.status(500).json({ error: err.message });
   }
 });
+
+// --- MÓDULO WHATSAPP (API OFICIAL META CLOUD API) ---
+registerWhatsappRoutes(apiRouter, { getPool, insertAuditLog });
+
 
 
 
