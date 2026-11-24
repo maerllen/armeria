@@ -924,8 +924,29 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     dogDetalhes?: DetalhesCompletosCachorro | null
   ): Promise<string> => {
     const { unitObj, deptObj, logoUrl: cocLogoUrl } = resolveCocUnitAndLogo(units, departments, dog, currentUser);
-    const goldShieldUrl = getSafeImageUrl(DEFAULT_SYSTEM_LOGO) || '';
-    const headerEmblemUrl = cocLogoUrl || getSafeImageUrl(deptObj?.logoUrl || DEFAULT_SYSTEM_LOGO) || '';
+    const cocBadgeUrl = cocLogoUrl || getSafeImageUrl(deptObj?.logoUrl || DEFAULT_SYSTEM_LOGO) || '';
+    const mgCoatOfArmsSvg = `<svg class="front-emblem" viewBox="0 0 64 68" xmlns="http://www.w3.org/2000/svg" aria-label="Brasão de Minas Gerais">
+      <g fill="none" stroke="#cbd5e1" stroke-width="1.3" stroke-linecap="round">
+        <path d="M18 48 C10 42 8 31 11 20 C13 14 16 10 21 7"/>
+        <path d="M46 48 C54 42 56 31 53 20 C51 14 48 10 43 7"/>
+      </g>
+      <g fill="#4d7c0f" stroke="#d9f99d" stroke-width="0.45">
+        <ellipse cx="12" cy="38" rx="3.4" ry="1.8" transform="rotate(-35 12 38)"/>
+        <ellipse cx="10" cy="30" rx="3.5" ry="1.8" transform="rotate(-15 10 30)"/>
+        <ellipse cx="11" cy="22" rx="3.4" ry="1.7" transform="rotate(10 11 22)"/>
+        <ellipse cx="15" cy="14" rx="3.2" ry="1.6" transform="rotate(32 15 14)"/>
+        <ellipse cx="52" cy="38" rx="3.4" ry="1.8" transform="rotate(35 52 38)"/>
+        <ellipse cx="54" cy="30" rx="3.5" ry="1.8" transform="rotate(15 54 30)"/>
+        <ellipse cx="53" cy="22" rx="3.4" ry="1.7" transform="rotate(-10 53 22)"/>
+        <ellipse cx="49" cy="14" rx="3.2" ry="1.6" transform="rotate(-32 49 14)"/>
+      </g>
+      <polygon points="32,8 37.2,23.5 53.5,23.5 40.3,33.1 45.3,48.6 32,39 18.7,48.6 23.7,33.1 10.5,23.5 26.8,23.5" fill="#dc2626" stroke="#f8fafc" stroke-width="1.4" stroke-linejoin="round"/>
+      <circle cx="32" cy="30" r="6.6" fill="#991b1b" stroke="#fde68a" stroke-width="0.9"/>
+      <path d="M29 33 L35 27 M29 27 L35 33" stroke="#f8fafc" stroke-width="1.3" stroke-linecap="round"/>
+      <rect x="30.2" y="25.8" width="3.6" height="8.2" rx="1.4" fill="#f8fafc" stroke="#7f1d1d" stroke-width="0.6"/>
+      <path d="M12 49 Q32 43 52 49 L50 56 Q32 50 14 56 Z" fill="#1e3a8a" stroke="#e2e8f0" stroke-width="1"/>
+      <text x="32" y="52.4" text-anchor="middle" font-family="Arial,sans-serif" font-size="3.9" font-weight="900" fill="#ffffff" letter-spacing="0.3">MINAS GERAIS</text>
+    </svg>`;
     const safeFoto = getSafeImageUrl(dog.fotoUrl);
     const todayIso = getTodayIsoBr();
     const baiaBoxText = formatBaiaBoxLabel(dog);
@@ -1669,7 +1690,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
           <div class="front-watermark">${armsWatermarkSvg}</div>
 
           <div class="front-header">
-            ${headerEmblemUrl ? `<img class="front-emblem" src="${escapeHtmlText(headerEmblemUrl)}" alt="Brasão COC" />` : ''}
+            ${mgCoatOfArmsSvg}
             <div class="front-titles">
               <div class="ft-rep">REPÚBLICA FEDERATIVA DO BRASIL</div>
               <div class="ft-mg">ESTADO DE MINAS GERAIS</div>
@@ -1689,7 +1710,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
               </div>
             </div>
             <div class="gold-shield-wrap">
-              ${goldShieldUrl ? `<img class="gold-shield-img" src="${escapeHtmlText(goldShieldUrl)}" alt="Distintivo Polícia Civil MG" />` : ''}
+              ${cocBadgeUrl ? `<img class="gold-shield-img" src="${escapeHtmlText(cocBadgeUrl)}" alt="Logo Unidade COC" />` : ''}
             </div>
           </div>
 
@@ -1736,7 +1757,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
 
         <!-- ======================= VERSO (FUNDO) ======================= -->
         <div class="face back">
-          ${goldShieldUrl ? `<img class="back-shield-ghost" src="${escapeHtmlText(goldShieldUrl)}" alt="" />` : ''}
+          ${cocBadgeUrl ? `<img class="back-shield-ghost" src="${escapeHtmlText(cocBadgeUrl)}" alt="" />` : ''}
 
           <div class="back-left">
             <div class="back-clause">
