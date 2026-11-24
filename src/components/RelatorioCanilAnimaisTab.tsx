@@ -7,7 +7,8 @@ import {
   DetalhesCompletosCachorro,
   Unit,
   Department,
-  getSystemLogo
+  getSystemLogo,
+  DEFAULT_SYSTEM_LOGO
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
@@ -37,7 +38,8 @@ import {
   CheckSquare,
   Square,
   Home,
-  Clock
+  Clock,
+  IdCard
 } from 'lucide-react';
 
 interface RelatorioCanilAnimaisTabProps {
@@ -916,6 +918,648 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     printDogsPages([selectedDog], { [selectedDog.id]: currentDetalhes });
   };
 
+  const buildIdentidadeFuncionalK9Html = (dog: Cachorro, dogDetalhes?: DetalhesCompletosCachorro | null) => {
+    const stats = computeDogTrainingStats(dog, relatoriosTreinamento, activeTopicos);
+    const { unitObj, deptObj, logoUrl: cocLogoUrl } = resolveCocUnitAndLogo(units, departments, dog, currentUser);
+    const pcmgLogoUrl = getSafeImageUrl(deptObj?.logoUrl || DEFAULT_SYSTEM_LOGO) || '';
+    const safeFoto = getSafeImageUrl(dog.fotoUrl);
+    const todayIso = getTodayIsoBr();
+    const baiaBoxText = formatBaiaBoxLabel(dog);
+    const registroK9 = dog.microchip?.trim() || dog.id.toUpperCase();
+
+    const vacinasList = [...(dogDetalhes?.vacinas || [])].sort((a, b) =>
+      String(b.dataAplicacao || '').localeCompare(String(a.dataAplicacao || ''))
+    );
+    const overdueVac = vacinasList.filter(v => v.proximaDose && v.proximaDose < todayIso).length;
+    const vacStatusLabel =
+      vacinasList.length === 0 ? 'SEM REGISTRO' : overdueVac === 0 ? 'EM DIA' : 'PENDENTE';
+    const vacStatusStyle =
+      vacinasList.length === 0
+        ? 'background:#e2e8f0;color:#475569;border:1px solid #cbd5e1;'
+        : overdueVac === 0
+        ? 'background:#dcfce7;color:#166534;border:1px solid #86efac;'
+        : 'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;';
+
+    const ultimaVacina = vacinasList[0] || null;
+    const vacinasComProxima = vacinasList.filter(v => Boolean(v.proximaDose));
+    const proximaVacina =
+      vacinasComProxima
+        .filter(v => String(v.proximaDose) >= todayIso)
+        .sort((a, b) => String(a.proximaDose || '').localeCompare(String(b.proximaDose || '')))[0] ||
+      vacinasComProxima
+        .filter(v => String(v.proximaDose) < todayIso)
+        .sort((a, b) => String(b.proximaDose || '').localeCompare(String(a.proximaDose || '')))[0] ||
+      null;
+
+    const condutor1Text =
+      dog.tipoVinculo === 'SISTEMA'
+        ? dog.usuarioInternoNome
+          ? `${dog.usuarioInternoNome}${dog.usuarioInternoMasp ? ` • MASP ${formatMasp(dog.usuarioInternoMasp)}` : ''}${
+              dog.usuarioInternoCargo ? ` (${dog.usuarioInternoCargo})` : ''
+            }`
+          : 'Não vinculado'
+        : `${dog.responsavelExternoNome || 'Vínculo Externo'}${
+            dog.responsavelExternoOrgao ? ` • ${dog.responsavelExternoOrgao}` : ''
+          }`;
+
+    const condutor2Text =
+      dog.tipoVinculo === 'SISTEMA' && dog.usuarioInterno2Nome
+        ? `${dog.usuarioInterno2Nome}${dog.usuarioInterno2Masp ? ` • MASP ${formatMasp(dog.usuarioInterno2Masp)}` : ''}`
+        : '';
+
+    const aptidaoResumo =
+      stats.aptidaoTopicos.length > 0
+        ? stats.aptidaoTopicos.slice(0, 3).join(' • ')
+        : 'Em avaliação / Treinamento';
+
+    const statusUpper = String(dog.status || 'ATIVO / OPERACIONAL').toUpperCase();
+    const isAtivoStatus = statusUpper.includes('ATIVO') || statusUpper.includes('OPERACIONAL');
+
+    const title = buildStandardDocumentTitle(`Identidade_Funcional_K9_${dog.nome}`, 'COC');
+
+    const pawSvg = `
+      <svg viewBox="0 0 64 64" width="24" height="24" fill="#94a3b8" opacity="0.42" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="16" cy="24" rx="6" ry="8" transform="rotate(-18 16 24)"/>
+        <ellipse cx="27" cy="15" rx="6" ry="8.5" transform="rotate(-6 27 15)"/>
+        <ellipse cx="39" cy="15" rx="6" ry="8.5" transform="rotate(6 39 15)"/>
+        <ellipse cx="49" cy="24" rx="6" ry="8" transform="rotate(18 49 24)"/>
+        <path d="M32 27c-9.5 0-16.5 7.5-16.5 14.5 0 5.2 3.8 8.5 8.5 8.5 3 0 5.3-1.4 8-1.4s5 1.4 8 1.4c4.7 0 8.5-3.3 8.5-8.5C48.5 34.5 41.5 27 32 27z"/>
+      </svg>
+    `;
+
+    const dogPlaceholderSvg = `
+      <svg viewBox="0 0 64 64" width="32" height="32" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 22l-5-10 10 4h18l10-4-5 10v14c0 9-6.5 16-14 16s-14-7-14-16V22z"/>
+        <circle cx="25" cy="30" r="2" fill="#64748b"/>
+        <circle cx="39" cy="30" r="2" fill="#64748b"/>
+        <path d="M29 37h6l-3 3.5L29 37z" fill="#64748b"/>
+      </svg>
+    `;
+
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>${escapeHtmlText(title)}</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: #ffffff;
+      color: #0f172a;
+    }
+    .sheet {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 4mm;
+    }
+    .cut-guide-header {
+      width: 184mm;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 8.5pt;
+      color: #475569;
+      margin-bottom: 5mm;
+      border-bottom: 1px solid #e2e8f0;
+      padding-bottom: 2.5mm;
+    }
+    .card-assembly {
+      position: relative;
+      padding: 3.5mm;
+    }
+    /* Marcas de corte externas */
+    .crop {
+      position: absolute;
+      width: 3mm;
+      height: 3mm;
+      border-color: #64748b;
+      border-style: solid;
+      border-width: 0;
+    }
+    .crop-tl { top: 0; left: 0; border-top-width: 0.6pt; border-left-width: 0.6pt; }
+    .crop-tr { top: 0; right: 0; border-top-width: 0.6pt; border-right-width: 0.6pt; }
+    .crop-bl { bottom: 0; left: 0; border-bottom-width: 0.6pt; border-left-width: 0.6pt; }
+    .crop-br { bottom: 0; right: 0; border-bottom-width: 0.6pt; border-right-width: 0.6pt; }
+    .fold-tick-top {
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 6pt;
+      font-weight: 700;
+      color: #64748b;
+      letter-spacing: 0.4px;
+    }
+    .fold-tick-bottom {
+      position: absolute;
+      bottom: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 6pt;
+      font-weight: 700;
+      color: #64748b;
+      letter-spacing: 0.4px;
+    }
+    .id-pair {
+      display: flex;
+      width: 184mm;
+      height: 60mm;
+      border: 0.8pt solid #334155;
+      border-radius: 2.2mm;
+      overflow: hidden;
+      background: #ffffff;
+    }
+    .id-face {
+      position: relative;
+      width: 92mm;
+      height: 60mm;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background-color: #f5f9f6;
+      background-image:
+        repeating-linear-gradient(
+          45deg,
+          rgba(15, 41, 66, 0.032) 0px,
+          rgba(15, 41, 66, 0.032) 1px,
+          transparent 1px,
+          transparent 6px
+        ),
+        repeating-linear-gradient(
+          -45deg,
+          rgba(16, 185, 129, 0.038) 0px,
+          rgba(16, 185, 129, 0.038) 1px,
+          transparent 1px,
+          transparent 6px
+        );
+    }
+    .id-face.front {
+      border-right: 1pt dashed #475569;
+    }
+    .watermark {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16pt;
+      font-weight: 900;
+      letter-spacing: 2.5px;
+      color: rgba(15, 41, 66, 0.055);
+      transform: rotate(-18deg);
+      pointer-events: none;
+      user-select: none;
+      white-space: nowrap;
+      z-index: 0;
+    }
+    .face-header {
+      position: relative;
+      z-index: 1;
+      background: linear-gradient(90deg, #0b2239 0%, #143657 55%, #0b2239 100%);
+      border-bottom: 1.5pt solid #d97706;
+      padding: 1.5mm 2.2mm;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5mm;
+      height: 11.8mm;
+      flex-shrink: 0;
+    }
+    .face-header.back-hdr {
+      height: 7.4mm;
+      justify-content: center;
+      padding: 1mm 2.2mm;
+    }
+    .hdr-logo {
+      height: 8.6mm;
+      max-width: 9.5mm;
+      object-fit: contain;
+      flex-shrink: 0;
+    }
+    .hdr-titles {
+      flex: 1;
+      text-align: center;
+      line-height: 1.12;
+    }
+    .hdr-uf {
+      font-size: 4.9pt;
+      font-weight: 800;
+      color: #fde68a;
+      letter-spacing: 0.4px;
+      text-transform: uppercase;
+    }
+    .hdr-org {
+      font-size: 6pt;
+      font-weight: 900;
+      color: #ffffff;
+      text-transform: uppercase;
+      letter-spacing: 0.25px;
+    }
+    .hdr-sub {
+      font-size: 5pt;
+      font-weight: 800;
+      color: #a7f3d0;
+      text-transform: uppercase;
+      letter-spacing: 0.35px;
+    }
+    .face-body {
+      position: relative;
+      z-index: 1;
+      flex: 1;
+      padding: 1.8mm 2.2mm 1.4mm;
+      display: flex;
+      gap: 2.2mm;
+      overflow: hidden;
+    }
+    .face-body.back-body {
+      flex-direction: column;
+      gap: 1.5mm;
+      padding: 1.6mm 2.2mm 1.4mm;
+    }
+    .photo-col {
+      width: 22.5mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.1mm;
+      flex-shrink: 0;
+    }
+    .photo-frame {
+      width: 22mm;
+      height: 29.2mm;
+      border: 1pt solid #143657;
+      border-radius: 1.4mm;
+      background: #e2e8f0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow: inset 0 0 0 0.6pt rgba(255,255,255,0.6);
+    }
+    .photo-frame img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .status-pill {
+      width: 100%;
+      text-align: center;
+      font-size: 4.8pt;
+      font-weight: 900;
+      padding: 0.7mm 0.8mm;
+      border-radius: 1mm;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .k9-tag {
+      font-size: 5pt;
+      font-weight: 900;
+      color: #0b2239;
+      background: #fef3c7;
+      border: 0.6pt solid #f59e0b;
+      border-radius: 1mm;
+      padding: 0.45mm 1.2mm;
+      width: 100%;
+      text-align: center;
+      letter-spacing: 0.3px;
+    }
+    .fields-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+      gap: 1mm;
+    }
+    .fld {
+      background: rgba(255, 255, 255, 0.82);
+      border: 0.5pt solid #cbd5e1;
+      border-radius: 1mm;
+      padding: 0.75mm 1.4mm;
+      min-width: 0;
+    }
+    .fld-label {
+      font-size: 4.6pt;
+      font-weight: 800;
+      color: #475569;
+      text-transform: uppercase;
+      letter-spacing: 0.25px;
+      line-height: 1.05;
+    }
+    .fld-val {
+      font-size: 6.5pt;
+      font-weight: 800;
+      color: #0f172a;
+      line-height: 1.18;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .fld-val.dog-name {
+      font-size: 9pt;
+      font-weight: 900;
+      color: #0b2239;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
+    }
+    .fld-val.mono {
+      font-family: "Courier New", Courier, monospace;
+      font-size: 6.3pt;
+    }
+    .fld-val.emerald {
+      color: #065f46;
+    }
+    .row-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2mm;
+    }
+    .row-2-wide {
+      display: grid;
+      grid-template-columns: 1.32fr 0.68fr;
+      gap: 1.2mm;
+    }
+    .face-footer {
+      position: relative;
+      z-index: 1;
+      background: #0b2239;
+      border-top: 1pt solid #d97706;
+      color: #fde68a;
+      font-size: 4.5pt;
+      font-weight: 800;
+      text-align: center;
+      letter-spacing: 0.35px;
+      text-transform: uppercase;
+      padding: 0.9mm 1.5mm;
+      height: 4.4mm;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .back-bottom {
+      display: flex;
+      gap: 2mm;
+      align-items: stretch;
+      margin-top: auto;
+    }
+    .paw-box {
+      width: 21mm;
+      height: 14.5mm;
+      border: 0.7pt dashed #64748b;
+      border-radius: 1.2mm;
+      background: rgba(255, 255, 255, 0.85);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.8mm;
+      flex-shrink: 0;
+    }
+    .paw-caption {
+      font-size: 4.2pt;
+      font-weight: 800;
+      color: #475569;
+      text-transform: uppercase;
+      text-align: center;
+      line-height: 1;
+    }
+    .issuance-box {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-width: 0;
+    }
+    .sig-line {
+      border-top: 0.6pt solid #334155;
+      margin-top: 3.8mm;
+      padding-top: 0.6mm;
+      text-align: center;
+      font-size: 4.6pt;
+      font-weight: 800;
+      color: #334155;
+      text-transform: uppercase;
+    }
+    .instructions {
+      width: 184mm;
+      margin-top: 5mm;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 6px;
+      padding: 3mm 4mm;
+      font-size: 8pt;
+      color: #334155;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <div class="sheet">
+    <div class="cut-guide-header">
+      <div><strong>IDENTIDADE FUNCIONAL K9</strong> — ${escapeHtmlText(dog.nome.toUpperCase())}</div>
+      <div>Dimensão dobrada: <strong>92 × 60 mm</strong> (Padrão Funcional / Polaseal RG)</div>
+    </div>
+
+    <div class="card-assembly">
+      <div class="crop crop-tl"></div>
+      <div class="crop crop-tr"></div>
+      <div class="crop crop-bl"></div>
+      <div class="crop crop-br"></div>
+      <div class="fold-tick-top">▼ DOBRAR AQUI ▼</div>
+      <div class="fold-tick-bottom">▲ DOBRAR AQUI ▲</div>
+
+      <div class="id-pair">
+        <!-- ================= FRENTE ================= -->
+        <div class="id-face front">
+          <div class="watermark">PCMG • COC • K9</div>
+          <div class="face-header">
+            ${pcmgLogoUrl ? `<img class="hdr-logo" src="${escapeHtmlText(pcmgLogoUrl)}" alt="Brasão PCMG" />` : ''}
+            <div class="hdr-titles">
+              <div class="hdr-uf">Polícia Civil do Estado de Minas Gerais</div>
+              <div class="hdr-org">${escapeHtmlText(unitObj?.name || 'Coordenação de Operações com Cães — COC')}</div>
+              <div class="hdr-sub">Carteira de Identidade Funcional K9</div>
+            </div>
+            ${cocLogoUrl ? `<img class="hdr-logo" src="${escapeHtmlText(cocLogoUrl)}" alt="Brasão COC" />` : ''}
+          </div>
+
+          <div class="face-body">
+            <div class="photo-col">
+              <div class="photo-frame">
+                ${
+                  safeFoto
+                    ? `<img src="${escapeHtmlText(safeFoto)}" alt="Foto 3x4 ${escapeHtmlText(dog.nome)}" />`
+                    : `${dogPlaceholderSvg}<span style="font-size:5pt;font-weight:800;color:#64748b;margin-top:1mm;">FOTO 3×4</span>`
+                }
+              </div>
+              <div class="status-pill" style="${
+                isAtivoStatus
+                  ? 'background:#dcfce7;color:#166534;border:0.6pt solid #86efac;'
+                  : 'background:#fef3c7;color:#92400e;border:0.6pt solid #fcd34d;'
+              }">${escapeHtmlText(statusUpper)}</div>
+              <div class="k9-tag">SEMOVENTE K9</div>
+            </div>
+
+            <div class="fields-col">
+              <div class="fld">
+                <div class="fld-label">Nome do Cão Policial</div>
+                <div class="fld-val dog-name">${escapeHtmlText(dog.nome)}</div>
+              </div>
+
+              <div class="row-2-wide">
+                <div class="fld">
+                  <div class="fld-label">Raça</div>
+                  <div class="fld-val">${escapeHtmlText(dog.raca || 'Não informada')}</div>
+                </div>
+                <div class="fld">
+                  <div class="fld-label">Sexo</div>
+                  <div class="fld-val">${escapeHtmlText(dog.sexo || '—')}</div>
+                </div>
+              </div>
+
+              <div class="row-2">
+                <div class="fld">
+                  <div class="fld-label">Cor / Pelagem</div>
+                  <div class="fld-val">${escapeHtmlText(dog.pelagem || 'Não informada')}</div>
+                </div>
+                <div class="fld">
+                  <div class="fld-label">Data Nasc. / Idade</div>
+                  <div class="fld-val">${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
+                </div>
+              </div>
+
+              <div class="fld">
+                <div class="fld-label">Especialidade / Emprego Operacional</div>
+                <div class="fld-val emerald">${escapeHtmlText(dog.especialidade || 'Operações Policiais com Cães (K9)')}</div>
+              </div>
+
+              <div class="row-2">
+                <div class="fld">
+                  <div class="fld-label">Microchip / Registro</div>
+                  <div class="fld-val mono">${escapeHtmlText(registroK9)}</div>
+                </div>
+                <div class="fld">
+                  <div class="fld-label">Baia / Box</div>
+                  <div class="fld-val">${escapeHtmlText(baiaBoxText)}</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="face-footer">
+            DOCUMENTO FUNCIONAL DE SEMOVENTE POLICIAL • ${escapeHtmlText((deptObj?.name || 'COE').toUpperCase())} / COC
+          </div>
+        </div>
+
+        <!-- ================= VERSO ================= -->
+        <div class="id-face back">
+          <div class="watermark">IDENTIDADE K9 • PCMG</div>
+          <div class="face-header back-hdr">
+            <div class="hdr-titles">
+              <div class="hdr-org" style="font-size:5.8pt;">Dados Funcionais, Condutor e Situação Sanitária — K9</div>
+            </div>
+          </div>
+
+          <div class="face-body back-body">
+            <div class="fld">
+              <div class="fld-label">Condutor(es) Responsável(is)</div>
+              <div class="fld-val" style="font-size:6.1pt;">1º: ${escapeHtmlText(condutor1Text)}</div>
+              ${
+                condutor2Text
+                  ? `<div class="fld-val" style="font-size:5.9pt;color:#334155;">2º: ${escapeHtmlText(condutor2Text)}</div>`
+                  : ''
+              }
+            </div>
+
+            <div class="row-2">
+              <div class="fld">
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:1mm;">
+                  <span class="fld-label">Situação Vacinal</span>
+                  <span style="font-size:4.5pt;font-weight:900;padding:0.3mm 1.2mm;border-radius:0.8mm;${vacStatusStyle}">${vacStatusLabel}</span>
+                </div>
+                <div class="fld-val" style="font-size:5.7pt;margin-top:0.4mm;">
+                  Últ.: ${ultimaVacina ? `${escapeHtmlText(formatDateBr(ultimaVacina.dataAplicacao))} (${escapeHtmlText(ultimaVacina.nomeVacina)})` : 'Sem registro'}
+                </div>
+                <div class="fld-val" style="font-size:5.7pt;color:${proximaVacina && proximaVacina.proximaDose && proximaVacina.proximaDose < todayIso ? '#b91c1c' : '#047857'};">
+                  Próx.: ${proximaVacina ? escapeHtmlText(formatDateBr(proximaVacina.proximaDose)) : 'Não agendada'}
+                </div>
+              </div>
+
+              <div class="fld">
+                <div class="fld-label">Aptidão &amp; Lotação</div>
+                <div class="fld-val emerald" style="font-size:5.7pt;margin-top:0.4mm;">${escapeHtmlText(aptidaoResumo)}</div>
+                <div class="fld-val" style="font-size:5.6pt;color:#334155;">
+                  Lotação: ${escapeHtmlText(deptObj?.name || 'COE')} / ${escapeHtmlText(unitObj?.name || 'COC')}
+                </div>
+              </div>
+            </div>
+
+            <div class="back-bottom">
+              <div class="paw-box">
+                <div class="paw-caption">Impressão Plantar</div>
+                ${pawSvg}
+                <div class="paw-caption">Pata K9</div>
+              </div>
+
+              <div class="issuance-box">
+                <div class="row-2">
+                  <div class="fld">
+                    <div class="fld-label">Data Expedição</div>
+                    <div class="fld-val mono" style="font-size:6pt;">${escapeHtmlText(formatDateBr(todayIso))}</div>
+                  </div>
+                  <div class="fld">
+                    <div class="fld-label">Órgão Expedidor</div>
+                    <div class="fld-val" style="font-size:5.9pt;">PCMG / COE / COC</div>
+                  </div>
+                </div>
+                <div class="sig-line">Coordenação / Responsável COC — Canil K9</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="face-footer">
+            USO OPERACIONAL EXCLUSIVO • VÁLIDA ENQUANTO ATIVO NA UNIDADE COC
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="instructions">
+      <strong>Instruções para plastificação:</strong>
+      Imprima em papel de alta gramatura (ex.: 180g ou papel fotográfico fosco) com escala <strong>100% (Tamanho Real)</strong>,
+      recorte acompanhando as marcas externas, dobre exatamente na <strong>linha tracejada central</strong> (unindo Frente e Verso)
+      e plastifique em envelope polaseal padrão RG (95 × 65 mm ou 100 × 70 mm).
+    </div>
+  </div>
+</body>
+</html>`;
+  };
+
+  const handlePrintIdentidadeFuncionalK9 = async () => {
+    if (!selectedDog) return;
+    let currentDetalhes = detalhes;
+    if (!currentDetalhes) {
+      const r = await storage.getDetalhesCompletosCachorro(selectedDog.id);
+      if (r.success && r.data) {
+        currentDetalhes = r.data;
+      }
+    }
+    const title = buildStandardDocumentTitle(`Identidade_Funcional_K9_${selectedDog.nome}`, 'COC');
+    const html = buildIdentidadeFuncionalK9Html(selectedDog, currentDetalhes);
+    printDocumentInPage(html, title);
+  };
+
   const handleOpenMultiPrint = () => {
     setMultiPrintSelectedIds(visibleDogs.map(d => d.id));
     setShowMultiPrintModal(true);
@@ -977,14 +1621,25 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
 
         <div className="flex flex-wrap items-center gap-2">
           {selectedDog && (
-            <button
-              type="button"
-              onClick={handlePrintSelectedAnimal}
-              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition flex items-center space-x-1.5 shadow"
-            >
-              <Printer className="w-4 h-4" />
-              <span>Imprimir Gráfico ({selectedDog.nome})</span>
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handlePrintSelectedAnimal}
+                className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition flex items-center space-x-1.5 shadow"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir Gráfico ({selectedDog.nome})</span>
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintIdentidadeFuncionalK9}
+                className="px-3 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition flex items-center space-x-1.5 shadow"
+                title="Imprimir Carteira de Identidade Funcional K9 (Frente e Verso pronta para recortar e plastificar)"
+              >
+                <IdCard className="w-4 h-4" />
+                <span>Identidade Funcional K9</span>
+              </button>
+            </>
           )}
           {visibleDogs.length > 1 && (
             <button
