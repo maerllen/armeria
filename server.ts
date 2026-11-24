@@ -7,6 +7,7 @@ import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
 import { testConnection, initializeDatabaseSchema, dbConfig } from './src/db/mysql';
 import { apiRouter } from './src/db/apiRoutes';
+import { renderTermosDeServicoHtml, renderPoliticaDePrivacidadeHtml } from './src/server/legalPages';
 
 async function startServer() {
   const app = express();
@@ -63,6 +64,15 @@ async function startServer() {
       host: dbConfig.host,
       port: dbConfig.port
     });
+  });
+
+  // Public legal pages required by Meta for Developers (WhatsApp Business API)
+  app.get(['/termos-de-servico', '/terms-of-service', '/termos'], (_req, res) => {
+    res.status(200).setHeader('Content-Type', 'text/html; charset=utf-8').send(renderTermosDeServicoHtml());
+  });
+
+  app.get(['/politica-de-privacidade', '/privacy-policy'], (_req, res) => {
+    res.status(200).setHeader('Content-Type', 'text/html; charset=utf-8').send(renderPoliticaDePrivacidadeHtml());
   });
 
   // Handle favicon.ico requests gracefully

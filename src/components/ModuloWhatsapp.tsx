@@ -313,12 +313,23 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     loadComunicacao();
   }, [currentUser.id]);
 
-  const computedWebhookUrl = useMemo(() => {
-    const base = formCallbackPublica.trim()
+  const computedBasePublicUrl = useMemo(() => {
+    return formCallbackPublica.trim()
       ? formCallbackPublica.trim().replace(/\/+$/, '')
       : window.location.origin;
-    return `${base}/api/whatsapp/webhook`;
   }, [formCallbackPublica]);
+
+  const computedWebhookUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/whatsapp/webhook`;
+  }, [computedBasePublicUrl]);
+
+  const computedTermsUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/termos-de-servico`;
+  }, [computedBasePublicUrl]);
+
+  const computedPrivacyUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/politica-de-privacidade`;
+  }, [computedBasePublicUrl]);
 
   const handleCopy = async (key: string, text: string) => {
     try {
@@ -1314,6 +1325,60 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                   No painel Meta Developers → WhatsApp → Configuração → Webhook, cadastre a URL acima, o Verify Token e
                   assine o campo <code className="text-slate-300">messages</code>.
                 </p>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                <div>
+                  <label className="font-bold text-slate-400 block mb-1">
+                    URL dos Termos de Serviço (cole em Meta Developers → Configurações do App → Básico)
+                  </label>
+                  <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2">
+                    <code className="flex-1 text-emerald-300 font-mono text-[11px] truncate">{computedTermsUrl}</code>
+                    <a
+                      href="/termos-de-servico"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center gap-1 shrink-0"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('termsUrl', computedTermsUrl)}
+                      className="px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 font-bold text-[11px] flex items-center gap-1 shrink-0"
+                    >
+                      {copiedKey === 'termsUrl' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedKey === 'termsUrl' ? 'Copiado' : 'Copiar URL'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-400 block mb-1">
+                    URL da Política de Privacidade (opcional/complementar no Painel Meta Developers)
+                  </label>
+                  <div className="flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-xl px-3 py-2">
+                    <code className="flex-1 text-sky-300 font-mono text-[11px] truncate">{computedPrivacyUrl}</code>
+                    <a
+                      href="/politica-de-privacidade"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-[11px] flex items-center gap-1 shrink-0"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>Abrir</span>
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => handleCopy('privacyUrl', computedPrivacyUrl)}
+                      className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 font-bold text-[11px] flex items-center gap-1 shrink-0"
+                    >
+                      {copiedKey === 'privacyUrl' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                      <span>{copiedKey === 'privacyUrl' ? 'Copiado' : 'Copiar URL'}</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
