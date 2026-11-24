@@ -3,14 +3,26 @@ import crypto from 'crypto';
 import {
   processWhatsappBotInteraction,
   resetBotSession,
-  verifySignedPdfToken
+  verifySignedPdfToken,
+  sendDirectWhatsappText
 } from './whatsappBotEngine';
 import {
+  OperacaoOrigem,
+  TreinamentoOrigem,
   findSingleOperationReport,
   findOperationReportsLast24h,
   findOperationReportsByDate,
   generateSingleOperationReportPdf,
   generateMultipleOperationsPdf,
+  findSingleTrainingReport,
+  findTrainingReportsLast24h,
+  findTrainingReportsByDate,
+  generateSingleTrainingReportPdf,
+  generateMultipleTrainingsPdf,
+  findSingleArmariaReceipt,
+  generateArmariaReceiptPdf,
+  findArmariaCautelasByPeriod,
+  generateArmariaCautelasReportPdf,
   formatIsoDateBr
 } from './whatsappPdfService';
 
@@ -255,6 +267,24 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         PRIMARY KEY (\`TELEFONE_CLIENTE\`),
         KEY \`idx_wpp_sessao_etapa\` (\`ETAPA_ATUAL\`),
         KEY \`idx_wpp_sessao_interacao\` (\`ULTIMA_INTERACAO_EM\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`WHATSAPP_SESSOES_TEMPORARIAS\` (
+        \`ID_SESSAO\` VARCHAR(64) NOT NULL,
+        \`TOKEN_HASH\` VARCHAR(128) NOT NULL,
+        \`TIPO_FLUXO\` ENUM('SOLICITAR_CAUTELA', 'DEVOLVER_CAUTELA') NOT NULL,
+        \`USUARIO_ID\` VARCHAR(64) NOT NULL,
+        \`TELEFONE_ORIGEM\` VARCHAR(32) NOT NULL,
+        \`STATUS_SESSAO\` ENUM('ATIVA', 'CONCLUIDA', 'EXPIRADA') NOT NULL DEFAULT 'ATIVA',
+        \`EXPIRA_EM\` DATETIME NOT NULL,
+        \`CONCLUIDA_EM\` DATETIME DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_SESSAO\`),
+        UNIQUE KEY \`uq_wpp_temp_token_hash\` (\`TOKEN_HASH\`),
+        KEY \`idx_wpp_temp_usuario\` (\`USUARIO_ID\`),
+        KEY \`idx_wpp_temp_status\` (\`STATUS_SESSAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -1834,9 +1864,12 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           ]
         );
 
-        // Dispara o atendimento interativo (Menu -> Operações -> Por data / Últimas 24h -> PDF)
+        // Dispara o atendimento interativo (Operações, Treinamentos e Armaria)
         if (botRuleActive && cfgRow?.ATIVO) {
           try {
+            const publicBaseUrl =
+              sanitizeSafePublicUrl(cfgRow?.CALLBACK_URL_PUBLICA) ||
+              sanitizeSafePublicUrl(`${req.protocol}://${req.get('host')}`);
             await processWhatsappBotInteraction(
               pool,
               cfgRow,
@@ -1850,6 +1883,7 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
               },
               {
                 dryRun: false,
+                publicBaseUrl,
                 signingKey: getEncryptionKey(),
                 decryptSecret
               }
@@ -1874,9 +1908,19 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       const auth = await verifyWhatsappAdmin(pool, req);
       if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
 
+      await ensureWhatsappSchema(pool);
       const cfgRow = await loadRawWhatsappConfig(pool);
       const body = req.body || {};
-      const simPhone = normalizePhoneDigits(body.fromPhone) || `sim${String(auth.user.id).replace(/\D/g, '').slice(-8) || '000001'}`;
+      const forcedUserId =
+        typeof body.simulateAsUserId === 'string' && body.simulateAsUserId.trim()
+          ? body.simulateAsUserId.trim()
+          : auth.user.id;
+      const simPhone =
+        normalizePhoneDigits(body.fromPhone) ||
+        `sim${String(forcedUserId).replace(/[^a-zA-Z0-9]/g, '').slice(-12) || '000001'}`;
+      const publicBaseUrl =
+        sanitizeSafePublicUrl(cfgRow?.CALLBACK_URL_PUBLICA) ||
+        sanitizeSafePublicUrl(`${req.protocol}://${req.get('host')}`);
 
       const result = await processWhatsappBotInteraction(
         pool,
@@ -1891,6 +1935,8 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         },
         {
           dryRun: true,
+          forcedUserId,
+          publicBaseUrl,
           signingKey: getEncryptionKey(),
           decryptSecret
         }
@@ -1899,7 +1945,8 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       return res.json({
         success: true,
         etapaAtual: result.etapaAtual,
-        replies: result.replies
+        replies: result.replies,
+        resolvedUser: result.resolvedUser
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
@@ -1913,9 +1960,13 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
 
       await ensureWhatsappSchema(pool);
+      const targetUserId =
+        typeof req.body?.simulateAsUserId === 'string' && req.body.simulateAsUserId.trim()
+          ? req.body.simulateAsUserId.trim()
+          : auth.user.id;
       const simPhone =
         normalizePhoneDigits(req.body?.fromPhone) ||
-        `sim${String(auth.user.id).replace(/\D/g, '').slice(-8) || '000001'}`;
+        `sim${String(targetUserId).replace(/[^a-zA-Z0-9]/g, '').slice(-12) || '000001'}`;
       await resetBotSession(pool, simPhone);
       return res.json({ success: true });
     } catch (err: any) {
@@ -1923,7 +1974,284 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
     }
   });
 
-  // 10. DOWNLOAD DE PDF COM TOKEN ASSINADO DE CURTA DURAÇÃO (HMAC-SHA256)
+  // 10. SESSÃO TEMPORÁRIA DE CAUTELA / DEVOLUÇÃO GERADA PELO WHATSAPP
+  apiRouter.get('/whatsapp/sessao-temporaria/:token', async (req: Request, res: Response) => {
+    try {
+      const rawToken = String(req.params.token || '').trim();
+      if (!/^[a-f0-9]{32,128}$/i.test(rawToken)) {
+        return res.status(400).json({ error: 'Token de sessão temporária inválido.' });
+      }
+
+      const pool = getPool();
+      await ensureWhatsappSchema(pool);
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+      const [sessRows]: any = await pool.query(
+        `SELECT
+           ID_SESSAO as id,
+           TIPO_FLUXO as tipoFluxo,
+           USUARIO_ID as userId,
+           TELEFONE_ORIGEM as fromPhone,
+           STATUS_SESSAO as status,
+           EXPIRA_EM as expiresAt,
+           CONCLUIDA_EM as concludedAt,
+           (EXPIRA_EM > NOW()) as isNotExpired
+         FROM WHATSAPP_SESSOES_TEMPORARIAS
+         WHERE TOKEN_HASH = ?
+         LIMIT 1`,
+        [tokenHash]
+      );
+
+      const sess = sessRows?.[0];
+      if (!sess) {
+        return res.status(404).json({ error: 'Sessão temporária não encontrada.' });
+      }
+
+      if (sess.status === 'CONCLUIDA') {
+        return res.status(410).json({
+          error: 'Esta sessão temporária já foi concluída.',
+          status: 'CONCLUIDA',
+          message: 'Aguardando deferimento do responsável pela armaria para emitir recibo.'
+        });
+      }
+
+      if (sess.status !== 'ATIVA' || !sess.isNotExpired) {
+        await pool.query(
+          "UPDATE WHATSAPP_SESSOES_TEMPORARIAS SET STATUS_SESSAO = 'EXPIRADA' WHERE ID_SESSAO = ?",
+          [sess.id]
+        );
+        return res.status(410).json({
+          error: 'Sessão temporária expirada. Solicite um novo link pelo WhatsApp.',
+          status: 'EXPIRADA'
+        });
+      }
+
+      // Carrega perfil completo do usuário (sem expor SENHA_USUARIOS)
+      let uRow: any = null;
+      try {
+        const [rows]: any = await pool.query(
+          `SELECT
+             ID_USUARIOS as id,
+             MASP_USUARIOS as masp,
+             NOME_USUARIOS as name,
+             TELEFONE_USUARIOS as phone,
+             CARGO_USUARIOS as cargo,
+             PERFIL_USUARIOS as role,
+             ROLES_USUARIOS as roles_json,
+             DEPARTAMENTO_ID_USUARIOS as department_id,
+             UNIDADE_ID_USUARIOS as unit_id,
+             ABRANGENCIA_GESTAO_USUARIOS as management_scope,
+             PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+             PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+             TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+             EH_PROFESSOR_USUARIOS as is_teacher,
+             DISCIPLINA_PROFESSOR_USUARIOS as teacher_subject,
+             SIGLA_PROFESSOR_USUARIOS as professor_sigla,
+             COORDENACAO_CURSO_USUARIOS as is_course_coordinator,
+             MATERIA_COORDENACAO_USUARIOS as coordinator_subject,
+             PODE_GERIR_FORMACAO_USUARIOS as can_manage_formacao,
+             PODE_GERIR_CONTINUADO_USUARIOS as can_manage_continuado,
+             PODE_CRIAR_CURSOS_USUARIOS as can_create_academy_courses,
+             PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as can_manage_canil_animals,
+             PODE_CADASTRAR_MED_CANIL_USUARIOS as can_register_canil_meds,
+             PODE_MINISTRAR_MED_CANIL_USUARIOS as can_administer_canil_meds,
+             PODE_VER_RELATORIOS_EQUIPES_CANIL_USUARIOS as can_view_all_canil_reports,
+             DATA_CRIACAO_USUARIOS as created_at
+           FROM USUARIOS
+           WHERE ID_USUARIOS = ?
+           LIMIT 1`,
+          [sess.userId]
+        );
+        uRow = rows?.[0] || null;
+      } catch {
+        const [rows]: any = await pool.query(
+          `SELECT
+             ID_USUARIOS as id,
+             MASP_USUARIOS as masp,
+             NOME_USUARIOS as name,
+             TELEFONE_USUARIOS as phone,
+             CARGO_USUARIOS as cargo,
+             PERFIL_USUARIOS as role,
+             DEPARTAMENTO_ID_USUARIOS as department_id,
+             UNIDADE_ID_USUARIOS as unit_id,
+             ABRANGENCIA_GESTAO_USUARIOS as management_scope,
+             PODE_MOVER_MUNICAO_USUARIOS as can_move_ammo,
+             PODE_MOVER_ARMAS_USUARIOS as can_move_weapons,
+             TEM_ACESSO_SISTEMA_USUARIOS as has_system_access,
+             DATA_CRIACAO_USUARIOS as created_at
+           FROM USUARIOS
+           WHERE ID_USUARIOS = ?
+           LIMIT 1`,
+          [sess.userId]
+        );
+        uRow = rows?.[0] || null;
+      }
+
+      if (!uRow) {
+        return res.status(404).json({ error: 'Usuário vinculado à sessão não encontrado.' });
+      }
+
+      let roles: string[] = [uRow.role];
+      if (uRow.roles_json) {
+        try {
+          const parsed = JSON.parse(uRow.roles_json);
+          if (Array.isArray(parsed) && parsed.length > 0) roles = parsed;
+        } catch {}
+      }
+
+      const [courseRows]: any = await pool.query(
+        `SELECT
+           CURSO_ID_USUARIO_CURSOS as courseId,
+           DATA_CONCLUSAO_USUARIO_CURSOS as completionDate,
+           DATA_VALIDADE_USUARIO_CURSOS as expirationDate
+         FROM USUARIO_CURSOS
+         WHERE USUARIO_ID_USUARIO_CURSOS = ?`,
+        [uRow.id]
+      );
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const officialDigits = normalizePhoneDigits(cfgRow?.NUMERO_TELEFONE_EXIBICAO);
+
+      const userPayload = {
+        id: uRow.id,
+        masp: uRow.masp,
+        name: uRow.name,
+        phone: uRow.phone || '',
+        cargo: uRow.cargo || 'Investigador de Polícia',
+        role: uRow.role,
+        roles,
+        departmentId: uRow.department_id || '',
+        unitId: uRow.unit_id || '',
+        managementScope: uRow.management_scope || 'unit',
+        canMoveAmmunition: Boolean(uRow.can_move_ammo),
+        canMoveWeapons: Boolean(uRow.can_move_weapons),
+        hasSystemAccess: Boolean(uRow.has_system_access),
+        mustChangePassword: false,
+        isTeacher: Boolean(uRow.is_teacher),
+        teacherSubject: uRow.teacher_subject || undefined,
+        professorSigla: uRow.professor_sigla || undefined,
+        isCourseCoordinator: Boolean(uRow.is_course_coordinator),
+        coordinatorSubject: uRow.coordinator_subject || undefined,
+        canManageFormacao: Boolean(uRow.can_manage_formacao),
+        canManageContinuado: Boolean(uRow.can_manage_continuado),
+        canCreateAcademyCourses: Boolean(uRow.can_create_academy_courses),
+        canManageCanilAnimals: Boolean(uRow.can_manage_canil_animals),
+        canRegisterCanilMeds: Boolean(uRow.can_register_canil_meds),
+        canAdministerCanilMeds: Boolean(uRow.can_administer_canil_meds),
+        canViewAllCanilReports: Boolean(uRow.can_view_all_canil_reports),
+        courses: (courseRows || []).map((c: any) => ({
+          courseId: c.courseId,
+          completionDate: c.completionDate ? new Date(c.completionDate).toISOString().split('T')[0] : '',
+          expirationDate: c.expirationDate ? new Date(c.expirationDate).toISOString().split('T')[0] : ''
+        })),
+        createdAt: uRow.created_at ? new Date(uRow.created_at).toISOString() : new Date().toISOString()
+      };
+
+      return res.json({
+        valid: true,
+        sessionId: sess.id,
+        tipoFluxo: sess.tipoFluxo,
+        expiresAt: sess.expiresAt,
+        fromPhone: sess.fromPhone,
+        whatsappReturnUrl: officialDigits ? `https://wa.me/${officialDigits}` : null,
+        user: userPayload
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  apiRouter.post('/whatsapp/sessao-temporaria/:token/concluir', async (req: Request, res: Response) => {
+    try {
+      const rawToken = String(req.params.token || '').trim();
+      if (!/^[a-f0-9]{32,128}$/i.test(rawToken)) {
+        return res.status(400).json({ error: 'Token de sessão temporária inválido.' });
+      }
+
+      const pool = getPool();
+      await ensureWhatsappSchema(pool);
+      const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+      const [sessRows]: any = await pool.query(
+        `SELECT
+           s.ID_SESSAO as id,
+           s.TIPO_FLUXO as tipoFluxo,
+           s.USUARIO_ID as userId,
+           s.TELEFONE_ORIGEM as fromPhone,
+           s.STATUS_SESSAO as status,
+           (s.EXPIRA_EM > NOW()) as isNotExpired,
+           u.NOME_USUARIOS as userName,
+           u.MASP_USUARIOS as userMasp,
+           u.PERFIL_USUARIOS as userRole
+         FROM WHATSAPP_SESSOES_TEMPORARIAS s
+         LEFT JOIN USUARIOS u ON u.ID_USUARIOS = s.USUARIO_ID
+         WHERE s.TOKEN_HASH = ?
+         LIMIT 1`,
+        [tokenHash]
+      );
+
+      const sess = sessRows?.[0];
+      if (!sess) {
+        return res.status(404).json({ error: 'Sessão temporária não encontrada.' });
+      }
+
+      if (sess.status !== 'ATIVA' || !sess.isNotExpired) {
+        return res.status(410).json({ error: 'Esta sessão temporária já foi encerrada ou expirou.' });
+      }
+
+      await pool.query(
+        `UPDATE WHATSAPP_SESSOES_TEMPORARIAS
+         SET STATUS_SESSAO = 'CONCLUIDA', CONCLUIDA_EM = NOW()
+         WHERE ID_SESSAO = ?`,
+        [sess.id]
+      );
+
+      const isDevolucao = sess.tipoFluxo === 'DEVOLVER_CAUTELA';
+      const wppMessage = isDevolucao
+        ? '✅ Solicitação de devolução de cautela registrada!\n\nAguardando deferimento do responsável pela armaria para emitir recibo.'
+        : '✅ Solicitação de cautela registrada!\n\nAguardando deferimento do responsável pela armaria para emitir recibo.';
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const isSimulatedPhone = String(sess.fromPhone || '').startsWith('sim');
+      let whatsappNotified = false;
+      if (!isSimulatedPhone && cfgRow?.ATIVO && sess.fromPhone) {
+        const sent = await sendDirectWhatsappText(
+          pool,
+          cfgRow,
+          sess.fromPhone,
+          wppMessage,
+          decryptSecret,
+          isDevolucao ? 'DEVOLUCAO_CAUTELA_WHATSAPP' : 'SOLICITACAO_CAUTELA_WHATSAPP'
+        );
+        whatsappNotified = sent.sentToMeta;
+      }
+
+      await insertAuditLog(
+        'WHATSAPP',
+        isDevolucao ? 'CONCLUIR_SESSAO_DEVOLUCAO_WPP' : 'CONCLUIR_SESSAO_CAUTELA_WPP',
+        `Sessão temporária WhatsApp (${sess.tipoFluxo}) concluída por ${sess.userName || sess.userId}. Aguardando deferimento do responsável pela armaria.`,
+        {
+          id: sess.userId,
+          name: sess.userName || undefined,
+          masp: sess.userMasp || undefined,
+          role: sess.userRole || undefined
+        },
+        req.ip
+      );
+
+      const officialDigits = normalizePhoneDigits(cfgRow?.NUMERO_TELEFONE_EXIBICAO);
+      return res.json({
+        success: true,
+        whatsappNotified,
+        message: 'Aguardando deferimento do responsável pela armaria para emitir recibo.',
+        whatsappReturnUrl: officialDigits ? `https://wa.me/${officialDigits}` : null
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 11. DOWNLOAD DE PDF COM TOKEN ASSINADO DE CURTA DURAÇÃO (HMAC-SHA256)
   apiRouter.get('/whatsapp/pdf/download', async (req: Request, res: Response) => {
     try {
       const token = String(req.query.token || '').trim();
@@ -1935,38 +2263,104 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       const pool = getPool();
       let buffer: Buffer;
       let filename: string;
+      const unitIds = Array.isArray(verified.unitIds) ? verified.unitIds : undefined;
+      const unitLabel = verified.unitLabel || 'Unidades Permitidas';
 
-      if (verified.scope === 'single' && verified.origem && verified.id) {
-        const rep = await findSingleOperationReport(pool, verified.origem, verified.id);
-        if (!rep) {
-          return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+      if (verified.scope === 'op_single' && verified.origem && verified.id) {
+        const rep = await findSingleOperationReport(pool, verified.origem as OperacaoOrigem, verified.id);
+        if (!rep || (unitIds && unitIds.length > 0 && rep.unidadeId && !unitIds.includes(rep.unidadeId))) {
+          return res.status(404).json({ error: 'Relatório de operação não encontrado ou sem permissão.' });
         }
         const pdf = await generateSingleOperationReportPdf(rep);
         buffer = pdf.buffer;
         filename = pdf.filename;
-      } else if (verified.scope === 'last24h') {
-        const reps = await findOperationReportsLast24h(pool);
+      } else if (verified.scope === 'op_last24h') {
+        const reps = await findOperationReportsLast24h(pool, unitIds);
         if (reps.length === 0) {
           return res.status(404).json({ error: 'Nenhum relatório de operação encontrado nas últimas 24 horas.' });
         }
         const todayIso = new Date().toISOString().slice(0, 10);
         const pdf = await generateMultipleOperationsPdf(
           reps,
-          'RELATORIOS DE OPERACOES — ULTIMAS 24 HORAS',
-          `Ultimas_24h_${todayIso}`
+          `RELATORIOS DE OPERACOES — ULTIMAS 24H (${unitLabel})`,
+          `Ultimas_24h_${unitLabel}_${todayIso}`
         );
         buffer = pdf.buffer;
         filename = pdf.filename;
-      } else if (verified.scope === 'period' && verified.granularity && verified.isoFilter) {
-        const reps = await findOperationReportsByDate(pool, verified.granularity, verified.isoFilter);
+      } else if (verified.scope === 'op_period' && verified.granularity && verified.isoFilter) {
+        const reps = await findOperationReportsByDate(pool, verified.granularity, verified.isoFilter, unitIds);
         if (reps.length === 0) {
-          return res.status(404).json({ error: 'Nenhum relatório encontrado para o período solicitado.' });
+          return res.status(404).json({ error: 'Nenhum relatório de operação encontrado para o período solicitado.' });
         }
         const display = verified.granularity === 'DIA' ? formatIsoDateBr(verified.isoFilter) : verified.isoFilter;
         const pdf = await generateMultipleOperationsPdf(
           reps,
-          `RELATORIOS DE OPERACOES — ${display}`,
-          `${verified.granularity}_${verified.isoFilter}`
+          `RELATORIOS DE OPERACOES — ${display} (${unitLabel})`,
+          `${verified.granularity}_${verified.isoFilter}_${unitLabel}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'tr_single' && verified.origem && verified.id) {
+        const rep = await findSingleTrainingReport(pool, verified.origem as TreinamentoOrigem, verified.id);
+        if (!rep || (unitIds && unitIds.length > 0 && rep.unidadeId && !unitIds.includes(rep.unidadeId))) {
+          return res.status(404).json({ error: 'Relatório de treinamento não encontrado ou sem permissão.' });
+        }
+        const pdf = await generateSingleTrainingReportPdf(rep);
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'tr_last24h') {
+        const reps = await findTrainingReportsLast24h(pool, unitIds);
+        if (reps.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório de treinamento encontrado nas últimas 24 horas.' });
+        }
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const pdf = await generateMultipleTrainingsPdf(
+          reps,
+          `RELATORIOS DE TREINAMENTOS — ULTIMAS 24H (${unitLabel})`,
+          `Ultimas_24h_${unitLabel}_${todayIso}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'tr_period' && verified.granularity && verified.isoFilter) {
+        const reps = await findTrainingReportsByDate(pool, verified.granularity, verified.isoFilter, unitIds);
+        if (reps.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório de treinamento encontrado para o período solicitado.' });
+        }
+        const display = verified.granularity === 'DIA' ? formatIsoDateBr(verified.isoFilter) : verified.isoFilter;
+        const pdf = await generateMultipleTrainingsPdf(
+          reps,
+          `RELATORIOS DE TREINAMENTOS — ${display} (${unitLabel})`,
+          `${verified.granularity}_${verified.isoFilter}_${unitLabel}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'arm_receipt' && verified.receiptTipo && verified.id) {
+        const rec = await findSingleArmariaReceipt(pool, verified.receiptTipo, verified.id);
+        if (!rec) {
+          return res.status(404).json({ error: 'Recibo de cautela não encontrado.' });
+        }
+        const pdf = await generateArmariaReceiptPdf(rec);
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'arm_report' && verified.period) {
+        const data = await findArmariaCautelasByPeriod(pool, verified.period, unitIds);
+        const totalCount = data.armas.length + data.municoes.length + data.materiais.length;
+        if (totalCount === 0) {
+          return res.status(404).json({ error: 'Nenhuma movimentação de armaria encontrada no período solicitado.' });
+        }
+        const periodLabels: Record<string, string> = {
+          '24H': 'Últimas 24h',
+          SEMANA: 'Última semana',
+          MES_ATUAL: 'Mês atual',
+          ANO_ATUAL: 'Ano atual'
+        };
+        const periodLabel = periodLabels[verified.period] || verified.period;
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const pdf = await generateArmariaCautelasReportPdf(
+          data,
+          unitLabel,
+          periodLabel,
+          `${verified.period}_${unitLabel}_${todayIso}`
         );
         buffer = pdf.buffer;
         filename = pdf.filename;

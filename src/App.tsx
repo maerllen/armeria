@@ -28,6 +28,7 @@ import { ModuloCautelaArmas } from './components/ModuloCautelaArmas';
 import { ModuloCautelaMunicoes } from './components/ModuloCautelaMunicoes';
 import { ModuloCautelaMateriais } from './components/ModuloCautelaMateriais';
 import { ModuloWhatsapp } from './components/ModuloWhatsapp';
+import { PortalSessaoTemporariaWhatsapp } from './components/PortalSessaoTemporariaWhatsapp';
 import { ManualModule } from './components/ModuloManual';
 import { Shield, Users, Crosshair, Disc, Vault, ArrowRightLeft, FileText, AlertTriangle, Key, Activity, Clock, Bomb, Dog } from 'lucide-react';
 import { formatTimestamp } from './utils/masks';
@@ -127,6 +128,13 @@ export default function App() {
     if (code) return code;
     if (window.location.pathname === '/validar-certificado') return '';
     return null;
+  });
+
+  const [whatsappTempSessionToken, setWhatsappTempSessionToken] = useState<string | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('wpp_sessao');
+    return token && token.trim() ? token.trim() : null;
   });
 
   useEffect(() => {
@@ -608,6 +616,20 @@ export default function App() {
           </div>
         </div>
       </div>
+    );
+  }
+
+  // Se acessando via link temporário gerado pelo WhatsApp (Solicitar / Devolver Cautelas)
+  if (whatsappTempSessionToken) {
+    return (
+      <PortalSessaoTemporariaWhatsapp
+        token={whatsappTempSessionToken}
+        onExitToApp={() => {
+          window.history.replaceState({}, document.title, window.location.pathname);
+          setWhatsappTempSessionToken(null);
+          refreshData();
+        }}
+      />
     );
   }
 

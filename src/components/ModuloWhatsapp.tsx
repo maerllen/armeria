@@ -45,7 +45,8 @@ import {
   List,
   RotateCcw,
   UploadCloud,
-  CornerDownRight
+  CornerDownRight,
+  ExternalLink
 } from 'lucide-react';
 
 interface ModuloWhatsappProps {
@@ -202,6 +203,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
   const [simInput, setSimInput] = useState('');
   const [simLoading, setSimLoading] = useState(false);
   const [simEtapa, setSimEtapa] = useState('INICIO');
+  const [simAsUserId, setSimAsUserId] = useState<string>(currentUser.id);
   const [openListMsgId, setOpenListMsgId] = useState<string | null>(null);
 
   // --- STATE: COMUNICAÇÃO (REGRAS, ENVIO MANUAL, LOGS E WEBHOOKS) ---
@@ -648,6 +650,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
         method: 'POST',
         headers: authHeaders,
         body: JSON.stringify({
+          simulateAsUserId: simAsUserId || currentUser.id,
           text: payload.text || '',
           buttonId: payload.buttonId || '',
           buttonTitle: payload.buttonTitle || '',
@@ -676,11 +679,11 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     }
   };
 
-  const handleResetSimulation = async () => {
+  const handleResetSimulation = async (overrideUserId?: string) => {
     await fetch('/api/whatsapp/bot/reset', {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({})
+      body: JSON.stringify({ simulateAsUserId: overrideUserId || simAsUserId || currentUser.id })
     }).catch(() => {});
     setSimMessages([]);
     setSimEtapa('INICIO');
@@ -1745,10 +1748,10 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold">
                       Operações
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 font-bold">
+                    <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-bold">
                       Treinamentos
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 font-bold">
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold">
                       Armaria
                     </span>
                   </div>
@@ -1758,40 +1761,39 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                   <div className="bg-slate-950/80 border border-cyan-500/30 rounded-xl p-3 space-y-1.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-cyan-300">
                       <CornerDownRight className="w-3.5 h-3.5" />
-                      <span>2. Ao clicar em &quot;Operações&quot;</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      <span className="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 font-bold">
-                        Relatórios Por data
-                      </span>
-                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 font-bold">
-                        Relatório das últimas 24h
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
-                    <div className="text-[11px] font-bold text-cyan-300">
-                      3A. Relatórios Por data → Dia, Mês ou Ano → Selecionar PDF
+                      <span>2A. Operações &amp; Treinamentos (mesma lógica)</span>
                     </div>
                     <p className="text-[11px] text-slate-400 leading-relaxed">
-                      O cliente escolhe <strong className="text-slate-200">Por Dia</strong>,{' '}
-                      <strong className="text-slate-200">Por Mês</strong> ou{' '}
-                      <strong className="text-slate-200">Por Ano</strong> (via lista interativa ou digitando a data),
-                      recebe os relatórios encontrados no banco e escolhe qual baixar em{' '}
-                      <strong className="text-emerald-300">PDF</strong> (ou todos consolidados).
+                      Escolhe <strong className="text-slate-200">Relatórios Por data</strong> (
+                      <strong className="text-cyan-200">DIA/MÊS/ANO</strong>,{' '}
+                      <strong className="text-cyan-200">MÊS/ANO</strong> ou{' '}
+                      <strong className="text-cyan-200">ANO</strong>) ou{' '}
+                      <strong className="text-amber-200">Relatório das últimas 24h</strong>. Antes de imprimir/baixar o
+                      PDF, pergunta <strong className="text-emerald-300">Qual unidade?</strong> (CAC, CAT, CAP, CORE,
+                      COC ou TODAS — exibindo somente as unidades permitidas ao usuário).
                     </p>
                   </div>
 
-                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
-                    <div className="text-[11px] font-bold text-amber-300">
-                      3B. Relatório das últimas 24h → Download imediato em PDF
+                  <div className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-amber-300">
+                      <CornerDownRight className="w-3.5 h-3.5" />
+                      <span>2B. Armaria (4 sub-opções)</span>
                     </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Gera automaticamente um <strong className="text-emerald-300">PDF consolidado</strong> com todos
-                      os relatórios de operações (COC, CAT e Unidades Policiais) das últimas 24 horas e envia como
-                      documento diretamente no WhatsApp.
-                    </p>
+                    <ul className="text-[11px] text-slate-400 leading-relaxed space-y-1">
+                      <li>
+                        • <strong className="text-slate-200">Solicitar / Devolver Cautelas:</strong> gera link de sessão
+                        temporária autenticada (Armas, Munições e Materiais). Ao concluir, retorna ao WhatsApp
+                        informando <em>&quot;Aguardando deferimento do responsável pela armaria para emitir recibo&quot;</em>.
+                      </li>
+                      <li>
+                        • <strong className="text-slate-200">Recibos:</strong> lista recibos separados (Armas, Munições
+                        e Materiais). Armeiros e Administradores podem emitir para terceiros escolhendo unidade e usuário.
+                      </li>
+                      <li>
+                        • <strong className="text-slate-200">Relatórios:</strong> escolhe a unidade permitida ou Todas e
+                        o período (Últimas 24h, Última semana, Mês atual ou Ano atual) para download em PDF.
+                      </li>
+                    </ul>
                   </div>
                 </div>
               </div>
@@ -1806,16 +1808,37 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     <span>Simulador Interativo do Bot (Dados Reais + PDF Real)</span>
                   </h3>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Teste agora todas as etapas do fluxo consultando os relatórios reais cadastrados no sistema.
+                    Teste o fluxo completo com as permissões reais de qualquer usuário cadastrado.
                   </p>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    value={simAsUserId}
+                    onChange={e => {
+                      const nextId = e.target.value;
+                      setSimAsUserId(nextId);
+                      handleResetSimulation(nextId);
+                    }}
+                    className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[11px] text-slate-100 max-w-[230px]"
+                    title="Simular permissões como usuário"
+                  >
+                    <option value={currentUser.id}>
+                      Você ({currentUser.name} — {currentUser.role})
+                    </option>
+                    {allUsers
+                      .filter(u => u.id !== currentUser.id)
+                      .map(u => (
+                        <option key={u.id} value={u.id}>
+                          {u.name} ({u.role})
+                        </option>
+                      ))}
+                  </select>
                   <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[10px] text-cyan-300">
                     Etapa: {simEtapa}
                   </span>
                   <button
                     type="button"
-                    onClick={handleResetSimulation}
+                    onClick={() => handleResetSimulation()}
                     className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold flex items-center gap-1"
                   >
                     <RotateCcw className="w-3.5 h-3.5" />
@@ -1836,8 +1859,8 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                         Envie uma mensagem para iniciar o menu interativo
                       </p>
                       <p className="text-[11px] text-slate-400 max-w-sm">
-                        Clique no botão abaixo para simular um cliente enviando &quot;Olá&quot; e navegue pelos botões
-                        até baixar os relatórios em PDF.
+                        Clique no botão abaixo para simular o usuário selecionado enviando &quot;Olá&quot; e teste
+                        Operações, Treinamentos e Armaria com filtros de unidade, sessões temporárias e PDFs reais.
                       </p>
                     </div>
                     <button
@@ -1875,7 +1898,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <div className="font-mono font-bold text-[11px] text-emerald-300 break-all">
-                                    {entry.reply.documentFilename || 'Relatorio_Operacoes.pdf'}
+                                    {entry.reply.documentFilename || 'Relatorio.pdf'}
                                   </div>
                                   <p className="text-[11px] text-slate-300 mt-0.5">{entry.reply.body}</p>
                                 </div>
@@ -1887,6 +1910,19 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                               >
                                 <Download className="w-3.5 h-3.5" />
                                 <span>Baixar PDF Real Gerado</span>
+                              </a>
+                            </div>
+                          ) : entry.reply?.kind === 'link' && entry.reply.actionUrl ? (
+                            <div className="bg-slate-950 border border-amber-500/40 rounded-xl p-3 space-y-2.5">
+                              <div className="text-slate-200 whitespace-pre-wrap leading-relaxed text-[11.5px]">
+                                {entry.reply.body}
+                              </div>
+                              <a
+                                href={entry.reply.actionUrl}
+                                className="w-full py-2 px-3 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1.5 transition"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                                <span>{entry.reply.actionLabel || 'Abrir Página Temporária'}</span>
                               </a>
                             </div>
                           ) : (

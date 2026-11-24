@@ -1553,6 +1553,26 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 34B-13. WHATSAPP_SESSOES_TEMPORARIAS (Sessões web temporárias para Solicitar/Devolver Cautela via WhatsApp)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`WHATSAPP_SESSOES_TEMPORARIAS\` (
+        \`ID_SESSAO\` VARCHAR(64) NOT NULL,
+        \`TOKEN_HASH\` VARCHAR(128) NOT NULL,
+        \`TIPO_FLUXO\` ENUM('SOLICITAR_CAUTELA', 'DEVOLVER_CAUTELA') NOT NULL,
+        \`USUARIO_ID\` VARCHAR(64) NOT NULL,
+        \`TELEFONE_CLIENTE\` VARCHAR(32) NOT NULL,
+        \`STATUS_SESSAO\` ENUM('ATIVA', 'CONCLUIDA', 'EXPIRADA', 'CANCELADA') NOT NULL DEFAULT 'ATIVA',
+        \`EXPIRA_EM\` DATETIME NOT NULL,
+        \`CONCLUIDA_EM\` DATETIME DEFAULT NULL,
+        \`RESUMO_ACAO\` TEXT DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_SESSAO\`),
+        UNIQUE KEY \`uk_wpp_sess_temp_hash\` (\`TOKEN_HASH\`),
+        KEY \`idx_wpp_sess_temp_user\` (\`USUARIO_ID\`),
+        KEY \`idx_wpp_sess_temp_status\` (\`STATUS_SESSAO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // 34C. RELATORIOS_OPERACOES_CANIL
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`RELATORIOS_OPERACOES_CANIL\` (

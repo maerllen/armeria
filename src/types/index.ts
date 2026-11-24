@@ -2334,7 +2334,7 @@ export interface WhatsappBotListRow {
 }
 
 export interface WhatsappBotReplyItem {
-  kind: 'buttons' | 'list' | 'text' | 'document';
+  kind: 'buttons' | 'list' | 'text' | 'document' | 'link';
   header?: string;
   body: string;
   footer?: string;
@@ -2344,6 +2344,8 @@ export interface WhatsappBotReplyItem {
   documentFilename?: string;
   documentCaption?: string;
   documentDownloadUrl?: string;
+  actionUrl?: string;
+  actionLabel?: string;
 }
 
 
