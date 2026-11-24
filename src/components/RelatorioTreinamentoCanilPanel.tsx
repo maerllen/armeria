@@ -11,6 +11,7 @@ import {
   ParticipacaoTreinamentoCanil,
   TopicoTreinamentoCanilTipo,
   TopicoTreinamentoCanilItem,
+  TopicoTreinamentoCanilConfig,
   TOPICOS_TREINAMENTO_CANIL,
   RelatorioOperacaoCanil,
   SolicitacaoOperacaoCanil,
@@ -30,6 +31,7 @@ import {
 } from '../data/estadosMunicipiosBR';
 import { TopLayerAlert } from './TopLayerAlert';
 import { RelatorioOperacoesCanilForm } from './RelatorioOperacoesCanilForm';
+import { RelatorioCanilAnimaisTab } from './RelatorioCanilAnimaisTab';
 import {
   Dog,
   Search,
@@ -52,7 +54,9 @@ import {
   Car,
   ChevronDown,
   ChevronRight,
-  Tag
+  Tag,
+  Settings,
+  Save
 } from 'lucide-react';
 
 interface RelatorioTreinamentoCanilPanelProps {
@@ -69,6 +73,7 @@ type CanilTrainingTab =
   | 'relatorio-treinamento'
   | 'relatorio-operacoes'
   | 'meus-relatorios'
+  | 'animais'
   | 'relatorio-unidade';
 
 export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilPanelProps> = ({
@@ -91,10 +96,64 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     effectiveRole === 'Armeiro' ||
     Boolean(currentUser.canViewAllCanilReports);
 
+  // Permissão para gerenciar (inserir/editar/excluir) tópicos K9: Administrador vinculado à COE ou Geral
+  const canManageTopicosTreinamento = useMemo(() => {
+    if (isGeral) return true;
+    const assignedRoles = [effectiveRole, currentUser.role, ...(currentUser.roles || [])].map(r =>
+      String(r || '').toLowerCase()
+    );
+    const isAdmin = assignedRoles.includes('administrador');
+    if (!isAdmin) return false;
+
+    const norm = (val?: string) =>
+      String(val || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+    const isCoeText = (code?: string, name?: string) => {
+      const c = norm(code);
+      const n = norm(name);
+      return (
+        c === 'coe' ||
+        n === 'coe' ||
+        n.includes('coordenacao de operacoes especiais') ||
+        n.startsWith('coe ') ||
+        n.includes('(coe)') ||
+        n.includes(' coe') ||
+        c.includes('coe')
+      );
+    };
+
+    const userUnit = units.find(u => u.id === currentUser.unitId);
+    const userDept =
+      departments.find(d => d.id === currentUser.departmentId) ||
+      (userUnit ? departments.find(d => d.id === userUnit.departmentId) : undefined);
+
+    return (
+      isCoeText(userUnit?.code, userUnit?.name) ||
+      isCoeText(userDept?.code, userDept?.name)
+    );
+  }, [isGeral, effectiveRole, currentUser, units, departments]);
+
   // Storage collections
   const cachorros = useMemo(() => storage.getCachorros(), [dataVersion, localVersion]);
   const relatoriosTreinamento = useMemo(
     () => storage.getRelatoriosTreinamentoCanil(),
+    [dataVersion, localVersion]
+  );
+  const topicosConfig = useMemo(
+    () => storage.getTopicosTreinamentoCanil(),
+    [dataVersion, localVersion]
+  );
+  const activeTopicosList = useMemo(() => {
+    if (topicosConfig.length > 0) {
+      return topicosConfig.map(t => t.nome);
+    }
+    return TOPICOS_TREINAMENTO_CANIL;
+  }, [topicosConfig]);
+  const movimentacoesVeterinarias = useMemo(
+    () => storage.getMovimentacoesVeterinarias(),
     [dataVersion, localVersion]
   );
   const relatoriosOperacoes = useMemo(
@@ -106,9 +165,89 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     [dataVersion, localVersion]
   );
 
+  // Modal de gerenciamento de tópicos K9 (Admin COE / Geral)
+  const [showManageTopicosModal, setShowManageTopicosModal] = useState(false);
+  const [newTopicoNome, setNewTopicoNome] = useState('');
+  const [editingTopicoId, setEditingTopicoId] = useState<string | null>(null);
+  const [editingTopicoNome, setEditingTopicoNome] = useState('');
+  const [confirmDeleteTopicoId, setConfirmDeleteTopicoId] = useState<string | null>(null);
+  const [topicoBusy, setTopicoBusy] = useState(false);
+
   const triggerRefresh = () => {
     setLocalVersion(v => v + 1);
     if (onRefresh) onRefresh();
+  };
+
+  const handleCreateTopico = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const nome = newTopicoNome.trim();
+    if (!nome) {
+      notifyError('Informe o nome do novo tópico de treinamento.');
+      return;
+    }
+    setTopicoBusy(true);
+    try {
+      const res = await storage.createTopicoTreinamentoCanil(nome);
+      if (res.success) {
+        setNewTopicoNome('');
+        notifySuccess(`Tópico "${nome.toUpperCase()}" cadastrado com sucesso.`);
+        triggerRefresh();
+      } else {
+        notifyError(res.error || 'Erro ao cadastrar tópico.');
+      }
+    } finally {
+      setTopicoBusy(false);
+    }
+  };
+
+  const handleUpdateTopico = async (item: TopicoTreinamentoCanilConfig) => {
+    const nome = editingTopicoNome.trim();
+    if (!nome) {
+      notifyError('Informe o novo nome do tópico.');
+      return;
+    }
+    setTopicoBusy(true);
+    try {
+      const res = await storage.updateTopicoTreinamentoCanil(item.id, nome);
+      if (res.success) {
+        const oldName = item.nome;
+        const nextName = nome.replace(/\s+/g, ' ').trim().toUpperCase();
+        setTreinoForm(prev => ({
+          ...prev,
+          topicosTreinamento: prev.topicosTreinamento.map(t =>
+            t.topico === oldName ? { ...t, topico: nextName } : t
+          )
+        }));
+        setEditingTopicoId(null);
+        setEditingTopicoNome('');
+        notifySuccess(`Tópico atualizado para "${nextName}".`);
+        triggerRefresh();
+      } else {
+        notifyError(res.error || 'Erro ao atualizar tópico.');
+      }
+    } finally {
+      setTopicoBusy(false);
+    }
+  };
+
+  const handleDeleteTopico = async (item: TopicoTreinamentoCanilConfig) => {
+    setTopicoBusy(true);
+    try {
+      const res = await storage.deleteTopicoTreinamentoCanil(item.id);
+      if (res.success) {
+        setTreinoForm(prev => ({
+          ...prev,
+          topicosTreinamento: prev.topicosTreinamento.filter(t => t.topico !== item.nome)
+        }));
+        setConfirmDeleteTopicoId(null);
+        notifySuccess(`Tópico "${item.nome}" excluído com sucesso.`);
+        triggerRefresh();
+      } else {
+        notifyError(res.error || 'Erro ao excluir tópico.');
+      }
+    } finally {
+      setTopicoBusy(false);
+    }
   };
 
   // Messages & Loading state
@@ -2008,6 +2147,19 @@ ${infoTableHtml}
           )}
         </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveTab('animais')}
+          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'animais'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Dog className="w-4 h-4" />
+          <span>ANIMAIS</span>
+        </button>
+
         {canVerRelatoriosTodasEquipes && (
           <button
             type="button"
@@ -2023,6 +2175,24 @@ ${infoTableHtml}
           </button>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB ANIMAIS: DOSSIÊ K9 + GRÁFICOS INTERATIVOS DE TÓPICOS DE TREINAMENTO  */}
+      {/* ========================================================================= */}
+      {activeTab === 'animais' && (
+        <RelatorioCanilAnimaisTab
+          currentUser={currentUser}
+          cachorros={cachorros}
+          relatoriosTreinamento={relatoriosTreinamento}
+          movimentacoesVeterinarias={movimentacoesVeterinarias}
+          activeTopicos={activeTopicosList}
+          units={units}
+          departments={departments}
+          onNotifySuccess={notifySuccess}
+          onNotifyError={notifyError}
+          onDataChanged={triggerRefresh}
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* TAB 1B: RELATÓRIO DE OPERAÇÕES (OPERADOR CANINO / COC) */}
@@ -2600,11 +2770,28 @@ ${infoTableHtml}
                     Selecione um ou mais tópicos realizados e defina se foram aplicados a <strong>todos os K9 do relatório</strong> ou apenas a <strong>K9 específicos</strong>.
                   </p>
                 </div>
-                {treinoForm.topicosTreinamento.length > 0 && (
-                  <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[11px] shrink-0">
-                    {treinoForm.topicosTreinamento.length} tópico(s)
-                  </span>
-                )}
+                <div className="flex items-center gap-2 shrink-0">
+                  {treinoForm.topicosTreinamento.length > 0 && (
+                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-500/30 text-amber-300 font-mono font-bold text-[11px]">
+                      {treinoForm.topicosTreinamento.length} tópico(s)
+                    </span>
+                  )}
+                  {canManageTopicosTreinamento && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingTopicoId(null);
+                        setConfirmDeleteTopicoId(null);
+                        setShowManageTopicosModal(true);
+                      }}
+                      className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold text-[11px] flex items-center space-x-1.5 transition"
+                      title="Inserir, editar ou excluir tópicos de treinamento K9 (Administrador COE)"
+                    >
+                      <Settings className="w-3.5 h-3.5" />
+                      <span>Gerenciar Tópicos</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col sm:flex-row gap-2">
@@ -2622,7 +2809,7 @@ ${infoTableHtml}
                       ? 'Selecione um tópico de treinamento para adicionar...'
                       : '+ Adicionar outro tópico de treinamento...'}
                   </option>
-                  {TOPICOS_TREINAMENTO_CANIL.filter(
+                  {activeTopicosList.filter(
                     t => !treinoForm.topicosTreinamento.some(item => item.topico === t)
                   ).map(topico => (
                     <option key={topico} value={topico}>
@@ -4461,6 +4648,164 @@ ${infoTableHtml}
                   <span>Imprimir Relatório</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Modal: Gerenciar Tópicos de Treinamento K9 (Administrador COE / Geral) */}
+      {showManageTopicosModal && canManageTopicosTreinamento && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-amber-300 uppercase flex items-center space-x-2">
+                  <Settings className="w-4 h-4" />
+                  <span>Gerenciar Tópicos de Treinamento K9</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Alterações atualizam imediatamente o formulário de treinamento e os gráficos da guia ANIMAIS.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowManageTopicosModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <form onSubmit={handleCreateTopico} className="flex gap-2">
+                <input
+                  type="text"
+                  value={newTopicoNome}
+                  onChange={e => setNewTopicoNome(e.target.value)}
+                  maxLength={80}
+                  placeholder="Novo tópico (ex: PISTA DE OBSTÁCULOS)..."
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 uppercase placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  type="submit"
+                  disabled={topicoBusy || !newTopicoNome.trim()}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center space-x-1.5 transition"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Inserir</span>
+                </button>
+              </form>
+
+              <div className="max-h-80 overflow-y-auto space-y-1.5 pr-1">
+                {topicosConfig.length === 0 ? (
+                  <p className="text-xs text-slate-500 text-center py-6">
+                    Nenhum tópico carregado do banco. Insira um novo tópico ou atualize a página.
+                  </p>
+                ) : (
+                  topicosConfig.map(item => {
+                    const isEditing = editingTopicoId === item.id;
+                    const isConfirmDelete = confirmDeleteTopicoId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        className="bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-2 flex items-center justify-between gap-2 text-xs"
+                      >
+                        {isEditing ? (
+                          <div className="flex-1 flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={editingTopicoNome}
+                              onChange={e => setEditingTopicoNome(e.target.value)}
+                              maxLength={80}
+                              className="flex-1 bg-slate-900 border border-amber-500/60 rounded-lg px-2.5 py-1 text-xs text-slate-100 uppercase focus:outline-none"
+                            />
+                            <button
+                              type="button"
+                              disabled={topicoBusy}
+                              onClick={() => handleUpdateTopico(item)}
+                              className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold flex items-center gap-1"
+                            >
+                              <Save className="w-3.5 h-3.5" />
+                              <span>Salvar</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingTopicoId(null);
+                                setEditingTopicoNome('');
+                              }}
+                              className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 font-semibold"
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        ) : (
+                          <>
+                            <span className="font-bold text-slate-100 uppercase tracking-wide">{item.nome}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isConfirmDelete ? (
+                                <>
+                                  <span className="text-[11px] text-red-300 font-semibold mr-1">Confirmar exclusão?</span>
+                                  <button
+                                    type="button"
+                                    disabled={topicoBusy}
+                                    onClick={() => handleDeleteTopico(item)}
+                                    className="px-2 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[11px]"
+                                  >
+                                    Excluir
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setConfirmDeleteTopicoId(null)}
+                                    className="px-2 py-1 rounded-lg bg-slate-800 text-slate-300 font-semibold text-[11px]"
+                                  >
+                                    Não
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setConfirmDeleteTopicoId(null);
+                                      setEditingTopicoId(item.id);
+                                      setEditingTopicoNome(item.nome);
+                                    }}
+                                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 transition"
+                                    title="Editar tópico"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingTopicoId(null);
+                                      setConfirmDeleteTopicoId(item.id);
+                                    }}
+                                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-red-500/20 text-red-400 transition"
+                                    title="Excluir tópico"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowManageTopicosModal(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+              >
+                Fechar
+              </button>
             </div>
           </div>
         </div>

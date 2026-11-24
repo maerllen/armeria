@@ -11707,9 +11707,177 @@ apiRouter.delete('/canis-fisicos/:id', async (req: Request, res: Response) => {
 });
 
 // --- 2. CACHORROS K9 ---
+let cachorrosDossierSchemaEnsured = false;
+async function ensureCachorrosDossierSchema(pool: any) {
+  if (cachorrosDossierSchemaEnsured) return;
+  try {
+    const [anotCol]: any = await pool.query(
+      `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CACHORROS_CANIL' AND COLUMN_NAME = 'ANOTACOES_CONDUTOR_CACHORRO'`
+    );
+    if (!anotCol?.[0]?.cnt) {
+      await pool.query(
+        'ALTER TABLE `CACHORROS_CANIL` ADD COLUMN `ANOTACOES_CONDUTOR_CACHORRO` VARCHAR(500) DEFAULT NULL AFTER `OBSERVACOES_CACHORRO`'
+      );
+    }
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`CACHORROS_CANIL_HISTORICO_CONDUTORES\` (
+        \`ID_HIST_CONDUTOR\` VARCHAR(64) NOT NULL,
+        \`CACHORRO_ID\` VARCHAR(64) NOT NULL,
+        \`SLOT\` TINYINT(1) NOT NULL DEFAULT 1,
+        \`CONDUTOR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`CONDUTOR_NOME\` VARCHAR(255) NOT NULL,
+        \`CONDUTOR_MASP\` VARCHAR(32) DEFAULT NULL,
+        \`CONDUTOR_CARGO\` VARCHAR(128) DEFAULT NULL,
+        \`DATA_INICIO\` VARCHAR(10) NOT NULL,
+        \`DATA_FIM\` VARCHAR(10) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_HIST_CONDUTOR\`),
+        KEY \`idx_hist_cond_cachorro\` (\`CACHORRO_ID\`),
+        KEY \`idx_hist_cond_usuario\` (\`CONDUTOR_ID\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`CACHORROS_CANIL_VACINAS\` (
+        \`ID_VACINA\` VARCHAR(64) NOT NULL,
+        \`CACHORRO_ID\` VARCHAR(64) NOT NULL,
+        \`NOME_VACINA\` VARCHAR(160) NOT NULL,
+        \`DATA_APLICACAO\` VARCHAR(10) NOT NULL,
+        \`PROXIMA_DOSE\` VARCHAR(10) DEFAULT NULL,
+        \`LOTE\` VARCHAR(80) DEFAULT NULL,
+        \`VETERINARIO\` VARCHAR(160) DEFAULT NULL,
+        \`OBSERVACOES\` TEXT DEFAULT NULL,
+        \`REGISTRADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`REGISTRADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_VACINA\`),
+        KEY \`idx_vac_cachorro\` (\`CACHORRO_ID\`),
+        KEY \`idx_vac_proxima\` (\`PROXIMA_DOSE\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`CACHORROS_CANIL_HISTORICO_MEDICO\` (
+        \`ID_HIST_MEDICO\` VARCHAR(64) NOT NULL,
+        \`CACHORRO_ID\` VARCHAR(64) NOT NULL,
+        \`DATA_ATENDIMENTO\` VARCHAR(10) NOT NULL,
+        \`TIPO_ATENDIMENTO\` VARCHAR(120) NOT NULL,
+        \`DIAGNOSTICO\` TEXT DEFAULT NULL,
+        \`CONDUTA\` TEXT DEFAULT NULL,
+        \`VETERINARIO\` VARCHAR(160) DEFAULT NULL,
+        \`OBSERVACOES\` TEXT DEFAULT NULL,
+        \`REGISTRADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`REGISTRADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`ID_HIST_MEDICO\`),
+        KEY \`idx_med_cachorro\` (\`CACHORRO_ID\`),
+        KEY \`idx_med_data\` (\`DATA_ATENDIMENTO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    cachorrosDossierSchemaEnsured = true;
+  } catch (err) {
+    console.warn('Aviso ao verificar schema de dossiê de CACHORROS_CANIL:', err);
+  }
+}
+
+function getTodayIsoBrServer(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+async function syncCachorroCondutorSlotHistory(
+  pool: any,
+  cachorroId: string,
+  slot: 1 | 2,
+  newCondutor: { id: string | null; nome: string | null; masp: string | null; cargo: string | null },
+  startDateOverride?: string
+): Promise<void> {
+  await ensureCachorrosDossierSchema(pool);
+  const todayBr = startDateOverride && /^\d{4}-\d{2}-\d{2}$/.test(startDateOverride)
+    ? startDateOverride
+    : getTodayIsoBrServer();
+
+  const [openRows]: any = await pool.query(
+    `SELECT ID_HIST_CONDUTOR as id, CONDUTOR_ID as condutorId
+     FROM CACHORROS_CANIL_HISTORICO_CONDUTORES
+     WHERE CACHORRO_ID = ? AND SLOT = ? AND DATA_FIM IS NULL
+     ORDER BY DATA_INICIO DESC, DATA_CRIACAO DESC`,
+    [cachorroId, slot]
+  );
+
+  const currentOpen = (openRows || [])[0] || null;
+  const newId = newCondutor.id ? String(newCondutor.id).trim() : null;
+  const newNome = newCondutor.nome ? String(newCondutor.nome).trim() : null;
+
+  if (currentOpen && currentOpen.condutorId === newId) {
+    return; // mesmo condutor continua ativo nesse slot
+  }
+
+  // Fecha vínculo anterior aberto neste slot
+  if (openRows && openRows.length > 0) {
+    await pool.query(
+      `UPDATE CACHORROS_CANIL_HISTORICO_CONDUTORES
+       SET DATA_FIM = ?
+       WHERE CACHORRO_ID = ? AND SLOT = ? AND DATA_FIM IS NULL`,
+      [todayBr, cachorroId, slot]
+    );
+  }
+
+  // Abre novo vínculo se houver novo condutor
+  if (newId && newNome) {
+    const histId = `hcond-${Date.now()}-${slot}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO CACHORROS_CANIL_HISTORICO_CONDUTORES (
+        ID_HIST_CONDUTOR, CACHORRO_ID, SLOT, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO, DATA_INICIO, DATA_FIM, DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NOW())`,
+      [histId, cachorroId, slot, newId, newNome, newCondutor.masp || null, newCondutor.cargo || null, todayBr]
+    );
+  }
+}
+
+async function verifyCanEditCachorroHealthRecords(pool: any, actorId: string): Promise<{ allowed: boolean; user?: any }> {
+  const cleanId = String(actorId || '').trim();
+  if (!cleanId) return { allowed: false };
+  const [rows]: any = await pool.query(
+    `SELECT ID_USUARIOS as id, NOME_USUARIOS as name, PERFIL_USUARIOS as role, ROLES_USUARIOS as rolesJson,
+            PODE_CRIAR_BAIAS_ANIMAIS_USUARIOS as canManageCanilAndAnimals,
+            PODE_CADASTRAR_MED_CANIL_USUARIOS as canManageCanilMeds,
+            PODE_MINISTRAR_MED_CANIL_USUARIOS as canAdministerCanilMeds
+     FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1`,
+    [cleanId]
+  );
+  const u = rows?.[0];
+  if (!u) return { allowed: false };
+  let parsedRoles: string[] = [String(u.role || '')];
+  if (u.rolesJson) {
+    try {
+      const arr = typeof u.rolesJson === 'string' ? JSON.parse(u.rolesJson) : u.rolesJson;
+      if (Array.isArray(arr)) parsedRoles = [...parsedRoles, ...arr.map(String)];
+    } catch (_) {}
+  }
+  const normalized = parsedRoles.map(r => r.toLowerCase());
+  const allowed =
+    normalized.includes('geral') ||
+    normalized.includes('administrador') ||
+    normalized.includes('armeiro') ||
+    normalized.includes('veterinario') ||
+    normalized.includes('veterinário') ||
+    Boolean(u.canManageCanilAndAnimals) ||
+    Boolean(u.canManageCanilMeds) ||
+    Boolean(u.canAdministerCanilMeds);
+  return { allowed, user: u };
+}
+
 apiRouter.get('/cachorros', async (req: Request, res: Response) => {
   try {
     const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
     try {
       const [rows]: any = await pool.query(`
         SELECT 
@@ -11741,6 +11909,7 @@ apiRouter.get('/cachorros', async (req: Request, res: Response) => {
           c.UNIDADE_ID_CACHORRO as unitId,
           c.FOTO_URL_CACHORRO as fotoUrl,
           c.OBSERVACOES_CACHORRO as observacoes,
+          c.ANOTACOES_CONDUTOR_CACHORRO as anotacoesCondutor,
           c.DATA_CRIACAO_CACHORRO as createdAt
         FROM CACHORROS_CANIL c
         LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
@@ -11947,6 +12116,9 @@ apiRouter.post('/cachorros', async (req: Request, res: Response) => {
       dog.observacoes || null
     ]);
 
+    await syncCachorroCondutorSlotHistory(pool, id, 1, resolved.c1);
+    await syncCachorroCondutorSlotHistory(pool, id, 2, resolved.c2);
+
     await insertAuditLog('Veterinário', 'Cadastrar Cão', `Cadastrado cão K9: ${dog.nome} (Raça: ${dog.raca})`, dog.actor, req.ip);
     return res.json({ id, ...dog });
   } catch (err: any) {
@@ -12027,6 +12199,9 @@ apiRouter.put('/cachorros/:id', async (req: Request, res: Response) => {
       id
     ]);
 
+    await syncCachorroCondutorSlotHistory(pool, id, 1, resolved.c1);
+    await syncCachorroCondutorSlotHistory(pool, id, 2, resolved.c2);
+
     await insertAuditLog('Veterinário', 'Editar Cão', `Atualizado cadastro do cão: ${dog.nome || id}`, dog.actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
@@ -12047,6 +12222,342 @@ apiRouter.delete('/cachorros/:id', async (req: Request, res: Response) => {
 
     await pool.query('DELETE FROM CACHORROS_CANIL WHERE ID_CACHORRO = ?', [id]);
     await insertAuditLog('Veterinário', 'Excluir Cão', `Excluído cão K9 ID: ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Dossiê Completo do Cão K9 (Histórico de Condutores, Vacinas, Histórico Médico e Medicamentos)
+apiRouter.get('/cachorros/:id/detalhes-completos', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const [dogRows]: any = await pool.query(
+      `SELECT ID_CACHORRO as id, TIPO_VINCULO_CACHORRO as tipoVinculo,
+              USUARIO_INTERNO_ID_CACHORRO as c1Id, USUARIO_INTERNO_NOME_CACHORRO as c1Nome,
+              USUARIO_INTERNO_MASP_CACHORRO as c1Masp, USUARIO_INTERNO_CARGO_CACHORRO as c1Cargo,
+              USUARIO_INTERNO_2_ID_CACHORRO as c2Id, USUARIO_INTERNO_2_NOME_CACHORRO as c2Nome,
+              USUARIO_INTERNO_2_MASP_CACHORRO as c2Masp, USUARIO_INTERNO_2_CARGO_CACHORRO as c2Cargo,
+              DATE_FORMAT(COALESCE(DATA_CRIACAO_CACHORRO, NOW()), '%Y-%m-%d') as createdDate
+       FROM CACHORROS_CANIL WHERE ID_CACHORRO = ? LIMIT 1`,
+      [id]
+    );
+    if (!dogRows || dogRows.length === 0) {
+      return res.status(404).json({ error: 'Animal não encontrado.' });
+    }
+    const dogRow = dogRows[0];
+
+    // Backfill automático caso cão legado ainda não tenha histórico registrado
+    const [existingHist]: any = await pool.query(
+      'SELECT COUNT(*) as cnt FROM CACHORROS_CANIL_HISTORICO_CONDUTORES WHERE CACHORRO_ID = ?',
+      [id]
+    );
+    if (!existingHist?.[0]?.cnt && dogRow.tipoVinculo === 'SISTEMA') {
+      if (dogRow.c1Id && dogRow.c1Nome) {
+        await syncCachorroCondutorSlotHistory(
+          pool,
+          id,
+          1,
+          { id: dogRow.c1Id, nome: dogRow.c1Nome, masp: dogRow.c1Masp || null, cargo: dogRow.c1Cargo || null },
+          dogRow.createdDate
+        );
+      }
+      if (dogRow.c2Id && dogRow.c2Nome) {
+        await syncCachorroCondutorSlotHistory(
+          pool,
+          id,
+          2,
+          { id: dogRow.c2Id, nome: dogRow.c2Nome, masp: dogRow.c2Masp || null, cargo: dogRow.c2Cargo || null },
+          dogRow.createdDate
+        );
+      }
+    }
+
+    const [histCondutores]: any = await pool.query(
+      `SELECT
+        ID_HIST_CONDUTOR as id,
+        CACHORRO_ID as cachorroId,
+        SLOT as slot,
+        CONDUTOR_ID as condutorId,
+        CONDUTOR_NOME as condutorNome,
+        CONDUTOR_MASP as condutorMasp,
+        CONDUTOR_CARGO as condutorCargo,
+        DATA_INICIO as dataInicio,
+        DATA_FIM as dataFim,
+        DATA_CRIACAO as createdAt
+      FROM CACHORROS_CANIL_HISTORICO_CONDUTORES
+      WHERE CACHORRO_ID = ?
+      ORDER BY (DATA_FIM IS NULL) DESC, DATA_INICIO DESC, DATA_CRIACAO DESC`,
+      [id]
+    );
+
+    const [vacinas]: any = await pool.query(
+      `SELECT
+        ID_VACINA as id,
+        CACHORRO_ID as cachorroId,
+        NOME_VACINA as nomeVacina,
+        DATA_APLICACAO as dataAplicacao,
+        PROXIMA_DOSE as proximaDose,
+        LOTE as lote,
+        VETERINARIO as veterinario,
+        OBSERVACOES as observacoes,
+        REGISTRADO_POR_ID as registradoPorId,
+        REGISTRADO_POR_NOME as registradoPorNome,
+        DATA_CRIACAO as createdAt
+      FROM CACHORROS_CANIL_VACINAS
+      WHERE CACHORRO_ID = ?
+      ORDER BY DATA_APLICACAO DESC, DATA_CRIACAO DESC`,
+      [id]
+    );
+
+    const [historicoMedico]: any = await pool.query(
+      `SELECT
+        ID_HIST_MEDICO as id,
+        CACHORRO_ID as cachorroId,
+        DATA_ATENDIMENTO as dataAtendimento,
+        TIPO_ATENDIMENTO as tipoAtendimento,
+        DIAGNOSTICO as diagnostico,
+        CONDUTA as conduta,
+        VETERINARIO as veterinario,
+        OBSERVACOES as observacoes,
+        REGISTRADO_POR_ID as registradoPorId,
+        REGISTRADO_POR_NOME as registradoPorNome,
+        DATA_CRIACAO as createdAt
+      FROM CACHORROS_CANIL_HISTORICO_MEDICO
+      WHERE CACHORRO_ID = ?
+      ORDER BY DATA_ATENDIMENTO DESC, DATA_CRIACAO DESC`,
+      [id]
+    );
+
+    const [medicamentos]: any = await pool.query(
+      `SELECT
+        ID_MOV_VET as id,
+        PRODUTO_ID_MOV_VET as produtoId,
+        PRODUTO_NOME_MOV_VET as produtoNome,
+        TIPO_PRODUTO_MOV_VET as tipoProduto,
+        TIPO_MOVIMENTACAO_MOV_VET as tipoMovimentacao,
+        QUANTIDADE_MOV_VET as quantidade,
+        UNIDADE_MEDIDA_MOV_VET as unidadeMedida,
+        CACHORRO_ID_MOV_VET as cachorroId,
+        CACHORRO_NOME_MOV_VET as cachorroNome,
+        DOSAGEM_APLICADA_MOV_VET as dosagemAplicada,
+        FREQUENCIA_ADMINISTRADA_MOV_VET as frequenciaAdministrada,
+        DATA_HORA_MOV_VET as dataHora,
+        MOTIVO_MOV_VET as motivo,
+        OBSERVACOES_MOV_VET as observacoes,
+        RESPONSAVEL_APLICACAO_ID_MOV_VET as responsavelAplicacaoId,
+        RESPONSAVEL_APLICACAO_NOME_MOV_VET as responsavelAplicacaoNome,
+        RESPONSAVEL_APLICACAO_MASP_MOV_VET as responsavelAplicacaoMasp,
+        UNIDADE_ID_MOV_VET as unitId
+      FROM MOVIMENTACOES_VETERINARIAS
+      WHERE CACHORRO_ID_MOV_VET = ? AND TIPO_MOVIMENTACAO_MOV_VET = 'ADMINISTRACAO_CAO'
+      ORDER BY DATA_HORA_MOV_VET DESC`,
+      [id]
+    );
+
+    return res.json({
+      historicoCondutores: histCondutores || [],
+      vacinas: vacinas || [],
+      historicoMedico: historicoMedico || [],
+      medicamentos: medicamentos || []
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Anotações livres do condutor (máximo 500 caracteres, editável apenas pelo condutor vinculado)
+apiRouter.put('/cachorros/:id/anotacoes-condutor', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { anotacoesCondutor, actor } = req.body || {};
+    const actorId = String(actor?.id || '').trim();
+    if (!actorId) {
+      return res.status(401).json({ error: 'Usuário não identificado para editar anotações do condutor.' });
+    }
+
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const [dogRows]: any = await pool.query(
+      `SELECT ID_CACHORRO as id, NOME_CACHORRO as nome,
+              USUARIO_INTERNO_ID_CACHORRO as c1Id, USUARIO_INTERNO_2_ID_CACHORRO as c2Id
+       FROM CACHORROS_CANIL WHERE ID_CACHORRO = ? LIMIT 1`,
+      [id]
+    );
+    if (!dogRows || dogRows.length === 0) {
+      return res.status(404).json({ error: 'Animal não encontrado.' });
+    }
+    const dog = dogRows[0];
+    if (dog.c1Id !== actorId && dog.c2Id !== actorId) {
+      return res.status(403).json({
+        error: 'Apenas o condutor vinculado a este animal pode editar o campo de anotações do condutor.'
+      });
+    }
+
+    const text = String(anotacoesCondutor ?? '');
+    if (text.length > 500) {
+      return res.status(400).json({ error: 'As anotações do condutor não podem ultrapassar 500 caracteres.' });
+    }
+
+    await pool.query(
+      'UPDATE CACHORROS_CANIL SET ANOTACOES_CONDUTOR_CACHORRO = ? WHERE ID_CACHORRO = ?',
+      [text.trim() ? text : null, id]
+    );
+
+    await insertAuditLog(
+      'Canil / COC',
+      'Editar Anotações do Condutor',
+      `Atualizadas anotações do condutor do cão K9 ${dog.nome} (${text.length} caracteres)`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, anotacoesCondutor: text.trim() ? text : '' });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Vacinas do Animal K9
+apiRouter.post('/cachorros/:id/vacinas', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nomeVacina, dataAplicacao, proximaDose, lote, veterinario, observacoes, actor } = req.body || {};
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const auth = await verifyCanEditCachorroHealthRecords(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para registrar vacinas do animal.' });
+    }
+
+    const cleanNome = String(nomeVacina || '').trim();
+    const cleanData = String(dataAplicacao || '').trim();
+    const cleanProxima = String(proximaDose || '').trim();
+    if (!cleanNome || cleanNome.length > 160) {
+      return res.status(400).json({ error: 'Informe o nome da vacina (até 160 caracteres).' });
+    }
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanData)) {
+      return res.status(400).json({ error: 'Informe a data de aplicação válida.' });
+    }
+    if (cleanProxima && !/^\d{4}-\d{2}-\d{2}$/.test(cleanProxima)) {
+      return res.status(400).json({ error: 'Data de próxima dose inválida.' });
+    }
+
+    const vacinaId = `vac-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO CACHORROS_CANIL_VACINAS (
+        ID_VACINA, CACHORRO_ID, NOME_VACINA, DATA_APLICACAO, PROXIMA_DOSE, LOTE, VETERINARIO, OBSERVACOES,
+        REGISTRADO_POR_ID, REGISTRADO_POR_NOME, DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        vacinaId,
+        id,
+        cleanNome,
+        cleanData,
+        cleanProxima || null,
+        String(lote || '').trim().slice(0, 80) || null,
+        String(veterinario || '').trim().slice(0, 160) || null,
+        String(observacoes || '').trim().slice(0, 1000) || null,
+        auth.user?.id || actor?.id || null,
+        auth.user?.name || actor?.name || null
+      ]
+    );
+
+    await insertAuditLog('Veterinário', 'Registrar Vacina K9', `Registrada vacina "${cleanNome}" para cão ID ${id}`, actor, req.ip);
+    return res.json({ success: true, id: vacinaId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/cachorros/:id/vacinas/:vacinaId', async (req: Request, res: Response) => {
+  try {
+    const { id, vacinaId } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const auth = await verifyCanEditCachorroHealthRecords(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para excluir registros de vacina.' });
+    }
+
+    await pool.query('DELETE FROM CACHORROS_CANIL_VACINAS WHERE ID_VACINA = ? AND CACHORRO_ID = ?', [vacinaId, id]);
+    await insertAuditLog('Veterinário', 'Excluir Vacina K9', `Excluída vacina ${vacinaId} do cão ID ${id}`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+// Histórico Médico do Animal K9
+apiRouter.post('/cachorros/:id/historico-medico', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { dataAtendimento, tipoAtendimento, diagnostico, conduta, veterinario, observacoes, actor } = req.body || {};
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const auth = await verifyCanEditCachorroHealthRecords(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para registrar histórico médico do animal.' });
+    }
+
+    const cleanData = String(dataAtendimento || '').trim();
+    const cleanTipo = String(tipoAtendimento || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanData)) {
+      return res.status(400).json({ error: 'Informe uma data de atendimento válida.' });
+    }
+    if (!cleanTipo || cleanTipo.length > 120) {
+      return res.status(400).json({ error: 'Informe o tipo de atendimento (até 120 caracteres).' });
+    }
+
+    const histId = `hmed-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO CACHORROS_CANIL_HISTORICO_MEDICO (
+        ID_HIST_MEDICO, CACHORRO_ID, DATA_ATENDIMENTO, TIPO_ATENDIMENTO, DIAGNOSTICO, CONDUTA, VETERINARIO, OBSERVACOES,
+        REGISTRADO_POR_ID, REGISTRADO_POR_NOME, DATA_CRIACAO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+      [
+        histId,
+        id,
+        cleanData,
+        cleanTipo,
+        String(diagnostico || '').trim().slice(0, 1500) || null,
+        String(conduta || '').trim().slice(0, 1500) || null,
+        String(veterinario || '').trim().slice(0, 160) || null,
+        String(observacoes || '').trim().slice(0, 1500) || null,
+        auth.user?.id || actor?.id || null,
+        auth.user?.name || actor?.name || null
+      ]
+    );
+
+    await insertAuditLog('Veterinário', 'Registrar Histórico Médico K9', `Registrado atendimento "${cleanTipo}" para cão ID ${id}`, actor, req.ip);
+    return res.json({ success: true, id: histId });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/cachorros/:id/historico-medico/:histId', async (req: Request, res: Response) => {
+  try {
+    const { id, histId } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+    await ensureCachorrosDossierSchema(pool);
+
+    const auth = await verifyCanEditCachorroHealthRecords(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: 'Você não possui permissão para excluir registros médicos.' });
+    }
+
+    await pool.query('DELETE FROM CACHORROS_CANIL_HISTORICO_MEDICO WHERE ID_HIST_MEDICO = ? AND CACHORRO_ID = ?', [histId, id]);
+    await insertAuditLog('Veterinário', 'Excluir Histórico Médico K9', `Excluído atendimento ${histId} do cão ID ${id}`, actor, req.ip);
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
@@ -12343,7 +12854,7 @@ apiRouter.post('/movimentacoes-veterinarias', async (req: Request, res: Response
 });
 
 // --- 5. RELATÓRIOS DE TREINAMENTO CANIL K9 ---
-const VALID_TOPICOS_TREINAMENTO_CANIL = new Set([
+const DEFAULT_TOPICOS_TREINAMENTO_CANIL = [
   'VEÍCULO',
   'ENTERRADA',
   'ALTO',
@@ -12351,7 +12862,7 @@ const VALID_TOPICOS_TREINAMENTO_CANIL = new Set([
   'INDICAÇÃO',
   'FECHADO',
   'FISICO',
-  'PADERE',
+  'PAREDE',
   'COLONIZAÇÃO',
   'MALAS',
   'POSIÇÕES',
@@ -12359,7 +12870,79 @@ const VALID_TOPICOS_TREINAMENTO_CANIL = new Set([
   'HAND TARGET',
   'SOLTAR',
   'FOCINHEIRA'
-]);
+];
+
+function normalizeTextForCoeMatch(val: any): string {
+  return String(val || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function isCoeLabel(code?: any, name?: any): boolean {
+  const c = normalizeTextForCoeMatch(code);
+  const n = normalizeTextForCoeMatch(name);
+  return (
+    c === 'coe' ||
+    n === 'coe' ||
+    n.includes('coordenacao de operacoes especiais') ||
+    n.startsWith('coe ') ||
+    n.includes('(coe)') ||
+    n.includes(' coe') ||
+    c.includes('coe')
+  );
+}
+
+async function verifyAdminCoeOrGeral(pool: any, actorId: string): Promise<{ allowed: boolean; user?: any; error?: string }> {
+  const cleanId = String(actorId || '').trim();
+  if (!cleanId) {
+    return { allowed: false, error: 'Usuário não identificado.' };
+  }
+  const [rows]: any = await pool.query(
+    `SELECT u.ID_USUARIOS as id, u.NOME_USUARIOS as name, u.PERFIL_USUARIOS as role, u.ROLES_USUARIOS as rolesJson,
+            un.SIGLA_UNIDADES as unitCode, un.NOME_UNIDADES as unitName,
+            d.SIGLA_DEPARTAMENTOS as deptCode, d.NOME_DEPARTAMENTOS as deptName
+     FROM USUARIOS u
+     LEFT JOIN UNIDADES un ON un.ID_UNIDADES = u.UNIDADE_ID_USUARIOS
+     LEFT JOIN DEPARTAMENTOS d ON d.ID_DEPARTAMENTOS = COALESCE(u.DEPARTAMENTO_ID_USUARIOS, un.DEPARTAMENTO_ID_UNIDADES)
+     WHERE u.ID_USUARIOS = ? LIMIT 1`,
+    [cleanId]
+  );
+  const u = rows?.[0];
+  if (!u) {
+    return { allowed: false, error: 'Usuário não encontrado.' };
+  }
+  let parsedRoles: string[] = [String(u.role || '')];
+  if (u.rolesJson) {
+    try {
+      const arr = typeof u.rolesJson === 'string' ? JSON.parse(u.rolesJson) : u.rolesJson;
+      if (Array.isArray(arr)) parsedRoles = [...parsedRoles, ...arr.map(String)];
+    } catch (_) {}
+  }
+  const normRoles = parsedRoles.map(r => r.toLowerCase());
+  if (normRoles.includes('geral')) {
+    return { allowed: true, user: u };
+  }
+  const isAdmin = normRoles.includes('administrador');
+  const linkedCoe = isCoeLabel(u.unitCode, u.unitName) || isCoeLabel(u.deptCode, u.deptName);
+  if (isAdmin && linkedCoe) {
+    return { allowed: true, user: u };
+  }
+  return {
+    allowed: false,
+    error: 'Apenas usuários com perfil Administrador vinculados à unidade/departamento COE podem gerenciar os tópicos de treinamento.'
+  };
+}
+
+async function getActiveTopicosTreinamentoSet(pool: any): Promise<Set<string>> {
+  await ensureRelatoriosTreinamentoSchema(pool);
+  const [rows]: any = await pool.query('SELECT NOME_TOPICO as nome FROM TOPICOS_TREINAMENTO_CANIL');
+  if (!rows || rows.length === 0) {
+    return new Set(DEFAULT_TOPICOS_TREINAMENTO_CANIL);
+  }
+  return new Set(rows.map((r: any) => String(r.nome || '').trim()).filter(Boolean));
+}
 
 function getCurrentTimeBrHHmm(): string {
   try {
@@ -12395,7 +12978,8 @@ function collectAllDogsFromTraining(
 
 function sanitizeTopicosTreinamentoCanil(
   raw: any,
-  allReportDogs: Array<{ id: string; nome: string; raca: string; microchip: string }>
+  allReportDogs: Array<{ id: string; nome: string; raca: string; microchip: string }>,
+  validTopicsSet: Set<string>
 ): { items: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> }>; error?: string } {
   if (!Array.isArray(raw)) return { items: [] };
   const dogMap = new Map(allReportDogs.map(d => [d.id, d]));
@@ -12403,8 +12987,9 @@ function sanitizeTopicosTreinamentoCanil(
   const items: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: Array<{ id: string; nome: string; raca: string; microchip: string }> }> = [];
 
   for (const entry of raw) {
-    const topico = String(entry?.topico || '').trim();
-    if (!topico || !VALID_TOPICOS_TREINAMENTO_CANIL.has(topico)) continue;
+    const rawTopico = String(entry?.topico || '').trim();
+    const topico = rawTopico === 'PADERE' ? 'PAREDE' : rawTopico;
+    if (!topico || !validTopicsSet.has(topico)) continue;
     if (seenTopics.has(topico)) continue;
     seenTopics.add(topico);
 
@@ -12558,11 +13143,227 @@ async function ensureRelatoriosTreinamentoSchema(pool: any) {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`TOPICOS_TREINAMENTO_CANIL\` (
+        \`ID_TOPICO\` VARCHAR(64) NOT NULL,
+        \`NOME_TOPICO\` VARCHAR(80) NOT NULL,
+        \`ORDEM\` INT NOT NULL DEFAULT 0,
+        \`CRIADO_POR_ID\` VARCHAR(64) DEFAULT NULL,
+        \`CRIADO_POR_NOME\` VARCHAR(255) DEFAULT NULL,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_ATUALIZACAO\` DATETIME DEFAULT NULL,
+        PRIMARY KEY (\`ID_TOPICO\`),
+        UNIQUE KEY \`uq_topico_trein_canil_nome\` (\`NOME_TOPICO\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    const [cntRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM TOPICOS_TREINAMENTO_CANIL');
+    if (!cntRows?.[0]?.cnt) {
+      for (let idx = 0; idx < DEFAULT_TOPICOS_TREINAMENTO_CANIL.length; idx++) {
+        const nome = DEFAULT_TOPICOS_TREINAMENTO_CANIL[idx];
+        const tid = `topico-k9-${String(idx + 1).padStart(2, '0')}`;
+        await pool.query(
+          'INSERT IGNORE INTO TOPICOS_TREINAMENTO_CANIL (ID_TOPICO, NOME_TOPICO, ORDEM, DATA_CRIACAO) VALUES (?, ?, ?, NOW())',
+          [tid, nome, idx + 1]
+        );
+      }
+    }
+
+    // Migração automática de dados legados 'PADERE' -> 'PAREDE'
+    const [paredeExists]: any = await pool.query(
+      'SELECT COUNT(*) as cnt FROM TOPICOS_TREINAMENTO_CANIL WHERE NOME_TOPICO = ?',
+      ['PAREDE']
+    );
+    if (!paredeExists?.[0]?.cnt) {
+      await pool.query(
+        'UPDATE TOPICOS_TREINAMENTO_CANIL SET NOME_TOPICO = ?, DATA_ATUALIZACAO = NOW() WHERE NOME_TOPICO = ?',
+        ['PAREDE', 'PADERE']
+      );
+    } else {
+      await pool.query('DELETE FROM TOPICOS_TREINAMENTO_CANIL WHERE NOME_TOPICO = ?', ['PADERE']);
+    }
+    await pool.query('UPDATE RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9 SET TOPICO = ? WHERE TOPICO = ?', ['PAREDE', 'PADERE']);
+    await pool.query(
+      `UPDATE RELATORIOS_TREINAMENTO_CANIL
+       SET TOPICOS_TREINAMENTO_JSON = REPLACE(TOPICOS_TREINAMENTO_JSON, '"PADERE"', '"PAREDE"')
+       WHERE TOPICOS_TREINAMENTO_JSON LIKE '%"PADERE"%'`
+    );
+
     relatoriosTreinamentoSchemaEnsured = true;
   } catch (err) {
     console.warn('Aviso ao verificar schema de RELATORIOS_TREINAMENTO_CANIL:', err);
   }
 }
+
+// CRUD de Tópicos Dinâmicos de Treinamento K9 (Inserir/Editar/Excluir restrito a Administrador COE ou Geral)
+apiRouter.get('/topicos-treinamento-canil', async (_req: Request, res: Response) => {
+  try {
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+    const [rows]: any = await pool.query(
+      `SELECT
+        ID_TOPICO as id,
+        NOME_TOPICO as nome,
+        ORDEM as ordem,
+        CRIADO_POR_ID as criadoPorId,
+        CRIADO_POR_NOME as criadoPorNome,
+        DATA_CRIACAO as createdAt,
+        DATA_ATUALIZACAO as updatedAt
+      FROM TOPICOS_TREINAMENTO_CANIL
+      ORDER BY ORDEM ASC, NOME_TOPICO ASC`
+    );
+    return res.json(rows || []);
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.post('/topicos-treinamento-canil', async (req: Request, res: Response) => {
+  try {
+    const { nome, actor } = req.body || {};
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+
+    const auth = await verifyAdminCoeOrGeral(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: auth.error || 'Sem permissão para cadastrar tópicos.' });
+    }
+
+    const cleanNome = String(nome || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (cleanNome.length < 2 || cleanNome.length > 80) {
+      return res.status(400).json({ error: 'Informe um nome válido para o tópico (entre 2 e 80 caracteres).' });
+    }
+
+    const [dup]: any = await pool.query('SELECT ID_TOPICO FROM TOPICOS_TREINAMENTO_CANIL WHERE NOME_TOPICO = ? LIMIT 1', [cleanNome]);
+    if (dup && dup.length > 0) {
+      return res.status(400).json({ error: `O tópico "${cleanNome}" já está cadastrado.` });
+    }
+
+    const [maxOrd]: any = await pool.query('SELECT COALESCE(MAX(ORDEM), 0) as maxOrd FROM TOPICOS_TREINAMENTO_CANIL');
+    const nextOrd = Number(maxOrd?.[0]?.maxOrd || 0) + 1;
+    const id = `topico-k9-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+
+    await pool.query(
+      `INSERT INTO TOPICOS_TREINAMENTO_CANIL (ID_TOPICO, NOME_TOPICO, ORDEM, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [id, cleanNome, nextOrd, auth.user?.id || actor?.id || null, auth.user?.name || actor?.name || null]
+    );
+
+    await insertAuditLog('Canil / COC', 'Cadastrar Tópico Treinamento K9', `Cadastrado tópico "${cleanNome}"`, actor, req.ip);
+    return res.json({ id, nome: cleanNome, ordem: nextOrd });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.put('/topicos-treinamento-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { nome, actor } = req.body || {};
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+
+    const auth = await verifyAdminCoeOrGeral(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: auth.error || 'Sem permissão para editar tópicos.' });
+    }
+
+    const cleanNome = String(nome || '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (cleanNome.length < 2 || cleanNome.length > 80) {
+      return res.status(400).json({ error: 'Informe um nome válido para o tópico (entre 2 e 80 caracteres).' });
+    }
+
+    const [existingRows]: any = await pool.query(
+      'SELECT ID_TOPICO as id, NOME_TOPICO as nome FROM TOPICOS_TREINAMENTO_CANIL WHERE ID_TOPICO = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Tópico não encontrado.' });
+    }
+    const oldNome = String(existingRows[0].nome || '');
+
+    const [dup]: any = await pool.query(
+      'SELECT ID_TOPICO FROM TOPICOS_TREINAMENTO_CANIL WHERE NOME_TOPICO = ? AND ID_TOPICO != ? LIMIT 1',
+      [cleanNome, id]
+    );
+    if (dup && dup.length > 0) {
+      return res.status(400).json({ error: `Já existe outro tópico cadastrado com o nome "${cleanNome}".` });
+    }
+
+    await pool.query(
+      'UPDATE TOPICOS_TREINAMENTO_CANIL SET NOME_TOPICO = ?, DATA_ATUALIZACAO = NOW() WHERE ID_TOPICO = ?',
+      [cleanNome, id]
+    );
+
+    if (oldNome && oldNome !== cleanNome) {
+      // Atualiza tabela relacional de tópicos por animal
+      await pool.query(
+        'UPDATE RELATORIOS_TREINAMENTO_CANIL_TOPICOS_K9 SET TOPICO = ? WHERE TOPICO = ?',
+        [cleanNome, oldNome]
+      );
+      // Atualiza JSON dos relatórios de treinamento com segurança (parse & rewrite)
+      const [relRows]: any = await pool.query(
+        'SELECT ID_REL_TREINAMENTO as id, TOPICOS_TREINAMENTO_JSON as topicosJson FROM RELATORIOS_TREINAMENTO_CANIL WHERE TOPICOS_TREINAMENTO_JSON IS NOT NULL AND TOPICOS_TREINAMENTO_JSON LIKE ?',
+        [`%${oldNome}%`]
+      );
+      for (const r of relRows || []) {
+        try {
+          const parsed = typeof r.topicosJson === 'string' ? JSON.parse(r.topicosJson) : r.topicosJson;
+          if (Array.isArray(parsed)) {
+            let changed = false;
+            const updated = parsed.map((item: any) => {
+              if (item && item.topico === oldNome) {
+                changed = true;
+                return { ...item, topico: cleanNome };
+              }
+              return item;
+            });
+            if (changed) {
+              await pool.query(
+                'UPDATE RELATORIOS_TREINAMENTO_CANIL SET TOPICOS_TREINAMENTO_JSON = ? WHERE ID_REL_TREINAMENTO = ?',
+                [JSON.stringify(updated), r.id]
+              );
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    await insertAuditLog('Canil / COC', 'Editar Tópico Treinamento K9', `Renomeado tópico "${oldNome}" para "${cleanNome}"`, actor, req.ip);
+    return res.json({ success: true, id, nome: cleanNome });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
+
+apiRouter.delete('/topicos-treinamento-canil/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { actor } = req.body || {};
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+
+    const auth = await verifyAdminCoeOrGeral(pool, actor?.id);
+    if (!auth.allowed) {
+      return res.status(403).json({ error: auth.error || 'Sem permissão para excluir tópicos.' });
+    }
+
+    const [existingRows]: any = await pool.query(
+      'SELECT NOME_TOPICO as nome FROM TOPICOS_TREINAMENTO_CANIL WHERE ID_TOPICO = ? LIMIT 1',
+      [id]
+    );
+    if (!existingRows || existingRows.length === 0) {
+      return res.status(404).json({ error: 'Tópico não encontrado.' });
+    }
+    const oldNome = String(existingRows[0].nome || '');
+
+    await pool.query('DELETE FROM TOPICOS_TREINAMENTO_CANIL WHERE ID_TOPICO = ?', [id]);
+    await insertAuditLog('Canil / COC', 'Excluir Tópico Treinamento K9', `Excluído tópico "${oldNome}"`, actor, req.ip);
+    return res.json({ success: true });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message });
+  }
+});
 
 apiRouter.get('/relatorios-treinamento-canil/topicos-por-animal', async (req: Request, res: Response) => {
   try {
@@ -12579,9 +13380,12 @@ apiRouter.get('/relatorios-treinamento-canil/topicos-por-animal', async (req: Re
     }
 
     const topico = String(req.query.topico || '').trim();
-    if (topico && VALID_TOPICOS_TREINAMENTO_CANIL.has(topico)) {
-      conditions.push('TOPICO = ?');
-      params.push(topico);
+    if (topico) {
+      const validTopicsSet = await getActiveTopicosTreinamentoSet(pool);
+      if (validTopicsSet.has(topico)) {
+        conditions.push('TOPICO = ?');
+        params.push(topico);
+      }
     }
 
     const dataInicio = String(req.query.dataInicio || '').trim();
@@ -12853,15 +13657,17 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       ? String(body.horaTreinamento).trim()
       : getCurrentTimeBrHHmm();
 
+    const pool = getPool();
+    await ensureRelatoriosTreinamentoSchema(pool);
+    const validTopicsSet = await getActiveTopicosTreinamentoSet(pool);
+
     const allReportDogs = collectAllDogsFromTraining(condutorCachorros, participantes);
-    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs);
+    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs, validTopicsSet);
     if (topicosSanitized.error) {
       return res.status(400).json({ error: topicosSanitized.error });
     }
     const topicosTreinamento = topicosSanitized.items;
 
-    const pool = getPool();
-    await ensureRelatoriosTreinamentoSchema(pool);
     const id = `rel-trein-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const departmentId = body.departmentId || actor.departmentId || null;
     const unitId = body.unitId || actor.unitId || null;
@@ -13102,8 +13908,9 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       }
     }
 
+    const validTopicsSet = await getActiveTopicosTreinamentoSet(pool);
     const allReportDogs = collectAllDogsFromTraining(condutorCachorros, participantes);
-    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs);
+    const topicosSanitized = sanitizeTopicosTreinamentoCanil(body.topicosTreinamento, allReportDogs, validTopicsSet);
     if (topicosSanitized.error) {
       return res.status(400).json({ error: topicosSanitized.error });
     }

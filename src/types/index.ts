@@ -1314,6 +1314,7 @@ export interface Cachorro {
   unitId?: string;
   fotoUrl?: string;
   observacoes?: string;
+  anotacoesCondutor?: string;
   createdAt: string;
 }
 
@@ -1404,24 +1405,9 @@ export interface ParticipanteTreinamentoCanil {
   cachorros?: ParticipanteTreinamentoCachorro[];
 }
 
-export type TopicoTreinamentoCanilTipo =
-  | 'VEÍCULO'
-  | 'ENTERRADA'
-  | 'ALTO'
-  | 'TEMPO'
-  | 'INDICAÇÃO'
-  | 'FECHADO'
-  | 'FISICO'
-  | 'PADERE'
-  | 'COLONIZAÇÃO'
-  | 'MALAS'
-  | 'POSIÇÕES'
-  | 'CONDUÇÃO'
-  | 'HAND TARGET'
-  | 'SOLTAR'
-  | 'FOCINHEIRA';
+export type TopicoTreinamentoCanilTipo = string;
 
-export const TOPICOS_TREINAMENTO_CANIL: TopicoTreinamentoCanilTipo[] = [
+export const TOPICOS_TREINAMENTO_CANIL: string[] = [
   'VEÍCULO',
   'ENTERRADA',
   'ALTO',
@@ -1429,7 +1415,7 @@ export const TOPICOS_TREINAMENTO_CANIL: TopicoTreinamentoCanilTipo[] = [
   'INDICAÇÃO',
   'FECHADO',
   'FISICO',
-  'PADERE',
+  'PAREDE',
   'COLONIZAÇÃO',
   'MALAS',
   'POSIÇÕES',
@@ -1438,6 +1424,64 @@ export const TOPICOS_TREINAMENTO_CANIL: TopicoTreinamentoCanilTipo[] = [
   'SOLTAR',
   'FOCINHEIRA'
 ];
+
+export interface TopicoTreinamentoCanilConfig {
+  id: string;
+  nome: string;
+  ordem: number;
+  criadoPorId?: string;
+  criadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface HistoricoCondutorCachorro {
+  id: string;
+  cachorroId: string;
+  slot: 1 | 2;
+  condutorId?: string | null;
+  condutorNome: string;
+  condutorMasp?: string | null;
+  condutorCargo?: string | null;
+  dataInicio: string; // YYYY-MM-DD
+  dataFim?: string | null; // YYYY-MM-DD or null (Atual)
+  createdAt?: string;
+}
+
+export interface VacinaCachorro {
+  id: string;
+  cachorroId: string;
+  nomeVacina: string;
+  dataAplicacao: string; // YYYY-MM-DD
+  proximaDose?: string | null; // YYYY-MM-DD
+  lote?: string | null;
+  veterinario?: string | null;
+  observacoes?: string | null;
+  registradoPorId?: string | null;
+  registradoPorNome?: string | null;
+  createdAt?: string;
+}
+
+export interface HistoricoMedicoCachorro {
+  id: string;
+  cachorroId: string;
+  dataAtendimento: string; // YYYY-MM-DD
+  tipoAtendimento: string;
+  diagnostico?: string | null;
+  conduta?: string | null;
+  veterinario?: string | null;
+  observacoes?: string | null;
+  registradoPorId?: string | null;
+  registradoPorNome?: string | null;
+  createdAt?: string;
+}
+
+export interface DetalhesCompletosCachorro {
+  historicoCondutores: HistoricoCondutorCachorro[];
+  vacinas: VacinaCachorro[];
+  historicoMedico: HistoricoMedicoCachorro[];
+  medicamentos: MovimentacaoVeterinaria[];
+}
 
 export interface TopicoTreinamentoCanilItem {
   topico: TopicoTreinamentoCanilTipo;

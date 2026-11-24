@@ -1,0 +1,1837 @@
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  User,
+  Cachorro,
+  RelatorioTreinamentoCanil,
+  MovimentacaoVeterinaria,
+  DetalhesCompletosCachorro,
+  Unit,
+  Department,
+  getSystemLogo
+} from '../types';
+import { storage } from '../services/storage';
+import { formatMasp } from '../utils/masks';
+import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
+import {
+  Dog,
+  Search,
+  Printer,
+  History,
+  Syringe,
+  Stethoscope,
+  Pill,
+  FileText,
+  CheckCircle2,
+  AlertTriangle,
+  Award,
+  TrendingDown,
+  BarChart3,
+  Plus,
+  Trash2,
+  Save,
+  X,
+  UserCheck,
+  Calendar,
+  Hash,
+  Sparkles,
+  CheckSquare,
+  Square
+} from 'lucide-react';
+
+interface RelatorioCanilAnimaisTabProps {
+  currentUser: User;
+  cachorros: Cachorro[];
+  relatoriosTreinamento: RelatorioTreinamentoCanil[];
+  movimentacoesVeterinarias: MovimentacaoVeterinaria[];
+  activeTopicos: string[];
+  units: Unit[];
+  departments: Department[];
+  onNotifySuccess: (msg: string) => void;
+  onNotifyError: (msg: string) => void;
+  onDataChanged: () => void;
+}
+
+interface TopicBarDatum {
+  topico: string;
+  count: number;
+  pctOfTrainings: number;
+}
+
+interface DogTrainingStats {
+  totalTreinos: number;
+  bars: TopicBarDatum[];
+  maxCount: number;
+  minCount: number;
+  aptidaoTopicos: string[];
+  sugestaoTopicos: string[];
+}
+
+function getSafeImageUrl(url?: string | null): string | null {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  if (/^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=]+$/i.test(raw)) return raw;
+  try {
+    const parsed = new URL(raw, window.location.origin);
+    if (parsed.protocol === 'https:' || parsed.protocol === 'http:') return parsed.href;
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function formatDateBr(iso?: string | null): string {
+  if (!iso) return '—';
+  const clean = String(iso).slice(0, 10);
+  const parts = clean.split('-');
+  if (parts.length !== 3) return clean;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+function formatDateTimeBr(dt?: string | null): string {
+  if (!dt) return '—';
+  const str = String(dt);
+  if (str.length >= 16 && str.includes('-')) {
+    const datePart = formatDateBr(str.slice(0, 10));
+    const timePart = str.slice(11, 16);
+    return `${datePart} ${timePart}`;
+  }
+  return formatDateBr(str);
+}
+
+function getTodayIsoBr(): string {
+  try {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  } catch {
+    return new Date().toISOString().slice(0, 10);
+  }
+}
+
+function calculateAgeText(dataNascimento?: string | null): string {
+  if (!dataNascimento || !/^\d{4}-\d{2}-\d{2}/.test(dataNascimento)) return 'Não informada';
+  const [y, m, d] = dataNascimento.slice(0, 10).split('-').map(Number);
+  const birth = new Date(y, (m || 1) - 1, d || 1);
+  const now = new Date();
+  if (Number.isNaN(birth.getTime()) || birth > now) return 'Não informada';
+
+  let years = now.getFullYear() - birth.getFullYear();
+  let months = now.getMonth() - birth.getMonth();
+  if (now.getDate() < birth.getDate()) months -= 1;
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  if (years <= 0 && months <= 0) return 'Menos de 1 mês';
+  if (years <= 0) return `${months} ${months === 1 ? 'mês' : 'meses'}`;
+  if (months === 0) return `${years} ${years === 1 ? 'ano' : 'anos'}`;
+  return `${years} ${years === 1 ? 'ano' : 'anos'} e ${months} ${months === 1 ? 'mês' : 'meses'}`;
+}
+
+function computeDogTrainingStats(
+  dog: Cachorro,
+  relatorios: RelatorioTreinamentoCanil[],
+  activeTopicos: string[]
+): DogTrainingStats {
+  const counts = new Map<string, number>();
+  for (const t of activeTopicos) {
+    counts.set(t, 0);
+  }
+
+  let totalTreinos = 0;
+
+  for (const rel of relatorios) {
+    const condutorDogs =
+      rel.cachorros && rel.cachorros.length > 0
+        ? rel.cachorros
+        : rel.cachorroId
+        ? [{ id: rel.cachorroId, nome: rel.cachorroNome }]
+        : [];
+    const partDogs = (rel.participantes || []).flatMap(p => p.cachorros || []);
+    const reportDogIds = new Set<string>([
+      ...condutorDogs.map(d => d.id).filter(Boolean),
+      ...partDogs.map(d => d.id).filter(Boolean)
+    ]);
+
+    const participatedInReport = reportDogIds.has(dog.id);
+    if (participatedInReport) {
+      totalTreinos += 1;
+    }
+
+    for (const item of rel.topicosTreinamento || []) {
+      const normalizedTopic = item.topico === 'PADERE' ? 'PAREDE' : item.topico;
+      if (!counts.has(normalizedTopic)) continue;
+
+      const dogTrainedTopic =
+        (item.aplicarTodosK9 && participatedInReport) ||
+        (item.cachorros || []).some(c => c.id === dog.id);
+
+      if (dogTrainedTopic) {
+        counts.set(normalizedTopic, (counts.get(normalizedTopic) || 0) + 1);
+      }
+    }
+  }
+
+  const bars: TopicBarDatum[] = activeTopicos.map(topico => {
+    const count = counts.get(topico) || 0;
+    const pctOfTrainings = totalTreinos > 0 ? Math.round((count / totalTreinos) * 100) : 0;
+    return { topico, count, pctOfTrainings };
+  });
+
+  const maxCount = bars.length > 0 ? Math.max(...bars.map(b => b.count)) : 0;
+  const minCount = bars.length > 0 ? Math.min(...bars.map(b => b.count)) : 0;
+
+  const aptidaoTopicos = maxCount > 0 ? bars.filter(b => b.count === maxCount).map(b => b.topico) : [];
+  const sugestaoTopicos = bars.length > 0 ? bars.filter(b => b.count === minCount).map(b => b.topico) : [];
+
+  return {
+    totalTreinos,
+    bars,
+    maxCount,
+    minCount,
+    aptidaoTopicos,
+    sugestaoTopicos
+  };
+}
+
+function buildPrintableChartSvg(stats: DogTrainingStats): string {
+  const bars = stats.bars;
+  if (bars.length === 0) {
+    return '<div style="padding:16px;text-align:center;color:#475569;font-size:12px;">Nenhum tópico de treinamento configurado.</div>';
+  }
+
+  const width = 760;
+  const height = 290;
+  const padLeft = 40;
+  const padRight = 18;
+  const padTop = 26;
+  const padBottom = 96;
+  const chartW = width - padLeft - padRight;
+  const chartH = height - padTop - padBottom;
+  const maxVal = Math.max(stats.maxCount, 1);
+
+  const stepCount = Math.min(maxVal, 5);
+  const gridLines: string[] = [];
+  for (let i = 0; i <= stepCount; i++) {
+    const val = Math.round((maxVal / stepCount) * i);
+    const y = padTop + chartH - (val / maxVal) * chartH;
+    gridLines.push(
+      `<line x1="${padLeft}" y1="${y.toFixed(1)}" x2="${width - padRight}" y2="${y.toFixed(1)}" stroke="#e2e8f0" stroke-width="1" />` +
+        `<text x="${padLeft - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#64748b" font-family="Arial,sans-serif">${val}</text>`
+    );
+  }
+
+  const slotW = chartW / bars.length;
+  const barW = Math.max(12, Math.min(34, slotW * 0.62));
+
+  const barEls = bars
+    .map((b, idx) => {
+      const cx = padLeft + slotW * idx + slotW / 2;
+      const x = cx - barW / 2;
+      const barH = b.count > 0 ? Math.max(4, (b.count / maxVal) * chartH) : 2;
+      const y = padTop + chartH - barH;
+      const isAptidao = stats.maxCount > 0 && b.count === stats.maxCount;
+      const isSugestao = b.count === stats.minCount;
+      const fill = isAptidao ? '#059669' : isSugestao ? '#d97706' : '#2563eb';
+      const label = escapeHtmlText(b.topico.length > 16 ? `${b.topico.slice(0, 15)}…` : b.topico);
+
+      return (
+        `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${barH.toFixed(1)}" rx="3" fill="${fill}" />` +
+        `<text x="${cx.toFixed(1)}" y="${(y - 5).toFixed(1)}" text-anchor="middle" font-size="9.5" font-weight="bold" fill="#0f172a" font-family="Arial,sans-serif">${b.count}</text>` +
+        `<text x="${cx.toFixed(1)}" y="${(padTop + chartH + 12).toFixed(1)}" text-anchor="end" transform="rotate(-40 ${cx.toFixed(1)} ${(padTop + chartH + 12).toFixed(1)})" font-size="8.5" font-weight="bold" fill="#1e293b" font-family="Arial,sans-serif">${label}</text>`
+      );
+    })
+    .join('');
+
+  return `
+    <svg viewBox="0 0 ${width} ${height}" width="100%" style="max-height:280px;display:block;" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#ffffff" />
+      ${gridLines.join('')}
+      <line x1="${padLeft}" y1="${padTop + chartH}" x2="${width - padRight}" y2="${padTop + chartH}" stroke="#94a3b8" stroke-width="1.2" />
+      ${barEls}
+    </svg>
+  `;
+}
+
+export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> = ({
+  currentUser,
+  cachorros,
+  relatoriosTreinamento,
+  movimentacoesVeterinarias,
+  activeTopicos,
+  units,
+  departments,
+  onNotifySuccess,
+  onNotifyError,
+  onDataChanged
+}) => {
+  const effectiveRole = currentUser.activeRole || currentUser.role;
+  const canViewAllAnimals =
+    effectiveRole === 'Geral' ||
+    effectiveRole === 'Administrador' ||
+    effectiveRole === 'Armeiro' ||
+    Boolean(currentUser.canManageCanilAndAnimals);
+
+  const canEditHealthRecords =
+    effectiveRole === 'Geral' ||
+    effectiveRole === 'Administrador' ||
+    effectiveRole === 'Armeiro' ||
+    effectiveRole === 'Veterinário' ||
+    Boolean(currentUser.canManageCanilAndAnimals) ||
+    Boolean(currentUser.canManageCanilMeds) ||
+    Boolean(currentUser.canAdministerCanilMeds);
+
+  const visibleDogs = useMemo(() => {
+    const base = canViewAllAnimals
+      ? cachorros
+      : cachorros.filter(
+          d =>
+            d.tipoVinculo === 'SISTEMA' &&
+            (d.usuarioInternoId === currentUser.id || d.usuarioInterno2Id === currentUser.id)
+        );
+    return [...base].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+  }, [cachorros, canViewAllAnimals, currentUser.id]);
+
+  const [animalSearch, setAnimalSearch] = useState('');
+  const [selectedDogId, setSelectedDogId] = useState<string>('');
+  const [hoveredTopic, setHoveredTopic] = useState<string | null>(null);
+
+  // Detalhes completos do cão selecionado (histórico condutores, vacinas, histórico médico, medicamentos)
+  const [detalhes, setDetalhes] = useState<DetalhesCompletosCachorro | null>(null);
+  const [loadingDetalhes, setLoadingDetalhes] = useState(false);
+
+  // Modais e formulários auxiliares
+  const [showCondutoresHistoryModal, setShowCondutoresHistoryModal] = useState(false);
+  const [showMultiPrintModal, setShowMultiPrintModal] = useState(false);
+  const [multiPrintSelectedIds, setMultiPrintSelectedIds] = useState<string[]>([]);
+
+  // Anotações do condutor (500 caracteres)
+  const [anotacoesDraft, setAnotacoesDraft] = useState('');
+  const [savingAnotacoes, setSavingAnotacoes] = useState(false);
+
+  // Formulário rápido de Vacina
+  const [showAddVacina, setShowAddVacina] = useState(false);
+  const [vacinaForm, setVacinaForm] = useState({
+    nomeVacina: '',
+    dataAplicacao: getTodayIsoBr(),
+    proximaDose: '',
+    lote: '',
+    veterinario: '',
+    observacoes: ''
+  });
+  const [savingVacina, setSavingVacina] = useState(false);
+
+  // Formulário rápido de Histórico Médico
+  const [showAddMedico, setShowAddMedico] = useState(false);
+  const [medicoForm, setMedicoForm] = useState({
+    dataAtendimento: getTodayIsoBr(),
+    tipoAtendimento: '',
+    diagnostico: '',
+    conduta: '',
+    veterinario: '',
+    observacoes: ''
+  });
+  const [savingMedico, setSavingMedico] = useState(false);
+
+  const filteredDogs = useMemo(() => {
+    const q = animalSearch.trim().toLowerCase();
+    if (!q) return visibleDogs;
+    return visibleDogs.filter(d => {
+      const hay = `${d.nome} ${d.raca || ''} ${d.microchip || ''} ${d.usuarioInternoNome || ''} ${d.usuarioInterno2Nome || ''}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [visibleDogs, animalSearch]);
+
+  useEffect(() => {
+    if (visibleDogs.length === 0) {
+      setSelectedDogId('');
+      return;
+    }
+    if (!selectedDogId || !visibleDogs.some(d => d.id === selectedDogId)) {
+      setSelectedDogId(visibleDogs[0].id);
+    }
+  }, [visibleDogs, selectedDogId]);
+
+  const selectedDog = useMemo(
+    () => visibleDogs.find(d => d.id === selectedDogId) || null,
+    [visibleDogs, selectedDogId]
+  );
+
+  useEffect(() => {
+    setAnotacoesDraft(selectedDog?.anotacoesCondutor || '');
+    setShowAddVacina(false);
+    setShowAddMedico(false);
+  }, [selectedDog?.id, selectedDog?.anotacoesCondutor]);
+
+  const loadDetalhesDog = async (dogId: string) => {
+    setLoadingDetalhes(true);
+    try {
+      const res = await storage.getDetalhesCompletosCachorro(dogId);
+      if (res.success && res.data) {
+        setDetalhes(res.data);
+      } else {
+        setDetalhes({
+          historicoCondutores: [],
+          vacinas: [],
+          historicoMedico: [],
+          medicamentos: []
+        });
+      }
+    } finally {
+      setLoadingDetalhes(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!selectedDog?.id) {
+      setDetalhes(null);
+      return;
+    }
+    loadDetalhesDog(selectedDog.id);
+  }, [selectedDog?.id]);
+
+  const selectedDogStats = useMemo(() => {
+    if (!selectedDog) return null;
+    return computeDogTrainingStats(selectedDog, relatoriosTreinamento, activeTopicos);
+  }, [selectedDog, relatoriosTreinamento, activeTopicos]);
+
+  const isSelectedDogConductor = useMemo(() => {
+    if (!selectedDog) return false;
+    return (
+      selectedDog.tipoVinculo === 'SISTEMA' &&
+      (selectedDog.usuarioInternoId === currentUser.id || selectedDog.usuarioInterno2Id === currentUser.id)
+    );
+  }, [selectedDog, currentUser.id]);
+
+  // Medicamentos combinando resposta detalhada do backend + fallback do cache local
+  const dogMedicamentos = useMemo(() => {
+    if (!selectedDog) return [];
+    if (detalhes?.medicamentos && detalhes.medicamentos.length > 0) {
+      return detalhes.medicamentos;
+    }
+    return movimentacoesVeterinarias
+      .filter(m => m.cachorroId === selectedDog.id && m.tipoMovimentacao === 'ADMINISTRACAO_CAO')
+      .sort((a, b) => String(b.dataHora || '').localeCompare(String(a.dataHora || '')));
+  }, [selectedDog, detalhes?.medicamentos, movimentacoesVeterinarias]);
+
+  // Status vacinal (indicativo verde quando em dia)
+  const vacinaStatus = useMemo(() => {
+    const list = detalhes?.vacinas || [];
+    if (list.length === 0) {
+      return { status: 'SEM_REGISTRO' as const, overdueCount: 0 };
+    }
+    const todayIso = getTodayIsoBr();
+    const overdueCount = list.filter(v => v.proximaDose && v.proximaDose < todayIso).length;
+    if (overdueCount > 0) {
+      return { status: 'ATRASADA' as const, overdueCount };
+    }
+    return { status: 'EM_DIA' as const, overdueCount: 0 };
+  }, [detalhes?.vacinas]);
+
+  const handleSaveAnotacoes = async () => {
+    if (!selectedDog || !isSelectedDogConductor) return;
+    if (anotacoesDraft.length > 500) {
+      onNotifyError('As anotações do condutor não podem ultrapassar 500 caracteres.');
+      return;
+    }
+    setSavingAnotacoes(true);
+    try {
+      const res = await storage.updateAnotacoesCondutorCachorro(selectedDog.id, anotacoesDraft);
+      if (res.success) {
+        onNotifySuccess('Anotações do condutor salvas com sucesso.');
+        onDataChanged();
+      } else {
+        onNotifyError(res.error || 'Erro ao salvar anotações do condutor.');
+      }
+    } finally {
+      setSavingAnotacoes(false);
+    }
+  };
+
+  const handleAddVacina = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDog) return;
+    if (!vacinaForm.nomeVacina.trim()) {
+      onNotifyError('Informe o nome da vacina.');
+      return;
+    }
+    setSavingVacina(true);
+    try {
+      const res = await storage.saveVacinaCachorro(selectedDog.id, vacinaForm);
+      if (res.success) {
+        onNotifySuccess('Vacina registrada no histórico do animal.');
+        setVacinaForm({
+          nomeVacina: '',
+          dataAplicacao: getTodayIsoBr(),
+          proximaDose: '',
+          lote: '',
+          veterinario: '',
+          observacoes: ''
+        });
+        setShowAddVacina(false);
+        await loadDetalhesDog(selectedDog.id);
+      } else {
+        onNotifyError(res.error || 'Erro ao registrar vacina.');
+      }
+    } finally {
+      setSavingVacina(false);
+    }
+  };
+
+  const handleDeleteVacina = async (vacinaId: string) => {
+    if (!selectedDog) return;
+    const res = await storage.deleteVacinaCachorro(selectedDog.id, vacinaId);
+    if (res.success) {
+      onNotifySuccess('Registro de vacina removido.');
+      await loadDetalhesDog(selectedDog.id);
+    } else {
+      onNotifyError(res.error || 'Erro ao remover vacina.');
+    }
+  };
+
+  const handleAddMedico = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedDog) return;
+    if (!medicoForm.tipoAtendimento.trim()) {
+      onNotifyError('Informe o tipo de atendimento médico.');
+      return;
+    }
+    setSavingMedico(true);
+    try {
+      const res = await storage.saveHistoricoMedicoCachorro(selectedDog.id, medicoForm);
+      if (res.success) {
+        onNotifySuccess('Registro médico adicionado ao histórico do animal.');
+        setMedicoForm({
+          dataAtendimento: getTodayIsoBr(),
+          tipoAtendimento: '',
+          diagnostico: '',
+          conduta: '',
+          veterinario: '',
+          observacoes: ''
+        });
+        setShowAddMedico(false);
+        await loadDetalhesDog(selectedDog.id);
+      } else {
+        onNotifyError(res.error || 'Erro ao registrar atendimento médico.');
+      }
+    } finally {
+      setSavingMedico(false);
+    }
+  };
+
+  const handleDeleteMedico = async (histId: string) => {
+    if (!selectedDog) return;
+    const res = await storage.deleteHistoricoMedicoCachorro(selectedDog.id, histId);
+    if (res.success) {
+      onNotifySuccess('Registro médico removido.');
+      await loadDetalhesDog(selectedDog.id);
+    } else {
+      onNotifyError(res.error || 'Erro ao remover registro médico.');
+    }
+  };
+
+  const buildSingleAnimalPrintPageHtml = (dog: Cachorro, dogDetalhes?: DetalhesCompletosCachorro | null) => {
+    const stats = computeDogTrainingStats(dog, relatoriosTreinamento, activeTopicos);
+    const logoUrl = getSystemLogo();
+    const safeFoto = getSafeImageUrl(dog.fotoUrl);
+    const unitObj = units.find(u => u.id === dog.unitId);
+    const deptObj = departments.find(d => d.id === dog.departmentId);
+    const condutoresText =
+      dog.tipoVinculo === 'SISTEMA'
+        ? [
+            dog.usuarioInternoNome
+              ? `${dog.usuarioInternoNome}${dog.usuarioInternoMasp ? ` (MASP ${formatMasp(dog.usuarioInternoMasp)})` : ''}`
+              : null,
+            dog.usuarioInterno2Nome
+              ? `${dog.usuarioInterno2Nome}${dog.usuarioInterno2Masp ? ` (MASP ${formatMasp(dog.usuarioInterno2Masp)})` : ''}`
+              : null
+          ]
+            .filter(Boolean)
+            .join(' / ') || 'Não vinculado'
+        : dog.responsavelExternoNome || 'Vínculo Externo';
+
+    const aptidaoText =
+      stats.aptidaoTopicos.length > 0
+        ? `${stats.aptidaoTopicos.join(', ')} (${stats.maxCount} ${stats.maxCount === 1 ? 'treino' : 'treinos'})`
+        : 'Nenhum tópico treinado registrado';
+
+    const sugestaoText =
+      stats.sugestaoTopicos.length > 0
+        ? `${stats.sugestaoTopicos.join(', ')} (${stats.minCount} ${stats.minCount === 1 ? 'treino' : 'treinos'})`
+        : 'Sem tópicos cadastrados';
+
+    const vacinasList = dogDetalhes?.vacinas || [];
+    const todayIso = getTodayIsoBr();
+    const overdueVac = vacinasList.filter(v => v.proximaDose && v.proximaDose < todayIso).length;
+    const vacBadgeHtml =
+      vacinasList.length === 0
+        ? '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">Sem vacinas registradas</span>'
+        : overdueVac === 0
+        ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">● VACINAS EM DIA</span>'
+        : `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">▲ ${overdueVac} REFORÇO(S) PENDENTE(S)</span>`;
+
+    const topicsTableRows = stats.bars
+      .map(
+        b => `
+        <tr>
+          <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">${escapeHtmlText(b.topico)}</td>
+          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">${b.count}</td>
+          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">${b.pctOfTrainings}%</td>
+          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;font-weight:bold;color:${
+            stats.maxCount > 0 && b.count === stats.maxCount
+              ? '#047857'
+              : b.count === stats.minCount
+              ? '#b45309'
+              : '#334155'
+          };">${
+            stats.maxCount > 0 && b.count === stats.maxCount
+              ? 'Aptidão em'
+              : b.count === stats.minCount
+              ? 'Sugestão de Treino'
+              : 'Regular'
+          }</td>
+        </tr>`
+      )
+      .join('');
+
+    return `
+      <section class="animal-print-page">
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:12px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            ${logoUrl ? `<img src="${escapeHtmlText(logoUrl)}" style="height:42px;object-fit:contain;" />` : ''}
+            <div>
+              <div style="font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;">Polícia Civil de Minas Gerais — COC / Canil K9</div>
+              <div style="font-size:11px;font-weight:700;color:#334155;">Ficha de Desempenho e Tópicos de Treinamento K9</div>
+            </div>
+          </div>
+          <div style="text-align:right;font-size:10px;color:#475569;">
+            <div><strong>Emissão:</strong> ${escapeHtmlText(formatDateBr(getTodayIsoBr()))}</div>
+            <div>${escapeHtmlText(deptObj?.name || 'COE')} ${unitObj?.name ? `— ${escapeHtmlText(unitObj.name)}` : ''}</div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:14px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-bottom:12px;background:#f8fafc;">
+          <div style="width:84px;height:112px;border:1px solid #94a3b8;border-radius:6px;overflow:hidden;flex-shrink:0;background:#e2e8f0;display:flex;align-items:center;justify-content:center;">
+            ${
+              safeFoto
+                ? `<img src="${escapeHtmlText(safeFoto)}" style="width:100%;height:100%;object-fit:cover;" />`
+                : `<span style="font-size:10px;color:#64748b;font-weight:bold;text-align:center;">FOTO 3x4<br/>K9</span>`
+            }
+          </div>
+          <div style="flex:1;font-size:11px;line-height:1.45;color:#0f172a;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <div style="font-size:16px;font-weight:900;text-transform:uppercase;">${escapeHtmlText(dog.nome)}</div>
+              <div>${vacBadgeHtml}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;">
+              <div><strong>Raça:</strong> ${escapeHtmlText(dog.raca || '—')}</div>
+              <div><strong>Cor / Pelagem:</strong> ${escapeHtmlText(dog.pelagem || '—')}</div>
+              <div><strong>Nascimento:</strong> ${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
+              <div><strong>Microchip:</strong> ${escapeHtmlText(dog.microchip || '—')}</div>
+              <div><strong>Status:</strong> ${escapeHtmlText(dog.status || '—')}</div>
+              <div><strong>Total de Treinamentos:</strong> ${stats.totalTreinos}</div>
+            </div>
+            <div style="margin-top:4px;"><strong>Condutor(es):</strong> ${escapeHtmlText(condutoresText)}</div>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+          <div style="border:1px solid #10b981;background:#ecfdf5;border-radius:8px;padding:8px 10px;">
+            <div style="font-size:10px;font-weight:800;color:#047857;text-transform:uppercase;">Aptidão em (Mais Treinado)</div>
+            <div style="font-size:11.5px;font-weight:700;color:#064e3b;margin-top:2px;">${escapeHtmlText(aptidaoText)}</div>
+          </div>
+          <div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:8px 10px;">
+            <div style="font-size:10px;font-weight:800;color:#b45309;text-transform:uppercase;">Sugestão de Treinamento (Menor Índice)</div>
+            <div style="font-size:11.5px;font-weight:700;color:#78350f;margin-top:2px;">${escapeHtmlText(sugestaoText)}</div>
+          </div>
+        </div>
+
+        <div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-bottom:10px;">
+          <div style="font-size:11px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;">
+            <span>Gráfico de Tópicos de Treinamento (Total de Treinos do Animal: ${stats.totalTreinos})</span>
+            <span style="font-size:9.5px;font-weight:600;color:#475569;">
+              <span style="color:#059669;">■ Aptidão</span> &nbsp;
+              <span style="color:#2563eb;">■ Regular</span> &nbsp;
+              <span style="color:#d97706;">■ Sugestão</span>
+            </span>
+          </div>
+          ${buildPrintableChartSvg(stats)}
+        </div>
+
+        <table style="width:100%;border-collapse:collapse;font-size:9.5px;margin-bottom:10px;">
+          <thead>
+            <tr style="background:#f1f5f9;">
+              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:left;">Tópico de Treinamento</th>
+              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">Qtd. Treinos</th>
+              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">% dos Treinos</th>
+              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">Classificação</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${topicsTableRows}
+          </tbody>
+        </table>
+
+        ${
+          dog.anotacoesCondutor
+            ? `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:10.5px;background:#f8fafc;">
+                 <div style="font-weight:800;color:#0f172a;text-transform:uppercase;font-size:9.5px;margin-bottom:3px;">Anotações do Condutor</div>
+                 <div style="white-space:pre-wrap;color:#1e293b;">${escapeHtmlText(dog.anotacoesCondutor)}</div>
+               </div>`
+            : ''
+        }
+      </section>
+    `;
+  };
+
+  const printDogsPages = (dogsToPrint: Cachorro[], detalhesMap?: Record<string, DetalhesCompletosCachorro | null>) => {
+    if (dogsToPrint.length === 0) {
+      onNotifyError('Selecione ao menos um animal para impressão.');
+      return;
+    }
+
+    const pagesHtml = dogsToPrint
+      .map(d => buildSingleAnimalPrintPageHtml(d, detalhesMap ? detalhesMap[d.id] : null))
+      .join('');
+
+    const title = buildStandardDocumentTitle(
+      dogsToPrint.length === 1 ? `K9_${dogsToPrint[0].nome}` : `K9_Graficos_${dogsToPrint.length}_Animais`,
+      'COC'
+    );
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>${escapeHtmlText(title)}</title>
+        <style>
+          @page { size: A4 portrait; margin: 12mm; }
+          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; background: #fff; }
+          .animal-print-page { page-break-after: always; break-after: page; }
+          .animal-print-page:last-child { page-break-after: auto; break-after: auto; }
+        </style>
+      </head>
+      <body>${pagesHtml}</body>
+      </html>
+    `;
+
+    printDocumentInPage(html, title);
+  };
+
+  const handlePrintSelectedAnimal = () => {
+    if (!selectedDog) return;
+    printDogsPages([selectedDog], { [selectedDog.id]: detalhes });
+  };
+
+  const handleOpenMultiPrint = () => {
+    setMultiPrintSelectedIds(visibleDogs.map(d => d.id));
+    setShowMultiPrintModal(true);
+  };
+
+  const handleConfirmMultiPrint = async () => {
+    const selected = visibleDogs.filter(d => multiPrintSelectedIds.includes(d.id));
+    if (selected.length === 0) {
+      onNotifyError('Selecione pelo menos um animal para imprimir.');
+      return;
+    }
+    const detalhesMap: Record<string, DetalhesCompletosCachorro | null> = {};
+    if (selectedDog && detalhes) {
+      detalhesMap[selectedDog.id] = detalhes;
+    }
+    await Promise.all(
+      selected.map(async d => {
+        if (detalhesMap[d.id]) return;
+        const r = await storage.getDetalhesCompletosCachorro(d.id);
+        detalhesMap[d.id] = r.success && r.data ? r.data : null;
+      })
+    );
+    setShowMultiPrintModal(false);
+    printDogsPages(selected, detalhesMap);
+  };
+
+  // Interactive SVG Chart geometry
+  const chartWidth = 920;
+  const chartHeight = 340;
+  const padLeft = 46;
+  const padRight = 24;
+  const padTop = 34;
+  const padBottom = 112;
+  const innerW = chartWidth - padLeft - padRight;
+  const innerH = chartHeight - padTop - padBottom;
+
+  const hoveredBar = useMemo(() => {
+    if (!selectedDogStats || !hoveredTopic) return null;
+    return selectedDogStats.bars.find(b => b.topico === hoveredTopic) || null;
+  }, [selectedDogStats, hoveredTopic]);
+
+  const safeSelectedFoto = getSafeImageUrl(selectedDog?.fotoUrl);
+
+  return (
+    <div className="space-y-4">
+      {/* Barra superior de resumo e ações de impressão */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-black text-amber-400 uppercase tracking-wide flex items-center space-x-2">
+            <Dog className="w-4 h-4" />
+            <span>Painel de Animais K9 — Prontuário e Gráficos de Treinamento</span>
+          </h2>
+          <p className="text-xs text-slate-400 mt-0.5">
+            {canViewAllAnimals
+              ? `Visualizando todos os animais K9 cadastrados (${visibleDogs.length}).`
+              : `Visualizando somente os animais K9 vinculados ao seu perfil (${visibleDogs.length}).`}
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {selectedDog && (
+            <button
+              type="button"
+              onClick={handlePrintSelectedAnimal}
+              className="px-3 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs transition flex items-center space-x-1.5 shadow"
+            >
+              <Printer className="w-4 h-4" />
+              <span>Imprimir Gráfico ({selectedDog.nome})</span>
+            </button>
+          )}
+          {visibleDogs.length > 1 && (
+            <button
+              type="button"
+              onClick={handleOpenMultiPrint}
+              className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-bold text-xs transition flex items-center space-x-1.5"
+            >
+              <Printer className="w-4 h-4 text-cyan-400" />
+              <span>Imprimir Vários Animais (1 por página)</span>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {visibleDogs.length === 0 ? (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-10 text-center space-y-2">
+          <Dog className="w-10 h-10 text-slate-600 mx-auto" />
+          <p className="text-sm font-bold text-slate-300">Nenhum animal K9 disponível para exibição.</p>
+          <p className="text-xs text-slate-500">
+            {canViewAllAnimals
+              ? 'Cadastre animais no módulo Veterinário / Canil para acompanhá-los aqui.'
+              : 'Você ainda não possui animais vinculados como condutor no sistema.'}
+          </p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+          {/* Coluna Esquerda: Lista de Animais */}
+          <div className="xl:col-span-3 bg-slate-900 border border-slate-800 rounded-2xl p-3 space-y-3 h-fit">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={animalSearch}
+                onChange={e => setAnimalSearch(e.target.value)}
+                placeholder="Buscar cão, raça ou condutor..."
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-8 pr-3 py-2 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="space-y-1.5 max-h-[640px] overflow-y-auto pr-1">
+              {filteredDogs.map(dog => {
+                const isSelected = dog.id === selectedDog?.id;
+                const thumb = getSafeImageUrl(dog.fotoUrl);
+                const statsPreview = computeDogTrainingStats(dog, relatoriosTreinamento, activeTopicos);
+                return (
+                  <button
+                    key={dog.id}
+                    type="button"
+                    onClick={() => setSelectedDogId(dog.id)}
+                    className={`w-full text-left p-2.5 rounded-xl border transition flex items-center gap-2.5 ${
+                      isSelected
+                        ? 'bg-amber-500/15 border-amber-400 text-amber-100 shadow'
+                        : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="w-9 h-12 rounded-lg overflow-hidden bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center">
+                      {thumb ? (
+                        <img src={thumb} alt={dog.nome} className="w-full h-full object-cover" />
+                      ) : (
+                        <Dog className="w-4 h-4 text-slate-500" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="font-black text-xs truncate uppercase">{dog.nome}</div>
+                      <div className="text-[11px] text-slate-400 truncate">{dog.raca || 'Raça não informada'}</div>
+                      <div className="flex items-center justify-between mt-1">
+                        <span className="text-[10px] text-slate-500 truncate max-w-[120px]">
+                          {dog.usuarioInternoNome || dog.responsavelExternoNome || 'Sem condutor'}
+                        </span>
+                        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-slate-800 text-amber-300">
+                          {statsPreview.totalTreinos} tr.
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Coluna Direita: Dossiê do Animal + Gráfico Interativo */}
+          {selectedDog && selectedDogStats && (
+            <div className="xl:col-span-9 space-y-4">
+              {/* 1. Cartão Principal: Foto 3x4 + Dados do Animal + Condutor + Histórico */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5">
+                <div className="flex flex-col md:flex-row gap-5">
+                  {/* Foto 3x4 estilo identidade */}
+                  <div className="shrink-0 flex flex-col items-center">
+                    <div className="w-28 h-[149px] aspect-[3/4] rounded-xl overflow-hidden bg-slate-950 border-2 border-amber-500/40 shadow-lg flex flex-col items-center justify-center relative">
+                      {safeSelectedFoto ? (
+                        <img
+                          src={safeSelectedFoto}
+                          alt={`Foto 3x4 de ${selectedDog.nome}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <>
+                          <Dog className="w-10 h-10 text-slate-600" />
+                          <span className="text-[10px] font-bold text-slate-500 mt-1 uppercase">Foto 3x4</span>
+                        </>
+                      )}
+                    </div>
+                    <span className="mt-2 px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                      {selectedDog.status}
+                    </span>
+                  </div>
+
+                  {/* Dados detalhados */}
+                  <div className="flex-1 space-y-3 min-w-0">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-xl font-black text-white uppercase tracking-tight">
+                          {selectedDog.nome}
+                        </h3>
+                        <p className="text-xs text-amber-300 font-semibold">
+                          {selectedDog.raca || 'Raça não informada'}
+                          {selectedDog.especialidade ? ` • ${selectedDog.especialidade}` : ''}
+                        </p>
+                      </div>
+
+                      {/* Indicador Vacinas em Dia */}
+                      {vacinaStatus.status === 'EM_DIA' && (
+                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 text-xs font-black">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                          <span>Vacinas em Dia</span>
+                        </span>
+                      )}
+                      {vacinaStatus.status === 'ATRASADA' && (
+                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-red-500/15 border border-red-500/40 text-red-300 text-xs font-black">
+                          <AlertTriangle className="w-4 h-4 text-red-400" />
+                          <span>{vacinaStatus.overdueCount} Reforço(s) Vacinal(is) Pendente(s)</span>
+                        </span>
+                      )}
+                      {vacinaStatus.status === 'SEM_REGISTRO' && (
+                        <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-xl bg-slate-800 border border-slate-700 text-slate-400 text-xs font-semibold">
+                          <Syringe className="w-3.5 h-3.5" />
+                          <span>Sem vacinas registradas</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 text-xs">
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase">Cor / Pelagem</div>
+                        <div className="font-bold text-slate-200 mt-0.5">{selectedDog.pelagem || 'Não informada'}</div>
+                      </div>
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                          <Calendar className="w-3 h-3 text-amber-400" />
+                          <span>Data de Nascimento</span>
+                        </div>
+                        <div className="font-bold text-slate-200 mt-0.5">{formatDateBr(selectedDog.dataNascimento)}</div>
+                      </div>
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase">Idade</div>
+                        <div className="font-bold text-amber-300 mt-0.5">{calculateAgeText(selectedDog.dataNascimento)}</div>
+                      </div>
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                          <Hash className="w-3 h-3 text-cyan-400" />
+                          <span>Microchip</span>
+                        </div>
+                        <div className="font-mono font-bold text-slate-200 mt-0.5 truncate">
+                          {selectedDog.microchip || 'Não informado'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Condutor(es) + Botão de Histórico de Condutores na frente do nome */}
+                    <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                      <div className="space-y-1">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1.5">
+                          <UserCheck className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Condutor(es) Atual(is)</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="font-bold text-slate-100">
+                            {selectedDog.tipoVinculo === 'SISTEMA'
+                              ? [
+                                  selectedDog.usuarioInternoNome
+                                    ? `${selectedDog.usuarioInternoNome}${
+                                        selectedDog.usuarioInternoMasp
+                                          ? ` (${formatMasp(selectedDog.usuarioInternoMasp)})`
+                                          : ''
+                                      }`
+                                    : null,
+                                  selectedDog.usuarioInterno2Nome
+                                    ? `${selectedDog.usuarioInterno2Nome}${
+                                        selectedDog.usuarioInterno2Masp
+                                          ? ` (${formatMasp(selectedDog.usuarioInterno2Masp)})`
+                                          : ''
+                                      }`
+                                    : null
+                                ]
+                                  .filter(Boolean)
+                                  .join('  •  ') || 'Sem condutor vinculado'
+                              : `${selectedDog.responsavelExternoNome || 'Externo'}${
+                                  selectedDog.responsavelExternoOrgao ? ` (${selectedDog.responsavelExternoOrgao})` : ''
+                                }`}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setShowCondutoresHistoryModal(true)}
+                            className="inline-flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-[11px] transition"
+                            title="Ver histórico completo de condutores vinculados a este animal"
+                          >
+                            <History className="w-3.5 h-3.5" />
+                            <span>Histórico de Condutores</span>
+                          </button>
+                        </div>
+                      </div>
+                      {selectedDog.canilFisicoNome && (
+                        <div className="text-[11px] text-slate-400">
+                          Baia / Canil: <strong className="text-slate-200">{selectedDog.canilFisicoNome}</strong>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Gráfico Interativo de Tópicos de Treinamento */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h4 className="text-sm font-black text-slate-100 uppercase flex items-center space-x-2">
+                      <BarChart3 className="w-4 h-4 text-amber-400" />
+                      <span>Gráfico de Tópicos de Treinamento — {selectedDog.nome}</span>
+                    </h4>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Total de treinamentos do animal:{' '}
+                      <strong className="text-amber-300 font-mono">{selectedDogStats.totalTreinos}</strong> • Passe o
+                      mouse sobre as barras para detalhes interativos.
+                    </p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-3 text-[11px] font-semibold">
+                    <span className="inline-flex items-center gap-1.5 text-emerald-300">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" />
+                      Aptidão em
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-sky-300">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-sky-500 inline-block" />
+                      Regular
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 text-amber-300">
+                      <span className="w-2.5 h-2.5 rounded-sm bg-amber-500 inline-block" />
+                      Sugestão de Treinamento
+                    </span>
+                  </div>
+                </div>
+
+                {/* Cards de Aptidão e Sugestão */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="bg-emerald-500/10 border border-emerald-500/35 rounded-xl p-3.5 flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-emerald-500/20 text-emerald-300 shrink-0">
+                      <Award className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-black text-emerald-400 uppercase tracking-wide">
+                        Aptidão em (Mais Treinado)
+                      </div>
+                      {selectedDogStats.aptidaoTopicos.length > 0 ? (
+                        <>
+                          <div className="text-sm font-black text-emerald-100 mt-0.5">
+                            {selectedDogStats.aptidaoTopicos.join(' • ')}
+                          </div>
+                          <div className="text-[11px] text-emerald-300/80 mt-0.5">
+                            {selectedDogStats.maxCount}{' '}
+                            {selectedDogStats.maxCount === 1 ? 'treino registrado' : 'treinos registrados'}
+                            {selectedDogStats.totalTreinos > 0
+                              ? ` (${Math.round((selectedDogStats.maxCount / selectedDogStats.totalTreinos) * 100)}% dos treinos do animal)`
+                              : ''}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-slate-400 mt-0.5 italic">
+                          Nenhum tópico treinado registrado ainda para este animal.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-amber-500/10 border border-amber-500/35 rounded-xl p-3.5 flex items-start gap-3">
+                    <div className="p-2 rounded-lg bg-amber-500/20 text-amber-300 shrink-0">
+                      <TrendingDown className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-[11px] font-black text-amber-400 uppercase tracking-wide">
+                        Sugestão de Treinamento (Menor Índice)
+                      </div>
+                      {selectedDogStats.sugestaoTopicos.length > 0 ? (
+                        <>
+                          <div className="text-sm font-black text-amber-100 mt-0.5 break-words">
+                            {selectedDogStats.sugestaoTopicos.length <= 5
+                              ? selectedDogStats.sugestaoTopicos.join(' • ')
+                              : `${selectedDogStats.sugestaoTopicos.slice(0, 5).join(' • ')} (+${
+                                  selectedDogStats.sugestaoTopicos.length - 5
+                                } tópico(s))`}
+                          </div>
+                          <div className="text-[11px] text-amber-300/80 mt-0.5">
+                            {selectedDogStats.minCount}{' '}
+                            {selectedDogStats.minCount === 1 ? 'treino registrado' : 'treinos registrados'} — priorizar nos
+                            próximos treinamentos
+                          </div>
+                        </>
+                      ) : (
+                        <div className="text-xs text-slate-400 mt-0.5 italic">Sem tópicos configurados.</div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Barra de Tooltip Interativo */}
+                <div className="min-h-[38px] px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  {hoveredBar ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                        <span className="font-black text-white uppercase">{hoveredBar.topico}</span>
+                        <span className="text-slate-400">—</span>
+                        <span className="text-slate-200 font-semibold">
+                          {hoveredBar.count} {hoveredBar.count === 1 ? 'vez treinada' : 'vezes treinadas'} de{' '}
+                          {selectedDogStats.totalTreinos} treino(s) ({hoveredBar.pctOfTrainings}%)
+                        </span>
+                      </div>
+                      <span
+                        className={`px-2 py-0.5 rounded-md font-bold text-[11px] ${
+                          selectedDogStats.maxCount > 0 && hoveredBar.count === selectedDogStats.maxCount
+                            ? 'bg-emerald-500/20 text-emerald-300'
+                            : hoveredBar.count === selectedDogStats.minCount
+                            ? 'bg-amber-500/20 text-amber-300'
+                            : 'bg-sky-500/20 text-sky-300'
+                        }`}
+                      >
+                        {selectedDogStats.maxCount > 0 && hoveredBar.count === selectedDogStats.maxCount
+                          ? 'Aptidão em'
+                          : hoveredBar.count === selectedDogStats.minCount
+                          ? 'Sugestão de Treinamento'
+                          : 'Em Evolução'}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-slate-500">
+                      Passe o cursor ou toque em qualquer coluna do gráfico para inspecionar o desempenho por tópico.
+                    </span>
+                  )}
+                </div>
+
+                {/* Gráfico SVG Interativo */}
+                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 overflow-x-auto">
+                  {selectedDogStats.bars.length === 0 ? (
+                    <div className="text-center py-8 text-xs text-slate-500">
+                      Nenhum tópico de treinamento cadastrado.
+                    </div>
+                  ) : (
+                    <svg
+                      viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+                      className="w-full min-w-[680px] h-auto select-none"
+                      role="img"
+                      aria-label={`Gráfico de tópicos de treinamento de ${selectedDog.nome}`}
+                    >
+                      {(() => {
+                        const maxVal = Math.max(selectedDogStats.maxCount, 1);
+                        const stepCount = Math.min(maxVal, 5);
+                        const gridTicks = Array.from({ length: stepCount + 1 }, (_, i) =>
+                          Math.round((maxVal / stepCount) * i)
+                        );
+                        const slotW = innerW / selectedDogStats.bars.length;
+                        const barW = Math.max(16, Math.min(40, slotW * 0.62));
+
+                        return (
+                          <>
+                            {gridTicks.map((val, idx) => {
+                              const y = padTop + innerH - (val / maxVal) * innerH;
+                              return (
+                                <g key={`grid-${idx}`}>
+                                  <line
+                                    x1={padLeft}
+                                    y1={y}
+                                    x2={chartWidth - padRight}
+                                    y2={y}
+                                    stroke="#1e293b"
+                                    strokeDasharray="3 3"
+                                  />
+                                  <text
+                                    x={padLeft - 8}
+                                    y={y + 4}
+                                    textAnchor="end"
+                                    fill="#64748b"
+                                    fontSize="11"
+                                    fontFamily="monospace"
+                                  >
+                                    {val}
+                                  </text>
+                                </g>
+                              );
+                            })}
+
+                            <line
+                              x1={padLeft}
+                              y1={padTop + innerH}
+                              x2={chartWidth - padRight}
+                              y2={padTop + innerH}
+                              stroke="#475569"
+                              strokeWidth="1.5"
+                            />
+
+                            {selectedDogStats.bars.map((bar, idx) => {
+                              const cx = padLeft + slotW * idx + slotW / 2;
+                              const x = cx - barW / 2;
+                              const barH = bar.count > 0 ? Math.max(6, (bar.count / maxVal) * innerH) : 3;
+                              const y = padTop + innerH - barH;
+                              const isAptidao = selectedDogStats.maxCount > 0 && bar.count === selectedDogStats.maxCount;
+                              const isSugestao = bar.count === selectedDogStats.minCount;
+                              const isHover = hoveredTopic === bar.topico;
+                              const fill = isAptidao ? '#10b981' : isSugestao ? '#f59e0b' : '#38bdf8';
+
+                              return (
+                                <g
+                                  key={bar.topico}
+                                  className="cursor-pointer"
+                                  onMouseEnter={() => setHoveredTopic(bar.topico)}
+                                  onMouseLeave={() => setHoveredTopic(null)}
+                                  onClick={() => setHoveredTopic(bar.topico)}
+                                >
+                                  {/* Área interativa invisível para facilitar hover */}
+                                  <rect
+                                    x={padLeft + slotW * idx}
+                                    y={padTop}
+                                    width={slotW}
+                                    height={innerH + padBottom}
+                                    fill={isHover ? 'rgba(255,255,255,0.03)' : 'transparent'}
+                                  />
+                                  <rect
+                                    x={x}
+                                    y={y}
+                                    width={barW}
+                                    height={barH}
+                                    rx={4}
+                                    fill={fill}
+                                    opacity={hoveredTopic && !isHover ? 0.5 : 1}
+                                  />
+                                  <text
+                                    x={cx}
+                                    y={y - 7}
+                                    textAnchor="middle"
+                                    fill={isHover ? '#ffffff' : '#cbd5e1'}
+                                    fontSize="11"
+                                    fontWeight="bold"
+                                    fontFamily="monospace"
+                                  >
+                                    {bar.count}
+                                  </text>
+                                  <text
+                                    x={cx}
+                                    y={padTop + innerH + 14}
+                                    textAnchor="end"
+                                    transform={`rotate(-40 ${cx} ${padTop + innerH + 14})`}
+                                    fill={isHover ? '#fbbf24' : '#94a3b8'}
+                                    fontSize="10.5"
+                                    fontWeight="bold"
+                                  >
+                                    {bar.topico.length > 18 ? `${bar.topico.slice(0, 17)}…` : bar.topico}
+                                  </text>
+                                </g>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                    </svg>
+                  )}
+                </div>
+              </div>
+
+              {/* 3. Campo Livre de Anotações do Condutor (500 caracteres) */}
+              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2">
+                    <FileText className="w-4 h-4 text-amber-400" />
+                    <h4 className="text-xs font-black text-slate-100 uppercase">
+                      Anotações do Condutor do Animal
+                    </h4>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[11px] font-mono font-bold ${
+                        anotacoesDraft.length >= 470 ? 'text-amber-400' : 'text-slate-400'
+                      }`}
+                    >
+                      {anotacoesDraft.length} / 500 caracteres
+                    </span>
+                    {!isSelectedDogConductor && (
+                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-slate-400 border border-slate-700">
+                        Somente leitura (editável pelo condutor)
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {isSelectedDogConductor ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={anotacoesDraft}
+                      onChange={e => setAnotacoesDraft(e.target.value.slice(0, 500))}
+                      maxLength={500}
+                      rows={3}
+                      placeholder="Registre observações comportamentais, rotina, preferências de recompensa ou orientações específicas do animal (até 500 caracteres)..."
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-amber-500"
+                    />
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        disabled={savingAnotacoes}
+                        onClick={handleSaveAnotacoes}
+                        className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs transition flex items-center space-x-1.5"
+                      >
+                        <Save className="w-3.5 h-3.5" />
+                        <span>{savingAnotacoes ? 'Salvando...' : 'Salvar Anotações'}</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-300 whitespace-pre-wrap min-h-[60px]">
+                    {selectedDog.anotacoesCondutor?.trim() ? (
+                      selectedDog.anotacoesCondutor
+                    ) : (
+                      <span className="text-slate-500 italic">Nenhuma anotação registrada pelo condutor.</span>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Prontuário Clínico: Histórico de Vacinas, Histórico Médico e Histórico de Medicamentos */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Histórico de Vacinas */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 flex flex-col">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-emerald-300 uppercase flex items-center gap-1.5">
+                      <Syringe className="w-4 h-4" />
+                      <span>Histórico de Vacinas</span>
+                    </h4>
+                    {canEditHealthRecords && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddVacina(v => !v)}
+                        className="px-2 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Nova</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {showAddVacina && canEditHealthRecords && (
+                    <form onSubmit={handleAddVacina} className="bg-slate-950 border border-slate-700 rounded-xl p-3 space-y-2 text-xs">
+                      <input
+                        type="text"
+                        required
+                        maxLength={160}
+                        placeholder="Nome da vacina (ex: V10, Antirrábica) *"
+                        value={vacinaForm.nomeVacina}
+                        onChange={e => setVacinaForm({ ...vacinaForm, nomeVacina: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Aplicação *</label>
+                          <input
+                            type="date"
+                            required
+                            value={vacinaForm.dataAplicacao}
+                            onChange={e => setVacinaForm({ ...vacinaForm, dataAplicacao: e.target.value })}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 block mb-0.5">Próxima Dose</label>
+                          <input
+                            type="date"
+                            value={vacinaForm.proximaDose}
+                            onChange={e => setVacinaForm({ ...vacinaForm, proximaDose: e.target.value })}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                          />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="text"
+                          placeholder="Lote"
+                          value={vacinaForm.lote}
+                          onChange={e => setVacinaForm({ ...vacinaForm, lote: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                        />
+                        <input
+                          type="text"
+                          placeholder="Veterinário"
+                          value={vacinaForm.veterinario}
+                          onChange={e => setVacinaForm({ ...vacinaForm, veterinario: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                        />
+                      </div>
+                      <div className="flex justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddVacina(false)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 font-semibold"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingVacina}
+                          className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold"
+                        >
+                          {savingVacina ? 'Salvando...' : 'Salvar'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="space-y-2 flex-1 max-h-72 overflow-y-auto pr-1">
+                    {loadingDetalhes ? (
+                      <div className="text-xs text-slate-500 py-4 text-center">Carregando...</div>
+                    ) : (detalhes?.vacinas || []).length === 0 ? (
+                      <div className="text-xs text-slate-500 italic py-4 text-center">
+                        Nenhuma vacina registrada.
+                      </div>
+                    ) : (
+                      (detalhes?.vacinas || []).map(v => {
+                        const isOverdue = Boolean(v.proximaDose && v.proximaDose < getTodayIsoBr());
+                        return (
+                          <div key={v.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="font-bold text-slate-100">{v.nomeVacina}</span>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                    isOverdue
+                                      ? 'bg-red-500/20 text-red-300'
+                                      : 'bg-emerald-500/20 text-emerald-300'
+                                  }`}
+                                >
+                                  {isOverdue ? 'Vencida' : 'Em dia'}
+                                </span>
+                                {canEditHealthRecords && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteVacina(v.id)}
+                                    className="text-slate-500 hover:text-red-400"
+                                    title="Excluir vacina"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+                            <div className="text-[11px] text-slate-400">
+                              Aplicada em: <strong className="text-slate-200">{formatDateBr(v.dataAplicacao)}</strong>
+                              {v.proximaDose && (
+                                <>
+                                  {' • '}Reforço: <strong className={isOverdue ? 'text-red-300' : 'text-emerald-300'}>{formatDateBr(v.proximaDose)}</strong>
+                                </>
+                              )}
+                            </div>
+                            {(v.lote || v.veterinario) && (
+                              <div className="text-[10px] text-slate-500">
+                                {v.lote ? `Lote: ${v.lote}` : ''}
+                                {v.lote && v.veterinario ? ' • ' : ''}
+                                {v.veterinario ? `Vet.: ${v.veterinario}` : ''}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Histórico Médico */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 flex flex-col">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-cyan-300 uppercase flex items-center gap-1.5">
+                      <Stethoscope className="w-4 h-4" />
+                      <span>Histórico Médico</span>
+                    </h4>
+                    {canEditHealthRecords && (
+                      <button
+                        type="button"
+                        onClick={() => setShowAddMedico(v => !v)}
+                        className="px-2 py-1 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 text-[11px] font-bold flex items-center gap-1"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>Novo</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {showAddMedico && canEditHealthRecords && (
+                    <form onSubmit={handleAddMedico} className="bg-slate-950 border border-slate-700 rounded-xl p-3 space-y-2 text-xs">
+                      <div className="grid grid-cols-2 gap-2">
+                        <input
+                          type="date"
+                          required
+                          value={medicoForm.dataAtendimento}
+                          onChange={e => setMedicoForm({ ...medicoForm, dataAtendimento: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                        />
+                        <input
+                          type="text"
+                          required
+                          maxLength={120}
+                          placeholder="Tipo (Consulta, Exame...) *"
+                          value={medicoForm.tipoAtendimento}
+                          onChange={e => setMedicoForm({ ...medicoForm, tipoAtendimento: e.target.value })}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-100"
+                        />
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Diagnóstico / Ocorrência"
+                        value={medicoForm.diagnostico}
+                        onChange={e => setMedicoForm({ ...medicoForm, diagnostico: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Conduta / Tratamento"
+                        value={medicoForm.conduta}
+                        onChange={e => setMedicoForm({ ...medicoForm, conduta: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Veterinário responsável"
+                        value={medicoForm.veterinario}
+                        onChange={e => setMedicoForm({ ...medicoForm, veterinario: e.target.value })}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-slate-100"
+                      />
+                      <div className="flex justify-end gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddMedico(false)}
+                          className="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-300 font-semibold"
+                        >
+                          Cancelar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={savingMedico}
+                          className="px-2.5 py-1 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold"
+                        >
+                          {savingMedico ? 'Salvando...' : 'Salvar'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  <div className="space-y-2 flex-1 max-h-72 overflow-y-auto pr-1">
+                    {loadingDetalhes ? (
+                      <div className="text-xs text-slate-500 py-4 text-center">Carregando...</div>
+                    ) : (detalhes?.historicoMedico || []).length === 0 ? (
+                      <div className="text-xs text-slate-500 italic py-4 text-center">
+                        Nenhum atendimento médico registrado.
+                      </div>
+                    ) : (
+                      (detalhes?.historicoMedico || []).map(hm => (
+                        <div key={hm.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-bold text-slate-100">{hm.tipoAtendimento}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] font-mono text-cyan-300">{formatDateBr(hm.dataAtendimento)}</span>
+                              {canEditHealthRecords && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteMedico(hm.id)}
+                                  className="text-slate-500 hover:text-red-400"
+                                  title="Excluir registro médico"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                          {hm.diagnostico && (
+                            <div className="text-[11px] text-slate-300">
+                              <span className="text-slate-500">Diag.:</span> {hm.diagnostico}
+                            </div>
+                          )}
+                          {hm.conduta && (
+                            <div className="text-[11px] text-slate-300">
+                              <span className="text-slate-500">Conduta:</span> {hm.conduta}
+                            </div>
+                          )}
+                          {hm.veterinario && (
+                            <div className="text-[10px] text-slate-500">Vet.: {hm.veterinario}</div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Histórico de Medicamentos */}
+                <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 flex flex-col">
+                  <div className="flex items-center justify-between gap-2">
+                    <h4 className="text-xs font-black text-amber-300 uppercase flex items-center gap-1.5">
+                      <Pill className="w-4 h-4" />
+                      <span>Histórico de Medicamentos</span>
+                    </h4>
+                    <span className="text-[10px] font-mono text-slate-400">{dogMedicamentos.length} reg.</span>
+                  </div>
+
+                  <div className="space-y-2 flex-1 max-h-72 overflow-y-auto pr-1">
+                    {loadingDetalhes ? (
+                      <div className="text-xs text-slate-500 py-4 text-center">Carregando...</div>
+                    ) : dogMedicamentos.length === 0 ? (
+                      <div className="text-xs text-slate-500 italic py-4 text-center">
+                        Nenhum medicamento ministrado registrado no módulo veterinário.
+                      </div>
+                    ) : (
+                      dogMedicamentos.map(med => (
+                        <div key={med.id} className="bg-slate-950/80 border border-slate-800 rounded-xl p-2.5 text-xs space-y-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-bold text-slate-100">{med.produtoNome}</span>
+                            <span className="text-[10px] font-mono text-amber-300 shrink-0">
+                              {formatDateTimeBr(med.dataHora)}
+                            </span>
+                          </div>
+                          <div className="text-[11px] text-slate-300">
+                            Qtd.: <strong>{med.quantidade} {med.unidadeMedida || ''}</strong>
+                            {med.dosagemAplicada ? ` • Dose: ${med.dosagemAplicada}` : ''}
+                            {med.frequenciaAdministrada ? ` • ${med.frequenciaAdministrada}` : ''}
+                          </div>
+                          {med.motivo && (
+                            <div className="text-[11px] text-slate-400">Motivo: {med.motivo}</div>
+                          )}
+                          {med.responsavelAplicacaoNome && (
+                            <div className="text-[10px] text-slate-500">
+                              Aplicado por: {med.responsavelAplicacaoNome}
+                            </div>
+                          )}
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Modal: Histórico de Condutores do Animal */}
+      {showCondutoresHistoryModal && selectedDog && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-cyan-300 uppercase flex items-center gap-2">
+                  <History className="w-4 h-4" />
+                  <span>Histórico de Condutores — {selectedDog.nome}</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Todos os policiais vinculados como condutores deste animal com data de início e término.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCondutoresHistoryModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 max-h-[65vh] overflow-y-auto space-y-2.5">
+              {(detalhes?.historicoCondutores || []).length === 0 ? (
+                <div className="text-xs text-slate-400 text-center py-6">
+                  Nenhum vínculo de condutor registrado no histórico para este animal.
+                </div>
+              ) : (
+                (detalhes?.historicoCondutores || []).map(h => (
+                  <div
+                    key={h.id}
+                    className={`p-3 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs ${
+                      !h.dataFim
+                        ? 'bg-emerald-500/10 border-emerald-500/35'
+                        : 'bg-slate-950/80 border-slate-800'
+                    }`}
+                  >
+                    <div>
+                      <div className="font-bold text-slate-100 flex items-center gap-2">
+                        <span>{h.condutorNome}</span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] text-slate-300">
+                          {h.slot === 2 ? '2º Condutor' : '1º Condutor'}
+                        </span>
+                        {!h.dataFim && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px] font-black">
+                            ATUAL
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        {h.condutorMasp ? `MASP ${formatMasp(h.condutorMasp)}` : 'MASP não informado'}
+                        {h.condutorCargo ? ` • ${h.condutorCargo}` : ''}
+                      </div>
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-300 sm:text-right">
+                      <div>
+                        <span className="text-slate-500">Início:</span> {formatDateBr(h.dataInicio)}
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Término:</span>{' '}
+                        {h.dataFim ? formatDateBr(h.dataFim) : <span className="text-emerald-400 font-bold">Em vigor</span>}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-800 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowCondutoresHistoryModal(false)}
+                className="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Impressão de Vários Animais (1 gráfico/ficha por página) */}
+      {showMultiPrintModal && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-black text-amber-300 uppercase flex items-center gap-2">
+                  <Printer className="w-4 h-4" />
+                  <span>Imprimir Gráficos de Vários Animais</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Cada animal selecionado será impresso em sua própria folha (1 gráfico por página).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowMultiPrintModal(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-400">
+                  Selecionados: <strong className="text-amber-300">{multiPrintSelectedIds.length}</strong> de{' '}
+                  {visibleDogs.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setMultiPrintSelectedIds(visibleDogs.map(d => d.id))}
+                    className="text-cyan-400 hover:text-cyan-300 font-bold"
+                  >
+                    Selecionar todos
+                  </button>
+                  <span className="text-slate-600">|</span>
+                  <button
+                    type="button"
+                    onClick={() => setMultiPrintSelectedIds([])}
+                    className="text-slate-400 hover:text-slate-200 font-bold"
+                  >
+                    Limpar
+                  </button>
+                </div>
+              </div>
+
+              <div className="max-h-72 overflow-y-auto space-y-1.5 pr-1">
+                {visibleDogs.map(dog => {
+                  const checked = multiPrintSelectedIds.includes(dog.id);
+                  return (
+                    <button
+                      key={`mp-${dog.id}`}
+                      type="button"
+                      onClick={() =>
+                        setMultiPrintSelectedIds(prev =>
+                          prev.includes(dog.id) ? prev.filter(id => id !== dog.id) : [...prev, dog.id]
+                        )
+                      }
+                      className={`w-full text-left px-3 py-2 rounded-xl border text-xs flex items-center justify-between transition ${
+                        checked
+                          ? 'bg-amber-500/15 border-amber-400 text-amber-100'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {checked ? (
+                          <CheckSquare className="w-4 h-4 text-amber-400 shrink-0" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 shrink-0" />
+                        )}
+                        <span className="font-bold uppercase">{dog.nome}</span>
+                        <span className="text-slate-400">({dog.raca || 'K9'})</span>
+                      </div>
+                      <span className="text-[11px] text-slate-400 truncate max-w-[160px]">
+                        {dog.usuarioInternoNome || dog.responsavelExternoNome || 'Sem condutor'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="px-5 py-3 border-t border-slate-800 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowMultiPrintModal(false)}
+                className="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMultiPrint}
+                disabled={multiPrintSelectedIds.length === 0}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1.5"
+              >
+                <Printer className="w-4 h-4" />
+                <span>Imprimir ({multiPrintSelectedIds.length} folha(s))</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

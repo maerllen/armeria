@@ -48,6 +48,8 @@ import {
   ProdutoVeterinario,
   MovimentacaoVeterinaria,
   RelatorioTreinamentoCanil,
+  TopicoTreinamentoCanilConfig,
+  DetalhesCompletosCachorro,
   RelatorioOperacaoCanil,
   RelatorioTreinamentoPolicial,
   RelatorioOperacaoPolicial,
@@ -106,6 +108,7 @@ export interface AppState {
   produtosVeterinarios: ProdutoVeterinario[];
   movimentacoesVeterinarias: MovimentacaoVeterinaria[];
   relatoriosTreinamentoCanil: RelatorioTreinamentoCanil[];
+  topicosTreinamentoCanil: TopicoTreinamentoCanilConfig[];
   relatoriosOperacoesCanil: RelatorioOperacaoCanil[];
   relatoriosTreinamentoPolicial: RelatorioTreinamentoPolicial[];
   relatoriosOperacoesPolicial: RelatorioOperacaoPolicial[];
@@ -165,6 +168,7 @@ class StorageService {
     produtosVeterinarios: [],
     movimentacoesVeterinarias: [],
     relatoriosTreinamentoCanil: [],
+    topicosTreinamentoCanil: [],
     relatoriosOperacoesCanil: [],
     relatoriosTreinamentoPolicial: [],
     relatoriosOperacoesPolicial: [],
@@ -235,6 +239,7 @@ class StorageService {
         produtosVeterinariosRes,
         movimentacoesVeterinariasRes,
         relatoriosTreinamentoCanilRes,
+        topicosTreinamentoCanilRes,
         relatoriosOperacoesCanilRes,
         relatoriosTreinamentoPolicialRes,
         relatoriosOperacoesPolicialRes,
@@ -287,6 +292,7 @@ class StorageService {
         fetchSync('/api/produtos-veterinarios'),
         fetchSync('/api/movimentacoes-veterinarias'),
         fetchSync('/api/relatorios-treinamento-canil'),
+        fetchSync('/api/topicos-treinamento-canil'),
         fetchSync('/api/relatorios-operacoes-canil'),
         fetchSync('/api/relatorios-treinamento-policial'),
         fetchSync('/api/relatorios-operacoes-policial'),
@@ -340,6 +346,7 @@ class StorageService {
       this.state.produtosVeterinarios = produtosVeterinariosRes || [];
       this.state.movimentacoesVeterinarias = movimentacoesVeterinariasRes || [];
       this.state.relatoriosTreinamentoCanil = relatoriosTreinamentoCanilRes || [];
+      this.state.topicosTreinamentoCanil = topicosTreinamentoCanilRes || [];
       this.state.relatoriosOperacoesCanil = relatoriosOperacoesCanilRes || [];
       this.state.relatoriosTreinamentoPolicial = relatoriosTreinamentoPolicialRes || [];
       this.state.relatoriosOperacoesPolicial = relatoriosOperacoesPolicialRes || [];
@@ -3643,6 +3650,190 @@ class StorageService {
       });
       const data = await res.json();
       if (!res.ok) return { success: false, error: data.error };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async getDetalhesCompletosCachorro(
+    cachorroId: string
+  ): Promise<{ success: boolean; data?: DetalhesCompletosCachorro; error?: string }> {
+    try {
+      const res = await fetch(`/api/cachorros/${encodeURIComponent(cachorroId)}/detalhes-completos`);
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao carregar detalhes do animal.' };
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateAnotacoesCondutorCachorro(
+    cachorroId: string,
+    anotacoesCondutor: string
+  ): Promise<{ success: boolean; error?: string; anotacoesCondutor?: string }> {
+    try {
+      const res = await fetch(`/api/cachorros/${encodeURIComponent(cachorroId)}/anotacoes-condutor`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ anotacoesCondutor, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao salvar anotações do condutor.' };
+      await this.refreshFromServer();
+      return { success: true, anotacoesCondutor: data.anotacoesCondutor };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async saveVacinaCachorro(
+    cachorroId: string,
+    payload: {
+      nomeVacina: string;
+      dataAplicacao: string;
+      proximaDose?: string;
+      lote?: string;
+      veterinario?: string;
+      observacoes?: string;
+    }
+  ): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch(`/api/cachorros/${encodeURIComponent(cachorroId)}/vacinas`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao registrar vacina.' };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteVacinaCachorro(
+    cachorroId: string,
+    vacinaId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(
+        `/api/cachorros/${encodeURIComponent(cachorroId)}/vacinas/${encodeURIComponent(vacinaId)}`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actor: this.state.currentUser })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir vacina.' };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async saveHistoricoMedicoCachorro(
+    cachorroId: string,
+    payload: {
+      dataAtendimento: string;
+      tipoAtendimento: string;
+      diagnostico?: string;
+      conduta?: string;
+      veterinario?: string;
+      observacoes?: string;
+    }
+  ): Promise<{ success: boolean; error?: string; id?: string }> {
+    try {
+      const res = await fetch(`/api/cachorros/${encodeURIComponent(cachorroId)}/historico-medico`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao registrar histórico médico.' };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteHistoricoMedicoCachorro(
+    cachorroId: string,
+    histId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(
+        `/api/cachorros/${encodeURIComponent(cachorroId)}/historico-medico/${encodeURIComponent(histId)}`,
+        {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ actor: this.state.currentUser })
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir registro médico.' };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  // Tópicos Dinâmicos de Treinamento Canil K9
+  public getTopicosTreinamentoCanil(): TopicoTreinamentoCanilConfig[] {
+    return this.state.topicosTreinamentoCanil || [];
+  }
+
+  public async createTopicoTreinamentoCanil(
+    nome: string
+  ): Promise<{ success: boolean; error?: string; data?: TopicoTreinamentoCanilConfig }> {
+    try {
+      const res = await fetch('/api/topicos-treinamento-canil', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao cadastrar tópico.' };
+      await this.refreshFromServer();
+      return { success: true, data };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateTopicoTreinamentoCanil(
+    id: string,
+    nome: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/topicos-treinamento-canil/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nome, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao editar tópico.' };
+      await this.refreshFromServer();
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteTopicoTreinamentoCanil(
+    id: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/topicos-treinamento-canil/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error || 'Erro ao excluir tópico.' };
       await this.refreshFromServer();
       return { success: true };
     } catch (err: any) {
