@@ -13,6 +13,7 @@ import {
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
+import QRCode from 'qrcode';
 import {
   Dog,
   Search,
@@ -918,14 +919,19 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     printDogsPages([selectedDog], { [selectedDog.id]: currentDetalhes });
   };
 
-  const buildIdentidadeFuncionalK9Html = (dog: Cachorro, dogDetalhes?: DetalhesCompletosCachorro | null) => {
-    const stats = computeDogTrainingStats(dog, relatoriosTreinamento, activeTopicos);
+  const buildIdentidadeFuncionalK9Html = async (
+    dog: Cachorro,
+    dogDetalhes?: DetalhesCompletosCachorro | null
+  ): Promise<string> => {
     const { unitObj, deptObj, logoUrl: cocLogoUrl } = resolveCocUnitAndLogo(units, departments, dog, currentUser);
-    const pcmgLogoUrl = getSafeImageUrl(deptObj?.logoUrl || DEFAULT_SYSTEM_LOGO) || '';
+    const goldShieldUrl = getSafeImageUrl(DEFAULT_SYSTEM_LOGO) || '';
+    const headerEmblemUrl = cocLogoUrl || getSafeImageUrl(deptObj?.logoUrl || DEFAULT_SYSTEM_LOGO) || '';
     const safeFoto = getSafeImageUrl(dog.fotoUrl);
     const todayIso = getTodayIsoBr();
     const baiaBoxText = formatBaiaBoxLabel(dog);
-    const registroK9 = dog.microchip?.trim() || dog.id.toUpperCase();
+    const registroK9 = dog.microchip?.trim() || dog.id.replace(/[^a-zA-Z0-9]/g, '').slice(-10).toUpperCase();
+    const docNumShort =
+      (dog.microchip || dog.id).replace(/\D/g, '').slice(-4).padStart(4, '0') || 'K901';
 
     const vacinasList = [...(dogDetalhes?.vacinas || [])].sort((a, b) =>
       String(b.dataAplicacao || '').localeCompare(String(a.dataAplicacao || ''))
@@ -933,14 +939,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     const overdueVac = vacinasList.filter(v => v.proximaDose && v.proximaDose < todayIso).length;
     const vacStatusLabel =
       vacinasList.length === 0 ? 'SEM REGISTRO' : overdueVac === 0 ? 'EM DIA' : 'PENDENTE';
-    const vacStatusStyle =
-      vacinasList.length === 0
-        ? 'background:#e2e8f0;color:#475569;border:1px solid #cbd5e1;'
-        : overdueVac === 0
-        ? 'background:#dcfce7;color:#166534;border:1px solid #86efac;'
-        : 'background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;';
 
-    const ultimaVacina = vacinasList[0] || null;
     const vacinasComProxima = vacinasList.filter(v => Boolean(v.proximaDose));
     const proximaVacina =
       vacinasComProxima
@@ -951,48 +950,141 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
         .sort((a, b) => String(b.proximaDose || '').localeCompare(String(a.proximaDose || '')))[0] ||
       null;
 
-    const condutor1Text =
+    const condutorShort =
       dog.tipoVinculo === 'SISTEMA'
         ? dog.usuarioInternoNome
-          ? `${dog.usuarioInternoNome}${dog.usuarioInternoMasp ? ` • MASP ${formatMasp(dog.usuarioInternoMasp)}` : ''}${
-              dog.usuarioInternoCargo ? ` (${dog.usuarioInternoCargo})` : ''
-            }`
-          : 'Não vinculado'
-        : `${dog.responsavelExternoNome || 'Vínculo Externo'}${
-            dog.responsavelExternoOrgao ? ` • ${dog.responsavelExternoOrgao}` : ''
-          }`;
+          ? `${dog.usuarioInternoNome}${dog.usuarioInternoMasp ? ` (${formatMasp(dog.usuarioInternoMasp)})` : ''}`
+          : 'COC / PCMG'
+        : dog.responsavelExternoNome || 'Vínculo Externo';
 
-    const condutor2Text =
-      dog.tipoVinculo === 'SISTEMA' && dog.usuarioInterno2Nome
-        ? `${dog.usuarioInterno2Nome}${dog.usuarioInterno2Masp ? ` • MASP ${formatMasp(dog.usuarioInterno2Masp)}` : ''}`
-        : '';
+    const condutor2Short =
+      dog.tipoVinculo === 'SISTEMA' && dog.usuarioInterno2Nome ? dog.usuarioInterno2Nome : '';
 
-    const aptidaoResumo =
-      stats.aptidaoTopicos.length > 0
-        ? stats.aptidaoTopicos.slice(0, 3).join(' • ')
-        : 'Em avaliação / Treinamento';
+    // Gera MRZ 3 linhas (30 caracteres cada) fiel ao padrão ICAO/PCMG vertical do verso
+    const toMrzAscii = (val: string) =>
+      val
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase()
+        .replace(/[^A-Z0-9]+/g, '<')
+        .replace(/^<+|<+$/g, '');
+    const padMrz = (val: string, len = 30) => (val + '<'.repeat(len)).slice(0, len);
 
-    const statusUpper = String(dog.status || 'ATIVO / OPERACIONAL').toUpperCase();
-    const isAtivoStatus = statusUpper.includes('ATIVO') || statusUpper.includes('OPERACIONAL');
+    const birthYYMMDD =
+      dog.dataNascimento && /^\d{4}-\d{2}-\d{2}/.test(dog.dataNascimento)
+        ? `${dog.dataNascimento.slice(2, 4)}${dog.dataNascimento.slice(5, 7)}${dog.dataNascimento.slice(8, 10)}`
+        : '000000';
+    const expYYMMDD = `${todayIso.slice(2, 4)}${todayIso.slice(5, 7)}${todayIso.slice(8, 10)}`;
+    const sexCode = String(dog.sexo || 'M').toUpperCase().startsWith('F') ? 'F' : 'M';
+    const mrzLine1 = padMrz(`IDBRA${docNumShort}<<<<<<1`);
+    const mrzLine2 = padMrz(`${birthYYMMDD}1${sexCode}${expYYMMDD}OBRA<<<<<<K9`);
+    const mrzNameParts = [toMrzAscii(dog.nome || 'K9'), toMrzAscii(dog.raca || 'CANIL'), 'COC'].filter(Boolean).join('<<');
+    const mrzLine3 = padMrz(mrzNameParts);
+
+    // QR Code real escaneável com dados funcionais do semovente K9
+    const qrPayload = [
+      'PCMG - IDENTIDADE FUNCIONAL K9',
+      `UNIDADE: ${unitObj?.name || 'COC'} / ${deptObj?.name || 'COE'}`,
+      `NOME: ${dog.nome}`,
+      `RACA: ${dog.raca || 'N/I'} (${dog.sexo || 'N/I'})`,
+      `PELAGEM: ${dog.pelagem || 'N/I'}`,
+      `MICROCHIP: ${registroK9}`,
+      `NASCIMENTO: ${formatDateBr(dog.dataNascimento)}`,
+      `BAIA/BOX: ${baiaBoxText}`,
+      `CONDUTOR: ${condutorShort}`,
+      `VACINACAO: ${vacStatusLabel}${proximaVacina?.proximaDose ? ` (Prox: ${formatDateBr(proximaVacina.proximaDose)})` : ''}`,
+      `EXPEDICAO: ${formatDateBr(todayIso)}`
+    ].join('\n');
+
+    let qrSvg = '';
+    try {
+      qrSvg = await QRCode.toString(qrPayload, {
+        type: 'svg',
+        errorCorrectionLevel: 'M',
+        margin: 0,
+        color: { dark: '#141517', light: '#00000000' }
+      });
+    } catch {
+      qrSvg = '<div style="font-size:6pt;color:#475569;text-align:center;">QR K9</div>';
+    }
 
     const title = buildStandardDocumentTitle(`Identidade_Funcional_K9_${dog.nome}`, 'COC');
 
-    const pawSvg = `
-      <svg viewBox="0 0 64 64" width="24" height="24" fill="#94a3b8" opacity="0.42" xmlns="http://www.w3.org/2000/svg">
-        <ellipse cx="16" cy="24" rx="6" ry="8" transform="rotate(-18 16 24)"/>
-        <ellipse cx="27" cy="15" rx="6" ry="8.5" transform="rotate(-6 27 15)"/>
-        <ellipse cx="39" cy="15" rx="6" ry="8.5" transform="rotate(6 39 15)"/>
-        <ellipse cx="49" cy="24" rx="6" ry="8" transform="rotate(18 49 24)"/>
-        <path d="M32 27c-9.5 0-16.5 7.5-16.5 14.5 0 5.2 3.8 8.5 8.5 8.5 3 0 5.3-1.4 8-1.4s5 1.4 8 1.4c4.7 0 8.5-3.3 8.5-8.5C48.5 34.5 41.5 27 32 27z"/>
+    const pawInkSvg = `
+      <svg viewBox="0 0 64 64" width="22" height="22" fill="#18181b" opacity="0.88" xmlns="http://www.w3.org/2000/svg">
+        <ellipse cx="16" cy="24" rx="5.6" ry="7.6" transform="rotate(-18 16 24)"/>
+        <ellipse cx="27" cy="15" rx="5.6" ry="8" transform="rotate(-6 27 15)"/>
+        <ellipse cx="39" cy="15" rx="5.6" ry="8" transform="rotate(6 39 15)"/>
+        <ellipse cx="49" cy="24" rx="5.6" ry="7.6" transform="rotate(18 49 24)"/>
+        <path d="M32 27.5c-9 0-15.8 7-15.8 13.8 0 5 3.6 8.2 8.1 8.2 2.9 0 5.1-1.3 7.7-1.3s4.8 1.3 7.7 1.3c4.5 0 8.1-3.2 8.1-8.2 0-6.8-6.8-13.8-15.8-13.8z"/>
       </svg>
     `;
 
     const dogPlaceholderSvg = `
-      <svg viewBox="0 0 64 64" width="32" height="32" fill="none" stroke="#64748b" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+      <svg viewBox="0 0 64 64" width="28" height="28" fill="none" stroke="#4b5563" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
         <path d="M18 22l-5-10 10 4h18l10-4-5 10v14c0 9-6.5 16-14 16s-14-7-14-16V22z"/>
-        <circle cx="25" cy="30" r="2" fill="#64748b"/>
-        <circle cx="39" cy="30" r="2" fill="#64748b"/>
-        <path d="M29 37h6l-3 3.5L29 37z" fill="#64748b"/>
+        <circle cx="25" cy="30" r="2" fill="#4b5563"/>
+        <circle cx="39" cy="30" r="2" fill="#4b5563"/>
+        <path d="M29 37h6l-3 3.5L29 37z" fill="#4b5563"/>
+      </svg>
+    `;
+
+    // Marca d'água central vetorial (Brasão / Estrela de Armas em guilhoche prateado)
+    const armsWatermarkSvg = `
+      <svg viewBox="0 0 200 200" width="142" height="142" fill="none" stroke="#475569" xmlns="http://www.w3.org/2000/svg">
+        <g opacity="0.22" stroke-width="1.2">
+          <circle cx="100" cy="100" r="82" stroke-dasharray="3 2"/>
+          <circle cx="100" cy="100" r="72"/>
+          <circle cx="100" cy="100" r="56" stroke-dasharray="2 2"/>
+          <polygon points="100,18 121,72 178,72 132,106 149,162 100,128 51,162 68,106 22,72 79,72" stroke-width="1.6"/>
+          <polygon points="100,34 116,76 160,76 124,102 138,144 100,118 62,144 76,102 40,76 84,76" stroke-width="0.9"/>
+          <circle cx="100" cy="100" r="26" stroke-width="1.4"/>
+          <circle cx="100" cy="100" r="18" stroke-dasharray="1.5 1.5"/>
+          <path d="M26 118 Q100 158 174 118" stroke-width="1.4"/>
+          <path d="M34 128 Q100 166 166 128" stroke-width="0.9"/>
+        </g>
+      </svg>
+    `;
+
+    // Selo tátil óptico (canto inferior esquerdo do verso, igual à referência)
+    const opticalPatchSvg = `
+      <svg viewBox="0 0 48 40" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <linearGradient id="optGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#3f3f46"/>
+            <stop offset="50%" stop-color="#18181b"/>
+            <stop offset="100%" stop-color="#52525b"/>
+          </linearGradient>
+          <pattern id="optWave" width="8" height="8" patternUnits="userSpaceOnUse">
+            <path d="M0 4 Q2 0 4 4 T8 4" fill="none" stroke="#d4d4d8" stroke-width="0.7" opacity="0.65"/>
+            <path d="M0 8 Q2 4 4 8 T8 8" fill="none" stroke="#a1a1aa" stroke-width="0.6" opacity="0.5"/>
+          </pattern>
+        </defs>
+        <rect width="48" height="40" rx="5" fill="url(#optGrad)"/>
+        <rect x="2" y="2" width="44" height="36" rx="4" fill="url(#optWave)"/>
+        <rect x="1" y="1" width="46" height="38" rx="4.5" fill="none" stroke="#a1a1aa" stroke-width="0.8"/>
+      </svg>
+    `;
+
+    // Faixa decorativa inferior em guilhoche (base da frente)
+    const bottomGuillocheSvg = `
+      <svg viewBox="0 0 220 34" width="100%" height="100%" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="gNet" width="10" height="10" patternUnits="userSpaceOnUse">
+            <path d="M0 5 Q5 0 10 5 Q5 10 0 5 Z" fill="none" stroke="#18181b" stroke-width="0.65" opacity="0.6"/>
+            <path d="M0 0 L10 10 M10 0 L0 10" stroke="#27272a" stroke-width="0.35" opacity="0.45"/>
+          </pattern>
+        </defs>
+        <rect x="0" y="0" width="220" height="34" fill="url(#gNet)"/>
+        <path d="M0 2 H220 M0 4.5 H220 M0 32 H220" stroke="#18181b" stroke-width="0.9"/>
+      </svg>
+    `;
+
+    // Rubrica estilizada institucional para o rodapé do verso
+    const authoritySigSvg = `
+      <svg viewBox="0 0 140 34" width="24mm" height="6.2mm" fill="none" stroke="#111827" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg">
+        <path d="M18 24 C28 10, 48 6, 56 14 C62 20, 44 26, 36 22 C44 14, 72 8, 92 14 C104 17, 94 25, 86 21 C94 18, 114 14, 126 17"/>
+        <path d="M30 27 C52 24, 82 23, 116 25" stroke-width="0.8" opacity="0.7"/>
       </svg>
     `;
 
@@ -1009,35 +1101,35 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
       padding: 0;
       font-family: Arial, Helvetica, sans-serif;
       background: #ffffff;
-      color: #0f172a;
+      color: #111827;
     }
     .sheet {
       width: 100%;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding-top: 4mm;
+      padding-top: 6mm;
     }
-    .cut-guide-header {
-      width: 184mm;
+    .sheet-header {
+      width: 120mm;
       display: flex;
       justify-content: space-between;
       align-items: center;
       font-size: 8.5pt;
       color: #475569;
-      margin-bottom: 5mm;
-      border-bottom: 1px solid #e2e8f0;
+      margin-bottom: 6mm;
+      border-bottom: 1px solid #cbd5e1;
       padding-bottom: 2.5mm;
     }
     .card-assembly {
       position: relative;
-      padding: 3.5mm;
+      padding: 4.5mm;
     }
     /* Marcas de corte externas */
     .crop {
       position: absolute;
-      width: 3mm;
-      height: 3mm;
+      width: 3.5mm;
+      height: 3.5mm;
       border-color: #64748b;
       border-style: solid;
       border-width: 0;
@@ -1046,320 +1138,509 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     .crop-tr { top: 0; right: 0; border-top-width: 0.6pt; border-right-width: 0.6pt; }
     .crop-bl { bottom: 0; left: 0; border-bottom-width: 0.6pt; border-left-width: 0.6pt; }
     .crop-br { bottom: 0; right: 0; border-bottom-width: 0.6pt; border-right-width: 0.6pt; }
-    .fold-tick-top {
+    .fold-label {
       position: absolute;
-      top: 0;
       left: 50%;
       transform: translateX(-50%);
-      font-size: 6pt;
-      font-weight: 700;
+      font-size: 5.5pt;
+      font-weight: 800;
       color: #64748b;
-      letter-spacing: 0.4px;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
     }
-    .fold-tick-bottom {
-      position: absolute;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      font-size: 6pt;
-      font-weight: 700;
-      color: #64748b;
-      letter-spacing: 0.4px;
-    }
-    .id-pair {
+    .fold-label.top { top: 0.4mm; }
+    .fold-label.bottom { bottom: 0.4mm; }
+
+    /* Par Frente + Verso lado a lado (CR80 Vertical: 54mm × 85.6mm cada face) */
+    .card-pair {
       display: flex;
-      width: 184mm;
-      height: 60mm;
-      border: 0.8pt solid #334155;
-      border-radius: 2.2mm;
+      width: 108mm;
+      height: 85.6mm;
+      border: 0.7pt solid #475569;
+      border-radius: 3mm;
       overflow: hidden;
       background: #ffffff;
     }
-    .id-face {
+    .face {
       position: relative;
-      width: 92mm;
-      height: 60mm;
+      width: 54mm;
+      height: 85.6mm;
+      overflow: hidden;
       display: flex;
       flex-direction: column;
-      overflow: hidden;
-      background-color: #f5f9f6;
-      background-image:
-        repeating-linear-gradient(
-          45deg,
-          rgba(15, 41, 66, 0.032) 0px,
-          rgba(15, 41, 66, 0.032) 1px,
-          transparent 1px,
-          transparent 6px
-        ),
-        repeating-linear-gradient(
-          -45deg,
-          rgba(16, 185, 129, 0.038) 0px,
-          rgba(16, 185, 129, 0.038) 1px,
-          transparent 1px,
-          transparent 6px
+    }
+
+    /* ==================== FRENTE (Referência 1) ==================== */
+    .face.front {
+      border-right: 0.9pt dashed #64748b;
+      background:
+        linear-gradient(
+          180deg,
+          #090a0c 0%,
+          #101215 21%,
+          #202328 29%,
+          #8f959c 36%,
+          #d7dadd 44%,
+          #e3e6e9 72%,
+          #cfd4d9 92%,
+          #b8bec5 100%
         );
     }
-    .id-face.front {
-      border-right: 1pt dashed #475569;
-    }
-    .watermark {
+    /* Linhas finas de segurança laterais em guilhoche */
+    .front-side-pattern {
       position: absolute;
-      inset: 0;
+      top: 19mm;
+      bottom: 8.5mm;
+      width: 2.2mm;
+      z-index: 1;
+      opacity: 0.45;
+      background-image: repeating-linear-gradient(
+        0deg,
+        #18181b 0px,
+        #18181b 0.8px,
+        transparent 0.8px,
+        transparent 2.4px
+      );
+    }
+    .front-side-pattern.left { left: 0.8mm; }
+    .front-side-pattern.right { right: 0.8mm; }
+
+    .front-watermark {
+      position: absolute;
+      top: 32mm;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1;
+      pointer-events: none;
+    }
+
+    .front-header {
+      position: relative;
+      z-index: 3;
       display: flex;
       align-items: center;
-      justify-content: center;
-      font-size: 16pt;
-      font-weight: 900;
-      letter-spacing: 2.5px;
-      color: rgba(15, 41, 66, 0.055);
-      transform: rotate(-18deg);
-      pointer-events: none;
-      user-select: none;
-      white-space: nowrap;
-      z-index: 0;
+      gap: 1.8mm;
+      padding: 2.4mm 2.6mm 1.5mm;
+      height: 17.5mm;
     }
-    .face-header {
+    .front-emblem {
+      width: 11mm;
+      height: 11.5mm;
+      object-fit: contain;
+      flex-shrink: 0;
+      filter: drop-shadow(0 0.5px 1.2px rgba(0, 0, 0, 0.7));
+    }
+    .front-titles {
+      flex: 1;
+      text-align: center;
+      color: #ffffff;
+      line-height: 1.08;
+    }
+    .ft-rep {
+      font-size: 4.3pt;
+      font-weight: 700;
+      letter-spacing: 0.25px;
+      color: #e5e7eb;
+    }
+    .ft-mg {
+      font-size: 6.1pt;
+      font-weight: 900;
+      letter-spacing: 0.2px;
+      color: #f8fafc;
+      margin-top: 0.3mm;
+    }
+    .ft-pc {
+      font-size: 9.6pt;
+      font-weight: 900;
+      letter-spacing: 0.35px;
+      color: #ffffff;
+      margin-top: 0.2mm;
+    }
+    .ft-id {
+      font-size: 5pt;
+      font-weight: 800;
+      letter-spacing: 0.4px;
+      color: #e2e8f0;
+      margin-top: 0.3mm;
+    }
+
+    /* Faixa Foto + Distintivo Dourado PCMG */
+    .front-media-row {
       position: relative;
-      z-index: 1;
-      background: linear-gradient(90deg, #0b2239 0%, #143657 55%, #0b2239 100%);
-      border-bottom: 1.5pt solid #d97706;
-      padding: 1.5mm 2.2mm;
+      z-index: 3;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 1.5mm;
-      height: 11.8mm;
+      padding: 0.6mm 2.8mm 0;
+      gap: 2mm;
+      height: 26mm;
+    }
+    .photo-guilloche-wrap {
+      padding: 1.1mm;
+      border-radius: 2mm;
+      border: 0.6pt solid rgba(255, 255, 255, 0.72);
+      box-shadow:
+        0 0 0 0.7pt rgba(255, 255, 255, 0.35),
+        0 0 0 1.4pt rgba(148, 163, 184, 0.45);
+      background: rgba(255, 255, 255, 0.12);
       flex-shrink: 0;
     }
-    .face-header.back-hdr {
-      height: 7.4mm;
-      justify-content: center;
-      padding: 1mm 2.2mm;
-    }
-    .hdr-logo {
-      height: 8.6mm;
-      max-width: 9.5mm;
-      object-fit: contain;
-      flex-shrink: 0;
-    }
-    .hdr-titles {
-      flex: 1;
-      text-align: center;
-      line-height: 1.12;
-    }
-    .hdr-uf {
-      font-size: 4.9pt;
-      font-weight: 800;
-      color: #fde68a;
-      letter-spacing: 0.4px;
-      text-transform: uppercase;
-    }
-    .hdr-org {
-      font-size: 6pt;
-      font-weight: 900;
-      color: #ffffff;
-      text-transform: uppercase;
-      letter-spacing: 0.25px;
-    }
-    .hdr-sub {
-      font-size: 5pt;
-      font-weight: 800;
-      color: #a7f3d0;
-      text-transform: uppercase;
-      letter-spacing: 0.35px;
-    }
-    .face-body {
-      position: relative;
-      z-index: 1;
-      flex: 1;
-      padding: 1.8mm 2.2mm 1.4mm;
-      display: flex;
-      gap: 2.2mm;
+    .photo-box {
+      width: 19.6mm;
+      height: 23.6mm;
+      border-radius: 1.2mm;
       overflow: hidden;
-    }
-    .face-body.back-body {
-      flex-direction: column;
-      gap: 1.5mm;
-      padding: 1.6mm 2.2mm 1.4mm;
-    }
-    .photo-col {
-      width: 22.5mm;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1.1mm;
-      flex-shrink: 0;
-    }
-    .photo-frame {
-      width: 22mm;
-      height: 29.2mm;
-      border: 1pt solid #143657;
-      border-radius: 1.4mm;
       background: #e2e8f0;
-      overflow: hidden;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      box-shadow: inset 0 0 0 0.6pt rgba(255,255,255,0.6);
     }
-    .photo-frame img {
+    .photo-box img {
       width: 100%;
       height: 100%;
       object-fit: cover;
     }
-    .status-pill {
-      width: 100%;
-      text-align: center;
-      font-size: 4.8pt;
-      font-weight: 900;
-      padding: 0.7mm 0.8mm;
-      border-radius: 1mm;
-      letter-spacing: 0.2px;
-      text-transform: uppercase;
-      line-height: 1.1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .k9-tag {
-      font-size: 5pt;
-      font-weight: 900;
-      color: #0b2239;
-      background: #fef3c7;
-      border: 0.6pt solid #f59e0b;
-      border-radius: 1mm;
-      padding: 0.45mm 1.2mm;
-      width: 100%;
-      text-align: center;
-      letter-spacing: 0.3px;
-    }
-    .fields-col {
+    .gold-shield-wrap {
       flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 25mm;
+    }
+    .gold-shield-img {
+      height: 24.4mm;
+      max-width: 22.5mm;
+      object-fit: contain;
+      filter: drop-shadow(0 0 0.7px #ffffff) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
+    }
+
+    /* Dados da Frente (tipografia direta sobre o fundo prateado, igual à referência) */
+    .front-fields {
+      position: relative;
+      z-index: 3;
+      flex: 1;
+      padding: 1.2mm 3.6mm 0.4mm;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
-      min-width: 0;
-      gap: 1mm;
+      color: #0b0c0e;
     }
-    .fld {
-      background: rgba(255, 255, 255, 0.82);
-      border: 0.5pt solid #cbd5e1;
-      border-radius: 1mm;
-      padding: 0.75mm 1.4mm;
-      min-width: 0;
+    .ff-block {
+      line-height: 1.12;
     }
-    .fld-label {
-      font-size: 4.6pt;
-      font-weight: 800;
-      color: #475569;
+    .ff-lbl {
+      font-size: 4.8pt;
+      font-weight: 600;
+      color: #1f2937;
       text-transform: uppercase;
-      letter-spacing: 0.25px;
-      line-height: 1.05;
+      letter-spacing: 0.15px;
     }
-    .fld-val {
-      font-size: 6.5pt;
+    .ff-val {
+      font-size: 6.4pt;
       font-weight: 800;
-      color: #0f172a;
-      line-height: 1.18;
+      color: #09090b;
+      text-transform: uppercase;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    .fld-val.dog-name {
-      font-size: 9pt;
+    .ff-val.name-val {
+      font-size: 7.4pt;
       font-weight: 900;
-      color: #0b2239;
+      letter-spacing: 0.15px;
+    }
+    .ff-val.cargo-red {
+      font-size: 6.6pt;
+      font-weight: 900;
+      color: #991b1b;
+      letter-spacing: 0.2px;
+    }
+    .ff-val.sub-cargo {
+      font-size: 5.6pt;
+      font-weight: 800;
+      color: #18181b;
+    }
+    .ff-row-2 {
+      display: grid;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 2mm;
+    }
+
+    /* Área Assinatura / Pata K9 com marca d'água PCMG */
+    .front-sig-area {
+      position: relative;
+      z-index: 3;
+      padding: 0 3.6mm 0.7mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-end;
+      height: 9.2mm;
+    }
+    .pcmg-ghost {
+      position: absolute;
+      top: 0.2mm;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 11pt;
+      font-weight: 900;
+      letter-spacing: 4px;
+      color: rgba(51, 65, 85, 0.2);
+      user-select: none;
+      white-space: nowrap;
+    }
+    .paw-ink-wrap {
+      position: relative;
+      z-index: 2;
+      line-height: 0;
+      margin-bottom: 0.3mm;
+    }
+    .sig-caption {
+      position: relative;
+      z-index: 2;
+      font-size: 4.3pt;
+      font-weight: 800;
+      color: #111827;
       letter-spacing: 0.2px;
       text-transform: uppercase;
     }
-    .fld-val.mono {
-      font-family: "Courier New", Courier, monospace;
-      font-size: 6.3pt;
-    }
-    .fld-val.emerald {
-      color: #065f46;
-    }
-    .row-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1.2mm;
-    }
-    .row-2-wide {
-      display: grid;
-      grid-template-columns: 1.32fr 0.68fr;
-      gap: 1.2mm;
-    }
-    .face-footer {
+
+    /* Rodapé Guilhoche com pílula branca central */
+    .front-bottom-band {
       position: relative;
-      z-index: 1;
-      background: #0b2239;
-      border-top: 1pt solid #d97706;
-      color: #fde68a;
-      font-size: 4.5pt;
-      font-weight: 800;
-      text-align: center;
-      letter-spacing: 0.35px;
+      z-index: 3;
+      height: 7.4mm;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .front-bottom-bg {
+      position: absolute;
+      inset: 0;
+      z-index: 0;
+    }
+    .valid-pill {
+      position: relative;
+      z-index: 2;
+      background: #f8fafc;
+      border: 0.6pt solid #334155;
+      border-radius: 3mm;
+      padding: 0.7mm 2.8mm;
+      font-size: 4.4pt;
+      font-weight: 900;
+      color: #09090b;
+      letter-spacing: 0.2px;
       text-transform: uppercase;
-      padding: 0.9mm 1.5mm;
-      height: 4.4mm;
+      white-space: nowrap;
+    }
+
+    /* ==================== VERSO (Referência 2) ==================== */
+    .face.back {
+      background: linear-gradient(155deg, #eceee9 0%, #e4e7e2 48%, #d9ddd7 100%);
+      flex-direction: row;
+    }
+    .back-shield-ghost {
+      position: absolute;
+      top: 7mm;
+      left: 7mm;
+      width: 26mm;
+      height: 30mm;
+      object-fit: contain;
+      opacity: 0.085;
+      filter: grayscale(100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    .back-left {
+      position: relative;
+      z-index: 2;
+      width: 39.2mm;
+      height: 100%;
+      padding: 3.2mm 1.6mm 2.4mm 3.2mm;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .back-clause {
+      font-size: 3.85pt;
+      font-weight: 800;
+      color: #18181b;
+      line-height: 1.24;
+      text-align: justify;
+      text-transform: uppercase;
+      letter-spacing: 0.05px;
+    }
+    .back-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 1.1mm;
+      margin-top: 1mm;
+    }
+    .bm-row-2 {
+      display: grid;
+      grid-template-columns: 0.85fr 1.15fr;
+      gap: 1.4mm;
+    }
+    .bm-lbl {
+      font-size: 4.3pt;
+      font-weight: 600;
+      color: #27272a;
+      text-transform: uppercase;
+      line-height: 1.05;
+    }
+    .bm-val {
+      font-size: 5.4pt;
+      font-weight: 900;
+      color: #09090b;
+      text-transform: uppercase;
+      line-height: 1.14;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .back-qr-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 1.2mm 0 0.8mm;
+    }
+    .back-qr-box {
+      width: 21.5mm;
+      height: 21.5mm;
+      padding: 0.8mm;
+      background: rgba(255, 255, 255, 0.35);
+      border-radius: 0.8mm;
+    }
+    .back-qr-box svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    /* Trio de Segurança abaixo do QR (Selo Tátil + PC Roxo + Mini Foto Fantasma) */
+    .security-trio {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.4mm;
+      padding: 0 0.8mm;
+    }
+    .sec-optical {
+      width: 10.8mm;
+      height: 9mm;
+      flex-shrink: 0;
+    }
+    .sec-pc-badge {
+      width: 6.4mm;
+      height: 10.6mm;
+      border-radius: 1.2mm;
+      background: linear-gradient(180deg, #8e3a65 0%, #6d264b 100%);
+      border: 0.5pt solid #4c1733;
+      color: #ffffff;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      line-height: 0.94;
+      font-weight: 900;
+      font-size: 8.6pt;
+      flex-shrink: 0;
+      box-shadow: inset 0 0 2px rgba(255, 255, 255, 0.25);
+    }
+    .sec-ghost-photo {
+      width: 8mm;
+      height: 9.8mm;
+      overflow: hidden;
+      border-radius: 0.8mm;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
     }
-    .back-bottom {
-      display: flex;
-      gap: 2mm;
-      align-items: stretch;
-      margin-top: auto;
+    .sec-ghost-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      filter: grayscale(100%) contrast(88%) brightness(108%);
+      opacity: 0.42;
     }
-    .paw-box {
-      width: 21mm;
-      height: 14.5mm;
-      border: 0.7pt dashed #64748b;
-      border-radius: 1.2mm;
-      background: rgba(255, 255, 255, 0.85);
+
+    /* Faixa em relevo PCMGPCMGPCMG */
+    .emboss-strip {
+      text-align: center;
+      font-size: 6pt;
+      font-weight: 900;
+      letter-spacing: 0.6px;
+      color: rgba(100, 116, 139, 0.28);
+      text-shadow: 0.4px 0.4px 0 rgba(255, 255, 255, 0.75);
+      line-height: 1;
+      margin-top: 0.5mm;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+    /* Assinatura Autoridade no rodapé do verso */
+    .back-authority {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: space-between;
-      padding: 0.8mm;
-      flex-shrink: 0;
+      text-align: center;
+      line-height: 1.12;
+      margin-top: 0.2mm;
     }
-    .paw-caption {
+    .auth-sig {
+      margin-bottom: -1.4mm;
+    }
+    .auth-name {
+      font-size: 4.3pt;
+      font-weight: 900;
+      color: #09090b;
+      text-transform: uppercase;
+    }
+    .auth-role {
       font-size: 4.2pt;
       font-weight: 800;
-      color: #475569;
+      color: #18181b;
       text-transform: uppercase;
-      text-align: center;
-      line-height: 1;
     }
-    .issuance-box {
-      flex: 1;
+
+    /* Faixa MRZ vertical à direita (igual à referência) */
+    .back-mrz-col {
+      position: relative;
+      z-index: 2;
+      width: 14.8mm;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .mrz-rotated {
+      transform: rotate(-90deg);
+      transform-origin: center center;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      min-width: 0;
-    }
-    .sig-line {
-      border-top: 0.6pt solid #334155;
-      margin-top: 3.8mm;
-      padding-top: 0.6mm;
-      text-align: center;
-      font-size: 4.6pt;
+      gap: 1.5mm;
+      font-family: "Courier New", Courier, monospace;
+      font-size: 7.4pt;
       font-weight: 800;
-      color: #334155;
-      text-transform: uppercase;
+      color: #111827;
+      letter-spacing: 0.95px;
+      line-height: 1;
+      white-space: nowrap;
     }
+
     .instructions {
-      width: 184mm;
-      margin-top: 5mm;
+      width: 120mm;
+      margin-top: 6mm;
       background: #f8fafc;
       border: 1px solid #cbd5e1;
       border-radius: 6px;
-      padding: 3mm 4mm;
-      font-size: 8pt;
+      padding: 3.2mm 4mm;
+      font-size: 7.8pt;
       color: #334155;
       line-height: 1.5;
     }
@@ -1367,9 +1648,9 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
 </head>
 <body>
   <div class="sheet">
-    <div class="cut-guide-header">
+    <div class="sheet-header">
       <div><strong>IDENTIDADE FUNCIONAL K9</strong> — ${escapeHtmlText(dog.nome.toUpperCase())}</div>
-      <div>Dimensão dobrada: <strong>92 × 60 mm</strong> (Padrão Funcional / Polaseal RG)</div>
+      <div>Padrão CR80 Vertical: <strong>54 × 85,6 mm</strong></div>
     </div>
 
     <div class="card-assembly">
@@ -1377,169 +1658,168 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
       <div class="crop crop-tr"></div>
       <div class="crop crop-bl"></div>
       <div class="crop crop-br"></div>
-      <div class="fold-tick-top">▼ DOBRAR AQUI ▼</div>
-      <div class="fold-tick-bottom">▲ DOBRAR AQUI ▲</div>
+      <div class="fold-label top">▼ DOBRAR AQUI ▼</div>
+      <div class="fold-label bottom">▲ DOBRAR AQUI ▲</div>
 
-      <div class="id-pair">
-        <!-- ================= FRENTE ================= -->
-        <div class="id-face front">
-          <div class="watermark">PCMG • COC • K9</div>
-          <div class="face-header">
-            ${pcmgLogoUrl ? `<img class="hdr-logo" src="${escapeHtmlText(pcmgLogoUrl)}" alt="Brasão PCMG" />` : ''}
-            <div class="hdr-titles">
-              <div class="hdr-uf">Polícia Civil do Estado de Minas Gerais</div>
-              <div class="hdr-org">${escapeHtmlText(unitObj?.name || 'Coordenação de Operações com Cães — COC')}</div>
-              <div class="hdr-sub">Carteira de Identidade Funcional K9</div>
+      <div class="card-pair">
+        <!-- ======================= FRENTE ======================= -->
+        <div class="face front">
+          <div class="front-side-pattern left"></div>
+          <div class="front-side-pattern right"></div>
+          <div class="front-watermark">${armsWatermarkSvg}</div>
+
+          <div class="front-header">
+            ${headerEmblemUrl ? `<img class="front-emblem" src="${escapeHtmlText(headerEmblemUrl)}" alt="Brasão COC" />` : ''}
+            <div class="front-titles">
+              <div class="ft-rep">REPÚBLICA FEDERATIVA DO BRASIL</div>
+              <div class="ft-mg">ESTADO DE MINAS GERAIS</div>
+              <div class="ft-pc">POLÍCIA CIVIL</div>
+              <div class="ft-id">IDENTIDADE FUNCIONAL K9</div>
             </div>
-            ${cocLogoUrl ? `<img class="hdr-logo" src="${escapeHtmlText(cocLogoUrl)}" alt="Brasão COC" />` : ''}
           </div>
 
-          <div class="face-body">
-            <div class="photo-col">
-              <div class="photo-frame">
+          <div class="front-media-row">
+            <div class="photo-guilloche-wrap">
+              <div class="photo-box">
                 ${
                   safeFoto
                     ? `<img src="${escapeHtmlText(safeFoto)}" alt="Foto 3x4 ${escapeHtmlText(dog.nome)}" />`
-                    : `${dogPlaceholderSvg}<span style="font-size:5pt;font-weight:800;color:#64748b;margin-top:1mm;">FOTO 3×4</span>`
+                    : `${dogPlaceholderSvg}<span style="font-size:4.6pt;font-weight:800;color:#4b5563;margin-top:0.6mm;">FOTO 3×4</span>`
                 }
               </div>
-              <div class="status-pill" style="${
-                isAtivoStatus
-                  ? 'background:#dcfce7;color:#166534;border:0.6pt solid #86efac;'
-                  : 'background:#fef3c7;color:#92400e;border:0.6pt solid #fcd34d;'
-              }">${escapeHtmlText(statusUpper)}</div>
-              <div class="k9-tag">SEMOVENTE K9</div>
+            </div>
+            <div class="gold-shield-wrap">
+              ${goldShieldUrl ? `<img class="gold-shield-img" src="${escapeHtmlText(goldShieldUrl)}" alt="Distintivo Polícia Civil MG" />` : ''}
+            </div>
+          </div>
+
+          <div class="front-fields">
+            <div class="ff-block">
+              <div class="ff-lbl">Nome</div>
+              <div class="ff-val name-val">${escapeHtmlText(dog.nome)}</div>
             </div>
 
-            <div class="fields-col">
-              <div class="fld">
-                <div class="fld-label">Nome do Cão Policial</div>
-                <div class="fld-val dog-name">${escapeHtmlText(dog.nome)}</div>
-              </div>
+            <div class="ff-block">
+              <div class="ff-lbl">Cargo / Função</div>
+              <div class="ff-val cargo-red">CÃO POLICIAL K9</div>
+              <div class="ff-val sub-cargo">${escapeHtmlText(dog.especialidade || unitObj?.name || 'COC • COE')}</div>
+            </div>
 
-              <div class="row-2-wide">
-                <div class="fld">
-                  <div class="fld-label">Raça</div>
-                  <div class="fld-val">${escapeHtmlText(dog.raca || 'Não informada')}</div>
-                </div>
-                <div class="fld">
-                  <div class="fld-label">Sexo</div>
-                  <div class="fld-val">${escapeHtmlText(dog.sexo || '—')}</div>
-                </div>
-              </div>
+            <div class="ff-block">
+              <div class="ff-lbl">Microchip / Registro</div>
+              <div class="ff-val">${escapeHtmlText(registroK9)}</div>
+            </div>
 
-              <div class="row-2">
-                <div class="fld">
-                  <div class="fld-label">Cor / Pelagem</div>
-                  <div class="fld-val">${escapeHtmlText(dog.pelagem || 'Não informada')}</div>
-                </div>
-                <div class="fld">
-                  <div class="fld-label">Data Nasc. / Idade</div>
-                  <div class="fld-val">${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
-                </div>
+            <div class="ff-row-2">
+              <div class="ff-block">
+                <div class="ff-lbl">Raça</div>
+                <div class="ff-val">${escapeHtmlText(dog.raca || 'Não informada')}</div>
               </div>
-
-              <div class="fld">
-                <div class="fld-label">Especialidade / Emprego Operacional</div>
-                <div class="fld-val emerald">${escapeHtmlText(dog.especialidade || 'Operações Policiais com Cães (K9)')}</div>
-              </div>
-
-              <div class="row-2">
-                <div class="fld">
-                  <div class="fld-label">Microchip / Registro</div>
-                  <div class="fld-val mono">${escapeHtmlText(registroK9)}</div>
-                </div>
-                <div class="fld">
-                  <div class="fld-label">Baia / Box</div>
-                  <div class="fld-val">${escapeHtmlText(baiaBoxText)}</div>
-                </div>
+              <div class="ff-block">
+                <div class="ff-lbl">Sexo / Pelagem</div>
+                <div class="ff-val">${escapeHtmlText(`${dog.sexo || '—'}${dog.pelagem ? ` • ${dog.pelagem}` : ''}`)}</div>
               </div>
             </div>
           </div>
 
-          <div class="face-footer">
-            DOCUMENTO FUNCIONAL DE SEMOVENTE POLICIAL • ${escapeHtmlText((deptObj?.name || 'COE').toUpperCase())} / COC
+          <div class="front-sig-area">
+            <div class="pcmg-ghost">PCMG</div>
+            <div class="paw-ink-wrap">${pawInkSvg}</div>
+            <div class="sig-caption">ASSINATURA / PATA DO K9</div>
+          </div>
+
+          <div class="front-bottom-band">
+            <div class="front-bottom-bg">${bottomGuillocheSvg}</div>
+            <div class="valid-pill">VÁLIDA EM TODO O TERRITÓRIO NACIONAL</div>
           </div>
         </div>
 
-        <!-- ================= VERSO ================= -->
-        <div class="id-face back">
-          <div class="watermark">IDENTIDADE K9 • PCMG</div>
-          <div class="face-header back-hdr">
-            <div class="hdr-titles">
-              <div class="hdr-org" style="font-size:5.8pt;">Dados Funcionais, Condutor e Situação Sanitária — K9</div>
+        <!-- ======================= VERSO (FUNDO) ======================= -->
+        <div class="face back">
+          ${goldShieldUrl ? `<img class="back-shield-ghost" src="${escapeHtmlText(goldShieldUrl)}" alt="" />` : ''}
+
+          <div class="back-left">
+            <div class="back-clause">
+              O SEMOVENTE K9 INTEGRA O EFETIVO OPERACIONAL DA POLÍCIA CIVIL DE MINAS GERAIS (${escapeHtmlText((unitObj?.name || 'COC').toUpperCase())}), COM FRANCO ACESSO A LOCAIS DE OPERAÇÃO E FISCALIZAÇÃO POLICIAL QUANDO CONDUZIDO POR POLICIAL CIVIL.
+            </div>
+
+            <div class="back-meta">
+              <div class="bm-row-2">
+                <div>
+                  <div class="bm-lbl">Nº Doc</div>
+                  <div class="bm-val">${escapeHtmlText(docNumShort)}</div>
+                </div>
+                <div>
+                  <div class="bm-lbl">Baia / Box</div>
+                  <div class="bm-val">${escapeHtmlText(baiaBoxText)}</div>
+                </div>
+              </div>
+
+              <div>
+                <div class="bm-lbl">Data de Nasc.</div>
+                <div class="bm-val">${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
+              </div>
+
+              <div>
+                <div class="bm-lbl">Condutor / Unidade</div>
+                <div class="bm-val">${escapeHtmlText(condutorShort)}</div>
+                ${condutor2Short ? `<div class="bm-val" style="font-size:4.8pt;color:#3f3f46;">2º: ${escapeHtmlText(condutor2Short)}</div>` : ''}
+              </div>
+
+              <div class="bm-row-2">
+                <div>
+                  <div class="bm-lbl">Vacinação</div>
+                  <div class="bm-val" style="color:${vacStatusLabel === 'EM DIA' ? '#166534' : vacStatusLabel === 'PENDENTE' ? '#991b1b' : '#27272a'};">${vacStatusLabel}</div>
+                </div>
+                <div>
+                  <div class="bm-lbl">Data de Exp.</div>
+                  <div class="bm-val">${escapeHtmlText(formatDateBr(todayIso))}</div>
+                </div>
+              </div>
+            </div>
+
+            <div class="back-qr-wrap">
+              <div class="back-qr-box">${qrSvg}</div>
+            </div>
+
+            <div class="security-trio">
+              <div class="sec-optical">${opticalPatchSvg}</div>
+              <div class="sec-pc-badge"><span>P</span><span>C</span></div>
+              <div class="sec-ghost-photo">
+                ${
+                  safeFoto
+                    ? `<img src="${escapeHtmlText(safeFoto)}" alt="" />`
+                    : `<div style="opacity:0.35;">${dogPlaceholderSvg}</div>`
+                }
+              </div>
+            </div>
+
+            <div class="emboss-strip">PCMGPCMGPCMGPCMG</div>
+
+            <div class="back-authority">
+              <div class="auth-sig">${authoritySigSvg}</div>
+              <div class="auth-name">${escapeHtmlText(unitObj?.name || 'COORDENAÇÃO DE OPERAÇÕES COM CÃES')}</div>
+              <div class="auth-role">POLÍCIA CIVIL</div>
+              <div class="auth-role">DE MINAS GERAIS</div>
             </div>
           </div>
 
-          <div class="face-body back-body">
-            <div class="fld">
-              <div class="fld-label">Condutor(es) Responsável(is)</div>
-              <div class="fld-val" style="font-size:6.1pt;">1º: ${escapeHtmlText(condutor1Text)}</div>
-              ${
-                condutor2Text
-                  ? `<div class="fld-val" style="font-size:5.9pt;color:#334155;">2º: ${escapeHtmlText(condutor2Text)}</div>`
-                  : ''
-              }
+          <div class="back-mrz-col">
+            <div class="mrz-rotated">
+              <div>${escapeHtmlText(mrzLine1)}</div>
+              <div>${escapeHtmlText(mrzLine2)}</div>
+              <div>${escapeHtmlText(mrzLine3)}</div>
             </div>
-
-            <div class="row-2">
-              <div class="fld">
-                <div style="display:flex;justify-content:space-between;align-items:center;gap:1mm;">
-                  <span class="fld-label">Situação Vacinal</span>
-                  <span style="font-size:4.5pt;font-weight:900;padding:0.3mm 1.2mm;border-radius:0.8mm;${vacStatusStyle}">${vacStatusLabel}</span>
-                </div>
-                <div class="fld-val" style="font-size:5.7pt;margin-top:0.4mm;">
-                  Últ.: ${ultimaVacina ? `${escapeHtmlText(formatDateBr(ultimaVacina.dataAplicacao))} (${escapeHtmlText(ultimaVacina.nomeVacina)})` : 'Sem registro'}
-                </div>
-                <div class="fld-val" style="font-size:5.7pt;color:${proximaVacina && proximaVacina.proximaDose && proximaVacina.proximaDose < todayIso ? '#b91c1c' : '#047857'};">
-                  Próx.: ${proximaVacina ? escapeHtmlText(formatDateBr(proximaVacina.proximaDose)) : 'Não agendada'}
-                </div>
-              </div>
-
-              <div class="fld">
-                <div class="fld-label">Aptidão &amp; Lotação</div>
-                <div class="fld-val emerald" style="font-size:5.7pt;margin-top:0.4mm;">${escapeHtmlText(aptidaoResumo)}</div>
-                <div class="fld-val" style="font-size:5.6pt;color:#334155;">
-                  Lotação: ${escapeHtmlText(deptObj?.name || 'COE')} / ${escapeHtmlText(unitObj?.name || 'COC')}
-                </div>
-              </div>
-            </div>
-
-            <div class="back-bottom">
-              <div class="paw-box">
-                <div class="paw-caption">Impressão Plantar</div>
-                ${pawSvg}
-                <div class="paw-caption">Pata K9</div>
-              </div>
-
-              <div class="issuance-box">
-                <div class="row-2">
-                  <div class="fld">
-                    <div class="fld-label">Data Expedição</div>
-                    <div class="fld-val mono" style="font-size:6pt;">${escapeHtmlText(formatDateBr(todayIso))}</div>
-                  </div>
-                  <div class="fld">
-                    <div class="fld-label">Órgão Expedidor</div>
-                    <div class="fld-val" style="font-size:5.9pt;">PCMG / COE / COC</div>
-                  </div>
-                </div>
-                <div class="sig-line">Coordenação / Responsável COC — Canil K9</div>
-              </div>
-            </div>
-          </div>
-
-          <div class="face-footer">
-            USO OPERACIONAL EXCLUSIVO • VÁLIDA ENQUANTO ATIVO NA UNIDADE COC
           </div>
         </div>
       </div>
     </div>
 
     <div class="instructions">
-      <strong>Instruções para plastificação:</strong>
-      Imprima em papel de alta gramatura (ex.: 180g ou papel fotográfico fosco) com escala <strong>100% (Tamanho Real)</strong>,
-      recorte acompanhando as marcas externas, dobre exatamente na <strong>linha tracejada central</strong> (unindo Frente e Verso)
-      e plastifique em envelope polaseal padrão RG (95 × 65 mm ou 100 × 70 mm).
+      <strong>Instruções para impressão e plastificação:</strong>
+      Imprima com escala <strong>100% (Tamanho Real)</strong> em papel 180g ou fotográfico fosco, recorte seguindo as marcas externas,
+      dobre na <strong>linha tracejada central</strong> unindo Frente e Verso (tamanho final CR80: <strong>54 × 85,6 mm</strong>)
+      e plastifique em envelope polaseal padrão crachá/RG (59 × 86 mm ou 60 × 90 mm).
     </div>
   </div>
 </body>
@@ -1556,7 +1836,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
       }
     }
     const title = buildStandardDocumentTitle(`Identidade_Funcional_K9_${selectedDog.nome}`, 'COC');
-    const html = buildIdentidadeFuncionalK9Html(selectedDog, currentDetalhes);
+    const html = await buildIdentidadeFuncionalK9Html(selectedDog, currentDetalhes);
     printDocumentInPage(html, title);
   };
 
