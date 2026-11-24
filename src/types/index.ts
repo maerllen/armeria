@@ -1294,6 +1294,7 @@ export interface Cachorro {
   especialidade?: string; // Faro de Drogas, Detecção de Explosivos, Patrulha/Guarda, Busca e Resgate
   canilFisicoId?: string;
   canilFisicoNome?: string;
+  canilFisicoIdentificacao?: string;
   status: StatusCachorro;
   tipoVinculo: 'SISTEMA' | 'EXTERNO';
   // Vínculo Interno 1 (Policial Operador Canino do Sistema)
@@ -1316,6 +1317,7 @@ export interface Cachorro {
   fotoUrl?: string;
   observacoes?: string;
   anotacoesCondutor?: string;
+  anotacoesCondutorUpdatedAt?: string;
   createdAt: string;
 }
 

@@ -11722,6 +11722,16 @@ async function ensureCachorrosDossierSchema(pool: any) {
       );
     }
 
+    const [anotUpdCol]: any = await pool.query(
+      `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CACHORROS_CANIL' AND COLUMN_NAME = 'ANOTACOES_CONDUTOR_ATUALIZADO_EM'`
+    );
+    if (!anotUpdCol?.[0]?.cnt) {
+      await pool.query(
+        'ALTER TABLE `CACHORROS_CANIL` ADD COLUMN `ANOTACOES_CONDUTOR_ATUALIZADO_EM` DATETIME DEFAULT NULL AFTER `ANOTACOES_CONDUTOR_CACHORRO`'
+      );
+    }
+
     const [fotoCol]: any = await pool.query(
       `SELECT DATA_TYPE as dataType FROM information_schema.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'CACHORROS_CANIL' AND COLUMN_NAME = 'FOTO_URL_CACHORRO' LIMIT 1`
@@ -11901,6 +11911,7 @@ apiRouter.get('/cachorros', async (req: Request, res: Response) => {
           c.ESPECIALIDADE_CACHORRO as especialidade,
           c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
           k.NOME_CANIL as canilFisicoNome,
+          k.IDENTIFICACAO_CANIL as canilFisicoIdentificacao,
           c.STATUS_CACHORRO as status,
           c.TIPO_VINCULO_CACHORRO as tipoVinculo,
           c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
@@ -11920,6 +11931,7 @@ apiRouter.get('/cachorros', async (req: Request, res: Response) => {
           c.FOTO_URL_CACHORRO as fotoUrl,
           c.OBSERVACOES_CACHORRO as observacoes,
           c.ANOTACOES_CONDUTOR_CACHORRO as anotacoesCondutor,
+          DATE_FORMAT(c.ANOTACOES_CONDUTOR_ATUALIZADO_EM, '%Y-%m-%d %H:%i:%s') as anotacoesCondutorUpdatedAt,
           c.DATA_CRIACAO_CACHORRO as createdAt
         FROM CACHORROS_CANIL c
         LEFT JOIN CANIS_FISICOS k ON k.ID_CANIL = c.CANIL_FISICO_ID_CACHORRO
@@ -11939,6 +11951,7 @@ apiRouter.get('/cachorros', async (req: Request, res: Response) => {
           c.ESPECIALIDADE_CACHORRO as especialidade,
           c.CANIL_FISICO_ID_CACHORRO as canilFisicoId,
           k.NOME_CANIL as canilFisicoNome,
+          k.IDENTIFICACAO_CANIL as canilFisicoIdentificacao,
           c.STATUS_CACHORRO as status,
           c.TIPO_VINCULO_CACHORRO as tipoVinculo,
           c.USUARIO_INTERNO_ID_CACHORRO as usuarioInternoId,
@@ -12508,9 +12521,23 @@ apiRouter.put('/cachorros/:id/anotacoes-condutor', async (req: Request, res: Res
       return res.status(400).json({ error: 'As anotações do condutor não podem ultrapassar 500 caracteres.' });
     }
 
+    const nowParts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(new Date());
+    const pGet = (t: string) => nowParts.find(p => p.type === t)?.value || '00';
+    const hh = String(Number(pGet('hour')) % 24).padStart(2, '0');
+    const updatedAtBr = `${pGet('year')}-${pGet('month')}-${pGet('day')} ${hh}:${pGet('minute')}:${pGet('second')}`;
+
     await pool.query(
-      'UPDATE CACHORROS_CANIL SET ANOTACOES_CONDUTOR_CACHORRO = ? WHERE ID_CACHORRO = ?',
-      [text.trim() ? text : null, id]
+      'UPDATE CACHORROS_CANIL SET ANOTACOES_CONDUTOR_CACHORRO = ?, ANOTACOES_CONDUTOR_ATUALIZADO_EM = ? WHERE ID_CACHORRO = ?',
+      [text.trim() ? text : null, updatedAtBr, id]
     );
 
     await insertAuditLog(
@@ -12521,7 +12548,11 @@ apiRouter.put('/cachorros/:id/anotacoes-condutor', async (req: Request, res: Res
       req.ip
     );
 
-    return res.json({ success: true, anotacoesCondutor: text.trim() ? text : '' });
+    return res.json({
+      success: true,
+      anotacoesCondutor: text.trim() ? text : '',
+      anotacoesCondutorUpdatedAt: updatedAtBr
+    });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
   }

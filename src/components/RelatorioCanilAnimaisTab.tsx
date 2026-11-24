@@ -35,7 +35,9 @@ import {
   Hash,
   Sparkles,
   CheckSquare,
-  Square
+  Square,
+  Home,
+  Clock
 } from 'lucide-react';
 
 interface RelatorioCanilAnimaisTabProps {
@@ -89,13 +91,61 @@ function formatDateBr(iso?: string | null): string {
 
 function formatDateTimeBr(dt?: string | null): string {
   if (!dt) return '—';
-  const str = String(dt);
+  const str = String(dt).trim();
   if (str.length >= 16 && str.includes('-')) {
     const datePart = formatDateBr(str.slice(0, 10));
     const timePart = str.slice(11, 16);
     return `${datePart} ${timePart}`;
   }
   return formatDateBr(str);
+}
+
+function formatBaiaBoxLabel(dog: Cachorro): string {
+  const nome = String(dog.canilFisicoNome || '').trim();
+  const ident = String(dog.canilFisicoIdentificacao || '').trim();
+  if (!nome && !ident) return 'Não alocada';
+  if (nome && ident && !nome.toLowerCase().includes(ident.toLowerCase())) {
+    return `${nome} (${ident})`;
+  }
+  return nome || ident;
+}
+
+function formatSugestaoTopicos(sugestaoTopicos: string[], separator = ' • '): string {
+  if (sugestaoTopicos.length === 0) return '';
+  if (sugestaoTopicos.length <= 4) {
+    return sugestaoTopicos.join(separator);
+  }
+  return `${sugestaoTopicos.slice(0, 4).join(separator)} e outros`;
+}
+
+function resolveCocUnitAndLogo(
+  units: Unit[],
+  departments: Department[],
+  dog: Cachorro,
+  currentUser: User
+): { unitObj: Unit | null; deptObj: Department | null; logoUrl: string } {
+  const cocMatches = units.filter(
+    u =>
+      /\bcoc\b/i.test(u.name || '') ||
+      /opera[çc][õo]es\s+com\s+c[ãa]es/i.test(u.name || '')
+  );
+  const canilMatches = units.filter(u => /canil|\bk9\b/i.test(u.name || ''));
+
+  const cocUnit =
+    cocMatches.find(u => Boolean(u.logoUrl && u.logoUrl.trim())) ||
+    cocMatches[0] ||
+    canilMatches.find(u => Boolean(u.logoUrl && u.logoUrl.trim())) ||
+    canilMatches[0] ||
+    units.find(u => u.id === dog.unitId) ||
+    units.find(u => u.id === currentUser.unitId) ||
+    null;
+
+  const deptObj =
+    departments.find(d => d.id === (cocUnit?.departmentId || dog.departmentId || currentUser.departmentId)) || null;
+
+  const rawLogo = getSystemLogo(cocUnit, deptObj);
+  const safeLogo = getSafeImageUrl(rawLogo) || '';
+  return { unitObj: cocUnit, deptObj, logoUrl: safeLogo };
 }
 
 function getTodayIsoBr(): string {
@@ -530,10 +580,9 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
 
   const buildSingleAnimalPrintPageHtml = (dog: Cachorro, dogDetalhes?: DetalhesCompletosCachorro | null) => {
     const stats = computeDogTrainingStats(dog, relatoriosTreinamento, activeTopicos);
-    const logoUrl = getSystemLogo();
+    const { unitObj, deptObj, logoUrl } = resolveCocUnitAndLogo(units, departments, dog, currentUser);
     const safeFoto = getSafeImageUrl(dog.fotoUrl);
-    const unitObj = units.find(u => u.id === dog.unitId);
-    const deptObj = departments.find(d => d.id === dog.departmentId);
+    const baiaBoxText = formatBaiaBoxLabel(dog);
     const condutoresText =
       dog.tipoVinculo === 'SISTEMA'
         ? [
@@ -550,104 +599,139 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
 
     const aptidaoText =
       stats.aptidaoTopicos.length > 0
-        ? `${stats.aptidaoTopicos.join(', ')} (${stats.maxCount} ${stats.maxCount === 1 ? 'treino' : 'treinos'})`
+        ? `${stats.aptidaoTopicos.join(' • ')} (${stats.maxCount} ${stats.maxCount === 1 ? 'treino' : 'treinos'})`
         : 'Nenhum tópico treinado registrado';
 
     const sugestaoText =
       stats.sugestaoTopicos.length > 0
-        ? `${stats.sugestaoTopicos.join(', ')} (${stats.minCount} ${stats.minCount === 1 ? 'treino' : 'treinos'})`
+        ? `${formatSugestaoTopicos(stats.sugestaoTopicos, ' • ')} (${stats.minCount} ${stats.minCount === 1 ? 'treino' : 'treinos'})`
         : 'Sem tópicos cadastrados';
 
-    const vacinasList = dogDetalhes?.vacinas || [];
     const todayIso = getTodayIsoBr();
+    const vacinasList = [...(dogDetalhes?.vacinas || [])].sort((a, b) =>
+      String(b.dataAplicacao || '').localeCompare(String(a.dataAplicacao || ''))
+    );
     const overdueVac = vacinasList.filter(v => v.proximaDose && v.proximaDose < todayIso).length;
     const vacBadgeHtml =
       vacinasList.length === 0
-        ? '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">Sem vacinas registradas</span>'
+        ? '<span style="background:#f1f5f9;color:#475569;padding:2px 8px;border-radius:6px;font-size:9.5px;font-weight:bold;border:1px solid #cbd5e1;">Sem vacinas registradas</span>'
         : overdueVac === 0
-        ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">● VACINAS EM DIA</span>'
-        : `<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:bold;">▲ ${overdueVac} REFORÇO(S) PENDENTE(S)</span>`;
+        ? '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:6px;font-size:9.5px;font-weight:bold;border:1px solid #86efac;">● VACINAS EM DIA</span>'
+        : `<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:6px;font-size:9.5px;font-weight:bold;border:1px solid #fca5a5;">▲ ${overdueVac} REFORÇO(S) PENDENTE(S)</span>`;
 
-    const topicsTableRows = stats.bars
-      .map(
-        b => `
-        <tr>
-          <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">${escapeHtmlText(b.topico)}</td>
-          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">${b.count}</td>
-          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">${b.pctOfTrainings}%</td>
-          <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;font-weight:bold;color:${
-            stats.maxCount > 0 && b.count === stats.maxCount
-              ? '#047857'
-              : b.count === stats.minCount
-              ? '#b45309'
-              : '#334155'
-          };">${
-            stats.maxCount > 0 && b.count === stats.maxCount
-              ? 'Aptidão em'
-              : b.count === stats.minCount
-              ? 'Sugestão de Treino'
-              : 'Regular'
-          }</td>
-        </tr>`
-      )
-      .join('');
+    const ultimaVacina = vacinasList[0] || null;
+    const vacinasComProxima = vacinasList.filter(v => Boolean(v.proximaDose));
+    const proximasFuturas = vacinasComProxima
+      .filter(v => String(v.proximaDose) >= todayIso)
+      .sort((a, b) => String(a.proximaDose || '').localeCompare(String(b.proximaDose || '')));
+    const proximasVencidas = vacinasComProxima
+      .filter(v => String(v.proximaDose) < todayIso)
+      .sort((a, b) => String(b.proximaDose || '').localeCompare(String(a.proximaDose || '')));
+    const proximaVacina = proximasFuturas[0] || proximasVencidas[0] || null;
+    const proximaVacinaVencida = Boolean(proximaVacina?.proximaDose && proximaVacina.proximaDose < todayIso);
+
+    const ultimoMedico =
+      [...(dogDetalhes?.historicoMedico || [])].sort((a, b) =>
+        String(b.dataAtendimento || '').localeCompare(String(a.dataAtendimento || ''))
+      )[0] || null;
+
+    const dogMedsList =
+      dogDetalhes?.medicamentos && dogDetalhes.medicamentos.length > 0
+        ? [...dogDetalhes.medicamentos].sort((a, b) =>
+            String(b.dataHora || '').localeCompare(String(a.dataHora || ''))
+          )
+        : movimentacoesVeterinarias
+            .filter(m => m.cachorroId === dog.id && m.tipoMovimentacao === 'ADMINISTRACAO_CAO')
+            .sort((a, b) => String(b.dataHora || '').localeCompare(String(a.dataHora || '')));
+    const ultimoMedicamento = dogMedsList[0] || null;
+
+    const anotacoesTexto = String(dog.anotacoesCondutor || '').trim();
+    const anotacoesUpdatedText = dog.anotacoesCondutorUpdatedAt
+      ? formatDateTimeBr(dog.anotacoesCondutorUpdatedAt)
+      : anotacoesTexto
+      ? 'Data/hora não registrada'
+      : 'Sem alterações';
 
     return `
       <section class="animal-print-page">
-        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:10px;">
           <div style="display:flex;align-items:center;gap:10px;">
-            ${logoUrl ? `<img src="${escapeHtmlText(logoUrl)}" style="height:42px;object-fit:contain;" />` : ''}
+            ${logoUrl ? `<img src="${escapeHtmlText(logoUrl)}" alt="Brasão COC" style="height:46px;max-width:58px;object-fit:contain;" />` : ''}
             <div>
-              <div style="font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;">Polícia Civil de Minas Gerais — COC / Canil K9</div>
+              <div style="font-size:13px;font-weight:900;color:#0f172a;text-transform:uppercase;">Polícia Civil de Minas Gerais — ${escapeHtmlText(unitObj?.name || 'COC / Canil K9')}</div>
               <div style="font-size:11px;font-weight:700;color:#334155;">Ficha de Desempenho e Tópicos de Treinamento K9</div>
             </div>
           </div>
           <div style="text-align:right;font-size:10px;color:#475569;">
-            <div><strong>Emissão:</strong> ${escapeHtmlText(formatDateBr(getTodayIsoBr()))}</div>
-            <div>${escapeHtmlText(deptObj?.name || 'COE')} ${unitObj?.name ? `— ${escapeHtmlText(unitObj.name)}` : ''}</div>
+            <div><strong>Emissão:</strong> ${escapeHtmlText(formatDateBr(todayIso))}</div>
+            <div>${escapeHtmlText(deptObj?.name || 'COE')}${unitObj?.name ? ` — ${escapeHtmlText(unitObj.name)}` : ''}</div>
           </div>
         </div>
 
-        <div style="display:flex;gap:14px;border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-bottom:12px;background:#f8fafc;">
-          <div style="width:84px;height:112px;border:1px solid #94a3b8;border-radius:6px;overflow:hidden;flex-shrink:0;background:#e2e8f0;display:flex;align-items:center;justify-content:center;">
+        <div style="display:flex;gap:14px;border:1px solid #cbd5e1;border-radius:10px;padding:10px;margin-bottom:10px;background:#f8fafc;">
+          <div style="width:82px;height:109px;border:1.5px solid #d97706;border-radius:8px;overflow:hidden;flex-shrink:0;background:#e2e8f0;display:flex;align-items:center;justify-content:center;">
             ${
               safeFoto
                 ? `<img src="${escapeHtmlText(safeFoto)}" style="width:100%;height:100%;object-fit:cover;" />`
                 : `<span style="font-size:10px;color:#64748b;font-weight:bold;text-align:center;">FOTO 3x4<br/>K9</span>`
             }
           </div>
-          <div style="flex:1;font-size:11px;line-height:1.45;color:#0f172a;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-              <div style="font-size:16px;font-weight:900;text-transform:uppercase;">${escapeHtmlText(dog.nome)}</div>
+          <div style="flex:1;font-size:10.5px;line-height:1.45;color:#0f172a;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;gap:8px;">
+              <div>
+                <div style="font-size:15px;font-weight:900;text-transform:uppercase;line-height:1.15;">${escapeHtmlText(dog.nome)}</div>
+                <div style="font-size:10px;font-weight:700;color:#b45309;">${escapeHtmlText(dog.raca || 'Raça não informada')}${dog.especialidade ? ` • ${escapeHtmlText(dog.especialidade)}` : ''}</div>
+              </div>
               <div>${vacBadgeHtml}</div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;">
-              <div><strong>Raça:</strong> ${escapeHtmlText(dog.raca || '—')}</div>
-              <div><strong>Cor / Pelagem:</strong> ${escapeHtmlText(dog.pelagem || '—')}</div>
-              <div><strong>Nascimento:</strong> ${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
-              <div><strong>Microchip:</strong> ${escapeHtmlText(dog.microchip || '—')}</div>
-              <div><strong>Status:</strong> ${escapeHtmlText(dog.status || '—')}</div>
-              <div><strong>Total de Treinamentos:</strong> ${stats.totalTreinos}</div>
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:5px 10px;margin-bottom:5px;">
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Cor / Pelagem</div>
+                <div style="font-weight:700;color:#0f172a;">${escapeHtmlText(dog.pelagem || 'Não informada')}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Nascimento / Idade</div>
+                <div style="font-weight:700;color:#0f172a;">${escapeHtmlText(formatDateBr(dog.dataNascimento))} (${escapeHtmlText(calculateAgeText(dog.dataNascimento))})</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Baia / Box</div>
+                <div style="font-weight:800;color:#0f172a;">${escapeHtmlText(baiaBoxText)}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Microchip</div>
+                <div style="font-weight:700;color:#0f172a;font-family:monospace;">${escapeHtmlText(dog.microchip || 'Não informado')}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Status</div>
+                <div style="font-weight:700;color:#0f172a;">${escapeHtmlText(dog.status || '—')}</div>
+              </div>
+              <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 7px;">
+                <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Total de Treinamentos</div>
+                <div style="font-weight:800;color:#b45309;">${stats.totalTreinos}</div>
+              </div>
             </div>
-            <div style="margin-top:4px;"><strong>Condutor(es):</strong> ${escapeHtmlText(condutoresText)}</div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;">
+              <strong style="font-size:9px;text-transform:uppercase;color:#64748b;">Condutor(es):</strong>
+              <span style="font-weight:700;color:#0f172a;"> ${escapeHtmlText(condutoresText)}</span>
+            </div>
           </div>
         </div>
 
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
-          <div style="border:1px solid #10b981;background:#ecfdf5;border-radius:8px;padding:8px 10px;">
-            <div style="font-size:10px;font-weight:800;color:#047857;text-transform:uppercase;">Aptidão em (Mais Treinado)</div>
-            <div style="font-size:11.5px;font-weight:700;color:#064e3b;margin-top:2px;">${escapeHtmlText(aptidaoText)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;">
+          <div style="border:1px solid #10b981;background:#ecfdf5;border-radius:10px;padding:8px 10px;">
+            <div style="font-size:9.5px;font-weight:900;color:#047857;text-transform:uppercase;letter-spacing:0.3px;">Aptidão em (Mais Treinado)</div>
+            <div style="font-size:11px;font-weight:800;color:#064e3b;margin-top:2px;">${escapeHtmlText(aptidaoText)}</div>
           </div>
-          <div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:8px;padding:8px 10px;">
-            <div style="font-size:10px;font-weight:800;color:#b45309;text-transform:uppercase;">Sugestão de Treinamento (Menor Índice)</div>
-            <div style="font-size:11.5px;font-weight:700;color:#78350f;margin-top:2px;">${escapeHtmlText(sugestaoText)}</div>
+          <div style="border:1px solid #f59e0b;background:#fffbeb;border-radius:10px;padding:8px 10px;">
+            <div style="font-size:9.5px;font-weight:900;color:#b45309;text-transform:uppercase;letter-spacing:0.3px;">Sugestão de Treinamento (Menor Índice)</div>
+            <div style="font-size:11px;font-weight:800;color:#78350f;margin-top:2px;">${escapeHtmlText(sugestaoText)}</div>
           </div>
         </div>
 
-        <div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px;margin-bottom:10px;">
-          <div style="font-size:11px;font-weight:800;color:#0f172a;text-transform:uppercase;margin-bottom:6px;display:flex;justify-content:space-between;">
+        <div style="border:1px solid #cbd5e1;border-radius:10px;padding:9px 10px;margin-bottom:10px;background:#ffffff;">
+          <div style="font-size:10.5px;font-weight:900;color:#0f172a;text-transform:uppercase;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center;">
             <span>Gráfico de Tópicos de Treinamento (Total de Treinos do Animal: ${stats.totalTreinos})</span>
-            <span style="font-size:9.5px;font-weight:600;color:#475569;">
+            <span style="font-size:9px;font-weight:700;color:#475569;">
               <span style="color:#059669;">■ Aptidão</span> &nbsp;
               <span style="color:#2563eb;">■ Regular</span> &nbsp;
               <span style="color:#d97706;">■ Sugestão</span>
@@ -656,28 +740,130 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
           ${buildPrintableChartSvg(stats)}
         </div>
 
-        <table style="width:100%;border-collapse:collapse;font-size:9.5px;margin-bottom:10px;">
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:left;">Tópico de Treinamento</th>
-              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">Qtd. Treinos</th>
-              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">% dos Treinos</th>
-              <th style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;">Classificação</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${topicsTableRows}
-          </tbody>
-        </table>
+        <!-- Campo de Anotações do Condutor com data e hora da última alteração -->
+        <div style="border:1px solid #cbd5e1;border-radius:10px;padding:9px 11px;margin-bottom:10px;background:#f8fafc;">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;">
+            <div style="font-size:10px;font-weight:900;color:#b45309;text-transform:uppercase;letter-spacing:0.3px;">
+              Anotações do Condutor do Animal
+            </div>
+            <div style="font-size:9px;font-weight:700;color:#475569;background:#ffffff;border:1px solid #cbd5e1;border-radius:6px;padding:2px 7px;">
+              Última alteração: <strong style="color:#0f172a;">${escapeHtmlText(anotacoesUpdatedText)}</strong>
+            </div>
+          </div>
+          <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 9px;font-size:10px;line-height:1.45;color:#1e293b;min-height:38px;white-space:pre-wrap;">${
+            anotacoesTexto
+              ? escapeHtmlText(anotacoesTexto)
+              : '<span style="color:#64748b;font-style:italic;">Nenhuma anotação registrada pelo condutor.</span>'
+          }</div>
+        </div>
 
-        ${
-          dog.anotacoesCondutor
-            ? `<div style="border:1px solid #cbd5e1;border-radius:8px;padding:8px 10px;font-size:10.5px;background:#f8fafc;">
-                 <div style="font-weight:800;color:#0f172a;text-transform:uppercase;font-size:9.5px;margin-bottom:3px;">Anotações do Condutor</div>
-                 <div style="white-space:pre-wrap;color:#1e293b;">${escapeHtmlText(dog.anotacoesCondutor)}</div>
-               </div>`
-            : ''
-        }
+        <!-- Prontuário Clínico Resumido (divs similares às do sistema) -->
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+          <!-- Div 1: Vacinas (Última tomada e Próxima vacina) -->
+          <div style="border:1px solid #a7f3d0;border-radius:10px;padding:9px 10px;background:#f8fafc;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+              <div style="font-size:9.5px;font-weight:900;color:#047857;text-transform:uppercase;">Vacinas</div>
+              <span style="font-size:8.5px;font-weight:800;padding:1px 6px;border-radius:4px;${
+                vacinasList.length === 0
+                  ? 'background:#e2e8f0;color:#475569;'
+                  : overdueVac === 0
+                  ? 'background:#dcfce7;color:#166534;'
+                  : 'background:#fee2e2;color:#991b1b;'
+              }">${vacinasList.length === 0 ? 'Sem registro' : overdueVac === 0 ? 'Em dia' : 'Pendente'}</span>
+            </div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;font-size:9.5px;line-height:1.4;">
+              <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Última Vacina Tomada</div>
+              ${
+                ultimaVacina
+                  ? `<div style="font-weight:800;color:#0f172a;margin-top:2px;">${escapeHtmlText(ultimaVacina.nomeVacina)}</div>
+                     <div style="color:#334155;">Data: <strong>${escapeHtmlText(formatDateBr(ultimaVacina.dataAplicacao))}</strong></div>
+                     ${
+                       ultimaVacina.lote || ultimaVacina.veterinario
+                         ? `<div style="font-size:8.5px;color:#64748b;margin-top:1px;">${escapeHtmlText(
+                             [ultimaVacina.lote ? `Lote: ${ultimaVacina.lote}` : '', ultimaVacina.veterinario ? `Vet.: ${ultimaVacina.veterinario}` : '']
+                               .filter(Boolean)
+                               .join(' • ')
+                           )}</div>`
+                         : ''
+                     }`
+                  : '<div style="color:#64748b;font-style:italic;margin-top:2px;">Nenhuma vacina registrada.</div>'
+              }
+            </div>
+            <div style="background:#ffffff;border:1px solid ${proximaVacinaVencida ? '#fca5a5' : '#e2e8f0'};border-radius:8px;padding:6px 8px;font-size:9.5px;line-height:1.4;">
+              <div style="font-size:8.5px;font-weight:800;color:#64748b;text-transform:uppercase;">Próxima Vacina</div>
+              ${
+                proximaVacina
+                  ? `<div style="font-weight:800;color:${proximaVacinaVencida ? '#b91c1c' : '#047857'};margin-top:2px;">${escapeHtmlText(formatDateBr(proximaVacina.proximaDose))}</div>
+                     <div style="font-size:9px;color:#334155;">${escapeHtmlText(proximaVacina.nomeVacina)}${proximaVacinaVencida ? ' (Vencida)' : ''}</div>`
+                  : '<div style="color:#64748b;font-style:italic;margin-top:2px;">Não agendada.</div>'
+              }
+            </div>
+          </div>
+
+          <!-- Div 2: Último Atendimento Médico -->
+          <div style="border:1px solid #a5f3fc;border-radius:10px;padding:9px 10px;background:#f8fafc;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+              <div style="font-size:9.5px;font-weight:900;color:#0e7490;text-transform:uppercase;">Último Atendimento Médico</div>
+            </div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 8px;font-size:9.5px;line-height:1.45;flex:1;">
+              ${
+                ultimoMedico
+                  ? `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin-bottom:3px;">
+                       <span style="font-weight:800;color:#0f172a;">${escapeHtmlText(ultimoMedico.tipoAtendimento)}</span>
+                       <span style="font-size:8.5px;font-weight:800;color:#0e7490;font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(ultimoMedico.dataAtendimento))}</span>
+                     </div>
+                     ${
+                       ultimoMedico.diagnostico
+                         ? `<div style="color:#334155;"><span style="color:#64748b;font-weight:700;">Diag.:</span> ${escapeHtmlText(ultimoMedico.diagnostico)}</div>`
+                         : ''
+                     }
+                     ${
+                       ultimoMedico.conduta
+                         ? `<div style="color:#334155;"><span style="color:#64748b;font-weight:700;">Conduta:</span> ${escapeHtmlText(ultimoMedico.conduta)}</div>`
+                         : ''
+                     }
+                     ${
+                       ultimoMedico.veterinario
+                         ? `<div style="font-size:8.5px;color:#64748b;margin-top:3px;">Vet.: ${escapeHtmlText(ultimoMedico.veterinario)}</div>`
+                         : ''
+                     }`
+                  : '<div style="color:#64748b;font-style:italic;">Nenhum atendimento médico registrado.</div>'
+              }
+            </div>
+          </div>
+
+          <!-- Div 3: Último Registro de Medicamentos -->
+          <div style="border:1px solid #fde68a;border-radius:10px;padding:9px 10px;background:#f8fafc;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:4px;">
+              <div style="font-size:9.5px;font-weight:900;color:#b45309;text-transform:uppercase;">Último Registro de Medicamentos</div>
+            </div>
+            <div style="background:#ffffff;border:1px solid #e2e8f0;border-radius:8px;padding:7px 8px;font-size:9.5px;line-height:1.45;flex:1;">
+              ${
+                ultimoMedicamento
+                  ? `<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:4px;margin-bottom:3px;">
+                       <span style="font-weight:800;color:#0f172a;">${escapeHtmlText(ultimoMedicamento.produtoNome)}</span>
+                       <span style="font-size:8.5px;font-weight:800;color:#b45309;font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateTimeBr(ultimoMedicamento.dataHora))}</span>
+                     </div>
+                     <div style="color:#334155;">
+                       Qtd.: <strong>${escapeHtmlText(String(ultimoMedicamento.quantidade))} ${escapeHtmlText(ultimoMedicamento.unidadeMedida || '')}</strong>${
+                         ultimoMedicamento.dosagemAplicada ? ` • Dose: ${escapeHtmlText(ultimoMedicamento.dosagemAplicada)}` : ''
+                       }${ultimoMedicamento.frequenciaAdministrada ? ` • ${escapeHtmlText(ultimoMedicamento.frequenciaAdministrada)}` : ''}
+                     </div>
+                     ${
+                       ultimoMedicamento.motivo
+                         ? `<div style="color:#475569;margin-top:2px;"><span style="color:#64748b;font-weight:700;">Motivo:</span> ${escapeHtmlText(ultimoMedicamento.motivo)}</div>`
+                         : ''
+                     }
+                     ${
+                       ultimoMedicamento.responsavelAplicacaoNome
+                         ? `<div style="font-size:8.5px;color:#64748b;margin-top:3px;">Aplicado por: ${escapeHtmlText(ultimoMedicamento.responsavelAplicacaoNome)}</div>`
+                         : ''
+                     }`
+                  : '<div style="color:#64748b;font-style:italic;">Nenhum medicamento ministrado registrado.</div>'
+              }
+            </div>
+          </div>
+        </div>
       </section>
     `;
   };
@@ -704,7 +890,8 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
         <meta charset="UTF-8" />
         <title>${escapeHtmlText(title)}</title>
         <style>
-          @page { size: A4 portrait; margin: 12mm; }
+          @page { size: A4 portrait; margin: 10mm; }
+          * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; background: #fff; }
           .animal-print-page { page-break-after: always; break-after: page; }
           .animal-print-page:last-child { page-break-after: auto; break-after: auto; }
@@ -717,9 +904,16 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
     printDocumentInPage(html, title);
   };
 
-  const handlePrintSelectedAnimal = () => {
+  const handlePrintSelectedAnimal = async () => {
     if (!selectedDog) return;
-    printDogsPages([selectedDog], { [selectedDog.id]: detalhes });
+    let currentDetalhes = detalhes;
+    if (!currentDetalhes) {
+      const r = await storage.getDetalhesCompletosCachorro(selectedDog.id);
+      if (r.success && r.data) {
+        currentDetalhes = r.data;
+      }
+    }
+    printDogsPages([selectedDog], { [selectedDog.id]: currentDetalhes });
   };
 
   const handleOpenMultiPrint = () => {
@@ -932,7 +1126,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
                       )}
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2.5 text-xs">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5 text-xs">
                       <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
                         <div className="text-[10px] font-bold text-slate-500 uppercase">Cor / Pelagem</div>
                         <div className="font-bold text-slate-200 mt-0.5">{selectedDog.pelagem || 'Não informada'}</div>
@@ -955,6 +1149,15 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
                         </div>
                         <div className="font-mono font-bold text-slate-200 mt-0.5 truncate">
                           {selectedDog.microchip || 'Não informado'}
+                        </div>
+                      </div>
+                      <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5">
+                        <div className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1">
+                          <Home className="w-3 h-3 text-emerald-400" />
+                          <span>Baia / Box</span>
+                        </div>
+                        <div className="font-bold text-emerald-300 mt-0.5 truncate" title={formatBaiaBoxLabel(selectedDog)}>
+                          {formatBaiaBoxLabel(selectedDog)}
                         </div>
                       </div>
                     </div>
@@ -1002,11 +1205,6 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
                           </button>
                         </div>
                       </div>
-                      {selectedDog.canilFisicoNome && (
-                        <div className="text-[11px] text-slate-400">
-                          Baia / Canil: <strong className="text-slate-200">{selectedDog.canilFisicoNome}</strong>
-                        </div>
-                      )}
                     </div>
                   </div>
                 </div>
@@ -1085,11 +1283,7 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
                       {selectedDogStats.sugestaoTopicos.length > 0 ? (
                         <>
                           <div className="text-sm font-black text-amber-100 mt-0.5 break-words">
-                            {selectedDogStats.sugestaoTopicos.length <= 5
-                              ? selectedDogStats.sugestaoTopicos.join(' • ')
-                              : `${selectedDogStats.sugestaoTopicos.slice(0, 5).join(' • ')} (+${
-                                  selectedDogStats.sugestaoTopicos.length - 5
-                                } tópico(s))`}
+                            {formatSugestaoTopicos(selectedDogStats.sugestaoTopicos, ' • ')}
                           </div>
                           <div className="text-[11px] text-amber-300/80 mt-0.5">
                             {selectedDogStats.minCount}{' '}
@@ -1276,7 +1470,13 @@ export const RelatorioCanilAnimaisTab: React.FC<RelatorioCanilAnimaisTabProps> =
                       Anotações do Condutor do Animal
                     </h4>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedDog.anotacoesCondutorUpdatedAt && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-md bg-slate-800 text-amber-300 border border-slate-700 font-semibold">
+                        <Clock className="w-3 h-3" />
+                        <span>Última alteração: {formatDateTimeBr(selectedDog.anotacoesCondutorUpdatedAt)}</span>
+                      </span>
+                    )}
                     <span
                       className={`text-[11px] font-mono font-bold ${
                         anotacoesDraft.length >= 470 ? 'text-amber-400' : 'text-slate-400'
