@@ -47,6 +47,7 @@ export interface UnifiedTrainingReport {
   participantes: string[];
   animaisK9: string[];
   topicosK9: string[];
+  disparoRealResumo?: string;
   descricao: string;
   dataCriacao: string;
 }
@@ -561,6 +562,22 @@ export async function findSingleOperationReport(
 // ============================================================================
 // 2. TREINAMENTOS (COC CANIL / UNIDADES POLICIAIS)
 // ============================================================================
+function extractDisparoRealResumo(disparoRealRaw: any, disparosJsonRaw: any): string {
+  if (!Number(disparoRealRaw)) return '';
+  const arr = safeJsonArray(disparosJsonRaw);
+  const parts: string[] = [];
+  let total = 0;
+  for (const item of arr) {
+    const tipo = String(item?.tipoArma || '').trim();
+    const qty = Math.trunc(Number(item?.quantidadeTiros));
+    if (!tipo || !Number.isFinite(qty) || qty <= 0) continue;
+    total += qty;
+    parts.push(`${tipo}: ${qty} ${qty === 1 ? 'tiro' : 'tiros'}`);
+  }
+  if (parts.length === 0) return 'Sim';
+  return parts.length > 1 ? `Sim — ${parts.join(' | ')} (Total: ${total} tiros)` : `Sim — ${parts[0]}`;
+}
+
 function mapCanilTrainingRow(r: any): UnifiedTrainingReport {
   const k9Arr = safeJsonArray(r.CACHORROS_JSON);
   const animais =
@@ -585,6 +602,7 @@ function mapCanilTrainingRow(r: any): UnifiedTrainingReport {
     participantes: extractNames(safeJsonArray(r.PARTICIPANTES_JSON)),
     animaisK9: animais,
     topicosK9: extractTopicosK9(r.TOPICOS_TREINAMENTO_JSON),
+    disparoRealResumo: extractDisparoRealResumo(r.DISPARO_REAL, r.DISPAROS_REAIS_JSON),
     descricao: String(r.DESCRICAO || 'Sem descrição registrada.'),
     dataCriacao: r.DATA_CRIACAO ? String(r.DATA_CRIACAO) : ''
   };
@@ -608,6 +626,7 @@ function mapPolicialTrainingRow(r: any): UnifiedTrainingReport {
     participantes: extractNames(safeJsonArray(r.PARTICIPANTES_JSON)),
     animaisK9: [],
     topicosK9: [],
+    disparoRealResumo: extractDisparoRealResumo(r.DISPARO_REAL, r.DISPAROS_REAIS_JSON),
     descricao: String(r.DESCRICAO || 'Sem descrição registrada.'),
     dataCriacao: r.DATA_CRIACAO ? String(r.DATA_CRIACAO) : ''
   };
@@ -1246,6 +1265,7 @@ class PdfReportBuilder {
     this.drawKeyValue('Local / Participação', `${report.modalidadeLocal} • ${report.modalidadeParticipacao}`);
     if (report.animaisK9.length > 0) this.drawKeyValue('Animais K9', report.animaisK9.join('; '));
     if (report.topicosK9.length > 0) this.drawKeyValue('Tópicos de Treinamento K9', report.topicosK9.join(', '));
+    if (report.disparoRealResumo) this.drawKeyValue('Disparo Real', report.disparoRealResumo);
     if (report.participantes.length > 0) this.drawKeyValue('Participantes', report.participantes.join('; '));
     if (report.dataCriacao) this.drawKeyValue('Registro no Sistema', formatIsoDateTimeBr(report.dataCriacao));
     this.cursorY -= 4;

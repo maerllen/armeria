@@ -18,8 +18,16 @@ import {
   MaterialEncontradoOperacaoCanil,
   OperadorOperacaoCanil,
   ViaturaOperacaoCanil,
+  DisparoRealArmaItem,
   getSystemLogo
 } from '../types';
+import {
+  DisparoRealTreinamentoSection,
+  DisparoRealSummaryBlock,
+  validateDisparoReal,
+  buildDisparoRealPrintBoxHtml,
+  buildDisparoRealInlineHtml
+} from './DisparoRealTreinamentoSection';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
@@ -316,6 +324,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     descricao: string;
     participantes: ParticipanteTreinamentoCanil[];
     topicosTreinamento: TopicoTreinamentoCanilItem[];
+    disparoReal: boolean;
+    disparosReais: DisparoRealArmaItem[];
   }>({
     dataTreinamento: getTodayIsoBr(),
     cachorros: [],
@@ -323,7 +333,9 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     modalidadeParticipacao: 'Sozinho',
     descricao: '',
     participantes: [],
-    topicosTreinamento: []
+    topicosTreinamento: [],
+    disparoReal: false,
+    disparosReais: []
   });
   const [selectedTopicoToAdd, setSelectedTopicoToAdd] = useState<TopicoTreinamentoCanilTipo | ''>('');
   const [hasUserChangedMainDog, setHasUserChangedMainDog] = useState(false);
@@ -725,7 +737,12 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         topico: t.topico,
         aplicarTodosK9: Boolean(t.aplicarTodosK9),
         cachorros: (t.cachorros || []).map(c => ({ ...c }))
-      }))
+      })),
+      disparoReal: Boolean(rel.disparoReal),
+      disparosReais:
+        Boolean(rel.disparoReal) && Array.isArray(rel.disparosReais)
+          ? rel.disparosReais.map(item => ({ ...item }))
+          : []
     });
     setSelectedTopicoToAdd('');
     setParticipantSearch('');
@@ -747,7 +764,9 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
       participantes: [],
-      topicosTreinamento: []
+      topicosTreinamento: [],
+      disparoReal: false,
+      disparosReais: []
     });
     setSelectedTopicoToAdd('');
     setParticipantSearch('');
@@ -801,6 +820,12 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         : (item.cachorros || []).filter(c => validFormDogIds.has(c.id))
     }));
 
+    const disparoValidation = validateDisparoReal(treinoForm.disparoReal, treinoForm.disparosReais);
+    if (disparoValidation.error) {
+      notifyError(disparoValidation.error);
+      return;
+    }
+
     const primaryDogEntry = treinoForm.cachorros[0];
     const primaryDogRecord = cachorros.find(c => c.id === primaryDogEntry.id);
 
@@ -817,7 +842,9 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         modalidadeParticipacao: treinoForm.modalidadeParticipacao,
         descricao: cleanDesc,
         participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
-        topicosTreinamento: normalizedTopicos
+        topicosTreinamento: normalizedTopicos,
+        disparoReal: treinoForm.disparoReal,
+        disparosReais: disparoValidation.normalized
       });
     } else {
       const todayDate = getTodayIsoBr();
@@ -837,6 +864,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         descricao: cleanDesc,
         participantes: treinoForm.modalidadeParticipacao === 'Coletivo' ? treinoForm.participantes : [],
         topicosTreinamento: normalizedTopicos,
+        disparoReal: treinoForm.disparoReal,
+        disparosReais: disparoValidation.normalized,
         departmentId: currentUser.departmentId || primaryDogRecord?.departmentId || '',
         unitId: currentUser.unitId || defaultUnitId || primaryDogRecord?.unitId || ''
       });
@@ -863,7 +892,9 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
       modalidadeParticipacao: 'Sozinho',
       descricao: '',
       participantes: [],
-      topicosTreinamento: []
+      topicosTreinamento: [],
+      disparoReal: false,
+      disparosReais: []
     });
     setSelectedTopicoToAdd('');
     setParticipantSearch('');
@@ -1247,6 +1278,8 @@ ${infoTableHtml}
     </div>
   </div>` : ''}
 
+  ${buildDisparoRealPrintBoxHtml(rel.disparoReal, rel.disparosReais)}
+
   <div class="desc-box">
     <div class="desc-title">Descrição do Treinamento do Dia</div>
     <div class="desc-text">${escapeHtmlText(rel.descricao)}</div>
@@ -1296,6 +1329,7 @@ ${infoTableHtml}
                     .map(t => `${escapeHtmlText(t.topico)} (${escapeHtmlText(t.aplicarTodosK9 ? 'Todos os K9' : (t.cachorros || []).map(c => c.nome).join(', '))})`)
                     .join(' • ')}</div>`
                 : '';
+              const disparoInlineHtml = buildDisparoRealInlineHtml(r.disparoReal, r.disparosReais);
             return `
             <tr>
               <td style="font-family: monospace; white-space: nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
@@ -1303,7 +1337,7 @@ ${infoTableHtml}
               <td>${condutorDogsHtml}${participantsSummary}</td>
               <td>${escapeHtmlText(r.modalidadeLocal)}</td>
               <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px; color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
-              <td style="white-space: pre-wrap; word-break: break-word;">${topicosHtml}${escapeHtmlText(r.descricao)}</td>
+              <td style="white-space: pre-wrap; word-break: break-word;">${topicosHtml}${disparoInlineHtml}${escapeHtmlText(r.descricao)}</td>
             </tr>`;
           })
           .join('');
@@ -1853,6 +1887,7 @@ ${infoTableHtml}
                       .map(t => `${escapeHtmlText(t.topico)} (${escapeHtmlText(t.aplicarTodosK9 ? 'Todos os K9' : (t.cachorros || []).map(c => c.nome).join(', '))})`)
                       .join(' • ')}</div>`
                   : '';
+              const disparoInlineHtml = buildDisparoRealInlineHtml(r.disparoReal, r.disparosReais);
               return `
                 <tr>
                   <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(r.dataTreinamento))}</td>
@@ -1860,7 +1895,7 @@ ${infoTableHtml}
                   <td>${condutorDogsHtml}${participantsSummary}</td>
                   <td>${escapeHtmlText(r.modalidadeLocal)}</td>
                   <td>${escapeHtmlText(r.modalidadeParticipacao)}${r.modalidadeParticipacao === 'Coletivo' ? `<br/><span style="font-size:9px;color:#475569;">+${(r.participantes || []).length} policial(is)</span>` : ''}</td>
-                  <td style="white-space:pre-wrap;word-break:break-word;">${topicosHtml}${escapeHtmlText(r.descricao)}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${topicosHtml}${disparoInlineHtml}${escapeHtmlText(r.descricao)}</td>
                 </tr>`;
             })
             .join('')}
@@ -2763,6 +2798,15 @@ ${infoTableHtml}
               </div>
             )}
 
+            {/* Treinamento com Disparo Real */}
+            <DisparoRealTreinamentoSection
+              disparoReal={treinoForm.disparoReal}
+              disparosReais={treinoForm.disparosReais}
+              onChangeDisparoReal={val => setTreinoForm(prev => ({ ...prev, disparoReal: val }))}
+              onChangeDisparosReais={items => setTreinoForm(prev => ({ ...prev, disparosReais: items }))}
+              idPrefix="coc-trein"
+            />
+
             {/* Tópicos de Treinamento K9 (Obrigatório) */}
             <div
               className={`bg-slate-950/80 border rounded-xl p-4 space-y-3.5 text-xs transition ${
@@ -3517,6 +3561,11 @@ ${infoTableHtml}
                                   ))}
                                 </div>
                               )}
+                              <DisparoRealSummaryBlock
+                                disparoReal={rel.disparoReal}
+                                disparosReais={rel.disparosReais}
+                                compact
+                              />
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
@@ -4256,6 +4305,11 @@ ${infoTableHtml}
                                   ))}
                                 </div>
                               )}
+                              <DisparoRealSummaryBlock
+                                disparoReal={rel.disparoReal}
+                                disparosReais={rel.disparosReais}
+                                compact
+                              />
                               <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 text-slate-200 whitespace-pre-wrap">
                                 {rel.descricao}
                               </div>
@@ -4394,6 +4448,11 @@ ${infoTableHtml}
                   </div>
                 </div>
               )}
+
+              <DisparoRealSummaryBlock
+                disparoReal={viewingTreinoReport.disparoReal}
+                disparosReais={viewingTreinoReport.disparosReais}
+              />
 
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
                 <span className="text-[10px] text-slate-400 uppercase font-bold block mb-1.5">

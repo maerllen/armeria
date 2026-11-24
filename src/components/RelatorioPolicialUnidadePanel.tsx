@@ -11,9 +11,17 @@ import {
   ParticipacaoTreinamentoPolicial,
   ParticipanteTreinamentoPolicial,
   UnidadeParticipanteTreinamento,
+  DisparoRealArmaItem,
   isCatUnitName,
   getSystemLogo
 } from '../types';
+import {
+  DisparoRealTreinamentoSection,
+  DisparoRealSummaryBlock,
+  validateDisparoReal,
+  buildDisparoRealPrintBoxHtml,
+  buildDisparoRealInlineHtml
+} from './DisparoRealTreinamentoSection';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import {
@@ -215,6 +223,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const [outrasUnidades, setOutrasUnidades] = useState<UnidadeParticipanteTreinamento[]>([]);
   const [participantes, setParticipantes] = useState<ParticipanteTreinamentoPolicial[]>([]);
   const [participantSearch, setParticipantSearch] = useState<string>('');
+  const [disparoReal, setDisparoReal] = useState<boolean>(false);
+  const [disparosReais, setDisparosReais] = useState<DisparoRealArmaItem[]>([]);
   const [descricao, setDescricao] = useState<string>('');
 
   // Form state — Relatório de Operações (edição iniciada via Meus Relatórios)
@@ -1081,13 +1091,14 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                       .join('; ')}</div>`
                   : '';
               const outrasU = (rel.outrasUnidades || []).map(u => escapeHtmlText(u.name)).join(', ') || '-';
+              const disparoInlineHtml = buildDisparoRealInlineHtml(rel.disparoReal, rel.disparosReais);
               return `
                 <tr>
                   <td style="font-family:monospace;white-space:nowrap;">${escapeHtmlText(formatDateBr(rel.dataTreinamento))}</td>
                   <td><strong>${escapeHtmlText(rel.tituloTreinamento)}</strong><br/><span style="font-size:9px;color:#475569;">${escapeHtmlText(rel.modalidadeLocal)} • ${escapeHtmlText(rel.modalidadeParticipacao)}</span></td>
                   <td><strong>${escapeHtmlText(rel.operadorNome)}</strong>${rel.operadorMasp ? `<br/><span style="font-size:9px;color:#475569;">MASP: ${escapeHtmlText(formatMasp(rel.operadorMasp))}</span>` : ''}${participantesHtml}</td>
                   <td>${outrasU}</td>
-                  <td style="white-space:pre-wrap;word-break:break-word;">${escapeHtmlText(rel.descricao)}</td>
+                  <td style="white-space:pre-wrap;word-break:break-word;">${disparoInlineHtml}${escapeHtmlText(rel.descricao)}</td>
                 </tr>`;
             })
             .join('')}
@@ -1321,6 +1332,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     setOutrasUnidades([]);
     setParticipantes([]);
     setParticipantSearch('');
+    setDisparoReal(false);
+    setDisparosReais([]);
     setDescricao('');
   };
 
@@ -1335,6 +1348,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     setOutrasUnidades(Array.isArray(rel.outrasUnidades) ? rel.outrasUnidades : []);
     setParticipantes(Array.isArray(rel.participantes) ? rel.participantes : []);
     setParticipantSearch('');
+    setDisparoReal(Boolean(rel.disparoReal));
+    setDisparosReais(
+      Boolean(rel.disparoReal) && Array.isArray(rel.disparosReais)
+        ? rel.disparosReais.map(item => ({ ...item }))
+        : []
+    );
     setDescricao(rel.descricao || '');
     setSubTab('TREINAMENTO');
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1550,6 +1569,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
           ${otherUnitsHtml}
         </div>
 
+        ${buildDisparoRealPrintBoxHtml(rel.disparoReal, rel.disparosReais)}
+
         <div class="section-title">Descrição do Treinamento do Dia</div>
         <div class="desc-box">${escapeHtmlText(rel.descricao)}</div>
 
@@ -1584,6 +1605,12 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
       return;
     }
 
+    const disparoValidation = validateDisparoReal(disparoReal, disparosReais);
+    if (disparoValidation.error) {
+      setFeedback({ type: 'error', message: disparoValidation.error });
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const payload: Partial<RelatorioTreinamentoPolicial> = {
@@ -1595,6 +1622,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
         outrasUnidades:
           modalidadeParticipacao === 'Coletivo' && participacaoOutrasUnidades ? outrasUnidades : [],
         participantes: modalidadeParticipacao === 'Coletivo' ? participantes : [],
+        disparoReal,
+        disparosReais: disparoValidation.normalized,
         descricao: trimmedDesc,
         departmentId: effectiveDeptId || undefined,
         unitId: effectiveUnitId || undefined,
@@ -2394,6 +2423,15 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
               </div>
             )}
 
+            {/* Treinamento com Disparo Real */}
+            <DisparoRealTreinamentoSection
+              disparoReal={disparoReal}
+              disparosReais={disparosReais}
+              onChangeDisparoReal={setDisparoReal}
+              onChangeDisparosReais={setDisparosReais}
+              idPrefix="pol-trein"
+            />
+
             {/* Descrição do Treinamento do Dia (máximo 1000 caracteres) */}
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
@@ -2806,6 +2844,11 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                         {/* Conteúdo expandido ao clicar em Abrir */}
                         {isExpanded && (
                           <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                            <DisparoRealSummaryBlock
+                              disparoReal={rel.disparoReal}
+                              disparosReais={rel.disparosReais}
+                              compact
+                            />
                             <div>
                               <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
                                 Descrição do Treinamento
@@ -3830,6 +3873,11 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
 
                           {isExpanded && (
                             <div className="pt-3 border-t border-slate-800 space-y-3 text-xs">
+                              <DisparoRealSummaryBlock
+                                disparoReal={rel.disparoReal}
+                                disparosReais={rel.disparosReais}
+                                compact
+                              />
                               <div>
                                 <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
                                   Descrição do Treinamento
@@ -4483,6 +4531,11 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                           </div>
                         </div>
                       )}
+
+                    <DisparoRealSummaryBlock
+                      disparoReal={viewModalReport.disparoReal}
+                      disparosReais={viewModalReport.disparosReais}
+                    />
 
                     <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
                       <span className="block text-[10px] font-bold uppercase text-slate-400 mb-1.5">

@@ -13227,6 +13227,72 @@ async function syncTopicosTreinamentoK9Table(
   }
 }
 
+const DISPARO_REAL_ALLOWED_ARMAS = new Set(['Pistola', 'Fuzil', 'Submetralhadora', 'Espingarda']);
+
+function sanitizeDisparosReais(
+  rawDisparoReal: any,
+  rawDisparosReais: any
+): { disparoReal: boolean; disparosReais: Array<{ tipoArma: string; quantidadeTiros: number }>; error?: string } {
+  const disparoReal = Boolean(rawDisparoReal);
+  if (!disparoReal) {
+    return { disparoReal: false, disparosReais: [] };
+  }
+  const rawList = Array.isArray(rawDisparosReais) ? rawDisparosReais : [];
+  const seen = new Set<string>();
+  const disparosReais: Array<{ tipoArma: string; quantidadeTiros: number }> = [];
+  for (const item of rawList) {
+    const tipoArma = String(item?.tipoArma || '').trim();
+    if (!DISPARO_REAL_ALLOWED_ARMAS.has(tipoArma) || seen.has(tipoArma)) continue;
+    const qty = Number(item?.quantidadeTiros);
+    if (!Number.isInteger(qty) || qty <= 0) {
+      return {
+        disparoReal: true,
+        disparosReais: [],
+        error: `Informe uma quantidade válida de tiros (maior que zero) para ${tipoArma}.`
+      };
+    }
+    if (qty > 100000) {
+      return {
+        disparoReal: true,
+        disparosReais: [],
+        error: `A quantidade de tiros informada para ${tipoArma} excede o limite permitido.`
+      };
+    }
+    seen.add(tipoArma);
+    disparosReais.push({ tipoArma, quantidadeTiros: qty });
+  }
+  if (disparosReais.length === 0) {
+    return {
+      disparoReal: true,
+      disparosReais: [],
+      error: 'Quando houver disparo real, selecione ao menos uma arma (Pistola, Fuzil, Submetralhadora ou Espingarda) e informe a quantidade de tiros.'
+    };
+  }
+  return { disparoReal: true, disparosReais };
+}
+
+function parseDisparosReaisJson(rawJson: any): Array<{ tipoArma: string; quantidadeTiros: number }> {
+  if (!rawJson) return [];
+  try {
+    const parsed = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    const out: Array<{ tipoArma: string; quantidadeTiros: number }> = [];
+    for (const item of parsed) {
+      const tipoArma = String(item?.tipoArma || '').trim();
+      const qty = Math.trunc(Number(item?.quantidadeTiros));
+      if (!DISPARO_REAL_ALLOWED_ARMAS.has(tipoArma) || seen.has(tipoArma) || !Number.isFinite(qty) || qty <= 0) {
+        continue;
+      }
+      seen.add(tipoArma);
+      out.push({ tipoArma, quantidadeTiros: qty });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 let relatoriosTreinamentoSchemaEnsured = false;
 async function ensureRelatoriosTreinamentoSchema(pool: any) {
   if (relatoriosTreinamentoSchemaEnsured) return;
@@ -13234,7 +13300,9 @@ async function ensureRelatoriosTreinamentoSchema(pool: any) {
     const missingChecks: Array<[string, string]> = [
       ['CACHORROS_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `CACHORROS_JSON` LONGTEXT DEFAULT NULL AFTER `CACHORRO_MICROCHIP`'],
       ['HORA_TREINAMENTO', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `HORA_TREINAMENTO` VARCHAR(5) DEFAULT NULL AFTER `DATA_TREINAMENTO`'],
-      ['TOPICOS_TREINAMENTO_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `TOPICOS_TREINAMENTO_JSON` LONGTEXT DEFAULT NULL AFTER `PARTICIPANTES_JSON`']
+      ['TOPICOS_TREINAMENTO_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `TOPICOS_TREINAMENTO_JSON` LONGTEXT DEFAULT NULL AFTER `PARTICIPANTES_JSON`'],
+      ['DISPARO_REAL', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `DISPARO_REAL` TINYINT(1) NOT NULL DEFAULT 0 AFTER `TOPICOS_TREINAMENTO_JSON`'],
+      ['DISPAROS_REAIS_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_CANIL` ADD COLUMN `DISPAROS_REAIS_JSON` LONGTEXT DEFAULT NULL AFTER `DISPARO_REAL`']
     ];
     for (const [colName, alterSql] of missingChecks) {
       const [cols]: any = await pool.query(
@@ -13604,6 +13672,8 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         DESCRICAO as descricao,
         PARTICIPANTES_JSON as participantesJson,
         TOPICOS_TREINAMENTO_JSON as topicosTreinamentoJson,
+        DISPARO_REAL as disparoReal,
+        DISPAROS_REAIS_JSON as disparosReaisJson,
         CONDUTOR_ASSINADO as condutorAssinado,
         DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
         DEPARTAMENTO_ID as departmentId,
@@ -13679,6 +13749,8 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         descricao: r.descricao || '',
         participantes,
         topicosTreinamento,
+        disparoReal: Boolean(r.disparoReal),
+        disparosReais: Boolean(r.disparoReal) ? parseDisparosReaisJson(r.disparosReaisJson) : [],
         condutorAssinado: Boolean(r.condutorAssinado),
         condutorAssinadoEm: r.condutorAssinadoEm || undefined,
         departmentId: r.departmentId || undefined,
@@ -13809,6 +13881,12 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       });
     }
 
+    const disparoSanitized = sanitizeDisparosReais(body.disparoReal, body.disparosReais);
+    if (disparoSanitized.error) {
+      return res.status(400).json({ error: disparoSanitized.error });
+    }
+    const { disparoReal, disparosReais } = disparoSanitized;
+
     const id = `rel-trein-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     const departmentId = body.departmentId || actor.departmentId || null;
     const unitId = body.unitId || actor.unitId || null;
@@ -13818,8 +13896,9 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
         ID_REL_TREINAMENTO, DATA_TREINAMENTO, HORA_TREINAMENTO, CONDUTOR_ID, CONDUTOR_NOME, CONDUTOR_MASP, CONDUTOR_CARGO,
         CACHORRO_ID, CACHORRO_NOME, CACHORRO_RACA, CACHORRO_MICROCHIP, CACHORROS_JSON,
         MODALIDADE_LOCAL, MODALIDADE_PARTICIPACAO, DESCRICAO, PARTICIPANTES_JSON, TOPICOS_TREINAMENTO_JSON,
+        DISPARO_REAL, DISPAROS_REAIS_JSON,
         CONDUTOR_ASSINADO, CONDUTOR_ASSINADO_EM, DEPARTAMENTO_ID, UNIDADE_ID, DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, NOW())`,
       [
         id,
         dataTreinamento,
@@ -13838,6 +13917,8 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
         descricao,
         JSON.stringify(participantes),
         JSON.stringify(topicosTreinamento),
+        disparoReal ? 1 : 0,
+        disparoReal ? JSON.stringify(disparosReais) : null,
         departmentId,
         unitId
       ]
@@ -13879,6 +13960,8 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
       descricao,
       participantes,
       topicosTreinamento,
+      disparoReal,
+      disparosReais,
       condutorAssinado: true,
       condutorAssinadoEm: new Date().toISOString(),
       departmentId: departmentId || undefined,
@@ -14061,6 +14144,12 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         error: 'É obrigatório selecionar ao menos um Tópico de Treinamento K9 para salvar o relatório.'
       });
     }
+    const disparoSanitized = sanitizeDisparosReais(body.disparoReal, body.disparosReais);
+    if (disparoSanitized.error) {
+      return res.status(400).json({ error: disparoSanitized.error });
+    }
+    const { disparoReal, disparosReais } = disparoSanitized;
+
     const horaTreinamento =
       existing.horaTreinamento ||
       (existing.createdAt ? String(existing.createdAt).slice(11, 16) : getCurrentTimeBrHHmm());
@@ -14077,6 +14166,8 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         DESCRICAO = ?,
         PARTICIPANTES_JSON = ?,
         TOPICOS_TREINAMENTO_JSON = ?,
+        DISPARO_REAL = ?,
+        DISPAROS_REAIS_JSON = ?,
         DATA_ATUALIZACAO = NOW()
       WHERE ID_REL_TREINAMENTO = ?`,
       [
@@ -14090,6 +14181,8 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         descricao,
         JSON.stringify(participantes),
         JSON.stringify(topicosTreinamento),
+        disparoReal ? 1 : 0,
+        disparoReal ? JSON.stringify(disparosReais) : null,
         id
       ]
     );
@@ -14130,6 +14223,8 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       descricao,
       participantes,
       topicosTreinamento,
+      disparoReal,
+      disparosReais,
       condutorAssinado: Boolean(existing.condutorAssinado),
       condutorAssinadoEm: existing.condutorAssinadoEm || undefined,
       departmentId: existing.departmentId || undefined,
@@ -20163,6 +20258,8 @@ async function ensureRelatoriosTreinamentoPolicialTable(pool: any): Promise<void
         \`PARTICIPACAO_OUTRAS_UNIDADES\` TINYINT(1) NOT NULL DEFAULT 0,
         \`OUTRAS_UNIDADES_JSON\` LONGTEXT DEFAULT NULL,
         \`PARTICIPANTES_JSON\` LONGTEXT DEFAULT NULL,
+        \`DISPARO_REAL\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`DISPAROS_REAIS_JSON\` LONGTEXT DEFAULT NULL,
         \`DESCRICAO\` TEXT NOT NULL,
         \`OPERADOR_ASSINADO\` TINYINT(1) NOT NULL DEFAULT 1,
         \`OPERADOR_ASSINADO_EM\` DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -20179,6 +20276,20 @@ async function ensureRelatoriosTreinamentoPolicialTable(pool: any): Promise<void
         KEY \`idx_rel_trein_pol_criacao\` (\`DATA_CRIACAO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+    const polMissingChecks: Array<[string, string]> = [
+      ['DISPARO_REAL', 'ALTER TABLE `RELATORIOS_TREINAMENTO_POLICIAL` ADD COLUMN `DISPARO_REAL` TINYINT(1) NOT NULL DEFAULT 0 AFTER `PARTICIPANTES_JSON`'],
+      ['DISPAROS_REAIS_JSON', 'ALTER TABLE `RELATORIOS_TREINAMENTO_POLICIAL` ADD COLUMN `DISPAROS_REAIS_JSON` LONGTEXT DEFAULT NULL AFTER `DISPARO_REAL`']
+    ];
+    for (const [colName, alterSql] of polMissingChecks) {
+      const [cols]: any = await pool.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'RELATORIOS_TREINAMENTO_POLICIAL' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+      if (!cols?.[0]?.cnt) {
+        await pool.query(alterSql);
+      }
+    }
     relatoriosTreinamentoPolicialEnsured = true;
   } catch (err) {
     console.error('[API] Erro ao garantir tabela RELATORIOS_TREINAMENTO_POLICIAL:', err);
@@ -20364,6 +20475,8 @@ function mapPolTreinoRow(r: any) {
     participacaoOutrasUnidades: Boolean(r.participacaoOutrasUnidades),
     outrasUnidades,
     participantes,
+    disparoReal: Boolean(r.disparoReal),
+    disparosReais: Boolean(r.disparoReal) ? parseDisparosReaisJson(r.disparosReaisJson) : [],
     descricao: String(r.descricao || ''),
     operadorAssinado: Boolean(r.operadorAssinado),
     operadorAssinadoEm: r.operadorAssinadoEm || null,
@@ -20393,6 +20506,8 @@ apiRouter.get('/relatorios-treinamento-policial', async (_req: Request, res: Res
         PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
         OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
         PARTICIPANTES_JSON as participantesJson,
+        DISPARO_REAL as disparoReal,
+        DISPAROS_REAIS_JSON as disparosReaisJson,
         DESCRICAO as descricao,
         OPERADOR_ASSINADO as operadorAssinado,
         DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,
@@ -20485,6 +20600,12 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
       } catch (_) {}
     }
 
+    const disparoSanitized = sanitizeDisparosReais(body.disparoReal, body.disparosReais);
+    if (disparoSanitized.error) {
+      return res.status(400).json({ error: disparoSanitized.error });
+    }
+    const { disparoReal, disparosReais } = disparoSanitized;
+
     const id = `rel-tpol-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 
     await pool.query(
@@ -20501,6 +20622,8 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
         PARTICIPACAO_OUTRAS_UNIDADES,
         OUTRAS_UNIDADES_JSON,
         PARTICIPANTES_JSON,
+        DISPARO_REAL,
+        DISPAROS_REAIS_JSON,
         DESCRICAO,
         OPERADOR_ASSINADO,
         OPERADOR_ASSINADO_EM,
@@ -20508,7 +20631,7 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
         UNIDADE_ID,
         UNIDADE_NOME,
         DATA_CRIACAO
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, ?, NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), ?, ?, ?, NOW())`,
       [
         id,
         dataTreinamento,
@@ -20522,6 +20645,8 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
         participacaoOutrasUnidades ? 1 : 0,
         JSON.stringify(outrasUnidades),
         JSON.stringify(participantes),
+        disparoReal ? 1 : 0,
+        disparoReal ? JSON.stringify(disparosReais) : null,
         descricao,
         departmentId,
         unitId,
@@ -20543,6 +20668,8 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
         PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
         OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
         PARTICIPANTES_JSON as participantesJson,
+        DISPARO_REAL as disparoReal,
+        DISPAROS_REAIS_JSON as disparosReaisJson,
         DESCRICAO as descricao,
         OPERADOR_ASSINADO as operadorAssinado,
         DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,
@@ -20680,6 +20807,12 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
         ? sanitizePolTreinoParticipantes(rawParticipantes, String(existing.operadorId), existingMap)
         : [];
 
+    const disparoSanitized = sanitizeDisparosReais(body.disparoReal, body.disparosReais);
+    if (disparoSanitized.error) {
+      return res.status(400).json({ error: disparoSanitized.error });
+    }
+    const { disparoReal, disparosReais } = disparoSanitized;
+
     await pool.query(
       `UPDATE RELATORIOS_TREINAMENTO_POLICIAL
        SET MODALIDADE_LOCAL = ?,
@@ -20688,6 +20821,8 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
            PARTICIPACAO_OUTRAS_UNIDADES = ?,
            OUTRAS_UNIDADES_JSON = ?,
            PARTICIPANTES_JSON = ?,
+           DISPARO_REAL = ?,
+           DISPAROS_REAIS_JSON = ?,
            DESCRICAO = ?
        WHERE ID_REL_TREIN_POL = ?`,
       [
@@ -20697,6 +20832,8 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
         participacaoOutrasUnidades ? 1 : 0,
         JSON.stringify(outrasUnidades),
         JSON.stringify(participantes),
+        disparoReal ? 1 : 0,
+        disparoReal ? JSON.stringify(disparosReais) : null,
         descricao,
         id
       ]
@@ -20716,6 +20853,8 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
         PARTICIPACAO_OUTRAS_UNIDADES as participacaoOutrasUnidades,
         OUTRAS_UNIDADES_JSON as outrasUnidadesJson,
         PARTICIPANTES_JSON as participantesJson,
+        DISPARO_REAL as disparoReal,
+        DISPAROS_REAIS_JSON as disparosReaisJson,
         DESCRICAO as descricao,
         OPERADOR_ASSINADO as operadorAssinado,
         DATE_FORMAT(OPERADOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as operadorAssinadoEm,

@@ -1492,6 +1492,20 @@ export interface TopicoTreinamentoCanilItem {
   cachorros: ParticipanteTreinamentoCachorro[];
 }
 
+export type TipoArmaDisparoReal = 'Pistola' | 'Fuzil' | 'Submetralhadora' | 'Espingarda';
+
+export const TIPOS_ARMA_DISPARO_REAL: TipoArmaDisparoReal[] = [
+  'Pistola',
+  'Fuzil',
+  'Submetralhadora',
+  'Espingarda'
+];
+
+export interface DisparoRealArmaItem {
+  tipoArma: TipoArmaDisparoReal;
+  quantidadeTiros: number;
+}
+
 export interface RelatorioTreinamentoCanil {
   id: string;
   dataTreinamento: string; // YYYY-MM-DD
@@ -1510,6 +1524,8 @@ export interface RelatorioTreinamentoCanil {
   descricao: string; // Máximo 1000 caracteres
   participantes: ParticipanteTreinamentoCanil[]; // Até 15 participantes adicionais quando Coletivo
   topicosTreinamento?: TopicoTreinamentoCanilItem[];
+  disparoReal?: boolean;
+  disparosReais?: DisparoRealArmaItem[];
   condutorAssinado: boolean;
   condutorAssinadoEm?: string;
   departmentId?: string;
@@ -1626,6 +1642,8 @@ export interface RelatorioTreinamentoPolicial {
   participacaoOutrasUnidades: boolean;
   outrasUnidades: UnidadeParticipanteTreinamento[];
   participantes: ParticipanteTreinamentoPolicial[];
+  disparoReal?: boolean;
+  disparosReais?: DisparoRealArmaItem[];
   descricao: string; // Máximo 1000 caracteres
   operadorAssinado: boolean;
   operadorAssinadoEm?: string | null;
