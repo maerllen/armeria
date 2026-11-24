@@ -1,5 +1,18 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import {
+  processWhatsappBotInteraction,
+  resetBotSession,
+  verifySignedPdfToken
+} from './whatsappBotEngine';
+import {
+  findSingleOperationReport,
+  findOperationReportsLast24h,
+  findOperationReportsByDate,
+  generateSingleOperationReportPdf,
+  generateMultipleOperationsPdf,
+  formatIsoDateBr
+} from './whatsappPdfService';
 
 interface WhatsappRoutesDeps {
   getPool: () => any;
@@ -232,6 +245,19 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS \`WHATSAPP_CONVERSAS_SESSAO\` (
+        \`TELEFONE_CLIENTE\` VARCHAR(32) NOT NULL,
+        \`ETAPA_ATUAL\` VARCHAR(64) NOT NULL DEFAULT 'INICIO',
+        \`CONTEXTO_JSON\` LONGTEXT DEFAULT NULL,
+        \`ULTIMA_INTERACAO_EM\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`TELEFONE_CLIENTE\`),
+        KEY \`idx_wpp_sessao_etapa\` (\`ETAPA_ATUAL\`),
+        KEY \`idx_wpp_sessao_interacao\` (\`ULTIMA_INTERACAO_EM\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Seed inicial da configuração padrão se não existir
     const [cfgRows]: any = await pool.query(
       'SELECT COUNT(*) as cnt FROM WHATSAPP_CONFIGURACAO_API WHERE ID_CONFIG = ?',
@@ -263,6 +289,37 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         )`
       );
     }
+
+    // Seed idempotente da template interativa de Menu Principal (Operações, Treinamentos, Armaria)
+    await pool.query(
+      `INSERT IGNORE INTO WHATSAPP_TEMPLATES (
+        ID_TEMPLATE, NOME_TEMPLATE, IDIOMA, CATEGORIA, STATUS_META,
+        CABECALHO_TIPO, CABECALHO_TEXTO, CORPO_TEXTO, RODAPE_TEXTO,
+        VARIAVEIS_EXEMPLO_JSON, BOTOES_JSON, ORIGEM, ATIVO, DATA_CRIACAO
+      ) VALUES (
+        'wpp-tpl-menu-principal',
+        'menu_atendimento_principal',
+        'pt_BR',
+        'UTILITY',
+        'RASCUNHO',
+        'TEXT',
+        'Central Operacional — PCMG',
+        'Olá! Bem-vindo ao atendimento automático do sistema. Selecione abaixo uma das opções desejadas para prosseguir:',
+        'Escolha uma opção nos botões abaixo',
+        '[]',
+        ?,
+        'LOCAL',
+        1,
+        NOW()
+      )`,
+      [
+        JSON.stringify([
+          { type: 'QUICK_REPLY', text: 'Operações' },
+          { type: 'QUICK_REPLY', text: 'Treinamentos' },
+          { type: 'QUICK_REPLY', text: 'Armaria' }
+        ])
+      ]
+    );
 
     // Seed das regras padrão de comunicação
     const [regraRows]: any = await pool.query('SELECT COUNT(*) as cnt FROM WHATSAPP_REGRAS_COMUNICACAO');
@@ -326,6 +383,25 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         );
       }
     }
+
+    // Seed idempotente da regra do Atendimento Interativo via Webhook
+    await pool.query(
+      `INSERT IGNORE INTO WHATSAPP_REGRAS_COMUNICACAO (
+        ID_REGRA, EVENTO_SISTEMA, NOME_EXIBICAO, DESCRICAO, TEMPLATE_ID, TEMPLATE_NOME,
+        DESTINATARIO_TIPO, MAPEAMENTO_VARIAVEIS_JSON, ATIVO, DATA_CRIACAO
+      ) VALUES (
+        'wpp-regra-07',
+        'ATENDIMENTO_BOT_INTERATIVO',
+        'Menu Interativo de Atendimento (Operações / Treinamentos / Armaria)',
+        'Responde automaticamente quando um cliente envia mensagem, exibindo o menu de botões e permitindo baixar relatórios de operações por data (dia/mês/ano) ou das últimas 24h em PDF.',
+        'wpp-tpl-menu-principal',
+        'menu_atendimento_principal',
+        'USUARIO_DESTINO',
+        '[]',
+        1,
+        NOW()
+      )`
+    );
 
     whatsappSchemaEnsured = true;
   } catch (err) {
@@ -925,6 +1001,15 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       const variaveisExemplo = Array.isArray(body.variaveisExemplo)
         ? body.variaveisExemplo.map((v: any) => String(v || '').trim().slice(0, 120)).filter(Boolean)
         : [];
+      const botoes = Array.isArray(body.botoes)
+        ? body.botoes
+            .map((b: any) => ({
+              type: 'QUICK_REPLY',
+              text: String(typeof b === 'string' ? b : b?.text || '').trim().slice(0, 25)
+            }))
+            .filter((b: any) => b.text.length > 0)
+            .slice(0, 3)
+        : [];
 
       let metaTemplateId: string | null = null;
       let statusMeta = 'RASCUNHO';
@@ -955,6 +1040,12 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         if (rodapeTexto) {
           components.push({ type: 'FOOTER', text: rodapeTexto });
         }
+        if (botoes.length > 0) {
+          components.push({
+            type: 'BUTTONS',
+            buttons: botoes.map((b: any) => ({ type: 'QUICK_REPLY', text: b.text }))
+          });
+        }
 
         const metaRes = await fetch(`${META_GRAPH_BASE_URL}/${apiVersion}/${wabaId}/message_templates`, {
           method: 'POST',
@@ -984,9 +1075,9 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       await pool.query(
         `INSERT INTO WHATSAPP_TEMPLATES (
           ID_TEMPLATE, META_TEMPLATE_ID, NOME_TEMPLATE, IDIOMA, CATEGORIA, STATUS_META,
-          CABECALHO_TIPO, CABECALHO_TEXTO, CORPO_TEXTO, RODAPE_TEXTO, VARIAVEIS_EXEMPLO_JSON,
+          CABECALHO_TIPO, CABECALHO_TEXTO, CORPO_TEXTO, RODAPE_TEXTO, VARIAVEIS_EXEMPLO_JSON, BOTOES_JSON,
           ORIGEM, ATIVO, CRIADO_POR_ID, CRIADO_POR_NOME, DATA_CRIACAO
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOCAL', 1, ?, ?, NOW())`,
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'LOCAL', 1, ?, ?, NOW())`,
         [
           id,
           metaTemplateId,
@@ -999,6 +1090,7 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           corpoTexto,
           rodapeTexto,
           JSON.stringify(variaveisExemplo),
+          JSON.stringify(botoes),
           auth.user.id,
           auth.user.name
         ]
@@ -1048,6 +1140,15 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       const variaveisExemplo = Array.isArray(body.variaveisExemplo)
         ? body.variaveisExemplo.map((v: any) => String(v || '').trim().slice(0, 120)).filter(Boolean)
         : [];
+      const botoes = Array.isArray(body.botoes)
+        ? body.botoes
+            .map((b: any) => ({
+              type: 'QUICK_REPLY',
+              text: String(typeof b === 'string' ? b : b?.text || '').trim().slice(0, 25)
+            }))
+            .filter((b: any) => b.text.length > 0)
+            .slice(0, 3)
+        : [];
       const ativo = body.ativo === false ? 0 : 1;
 
       await pool.query(
@@ -1060,6 +1161,7 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           CORPO_TEXTO = ?,
           RODAPE_TEXTO = ?,
           VARIAVEIS_EXEMPLO_JSON = ?,
+          BOTOES_JSON = ?,
           ATIVO = ?,
           DATA_ATUALIZACAO = NOW()
          WHERE ID_TEMPLATE = ?`,
@@ -1072,6 +1174,7 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           corpoTexto,
           rodapeTexto,
           JSON.stringify(variaveisExemplo),
+          JSON.stringify(botoes),
           ativo,
           id
         ]
@@ -1080,6 +1183,91 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       await insertAuditLog('WhatsApp', 'Editar Template', `Template "${nome}" (${idioma}) atualizada`, auth.user, req.ip);
       const [rows]: any = await pool.query('SELECT * FROM WHATSAPP_TEMPLATES WHERE ID_TEMPLATE = ? LIMIT 1', [id]);
       return res.json({ success: true, template: rows?.[0] ? mapTemplateRow(rows[0]) : null });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // SUBMETER TEMPLATE LOCAL EXISTENTE PARA APROVAÇÃO NA META (COM BOTÕES QUICK REPLY)
+  apiRouter.post('/whatsapp/templates/:id/submit-meta', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      await ensureWhatsappSchema(pool);
+      const { id } = req.params;
+      const [rows]: any = await pool.query('SELECT * FROM WHATSAPP_TEMPLATES WHERE ID_TEMPLATE = ? LIMIT 1', [id]);
+      const tplRow = rows?.[0];
+      if (!tplRow) return res.status(404).json({ error: 'Template não encontrada.' });
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const wabaId = sanitizeNumericId(cfgRow?.WABA_ID);
+      const accessToken = decryptSecret(cfgRow?.ACCESS_TOKEN_ENC);
+      const apiVersion = ALLOWED_API_VERSIONS.has(cfgRow?.API_VERSAO) ? cfgRow.API_VERSAO : 'v22.0';
+      if (!wabaId || !accessToken) {
+        return res.status(400).json({
+          error: 'Configure o WABA ID e o Access Token na aba Configuração da API antes de enviar a template para aprovação na Meta.'
+        });
+      }
+
+      const tpl = mapTemplateRow(tplRow);
+      const components: any[] = [];
+      if (tpl.cabecalhoTipo === 'TEXT' && tpl.cabecalhoTexto) {
+        components.push({ type: 'HEADER', format: 'TEXT', text: tpl.cabecalhoTexto });
+      }
+      const bodyComp: any = { type: 'BODY', text: tpl.corpoTexto };
+      if (tpl.variaveisExemplo.length > 0) {
+        bodyComp.example = { body_text: [tpl.variaveisExemplo] };
+      }
+      components.push(bodyComp);
+      if (tpl.rodapeTexto) {
+        components.push({ type: 'FOOTER', text: tpl.rodapeTexto });
+      }
+      if (tpl.botoes.length > 0) {
+        components.push({
+          type: 'BUTTONS',
+          buttons: tpl.botoes.slice(0, 3).map((b: any) => ({
+            type: 'QUICK_REPLY',
+            text: String(b?.text || '').trim().slice(0, 25)
+          }))
+        });
+      }
+
+      const metaRes = await fetch(`${META_GRAPH_BASE_URL}/${apiVersion}/${wabaId}/message_templates`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          name: tpl.nome,
+          language: tpl.idioma,
+          category: tpl.categoria,
+          components
+        })
+      });
+      const metaJson: any = await metaRes.json().catch(() => ({}));
+      if (!metaRes.ok || !metaJson?.id) {
+        return res.status(400).json({
+          error: metaJson?.error?.error_user_msg || metaJson?.error?.message || 'Meta rejeitou a submissão da template.'
+        });
+      }
+
+      const statusMeta = String(metaJson.status || 'PENDING').toUpperCase();
+      await pool.query(
+        `UPDATE WHATSAPP_TEMPLATES SET META_TEMPLATE_ID = ?, STATUS_META = ?, DATA_ATUALIZACAO = NOW() WHERE ID_TEMPLATE = ?`,
+        [String(metaJson.id), statusMeta, id]
+      );
+      await insertAuditLog(
+        'WhatsApp',
+        'Submeter Template Meta',
+        `Template "${tpl.nome}" (${tpl.idioma}) enviada para aprovação na Meta (ID: ${metaJson.id})`,
+        auth.user,
+        req.ip
+      );
+      const [updated]: any = await pool.query('SELECT * FROM WHATSAPP_TEMPLATES WHERE ID_TEMPLATE = ? LIMIT 1', [id]);
+      return res.json({ success: true, template: mapTemplateRow(updated[0]) });
     } catch (err: any) {
       return res.status(500).json({ error: err.message });
     }
@@ -1604,15 +1792,31 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         );
       }
 
-      // Registra mensagens recebidas
+      // Verifica se a regra do bot interativo está ativa
+      let botRuleActive = true;
+      try {
+        const [botRuleRows]: any = await pool.query(
+          "SELECT ATIVO FROM WHATSAPP_REGRAS_COMUNICACAO WHERE EVENTO_SISTEMA = 'ATENDIMENTO_BOT_INTERATIVO' LIMIT 1"
+        );
+        if (botRuleRows?.[0] !== undefined) {
+          botRuleActive = Boolean(botRuleRows[0].ATIVO);
+        }
+      } catch {}
+
+      // Registra mensagens recebidas e dispara o fluxo interativo automático
       for (const msg of messages) {
         const fromPhone = normalizePhoneDigits(msg?.from);
         if (!fromPhone) continue;
+        const buttonReplyId = msg?.interactive?.button_reply?.id || msg?.button?.payload || '';
+        const buttonReplyTitle = msg?.interactive?.button_reply?.title || msg?.button?.text || '';
+        const listReplyId = msg?.interactive?.list_reply?.id || '';
+        const listReplyTitle = msg?.interactive?.list_reply?.title || '';
         const textContent =
           msg?.text?.body ||
-          msg?.button?.text ||
-          msg?.interactive?.button_reply?.title ||
+          buttonReplyTitle ||
+          listReplyTitle ||
           `[Mensagem tipo: ${msg?.type || 'desconhecido'}]`;
+
         const inboundId = `wpp-in-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
         await pool.query(
           `INSERT INTO WHATSAPP_MENSAGENS (
@@ -1629,12 +1833,155 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
             JSON.stringify(msg)
           ]
         );
+
+        // Dispara o atendimento interativo (Menu -> Operações -> Por data / Últimas 24h -> PDF)
+        if (botRuleActive && cfgRow?.ATIVO) {
+          try {
+            await processWhatsappBotInteraction(
+              pool,
+              cfgRow,
+              {
+                fromPhone,
+                text: msg?.text?.body || '',
+                buttonId: buttonReplyId,
+                buttonTitle: buttonReplyTitle,
+                listRowId: listReplyId,
+                listRowTitle: listReplyTitle
+              },
+              {
+                dryRun: false,
+                signingKey: getEncryptionKey(),
+                decryptSecret
+              }
+            );
+          } catch (botErr) {
+            console.error('Erro no fluxo automático do Bot WhatsApp:', botErr);
+          }
+        }
       }
 
       return res.status(200).json({ received: true });
     } catch (err: any) {
       console.error('Erro ao processar webhook WhatsApp:', err);
       return res.status(200).json({ received: true });
+    }
+  });
+
+  // 9. SIMULADOR INTERATIVO DO BOT NO PAINEL ADMIN (usa os dados reais do banco + PDF real)
+  apiRouter.post('/whatsapp/bot/simular', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const body = req.body || {};
+      const simPhone = normalizePhoneDigits(body.fromPhone) || `sim${String(auth.user.id).replace(/\D/g, '').slice(-8) || '000001'}`;
+
+      const result = await processWhatsappBotInteraction(
+        pool,
+        cfgRow,
+        {
+          fromPhone: simPhone,
+          text: typeof body.text === 'string' ? body.text : '',
+          buttonId: typeof body.buttonId === 'string' ? body.buttonId : '',
+          buttonTitle: typeof body.buttonTitle === 'string' ? body.buttonTitle : '',
+          listRowId: typeof body.listRowId === 'string' ? body.listRowId : '',
+          listRowTitle: typeof body.listRowTitle === 'string' ? body.listRowTitle : ''
+        },
+        {
+          dryRun: true,
+          signingKey: getEncryptionKey(),
+          decryptSecret
+        }
+      );
+
+      return res.json({
+        success: true,
+        etapaAtual: result.etapaAtual,
+        replies: result.replies
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  apiRouter.post('/whatsapp/bot/reset', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      await ensureWhatsappSchema(pool);
+      const simPhone =
+        normalizePhoneDigits(req.body?.fromPhone) ||
+        `sim${String(auth.user.id).replace(/\D/g, '').slice(-8) || '000001'}`;
+      await resetBotSession(pool, simPhone);
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 10. DOWNLOAD DE PDF COM TOKEN ASSINADO DE CURTA DURAÇÃO (HMAC-SHA256)
+  apiRouter.get('/whatsapp/pdf/download', async (req: Request, res: Response) => {
+    try {
+      const token = String(req.query.token || '').trim();
+      const verified = verifySignedPdfToken(token, getEncryptionKey());
+      if (!verified) {
+        return res.status(403).json({ error: 'Link de download de PDF inválido ou expirado. Solicite novamente no WhatsApp.' });
+      }
+
+      const pool = getPool();
+      let buffer: Buffer;
+      let filename: string;
+
+      if (verified.scope === 'single' && verified.origem && verified.id) {
+        const rep = await findSingleOperationReport(pool, verified.origem, verified.id);
+        if (!rep) {
+          return res.status(404).json({ error: 'Relatório de operação não encontrado.' });
+        }
+        const pdf = await generateSingleOperationReportPdf(rep);
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'last24h') {
+        const reps = await findOperationReportsLast24h(pool);
+        if (reps.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório de operação encontrado nas últimas 24 horas.' });
+        }
+        const todayIso = new Date().toISOString().slice(0, 10);
+        const pdf = await generateMultipleOperationsPdf(
+          reps,
+          'RELATORIOS DE OPERACOES — ULTIMAS 24 HORAS',
+          `Ultimas_24h_${todayIso}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'period' && verified.granularity && verified.isoFilter) {
+        const reps = await findOperationReportsByDate(pool, verified.granularity, verified.isoFilter);
+        if (reps.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório encontrado para o período solicitado.' });
+        }
+        const display = verified.granularity === 'DIA' ? formatIsoDateBr(verified.isoFilter) : verified.isoFilter;
+        const pdf = await generateMultipleOperationsPdf(
+          reps,
+          `RELATORIOS DE OPERACOES — ${display}`,
+          `${verified.granularity}_${verified.isoFilter}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else {
+        return res.status(400).json({ error: 'Escopo de PDF inválido.' });
+      }
+
+      const safeFilename = filename.replace(/[^a-zA-Z0-9._-]/g, '_');
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      return res.status(200).send(buffer);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 }

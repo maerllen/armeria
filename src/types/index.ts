@@ -2322,4 +2322,29 @@ export interface WhatsappWebhookEvento {
   dataRecebimento?: string | null;
 }
 
+export interface WhatsappBotInteractiveButton {
+  id: string;
+  title: string;
+}
+
+export interface WhatsappBotListRow {
+  id: string;
+  title: string;
+  description?: string;
+}
+
+export interface WhatsappBotReplyItem {
+  kind: 'buttons' | 'list' | 'text' | 'document';
+  header?: string;
+  body: string;
+  footer?: string;
+  buttons?: WhatsappBotInteractiveButton[];
+  listButtonText?: string;
+  listRows?: WhatsappBotListRow[];
+  documentFilename?: string;
+  documentCaption?: string;
+  documentDownloadUrl?: string;
+}
+
+
 

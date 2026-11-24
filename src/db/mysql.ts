@@ -1539,6 +1539,20 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
 
+    // 34B-12. WHATSAPP_CONVERSAS_SESSAO (Estado do fluxo interativo do atendimento WhatsApp)
+    await connection.query(`
+      CREATE TABLE IF NOT EXISTS \`WHATSAPP_CONVERSAS_SESSAO\` (
+        \`TELEFONE_CLIENTE\` VARCHAR(32) NOT NULL,
+        \`ETAPA_ATUAL\` VARCHAR(64) NOT NULL DEFAULT 'INICIO',
+        \`CONTEXTO_JSON\` LONGTEXT DEFAULT NULL,
+        \`ULTIMA_INTERACAO_EM\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        \`DATA_CRIACAO\` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (\`TELEFONE_CLIENTE\`),
+        KEY \`idx_wpp_sessao_etapa\` (\`ETAPA_ATUAL\`),
+        KEY \`idx_wpp_sessao_interacao\` (\`ULTIMA_INTERACAO_EM\`)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
     // 34C. RELATORIOS_OPERACOES_CANIL
     await connection.query(`
       CREATE TABLE IF NOT EXISTS \`RELATORIOS_OPERACOES_CANIL\` (

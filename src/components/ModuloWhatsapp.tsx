@@ -9,7 +9,8 @@ import {
   WhatsappAmbiente,
   WhatsappTemplateCategoria,
   WhatsappTemplateHeaderTipo,
-  WhatsappDestinatarioTipo
+  WhatsappDestinatarioTipo,
+  WhatsappBotReplyItem
 } from '../types';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
@@ -38,7 +39,13 @@ import {
   Clock,
   Users,
   Search,
-  X
+  X,
+  Bot,
+  Download,
+  List,
+  RotateCcw,
+  UploadCloud,
+  CornerDownRight
 } from 'lucide-react';
 
 interface ModuloWhatsappProps {
@@ -167,6 +174,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     corpoTexto: string;
     rodapeTexto: string;
     variaveisExemploText: string;
+    botoesText: string;
     enviarParaMeta: boolean;
   }>({
     nome: '',
@@ -177,8 +185,24 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     corpoTexto: '',
     rodapeTexto: '',
     variaveisExemploText: '',
+    botoesText: '',
     enviarParaMeta: false
   });
+  const [submittingTplId, setSubmittingTplId] = useState<string | null>(null);
+
+  // --- STATE: SIMULADOR INTERATIVO DO BOT WHATSAPP ---
+  interface SimChatEntry {
+    id: string;
+    sender: 'client' | 'bot';
+    text?: string;
+    reply?: WhatsappBotReplyItem;
+    time: string;
+  }
+  const [simMessages, setSimMessages] = useState<SimChatEntry[]>([]);
+  const [simInput, setSimInput] = useState('');
+  const [simLoading, setSimLoading] = useState(false);
+  const [simEtapa, setSimEtapa] = useState('INICIO');
+  const [openListMsgId, setOpenListMsgId] = useState<string | null>(null);
 
   // --- STATE: COMUNICAÇÃO (REGRAS, ENVIO MANUAL, LOGS E WEBHOOKS) ---
   const [regras, setRegras] = useState<WhatsappRegraComunicacao[]>([]);
@@ -462,6 +486,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
       corpoTexto: 'Olá {{1}}, você possui uma notificação do sistema Armeria PCMG referente a {{2}}.',
       rodapeTexto: 'Polícia Civil de Minas Gerais',
       variaveisExemploText: 'Nome do Policial; Cautela #001',
+      botoesText: '',
       enviarParaMeta: false
     });
     setShowTemplateModal(true);
@@ -478,6 +503,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
       corpoTexto: tpl.corpoTexto,
       rodapeTexto: tpl.rodapeTexto || '',
       variaveisExemploText: (tpl.variaveisExemplo || []).join('; '),
+      botoesText: (tpl.botoes || []).map(b => b.text).filter(Boolean).join('; '),
       enviarParaMeta: false
     });
     setShowTemplateModal(true);
@@ -491,6 +517,12 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
         .split(';')
         .map(s => s.trim())
         .filter(Boolean);
+      const botoes = tplForm.botoesText
+        .split(';')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .slice(0, 3)
+        .map(text => ({ type: 'QUICK_REPLY', text }));
 
       const url = editingTemplate ? `/api/whatsapp/templates/${editingTemplate.id}` : '/api/whatsapp/templates';
       const method = editingTemplate ? 'PUT' : 'POST';
@@ -507,6 +539,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
           corpoTexto: tplForm.corpoTexto,
           rodapeTexto: tplForm.rodapeTexto,
           variaveisExemplo,
+          botoes,
           enviarParaMeta: !editingTemplate && tplForm.enviarParaMeta,
           actor: currentUser
         })
@@ -527,6 +560,26 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
       }
     } finally {
       setSavingTemplate(false);
+    }
+  };
+
+  const handleSubmitTemplateToMeta = async (tpl: WhatsappTemplate) => {
+    setSubmittingTplId(tpl.id);
+    try {
+      const res = await fetch(`/api/whatsapp/templates/${tpl.id}/submit-meta`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ actor: currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notifyError(data.error || 'Erro ao enviar template para aprovação na Meta.');
+      } else {
+        await loadTemplates();
+        notifySuccess(`Template "${tpl.nome}" enviada para aprovação na Meta!`);
+      }
+    } finally {
+      setSubmittingTplId(null);
     }
   };
 
@@ -564,6 +617,74 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     } finally {
       setSyncingTemplates(false);
     }
+  };
+
+  // --- HANDLERS: SIMULADOR INTERATIVO DO BOT ---
+  const nowTimeLabel = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const sendBotSimulation = async (payload: {
+    displayLabel: string;
+    text?: string;
+    buttonId?: string;
+    buttonTitle?: string;
+    listRowId?: string;
+    listRowTitle?: string;
+  }) => {
+    setSimLoading(true);
+    setOpenListMsgId(null);
+    const clientEntry: SimChatEntry = {
+      id: `sim-c-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+      sender: 'client',
+      text: payload.displayLabel,
+      time: nowTimeLabel()
+    };
+    setSimMessages(prev => [...prev, clientEntry]);
+
+    try {
+      const res = await fetch('/api/whatsapp/bot/simular', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          text: payload.text || '',
+          buttonId: payload.buttonId || '',
+          buttonTitle: payload.buttonTitle || '',
+          listRowId: payload.listRowId || '',
+          listRowTitle: payload.listRowTitle || ''
+        })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        notifyError(data.error || 'Erro ao simular interação do bot WhatsApp.');
+      } else {
+        setSimEtapa(data.etapaAtual || 'INICIO');
+        const replies: WhatsappBotReplyItem[] = Array.isArray(data.replies) ? data.replies : [];
+        const botEntries: SimChatEntry[] = replies.map((r, i) => ({
+          id: `sim-b-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 5)}`,
+          sender: 'bot',
+          reply: r,
+          time: nowTimeLabel()
+        }));
+        setSimMessages(prev => [...prev, ...botEntries]);
+      }
+    } catch (err: any) {
+      notifyError(err.message || 'Falha na simulação do fluxo.');
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const handleResetSimulation = async () => {
+    await fetch('/api/whatsapp/bot/reset', {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({})
+    }).catch(() => {});
+    setSimMessages([]);
+    setSimEtapa('INICIO');
+    setOpenListMsgId(null);
   };
 
   // --- HANDLERS: COMUNICAÇÃO ---
@@ -1493,6 +1614,18 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                           {tpl.rodapeTexto}
                         </div>
                       )}
+                      {tpl.botoes && tpl.botoes.length > 0 && (
+                        <div className="pt-2 mt-1.5 border-t border-emerald-500/20 flex flex-col gap-1">
+                          {tpl.botoes.map((btn, idx) => (
+                            <div
+                              key={`${tpl.id}-btn-${idx}`}
+                              className="w-full py-1.5 px-2.5 rounded-lg bg-slate-900/80 border border-emerald-500/30 text-center text-[11px] font-bold text-emerald-300"
+                            >
+                              {btn.text}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {tpl.variaveisExemplo.length > 0 && (
@@ -1503,22 +1636,37 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     )}
                   </div>
 
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTestMode('template');
-                        setTestTemplateName(tpl.nome);
-                        setTestTemplateLang(tpl.idioma);
-                        setTestTemplateVars((tpl.variaveisExemplo || []).join('; '));
-                        setActiveTab('config-api');
-                        notifySuccess(`Template "${tpl.nome}" carregada no painel de teste da API.`);
-                      }}
-                      className="text-amber-300 hover:text-amber-200 font-bold text-[11px] flex items-center gap-1"
-                    >
-                      <Send className="w-3.5 h-3.5" />
-                      <span>Usar no Teste</span>
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800 text-xs">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTestMode('template');
+                          setTestTemplateName(tpl.nome);
+                          setTestTemplateLang(tpl.idioma);
+                          setTestTemplateVars((tpl.variaveisExemplo || []).join('; '));
+                          setActiveTab('config-api');
+                          notifySuccess(`Template "${tpl.nome}" carregada no painel de teste da API.`);
+                        }}
+                        className="text-amber-300 hover:text-amber-200 font-bold text-[11px] flex items-center gap-1"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Usar no Teste</span>
+                      </button>
+
+                      {tpl.statusMeta === 'RASCUNHO' && (
+                        <button
+                          type="button"
+                          disabled={submittingTplId === tpl.id}
+                          onClick={() => handleSubmitTemplateToMeta(tpl)}
+                          className="text-cyan-300 hover:text-cyan-200 disabled:opacity-50 font-bold text-[11px] flex items-center gap-1"
+                          title="Enviar esta template com botões para aprovação na Meta"
+                        >
+                          <UploadCloud className="w-3.5 h-3.5" />
+                          <span>{submittingTplId === tpl.id ? 'Enviando...' : 'Enviar p/ Meta'}</span>
+                        </button>
+                      )}
+                    </div>
 
                     <div className="flex items-center gap-1.5">
                       {confirmDeleteTplId === tpl.id ? (
@@ -1572,6 +1720,287 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
       {/* ===================================================================== */}
       {activeTab === 'comunicacao' && (
         <div className="space-y-5">
+          {/* Seção 0: Fluxo Interativo Automático & Simulador Real com PDF */}
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-5">
+            {/* Mapa Visual do Fluxo de Atendimento */}
+            <div className="xl:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-black text-emerald-300 uppercase flex items-center gap-2">
+                    <Bot className="w-4 h-4" />
+                    <span>Fluxo Interativo do Atendimento</span>
+                  </h2>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Respondido automaticamente via Webhook oficial quando um cliente envia mensagem no WhatsApp.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2.5 text-xs">
+                <div className="bg-slate-950/90 border border-emerald-500/35 rounded-xl p-3 space-y-1.5">
+                  <div className="text-[10px] font-black uppercase text-emerald-400">
+                    1. Mensagem Recebida → Menu Principal (Template: menu_atendimento_principal)
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold">
+                      Operações
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 font-bold">
+                      Treinamentos
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-slate-800 border border-slate-700 text-slate-200 font-bold">
+                      Armaria
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pl-3 space-y-2 border-l-2 border-emerald-500/30 ml-2">
+                  <div className="bg-slate-950/80 border border-cyan-500/30 rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-cyan-300">
+                      <CornerDownRight className="w-3.5 h-3.5" />
+                      <span>2. Ao clicar em &quot;Operações&quot;</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      <span className="px-2.5 py-1 rounded-lg bg-cyan-500/15 border border-cyan-400/40 text-cyan-200 font-bold">
+                        Relatórios Por data
+                      </span>
+                      <span className="px-2.5 py-1 rounded-lg bg-amber-500/15 border border-amber-400/40 text-amber-200 font-bold">
+                        Relatório das últimas 24h
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
+                    <div className="text-[11px] font-bold text-cyan-300">
+                      3A. Relatórios Por data → Dia, Mês ou Ano → Selecionar PDF
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      O cliente escolhe <strong className="text-slate-200">Por Dia</strong>,{' '}
+                      <strong className="text-slate-200">Por Mês</strong> ou{' '}
+                      <strong className="text-slate-200">Por Ano</strong> (via lista interativa ou digitando a data),
+                      recebe os relatórios encontrados no banco e escolhe qual baixar em{' '}
+                      <strong className="text-emerald-300">PDF</strong> (ou todos consolidados).
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3 space-y-1">
+                    <div className="text-[11px] font-bold text-amber-300">
+                      3B. Relatório das últimas 24h → Download imediato em PDF
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Gera automaticamente um <strong className="text-emerald-300">PDF consolidado</strong> com todos
+                      os relatórios de operações (COC, CAT e Unidades Policiais) das últimas 24 horas e envia como
+                      documento diretamente no WhatsApp.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Simulador Interativo em Tempo Real */}
+            <div className="xl:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 flex flex-col justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-emerald-400" />
+                    <span>Simulador Interativo do Bot (Dados Reais + PDF Real)</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Teste agora todas as etapas do fluxo consultando os relatórios reais cadastrados no sistema.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[10px] text-cyan-300">
+                    Etapa: {simEtapa}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetSimulation}
+                    className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-bold flex items-center gap-1"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Reiniciar</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Área do Chat estilo WhatsApp */}
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 h-[360px] overflow-y-auto space-y-3">
+                {simMessages.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center space-y-3 px-4">
+                    <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
+                      <Bot className="w-7 h-7" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-slate-200">
+                        Envie uma mensagem para iniciar o menu interativo
+                      </p>
+                      <p className="text-[11px] text-slate-400 max-w-sm">
+                        Clique no botão abaixo para simular um cliente enviando &quot;Olá&quot; e navegue pelos botões
+                        até baixar os relatórios em PDF.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={simLoading}
+                      onClick={() => sendBotSimulation({ displayLabel: 'Olá', text: 'Olá' })}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Simular Mensagem &quot;Olá&quot;</span>
+                    </button>
+                  </div>
+                ) : (
+                  simMessages.map(entry =>
+                    entry.sender === 'client' ? (
+                      <div key={entry.id} className="flex justify-end">
+                        <div className="max-w-[80%] bg-emerald-600/25 border border-emerald-500/40 rounded-2xl rounded-tr-sm px-3.5 py-2 text-xs text-emerald-50">
+                          <div>{entry.text}</div>
+                          <div className="text-[9px] text-emerald-300/70 text-right mt-0.5">{entry.time}</div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div key={entry.id} className="flex justify-start">
+                        <div className="max-w-[88%] bg-slate-900 border border-slate-700/80 rounded-2xl rounded-tl-sm p-3 text-xs space-y-2">
+                          {entry.reply?.header && (
+                            <div className="font-black text-white text-[11.5px]">{entry.reply.header}</div>
+                          )}
+
+                          {/* Cartão de PDF para Download Real */}
+                          {entry.reply?.kind === 'document' && entry.reply.documentDownloadUrl ? (
+                            <div className="bg-slate-950 border border-emerald-500/40 rounded-xl p-3 space-y-2">
+                              <div className="flex items-start gap-2.5">
+                                <div className="p-2 rounded-lg bg-red-500/15 border border-red-500/35 text-red-400 shrink-0">
+                                  <FileText className="w-5 h-5" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-mono font-bold text-[11px] text-emerald-300 break-all">
+                                    {entry.reply.documentFilename || 'Relatorio_Operacoes.pdf'}
+                                  </div>
+                                  <p className="text-[11px] text-slate-300 mt-0.5">{entry.reply.body}</p>
+                                </div>
+                              </div>
+                              <a
+                                href={entry.reply.documentDownloadUrl}
+                                download={entry.reply.documentFilename || 'relatorio.pdf'}
+                                className="w-full py-2 px-3 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-[11px] flex items-center justify-center gap-1.5 transition"
+                              >
+                                <Download className="w-3.5 h-3.5" />
+                                <span>Baixar PDF Real Gerado</span>
+                              </a>
+                            </div>
+                          ) : (
+                            <div className="text-slate-200 whitespace-pre-wrap leading-relaxed">
+                              {entry.reply?.body}
+                            </div>
+                          )}
+
+                          {entry.reply?.footer && (
+                            <div className="text-[10px] text-slate-400">{entry.reply.footer}</div>
+                          )}
+
+                          {/* Botões Interativos Clicáveis */}
+                          {entry.reply?.kind === 'buttons' && entry.reply.buttons && (
+                            <div className="pt-1.5 border-t border-slate-800 flex flex-col gap-1.5">
+                              {entry.reply.buttons.map(btn => (
+                                <button
+                                  key={btn.id}
+                                  type="button"
+                                  disabled={simLoading}
+                                  onClick={() =>
+                                    sendBotSimulation({
+                                      displayLabel: btn.title,
+                                      buttonId: btn.id,
+                                      buttonTitle: btn.title
+                                    })
+                                  }
+                                  className="w-full py-1.5 px-3 rounded-lg bg-slate-800 hover:bg-emerald-500/20 border border-slate-700 hover:border-emerald-400/60 text-emerald-300 font-bold text-[11.5px] transition text-center"
+                                >
+                                  {btn.title}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Lista Interativa Clicável */}
+                          {entry.reply?.kind === 'list' && entry.reply.listRows && (
+                            <div className="pt-1.5 border-t border-slate-800 space-y-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setOpenListMsgId(prev => (prev === entry.id ? null : entry.id))}
+                                className="w-full py-1.5 px-3 rounded-lg bg-cyan-500/15 hover:bg-cyan-500/25 border border-cyan-500/40 text-cyan-300 font-bold text-[11.5px] flex items-center justify-center gap-1.5 transition"
+                              >
+                                <List className="w-3.5 h-3.5" />
+                                <span>
+                                  {entry.reply.listButtonText || 'Abrir Lista'} ({entry.reply.listRows.length})
+                                </span>
+                              </button>
+
+                              {openListMsgId === entry.id && (
+                                <div className="bg-slate-950 border border-slate-700 rounded-xl divide-y divide-slate-800 overflow-hidden">
+                                  {entry.reply.listRows.map(row => (
+                                    <button
+                                      key={row.id}
+                                      type="button"
+                                      disabled={simLoading}
+                                      onClick={() =>
+                                        sendBotSimulation({
+                                          displayLabel: row.title,
+                                          listRowId: row.id,
+                                          listRowTitle: row.title
+                                        })
+                                      }
+                                      className="w-full text-left px-3 py-2 hover:bg-emerald-500/15 transition"
+                                    >
+                                      <div className="font-bold text-emerald-300 text-[11px]">{row.title}</div>
+                                      {row.description && (
+                                        <div className="text-[10px] text-slate-400 truncate">{row.description}</div>
+                                      )}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="text-[9px] text-slate-500 text-right">{entry.time}</div>
+                        </div>
+                      </div>
+                    )
+                  )
+                )}
+              </div>
+
+              {/* Input de mensagem livre no simulador (para digitar datas DD/MM/AAAA, MM/AAAA, AAAA ou texto) */}
+              <form
+                onSubmit={e => {
+                  e.preventDefault();
+                  const clean = simInput.trim();
+                  if (!clean || simLoading) return;
+                  setSimInput('');
+                  sendBotSimulation({ displayLabel: clean, text: clean });
+                }}
+                className="flex items-center gap-2"
+              >
+                <input
+                  type="text"
+                  value={simInput}
+                  onChange={e => setSimInput(e.target.value)}
+                  placeholder='Digite uma mensagem (ex: "Olá", "24/11/2026", "11/2026", "2026")...'
+                  className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-slate-100 focus:outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="submit"
+                  disabled={simLoading || !simInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-slate-950 font-black text-xs flex items-center gap-1.5 shrink-0"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>{simLoading ? '...' : 'Enviar'}</span>
+                </button>
+              </form>
+            </div>
+          </div>
+
           {/* Seção 1: Regras de Disparo Automático */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2172,14 +2601,48 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                 </div>
               </div>
 
+              <div>
+                <label className="font-bold text-slate-300 block mb-1">
+                  Botões Quick Reply (opcional — até 3 botões separados por <code className="text-amber-300">;</code>)
+                </label>
+                <input
+                  type="text"
+                  value={tplForm.botoesText}
+                  onChange={e => setTplForm({ ...tplForm, botoesText: e.target.value })}
+                  placeholder="Ex: Operações; Treinamentos; Armaria"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100"
+                />
+              </div>
+
               {/* Preview */}
-              <div className="bg-emerald-950/35 border border-emerald-500/30 rounded-xl p-3.5 space-y-1">
+              <div className="bg-emerald-950/35 border border-emerald-500/30 rounded-xl p-3.5 space-y-1.5">
                 <div className="text-[10px] font-black text-emerald-400 uppercase">Pré-visualização WhatsApp</div>
                 {tplForm.cabecalhoTipo === 'TEXT' && tplForm.cabecalhoTexto && (
                   <div className="font-bold text-white">{tplForm.cabecalhoTexto}</div>
                 )}
                 <div className="text-slate-200 whitespace-pre-wrap">{previewRenderedBody || 'Digite o corpo...'}</div>
                 {tplForm.rodapeTexto && <div className="text-[10px] text-slate-400 pt-1">{tplForm.rodapeTexto}</div>}
+                {tplForm.botoesText
+                  .split(';')
+                  .map(s => s.trim())
+                  .filter(Boolean)
+                  .slice(0, 3).length > 0 && (
+                  <div className="pt-2 mt-1 border-t border-emerald-500/25 flex flex-col gap-1">
+                    {tplForm.botoesText
+                      .split(';')
+                      .map(s => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 3)
+                      .map((label, idx) => (
+                        <div
+                          key={`preview-btn-${idx}`}
+                          className="py-1.5 px-3 rounded-lg bg-slate-900/80 border border-emerald-500/35 text-center text-emerald-300 font-bold text-[11px]"
+                        >
+                          {label}
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
 
               {!editingTemplate && (
