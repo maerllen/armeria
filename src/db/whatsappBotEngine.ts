@@ -2,30 +2,26 @@ import crypto from 'crypto';
 import {
   OperacaoOrigem,
   TreinamentoOrigem,
+  ArmariaCategoria,
   ReciboTipo,
   ArmariaPeriodo,
-  UnifiedOperationReport,
-  UnifiedTrainingReport,
-  UnifiedArmariaReceipt,
-  formatIsoDateBr,
-  formatIsoDateTimeBr,
+  RelatorioPeriodoTipo,
+  DesempenhoCategoria,
+  ARMARIA_CATEGORIA_META,
   listAvailableOperationDates,
-  findOperationReportsByDate,
-  findOperationReportsLast24h,
-  findSingleOperationReport,
-  generateSingleOperationReportPdf,
-  generateMultipleOperationsPdf,
   listAvailableTrainingDates,
-  findTrainingReportsByDate,
-  findTrainingReportsLast24h,
-  findSingleTrainingReport,
-  generateSingleTrainingReportPdf,
+  findOperationReportsByPeriod,
+  findTrainingReportsByPeriod,
+  generateMultipleOperationsPdf,
   generateMultipleTrainingsPdf,
-  listArmariaReceipts,
-  findSingleArmariaReceipt,
-  generateArmariaReceiptPdf,
-  findArmariaCautelasByPeriod,
-  generateArmariaCautelasReportPdf
+  findUserCautelasByCategory,
+  findUnitCautelasByCategoryAndPeriod,
+  listAvailableCautelaPeriods,
+  generateCategoryCautelasPdf,
+  findVaultInventoryByCategory,
+  generateUnitVaultInventoryPdf,
+  generateMyPerformanceSheetPdf,
+  generateUnitPerformanceReportPdf
 } from './whatsappPdfService';
 
 const META_GRAPH_BASE_URL = 'https://graph.facebook.com';
@@ -103,11 +99,18 @@ export interface SignedPdfTokenPayload {
     | 'op_single'
     | 'op_last24h'
     | 'op_period'
+    | 'op_rel_period'
     | 'tr_single'
     | 'tr_last24h'
     | 'tr_period'
+    | 'tr_rel_period'
     | 'arm_receipt'
-    | 'arm_report';
+    | 'arm_report'
+    | 'arm_my_cautelas'
+    | 'arm_unit_cautelas'
+    | 'arm_unit_vaults'
+    | 'desemp_my'
+    | 'desemp_unit';
   origem?: OperacaoOrigem | TreinamentoOrigem;
   id?: string;
   granularity?: 'DIA' | 'MES' | 'ANO';
@@ -115,7 +118,14 @@ export interface SignedPdfTokenPayload {
   unitIds?: string[];
   unitLabel?: string;
   receiptTipo?: ReciboTipo;
+  categoria?: ArmariaCategoria;
+  onlyActive?: boolean;
+  userId?: string;
+  userName?: string;
+  userMasp?: string;
   period?: ArmariaPeriodo;
+  relPeriodo?: RelatorioPeriodoTipo;
+  desempCategoria?: DesempenhoCategoria;
   exp: number;
 }
 
@@ -159,6 +169,42 @@ function normalizePhoneDigits(phone?: string | null): string {
   return String(phone || '').replace(/\D/g, '');
 }
 
+/**
+ * Normaliza telefone desconsiderando pontos, traços, parênteses, sinais e código do país (+55).
+ */
+export function stripBrazilPhone(phone?: string | null): string {
+  let digits = normalizePhoneDigits(phone);
+  if (!digits) return '';
+  if (digits.startsWith('0055') && digits.length >= 14) {
+    digits = digits.slice(4);
+  } else if (digits.startsWith('55') && digits.length >= 12) {
+    digits = digits.slice(2);
+  }
+  if (digits.startsWith('0') && digits.length >= 11) {
+    digits = digits.slice(1);
+  }
+  return digits;
+}
+
+function phonesMatch(a: string, b: string): boolean {
+  const n1 = stripBrazilPhone(a);
+  const n2 = stripBrazilPhone(b);
+  if (n1.length < 8 || n2.length < 8) return false;
+  if (n1 === n2) return true;
+
+  // Se ambos possuem DDD (10 ou 11 dígitos), exige mesmo DDD + mesmos 8 dígitos finais (tolera 9º dígito BR)
+  if (n1.length >= 10 && n2.length >= 10) {
+    return n1.slice(0, 2) === n2.slice(0, 2) && n1.slice(-8) === n2.slice(-8);
+  }
+
+  // Se um deles foi salvo sem DDD (8 ou 9 dígitos), compara os 8 dígitos finais
+  if ((n1.length === 8 || n1.length === 9) !== (n2.length === 8 || n2.length === 9)) {
+    return n1.slice(-8) === n2.slice(-8);
+  }
+
+  return false;
+}
+
 function truncateText(val: string, max: number): string {
   const clean = String(val || '').trim();
   if (clean.length <= max) return clean;
@@ -177,15 +223,8 @@ function shortenUnitName(name: string): string {
   return truncateText(clean, 20);
 }
 
-function phonesMatch(a: string, b: string): boolean {
-  const d1 = normalizePhoneDigits(a);
-  const d2 = normalizePhoneDigits(b);
-  if (!d1 || !d2) return false;
-  if (d1 === d2) return true;
-  // Match ignoring country code 55 and/or Brazilian 9th digit
-  const tail1 = d1.slice(-8);
-  const tail2 = d2.slice(-8);
-  return tail1.length === 8 && tail1 === tail2;
+function isArmariaCategoria(val?: string | null): val is ArmariaCategoria {
+  return val === 'ARMAS' || val === 'MUNICOES' || val === 'EXPLOSIVOS' || val === 'MATERIAIS';
 }
 
 export async function resolveWhatsappUserContext(
@@ -201,9 +240,14 @@ export async function resolveWhatsappUserContext(
     const [allUsers]: any = await pool.query(
       "SELECT * FROM USUARIOS WHERE TELEFONE_USUARIOS IS NOT NULL AND TELEFONE_USUARIOS <> ''"
     );
-    userRow = (allUsers || []).find((u: any) => phonesMatch(u.TELEFONE_USUARIOS, fromPhone)) || null;
+    userRow =
+      (allUsers || []).find(
+        (u: any) =>
+          Number(u.TEM_ACESSO_SISTEMA_USUARIOS ?? 1) === 1 && phonesMatch(u.TELEFONE_USUARIOS, fromPhone)
+      ) || null;
   }
   if (!userRow) return null;
+  if (Number(userRow.TEM_ACESSO_SISTEMA_USUARIOS ?? 1) !== 1) return null;
 
   let roles: string[] = [String(userRow.PERFIL_USUARIOS || 'Policial')];
   if (userRow.ROLES_USUARIOS) {
@@ -263,30 +307,8 @@ export async function resolveWhatsappUserContext(
   };
 }
 
-function parseUserDate(granularity: 'DIA' | 'MES' | 'ANO', raw: string): { iso: string; display: string } | null {
+function parseMonthOrYear(granularity: 'MES' | 'ANO', raw: string): { iso: string; display: string } | null {
   const clean = String(raw || '').trim();
-  if (granularity === 'DIA') {
-    let m = clean.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
-    if (m) {
-      const dd = m[1].padStart(2, '0');
-      const mm = m[2].padStart(2, '0');
-      const yyyy = m[3];
-      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
-        return { iso: `${yyyy}-${mm}-${dd}`, display: `${dd}/${mm}/${yyyy}` };
-      }
-    }
-    m = clean.match(/^(\d{4})[\/\-](\d{1,2})[\/\-](\d{1,2})$/);
-    if (m) {
-      const yyyy = m[1];
-      const mm = m[2].padStart(2, '0');
-      const dd = m[3].padStart(2, '0');
-      if (Number(mm) >= 1 && Number(mm) <= 12 && Number(dd) >= 1 && Number(dd) <= 31) {
-        return { iso: `${yyyy}-${mm}-${dd}`, display: `${dd}/${mm}/${yyyy}` };
-      }
-    }
-    return null;
-  }
-
   if (granularity === 'MES') {
     let m = clean.match(/^(\d{1,2})[\/\-](\d{4})$/);
     if (m) {
@@ -341,8 +363,14 @@ async function saveSession(pool: any, phone: string, etapa: string, contexto: an
   );
 }
 
+function getSessionKey(phone: string): string {
+  const raw = String(phone || '').trim();
+  if (raw.startsWith('sim')) return raw.slice(0, 32);
+  return (stripBrazilPhone(raw) || normalizePhoneDigits(raw) || raw).slice(0, 32);
+}
+
 export async function resetBotSession(pool: any, phone: string): Promise<void> {
-  await saveSession(pool, phone, 'INICIO', {});
+  await saveSession(pool, getSessionKey(phone), 'INICIO', {});
 }
 
 export async function createTemporaryWhatsappSession(
@@ -353,14 +381,14 @@ export async function createTemporaryWhatsappSession(
     fromPhone: string;
   }
 ): Promise<{ sessionId: string; rawToken: string; expiresAt: Date }> {
-  const rawToken = crypto.randomBytes(24).toString('base64url');
+  const rawToken = crypto.randomBytes(24).toString('hex');
   const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
   const sessionId = `wpp-tmp-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-  const expiresAt = new Date(Date.now() + 30 * 60 * 1000); // 30 minutos
+  const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
 
   await pool.query(
     `INSERT INTO WHATSAPP_SESSOES_TEMPORARIAS (
-      ID_SESSAO, TOKEN_HASH, TIPO_FLUXO, USUARIO_ID, TELEFONE_CLIENTE, STATUS_SESSAO, EXPIRA_EM, DATA_CRIACAO
+      ID_SESSAO, TOKEN_HASH, TIPO_FLUXO, USUARIO_ID, TELEFONE_ORIGEM, STATUS_SESSAO, EXPIRA_EM, DATA_CRIACAO
     ) VALUES (?, ?, ?, ?, ?, 'ATIVA', DATE_ADD(NOW(), INTERVAL 30 MINUTE), NOW())`,
     [sessionId, tokenHash, params.tipoFluxo, params.userId, params.fromPhone]
   );
@@ -368,73 +396,154 @@ export async function createTemporaryWhatsappSession(
 }
 
 // ============================================================================
-// CONSTRUTORES DE MENUS INTERATIVOS
+// CONSTRUTORES DE MENUS INTERATIVOS — COEapp
 // ============================================================================
 function buildMainMenuReply(user?: ResolvedWhatsappUser | null): BotReplyItem {
-  const greeting = user?.name ? `Olá, *${user.name}*!` : 'Olá!';
+  const firstName = user?.name ? user.name.split(/\s+/)[0] : '';
+  const footer = user
+    ? truncateText(`Sessão ativa: ${firstName}${user.masp ? ` (MASP ${user.masp})` : ''}`, 60)
+    : 'Escolha uma opção abaixo';
+
   return {
     kind: 'buttons',
-    header: 'Central Operacional — PCMG',
-    body: `${greeting} Bem-vindo ao atendimento automático do sistema.\nSelecione abaixo uma das opções desejadas para prosseguir:`,
-    footer: 'Escolha uma opção nos botões abaixo',
+    header: 'Bem vindo(a) ao COEapp',
+    body: 'O que podemos fazer por você agora?',
+    footer,
     buttons: [
-      { id: 'MENU_OPERACOES', title: 'Operações' },
-      { id: 'MENU_TREINAMENTOS', title: 'Treinamentos' },
-      { id: 'MENU_ARMARIA', title: 'Armaria' }
+      { id: 'MENU_ARMARIA', title: 'Armaria' },
+      { id: 'MENU_RELATORIOS', title: 'Relatórios' },
+      { id: 'MENU_DESEMPENHO', title: 'Ficha de desempenho' }
     ]
   };
 }
 
-function buildModuloRelatoriosMenuReply(modulo: 'OP' | 'TR'): BotReplyItem {
-  const label = modulo === 'OP' ? 'Operações' : 'Treinamentos';
+function buildArmariaCategoriesReply(): BotReplyItem {
+  return {
+    kind: 'list',
+    header: 'Armaria — COEapp',
+    body: 'Escolha qual categoria da *Armaria* deseja consultar:',
+    footer: 'Armas, Munições, Explosivos ou Materiais',
+    listButtonText: 'Escolher Categoria',
+    listRows: [
+      { id: 'ARM_CAT::ARMAS', title: 'Armas', description: 'Minhas Cautelas, Cautelas da Unidade e Armas da Unidade' },
+      { id: 'ARM_CAT::MUNICOES', title: 'Munições', description: 'Minhas Cautelas, Cautelas da Unidade e Munições da Unidade' },
+      { id: 'ARM_CAT::EXPLOSIVOS', title: 'Explosivos', description: 'Minhas Cautelas, Cautelas da Unidade e Explosivos da Unidade' },
+      { id: 'ARM_CAT::MATERIAIS', title: 'Materiais', description: 'Minhas Cautelas, Cautelas da Unidade e Materiais da Unidade' },
+      { id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal do COEapp' }
+    ]
+  };
+}
+
+function buildArmariaCategoryActionsReply(categoria: ArmariaCategoria): BotReplyItem {
+  const meta = ARMARIA_CATEGORIA_META[categoria];
   return {
     kind: 'buttons',
-    header: `Relatórios de ${label}`,
+    header: `Armaria — ${meta.label}`,
     body:
-      `Escolha como deseja consultar e baixar os relatórios de *${label}* em PDF:\n\n` +
-      `• *Relatórios Por data* — filtrar por DIA/MÊS/ANO, MÊS/ANO ou ANO e escolher a unidade\n` +
-      `• *Relatório das últimas 24h* — baixar em PDF os relatórios de ${label.toLowerCase()} das últimas 24 horas`,
-    footer: 'Selecione uma das opções abaixo',
+      `Selecione o que deseja consultar em *${meta.label}*:\n\n` +
+      `• *Minhas Cautelas* — suas cautelas ativas (ou históricas por período)\n` +
+      `• *Cautelas da Unidade* — cautelas da(s) unidade(s) por mês/ano ou ano\n` +
+      `• *${meta.label} da Unidade* — inventário dos cofres por unidade ou geral`,
+    footer: 'Os documentos são enviados em PDF',
     buttons: [
-      { id: `MOD_POR_DATA::${modulo}`, title: 'Relatórios Por data' },
-      { id: `MOD_24H::${modulo}`, title: 'Relat. últimas 24h' },
+      { id: `ARM_ACT::${categoria}::MINHAS`, title: 'Minhas Cautelas' },
+      { id: `ARM_ACT::${categoria}::UNIDADE`, title: 'Cautelas da Unidade' },
+      { id: `ARM_ACT::${categoria}::COFRES`, title: truncateText(meta.unitButtonLabel, 20) }
+    ]
+  };
+}
+
+function buildRelatoriosMenuReply(): BotReplyItem {
+  return {
+    kind: 'buttons',
+    header: 'Relatórios — COEapp',
+    body: 'Qual tipo de relatório deseja gerar em PDF?',
+    footer: 'Operações ou Treinamento',
+    buttons: [
+      { id: 'REL_TIPO::OP', title: 'Operações' },
+      { id: 'REL_TIPO::TR', title: 'Treinamento' },
       { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
     ]
   };
 }
 
-function buildEscolherTipoDataReply(modulo: 'OP' | 'TR'): BotReplyItem {
-  const label = modulo === 'OP' ? 'Operações' : 'Treinamentos';
+function buildRelatoriosPeriodosReply(modulo: 'OP' | 'TR', unitLabel: string): BotReplyItem {
+  const modLabel = modulo === 'OP' ? 'Operações' : 'Treinamento';
   return {
-    kind: 'buttons',
-    header: `${label} — Por Data`,
-    body: `Como deseja filtrar os relatórios de *${label}*?\nSelecione abaixo se prefere por *DIA/MÊS/ANO*, *MÊS/ANO* ou *ANO*:`,
-    footer: 'Em seguida você escolherá a unidade permitida',
-    buttons: [
-      { id: `MOD_GRAN::${modulo}::DIA`, title: 'DIA/MÊS/ANO' },
-      { id: `MOD_GRAN::${modulo}::MES`, title: 'MÊS/ANO' },
-      { id: `MOD_GRAN::${modulo}::ANO`, title: 'ANO' }
+    kind: 'list',
+    header: truncateText(`${modLabel} — ${unitLabel}`, 60),
+    body:
+      `Unidade selecionada: *${unitLabel}*.\n` +
+      `Agora escolha o período do relatório de *${modLabel}* para receber o PDF:`,
+    footer: 'Selecione o período desejado',
+    listButtonText: 'Escolher Período',
+    listRows: [
+      { id: 'REL_PER::24H', title: 'Últimas 24h', description: 'Registros das últimas 24 horas' },
+      { id: 'REL_PER::SEMANA', title: 'Essa semana', description: 'De segunda-feira até hoje (limite até domingo)' },
+      { id: 'REL_PER::MES_ATUAL', title: 'Mês atual', description: 'Todos os registros do mês vigente' },
+      { id: 'REL_PER::ANO_ATUAL', title: 'Ano atual', description: 'Todos os registros do ano vigente' },
+      { id: 'REL_PER::MES_ANO', title: 'Escolher Mês e Ano', description: 'Informar mês e ano específicos (MM/AAAA)' },
+      { id: 'REL_PER::ANO', title: 'Escolher Ano', description: 'Informar apenas o ano específico (AAAA)' },
+      { id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal do COEapp' }
     ]
   };
 }
 
-function buildEscolherUnidadeReply(
-  permittedUnits: PermittedUnit[],
-  contextTitle: string,
-  actionPrefix: string,
-  includeTodas: boolean = true
-): BotReplyItem {
+function buildDesempenhoMenuReply(): BotReplyItem {
+  return {
+    kind: 'buttons',
+    header: 'Ficha de Desempenho — COEapp',
+    body:
+      'Escolha a ficha de desempenho que deseja receber em PDF:\n\n' +
+      '• *Minha ficha* — sua ficha completa (Física e Tática)\n' +
+      '• *Desempenho por unidade* — gráfico da unidade na 1ª folha + 1 ficha por folha',
+    footer: 'Selecione uma das opções abaixo',
+    buttons: [
+      { id: 'DESEMP_MINHA', title: 'Minha ficha' },
+      { id: 'DESEMP_UNIDADE', title: 'Desempenho unidade' },
+      { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+    ]
+  };
+}
+
+function buildDesempenhoCategoriaReply(): BotReplyItem {
+  return {
+    kind: 'buttons',
+    header: 'Desempenho por Unidade',
+    body: 'Deseja emitir o PDF consolidado de *Desempenho Físico* ou *Desempenho Tático*?',
+    footer: 'Em seguida você escolherá a unidade',
+    buttons: [
+      { id: 'DESEMP_CAT::FISICO', title: 'Desempenho Físico' },
+      { id: 'DESEMP_CAT::TATICO', title: 'Desempenho Tático' },
+      { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+    ]
+  };
+}
+
+function buildEscolherUnidadeListReply(params: {
+  permittedUnits: PermittedUnit[];
+  header: string;
+  body: string;
+  actionPrefix: string;
+  allOptionTitle?: string;
+  allOptionDesc?: string;
+  includeAllIfMultiple?: boolean;
+}): BotReplyItem {
   const rows: BotListRow[] = [];
-  if (includeTodas && permittedUnits.length > 1) {
+  const allowAll = (params.includeAllIfMultiple ?? true) && params.permittedUnits.length > 1;
+  if (allowAll) {
     rows.push({
-      id: `${actionPrefix}::TODAS`,
-      title: 'TODAS',
-      description: `Consultar todas as ${permittedUnits.length} unidades que você possui permissão`
+      id: `${params.actionPrefix}::TODAS`,
+      title: truncateText(params.allOptionTitle || 'Todas as Unidades', 24),
+      description: truncateText(
+        params.allOptionDesc || `Incluir todas as ${params.permittedUnits.length} unidades do seu acesso`,
+        72
+      )
     });
   }
-  permittedUnits.slice(0, 8).forEach(u => {
+  params.permittedUnits.slice(0, 8).forEach(u => {
     rows.push({
-      id: `${actionPrefix}::${u.id}`,
+      id: `${params.actionPrefix}::${u.id}`,
       title: truncateText(u.shortName, 24),
       description: truncateText(u.name, 72)
     });
@@ -442,77 +551,16 @@ function buildEscolherUnidadeReply(
   rows.push({
     id: 'VOLTAR_MENU',
     title: 'Voltar ao Menu',
-    description: 'Retornar ao menu principal'
+    description: 'Retornar ao menu principal do COEapp'
   });
 
-  // Se houver até 2 opções de unidade (+ TODAS se >1 -> no max 3 botões), pode usar lista interativa limpa
-  const unitNamesList = permittedUnits.map(u => `*${u.shortName}*`).join(', ');
   return {
     kind: 'list',
-    header: contextTitle,
-    body:
-      `Qual unidade deseja consultar?\n\n` +
-      `Unidades disponíveis no seu perfil: ${unitNamesList}${
-        includeTodas && permittedUnits.length > 1 ? ' ou *TODAS*' : ''
-      }.`,
-    footer: 'Exibindo apenas unidades autorizadas ao seu perfil',
+    header: truncateText(params.header, 60),
+    body: params.body,
+    footer: 'Exibindo apenas unidades permitidas ao seu perfil',
     listButtonText: 'Escolher Unidade',
     listRows: rows
-  };
-}
-
-function buildArmariaMenuReply(): BotReplyItem {
-  return {
-    kind: 'list',
-    header: 'Módulo Armaria — PCMG',
-    body:
-      'Selecione o serviço desejado na *Armaria*:\n\n' +
-      '• *Solicitar Cautelas* — abrir sessão temporária para cautelar armas, munições ou materiais\n' +
-      '• *Devolver Cautelas* — abrir sessão temporária para devolução\n' +
-      '• *Recibos* — baixar recibos em PDF (Armas, Munições e Materiais separados)\n' +
-      '• *Relatórios* — emitir relatório de cautelas por unidade e período em PDF',
-    footer: 'Toque abaixo para escolher uma opção',
-    listButtonText: 'Opções Armaria',
-    listRows: [
-      { id: 'ARM_SOLICITAR', title: 'Solicitar Cautelas', description: 'Abrir página temporária de cautela (armas/munições/materiais)' },
-      { id: 'ARM_DEVOLVER', title: 'Devolver Cautelas', description: 'Abrir página temporária de devolução de cautelas' },
-      { id: 'ARM_RECIBOS', title: 'Recibos', description: 'Emitir recibos em PDF (Armas, Munições e Materiais)' },
-      { id: 'ARM_RELATORIOS', title: 'Relatórios', description: 'Relatório de cautelas por unidade (24h, semana, mês, ano)' },
-      { id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Voltar para Operações, Treinamentos, Armaria' }
-    ]
-  };
-}
-
-function buildRecibosCategoriaReply(targetUserName: string, unitLabel?: string): BotReplyItem {
-  return {
-    kind: 'buttons',
-    header: 'Recibos — Selecionar Tipo',
-    body: `Escolha qual categoria de recibo deseja consultar para *${targetUserName}*${
-      unitLabel ? ` (${unitLabel})` : ''
-    }:`,
-    footer: 'Armas, Munições e Materiais são listados separadamente',
-    buttons: [
-      { id: 'ARM_REC_TIPO::ARMAS', title: 'Armas' },
-      { id: 'ARM_REC_TIPO::MUNICOES', title: 'Munições' },
-      { id: 'ARM_REC_TIPO::MATERIAIS', title: 'Materiais' }
-    ]
-  };
-}
-
-function buildArmariaPeriodoReply(unitLabel: string): BotReplyItem {
-  return {
-    kind: 'list',
-    header: `Relatório Armaria — ${truncateText(unitLabel, 24)}`,
-    body: `Selecione o período desejado para gerar o relatório consolidado de cautelas (*${unitLabel}*) em PDF:`,
-    footer: 'Armas, Munições e Materiais consolidados no PDF',
-    listButtonText: 'Escolher Período',
-    listRows: [
-      { id: 'ARM_REL_PER::24H', title: 'Últimas 24h', description: 'Cautelas registradas nas últimas 24 horas' },
-      { id: 'ARM_REL_PER::SEMANA', title: 'Última semana', description: 'Cautelas registradas nos últimos 7 dias' },
-      { id: 'ARM_REL_PER::MES_ATUAL', title: 'Mês atual', description: 'Cautelas registradas no mês corrente' },
-      { id: 'ARM_REL_PER::ANO_ATUAL', title: 'Ano atual', description: 'Cautelas registradas no ano corrente' },
-      { id: 'MENU_ARMARIA', title: 'Voltar p/ Armaria', description: 'Retornar ao menu da Armaria' }
-    ]
   };
 }
 
@@ -612,7 +660,7 @@ export async function sendDirectWhatsappText(
       TIPO_MENSAGEM, EVENTO_SISTEMA, CONTEUDO_RESUMO, META_MESSAGE_ID,
       STATUS_ENTREGA, ERRO_CODIGO, ERRO_MENSAGEM, PAYLOAD_REQUISICAO_JSON,
       PAYLOAD_RESPOSTA_JSON, ENVIADO_POR_NOME, DATA_CRIACAO
-    ) VALUES (?, 'SAIDA', ?, ?, 'text', ?, ?, ?, ?, ?, ?, ?, ?, 'Bot WhatsApp PCMG', NOW())`,
+    ) VALUES (?, 'SAIDA', ?, ?, 'text', ?, ?, ?, ?, ?, ?, ?, ?, 'Bot WhatsApp COEapp', NOW())`,
     [
       msgId,
       cleanTo,
@@ -707,7 +755,7 @@ async function dispatchBotRepliesToMeta(
         type: 'text',
         text: { preview_url: true, body: truncateText(bodyWithUrl, 4096) }
       };
-      resumo = `[Sessão Temporária] ${item.header || item.actionLabel || 'Link'}`;
+      resumo = `[Link] ${item.header || item.actionLabel || 'Link'}`;
     } else if (item.kind === 'document' && item.documentBuffer && item.documentFilename) {
       tipoMsg = 'document';
       const upload = await uploadPdfToMetaMedia(
@@ -792,7 +840,7 @@ async function dispatchBotRepliesToMeta(
         TIPO_MENSAGEM, EVENTO_SISTEMA, CONTEUDO_RESUMO, META_MESSAGE_ID,
         STATUS_ENTREGA, ERRO_CODIGO, ERRO_MENSAGEM, PAYLOAD_REQUISICAO_JSON,
         PAYLOAD_RESPOSTA_JSON, ENVIADO_POR_NOME, DATA_CRIACAO
-      ) VALUES (?, 'SAIDA', ?, ?, ?, 'ATENDIMENTO_BOT_INTERATIVO', ?, ?, ?, ?, ?, ?, ?, 'Bot WhatsApp PCMG', NOW())`,
+      ) VALUES (?, 'SAIDA', ?, ?, ?, 'ATENDIMENTO_BOT_INTERATIVO', ?, ?, ?, ?, ?, ?, ?, 'Bot WhatsApp COEapp', NOW())`,
       [
         msgId,
         toPhone,
@@ -811,45 +859,53 @@ async function dispatchBotRepliesToMeta(
 }
 
 // ============================================================================
-// MOTOR PRINCIPAL DA MÁQUINA DE ESTADOS DO BOT INTERATIVO
+// MOTOR PRINCIPAL DA MÁQUINA DE ESTADOS — COEapp
 // ============================================================================
 export async function processWhatsappBotInteraction(
   pool: any,
   cfgRow: any,
   input: BotInputMessage,
   options: BotProcessOptions
-): Promise<{ etapaAtual: string; replies: BotReplyItem[]; resolvedUser?: { id: string; name: string; role: string; unitsCount: number } | null }> {
-  const phone = normalizePhoneDigits(input.fromPhone);
+): Promise<{
+  etapaAtual: string;
+  replies: BotReplyItem[];
+  resolvedUser?: { id: string; name: string; role: string; unitsCount: number } | null;
+}> {
+  const rawPhoneDigits = normalizePhoneDigits(input.fromPhone);
+  const sessionKeyPhone = getSessionKey(input.fromPhone);
   const actionId = String(input.buttonId || input.listRowId || '').trim();
   const rawText = String(input.text || input.buttonTitle || input.listRowTitle || '').trim();
   const normText = normalizeText(rawText);
 
-  const resolvedUser = await resolveWhatsappUserContext(pool, phone, options.forcedUserId);
-  const session = await getSession(pool, phone);
+  const resolvedUser = await resolveWhatsappUserContext(pool, input.fromPhone, options.forcedUserId);
+  const session = await getSession(pool, sessionKeyPhone);
   let nextEtapa = session.etapa;
-  let nextContexto = { ...(session.contexto || {}) };
+  let nextContexto: any = {
+    ...(session.contexto || {}),
+    ...(resolvedUser ? { userId: resolvedUser.id, userName: resolvedUser.name, userMasp: resolvedUser.masp } : {})
+  };
   const replies: BotReplyItem[] = [];
 
   const permittedUnits = resolvedUser?.permittedUnits || [];
   const allPermittedUnitIds = permittedUnits.map(u => u.id);
 
-  const ensureAuthenticatedUser = (): boolean => {
+  const ensureAuthenticatedUser = (requireUnits = true): boolean => {
     if (!resolvedUser) {
       replies.push({
         kind: 'text',
-        header: 'Número Não Vinculado',
+        header: 'Bem vindo(a) ao COEapp',
         body:
-          'Seu número de WhatsApp não foi localizado no cadastro de policiais do sistema.\n' +
-          'Solicite ao Administrador que cadastre seu telefone no seu perfil de usuário para liberar acesso às suas unidades e relatórios.'
+          'Seu número de WhatsApp não foi localizado em nenhum usuário ativo do COEapp.\n' +
+          'Verifique com o Administrador se o seu telefone está cadastrado corretamente no seu perfil.'
       });
       nextEtapa = 'INICIO';
       return false;
     }
-    if (permittedUnits.length === 0) {
+    if (requireUnits && permittedUnits.length === 0) {
       replies.push({
         kind: 'buttons',
         header: 'Sem Unidade Vinculada',
-        body: `Olá, ${resolvedUser.name}. Seu usuário não possui unidade vinculada para consulta de relatórios ou cautelas.`,
+        body: `Olá, ${resolvedUser.name}. Seu perfil não possui unidade vinculada para esta consulta.`,
         buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
       });
       nextEtapa = 'MENU_PRINCIPAL';
@@ -858,14 +914,12 @@ export async function processWhatsappBotInteraction(
     return true;
   };
 
-  const resolveSelectedUnitScope = (
-    choice: string
-  ): { unitIds: string[]; unitLabel: string } | null => {
+  const resolveSelectedUnitScope = (choice: string): { unitIds: string[]; unitLabel: string } | null => {
     if (choice === 'TODAS') {
       if (permittedUnits.length === 0) return null;
       return {
         unitIds: allPermittedUnitIds,
-        unitLabel: permittedUnits.length > 1 ? 'TODAS AS UNIDADES PERMITIDAS' : permittedUnits[0].shortName
+        unitLabel: permittedUnits.length > 1 ? 'Todas as Unidades' : permittedUnits[0].shortName
       };
     }
     const found = permittedUnits.find(u => u.id === choice);
@@ -873,49 +927,46 @@ export async function processWhatsappBotInteraction(
     return { unitIds: [found.id], unitLabel: found.shortName };
   };
 
-  const buildPublicBaseUrl = (): string => {
-    const cfgBase = String(cfgRow?.CALLBACK_URL_PUBLICA || '').trim().replace(/\/+$/, '');
-    if (cfgBase) return cfgBase;
-    return String(options.publicBaseUrl || '').trim().replace(/\/+$/, '');
-  };
+  const isGreetingOrMenuReset =
+    actionId === 'VOLTAR_MENU' ||
+    ['oi', 'ola', 'bom dia', 'boa tarde', 'boa noite', 'menu', 'inicio', 'comecar', 'ajuda', '0'].includes(normText);
 
-  // --- Helpers de Relatórios de Operações & Treinamentos ---
-  const showDateOptionsForModulo = async (modulo: 'OP' | 'TR', granularity: 'DIA' | 'MES' | 'ANO') => {
-    const available =
-      modulo === 'OP'
-        ? await listAvailableOperationDates(pool, granularity, allPermittedUnitIds)
-        : await listAvailableTrainingDates(pool, granularity, allPermittedUnitIds);
+  // --- Helpers internos de emissão de PDFs ---
+  const showArmariaPeriodPicker = async (params: {
+    mode: 'MINHAS_ANTIGAS' | 'UNIDADE_CAUTELAS';
+    categoria: ArmariaCategoria;
+    granularity: 'MES' | 'ANO';
+  }) => {
+    const meta = ARMARIA_CATEGORIA_META[params.categoria];
+    const available = await listAvailableCautelaPeriods(pool, params.categoria, {
+      targetUser: params.mode === 'MINHAS_ANTIGAS' && resolvedUser ? resolvedUser : undefined,
+      unitIds: params.mode === 'UNIDADE_CAUTELAS' ? allPermittedUnitIds : undefined,
+      granularity: params.granularity
+    });
+    const formato = params.granularity === 'MES' ? 'MM/AAAA (ex: 11/2026)' : 'AAAA (ex: 2026)';
+    const granLabel = params.granularity === 'MES' ? 'Mês e Ano' : 'Ano';
 
-    const formatoExemplo =
-      granularity === 'DIA'
-        ? 'DD/MM/AAAA (ex: 24/11/2026)'
-        : granularity === 'MES'
-        ? 'MM/AAAA (ex: 11/2026)'
-        : 'AAAA (ex: 2026)';
-    const labelGran = granularity === 'DIA' ? 'DIA/MÊS/ANO' : granularity === 'MES' ? 'MÊS/ANO' : 'ANO';
-    const labelMod = modulo === 'OP' ? 'Operações' : 'Treinamentos';
-
-    nextEtapa = 'AGUARDANDO_VALOR_DATA';
-    nextContexto = { modulo, granularity };
+    nextEtapa = 'ARM_AGUARDANDO_PERIODO';
+    nextContexto = {
+      ...nextContexto,
+      armPeriodMode: params.mode,
+      armCategoria: params.categoria,
+      armGranularity: params.granularity
+    };
 
     if (available.length > 0) {
       const rows: BotListRow[] = available.map(opt => ({
-        id: `MOD_DATEVAL::${modulo}::${granularity}::${opt.value}`,
+        id: `ARM_PER_VAL::${params.mode}::${params.categoria}::${params.granularity}::${opt.value}`,
         title: truncateText(opt.label, 24),
-        description: `${opt.count} relatório(s) de ${labelMod.toLowerCase()} disponível(is)`
+        description: `${opt.count} registro(s) de ${meta.label.toLowerCase()} encontrado(s)`
       }));
-      rows.push({
-        id: 'VOLTAR_MENU',
-        title: 'Voltar ao Menu',
-        description: 'Retornar ao menu principal'
-      });
-
+      rows.push({ id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal' });
       replies.push({
         kind: 'list',
-        header: `${labelMod} — ${labelGran}`,
-        body: `Selecione uma opção abaixo ou digite diretamente no formato *${formatoExemplo}*.\nNa etapa seguinte você escolherá a unidade:`,
-        footer: 'Selecione ou digite a data desejada',
-        listButtonText: `Escolher ${labelGran}`,
+        header: `${meta.label} — ${granLabel}`,
+        body: `Selecione um período disponível abaixo ou digite no formato *${formato}*:`,
+        footer: 'Selecione da lista ou digite o período',
+        listButtonText: `Escolher ${granLabel}`,
         listRows: rows
       });
       return;
@@ -923,133 +974,130 @@ export async function processWhatsappBotInteraction(
 
     replies.push({
       kind: 'buttons',
-      header: `${labelMod} — ${labelGran}`,
-      body: `Digite a data desejada no formato *${formatoExemplo}* para consultar os relatórios de *${labelMod}*:`,
-      footer: 'Na próxima etapa você escolherá a unidade',
+      header: `${meta.label} — ${granLabel}`,
+      body: `Digite o período desejado no formato *${formato}* para consultar *${meta.label}*:`,
+      footer: 'Ou clique abaixo para voltar',
       buttons: [
-        { id: `MOD_POR_DATA::${modulo}`, title: 'Trocar Filtro' },
+        { id: `ARM_CAT::${params.categoria}`, title: 'Voltar Categoria' },
         { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
       ]
     });
   };
 
-  const askUnitBeforeReport = (params: {
-    modulo: 'OP' | 'TR';
-    mode: 'POR_DATA' | 'ULTIMAS_24H';
-    granularity?: 'DIA' | 'MES' | 'ANO';
-    isoFilter?: string;
-    displayFilter?: string;
-  }) => {
-    const labelMod = params.modulo === 'OP' ? 'Operações' : 'Treinamentos';
-    const sub = params.mode === 'ULTIMAS_24H' ? 'Últimas 24h' : params.displayFilter || 'Por Data';
-    nextEtapa = 'ESCOLHER_UNIDADE_RELATORIO';
-    nextContexto = { ...params };
-    replies.push(
-      buildEscolherUnidadeReply(
-        permittedUnits,
-        `${labelMod} (${sub}) — Qual unidade?`,
-        'REL_UNIT',
-        true
-      )
+  const emitMyCautelasPdf = async (
+    categoria: ArmariaCategoria,
+    opts: { onlyActive: boolean; granularity?: 'MES' | 'ANO'; isoFilter?: string; displayFilter?: string }
+  ) => {
+    if (!resolvedUser) return;
+    const meta = ARMARIA_CATEGORIA_META[categoria];
+    const items = await findUserCautelasByCategory(pool, categoria, resolvedUser, {
+      onlyActive: opts.onlyActive,
+      granularity: opts.granularity,
+      isoFilter: opts.isoFilter
+    });
+
+    if (opts.onlyActive && items.length === 0) {
+      nextEtapa = 'ARM_CONFIRM_ANTIGAS';
+      nextContexto = { ...nextContexto, armCategoria: categoria };
+      replies.push({
+        kind: 'buttons',
+        header: `Minhas Cautelas — ${meta.label}`,
+        body: 'Você não tem cautela ativa no sistema, deseja ver cautelas antigas?',
+        footer: 'Escolha Sim para consultar por mês/ano ou ano',
+        buttons: [
+          { id: `ARM_OLD_SIM::${categoria}`, title: 'Sim' },
+          { id: 'VOLTAR_MENU', title: 'Não' }
+        ]
+      });
+      return;
+    }
+
+    if (items.length === 0) {
+      replies.push({
+        kind: 'buttons',
+        header: `Minhas Cautelas — ${meta.label}`,
+        body: `Nenhuma cautela de *${meta.label}* foi encontrada para você no período *${opts.displayFilter || 'informado'}*.`,
+        buttons: [
+          { id: `ARM_OLD_SIM::${categoria}`, title: 'Outro Período' },
+          { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+        ]
+      });
+      nextEtapa = 'MENU_PRINCIPAL';
+      return;
+    }
+
+    const periodText = opts.onlyActive ? 'Cautelas Ativas' : `Período ${opts.displayFilter || opts.isoFilter || ''}`;
+    const { buffer, filename } = await generateCategoryCautelasPdf(
+      categoria,
+      items,
+      `MINHAS CAUTELAS DE ${meta.label.toUpperCase()} — ${opts.onlyActive ? 'ATIVAS' : 'HISTORICO'}`,
+      `${resolvedUser.name} (MASP ${resolvedUser.masp || '—'}) • ${periodText} • ${items.length} registro(s)`,
+      `Minhas_${opts.onlyActive ? 'Ativas' : opts.isoFilter || 'Hist'}`
     );
+
+    const token = createSignedPdfToken(
+      {
+        scope: 'arm_my_cautelas',
+        categoria,
+        onlyActive: opts.onlyActive,
+        granularity: opts.granularity,
+        isoFilter: opts.isoFilter,
+        userId: resolvedUser.id,
+        userName: resolvedUser.name,
+        userMasp: resolvedUser.masp
+      },
+      options.signingKey
+    );
+
+    const caption = `Minhas Cautelas (${meta.label}) • ${periodText} • ${items.length} registro(s)`;
+    replies.push({
+      kind: 'document',
+      header: `PDF — Minhas Cautelas (${meta.label})`,
+      body: caption,
+      documentFilename: filename,
+      documentCaption: caption,
+      documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+      documentBuffer: buffer
+    });
+    replies.push({
+      kind: 'buttons',
+      body: 'PDF enviado! Deseja fazer outra consulta?',
+      buttons: [
+        { id: `ARM_CAT::${categoria}`, title: meta.label },
+        { id: 'MENU_ARMARIA', title: 'Armaria' },
+        { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+      ]
+    });
+    nextEtapa = 'MENU_PRINCIPAL';
   };
 
-  const emitReportsAfterUnitChoice = async (unitChoice: string) => {
+  const emitUnitCautelasPdf = async (
+    categoria: ArmariaCategoria,
+    granularity: 'MES' | 'ANO',
+    isoFilter: string,
+    displayFilter: string,
+    unitChoice: string
+  ) => {
     const scope = resolveSelectedUnitScope(unitChoice);
     if (!scope) {
       replies.push({
         kind: 'buttons',
         header: 'Unidade não autorizada',
-        body: 'Você não possui permissão para consultar esta unidade. Escolha apenas uma unidade listada no seu perfil.',
+        body: 'Você não possui permissão para consultar esta unidade.',
         buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
       });
       nextEtapa = 'MENU_PRINCIPAL';
       return;
     }
-
-    const modulo: 'OP' | 'TR' = nextContexto.modulo === 'TR' ? 'TR' : 'OP';
-    const mode: 'POR_DATA' | 'ULTIMAS_24H' = nextContexto.mode === 'ULTIMAS_24H' ? 'ULTIMAS_24H' : 'POR_DATA';
-    const labelMod = modulo === 'OP' ? 'Operações' : 'Treinamentos';
-
-    // CASO 1: ÚLTIMAS 24H -> GERA E BAIXA PDF IMEDIATAMENTE
-    if (mode === 'ULTIMAS_24H') {
-      if (modulo === 'OP') {
-        const reports = await findOperationReportsLast24h(pool, scope.unitIds);
-        if (reports.length === 0) {
-          replies.push({
-            kind: 'buttons',
-            header: `Operações 24h — ${scope.unitLabel}`,
-            body: `Nenhum relatório de operações foi encontrado nas últimas 24h para *${scope.unitLabel}*.`,
-            buttons: [
-              { id: 'MOD_POR_DATA::OP', title: 'Relatórios Por data' },
-              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-            ]
-          });
-          nextEtapa = 'MENU_PRINCIPAL';
-          return;
-        }
-        const todayIso = new Date().toISOString().slice(0, 10);
-        const { buffer, filename } = await generateMultipleOperationsPdf(
-          reports,
-          `RELATORIOS DE OPERACOES (24H) — ${scope.unitLabel}`,
-          `24h_${scope.unitLabel}_${todayIso}`
-        );
-        const token = createSignedPdfToken(
-          { scope: 'op_last24h', unitIds: scope.unitIds, unitLabel: scope.unitLabel },
-          options.signingKey
-        );
-        const caption = `Relatórios de Operações (Últimas 24h) • Unidade: ${scope.unitLabel} • ${reports.length} registro(s)`;
-        replies.push({
-          kind: 'document',
-          header: 'PDF — Operações (Últimas 24h)',
-          body: caption,
-          documentFilename: filename,
-          documentCaption: caption,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-      } else {
-        const reports = await findTrainingReportsLast24h(pool, scope.unitIds);
-        if (reports.length === 0) {
-          replies.push({
-            kind: 'buttons',
-            header: `Treinamentos 24h — ${scope.unitLabel}`,
-            body: `Nenhum relatório de treinamento foi encontrado nas últimas 24h para *${scope.unitLabel}*.`,
-            buttons: [
-              { id: 'MOD_POR_DATA::TR', title: 'Relatórios Por data' },
-              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-            ]
-          });
-          nextEtapa = 'MENU_PRINCIPAL';
-          return;
-        }
-        const todayIso = new Date().toISOString().slice(0, 10);
-        const { buffer, filename } = await generateMultipleTrainingsPdf(
-          reports,
-          `RELATORIOS DE TREINAMENTOS (24H) — ${scope.unitLabel}`,
-          `24h_${scope.unitLabel}_${todayIso}`
-        );
-        const token = createSignedPdfToken(
-          { scope: 'tr_last24h', unitIds: scope.unitIds, unitLabel: scope.unitLabel },
-          options.signingKey
-        );
-        const caption = `Relatórios de Treinamentos (Últimas 24h) • Unidade: ${scope.unitLabel} • ${reports.length} registro(s)`;
-        replies.push({
-          kind: 'document',
-          header: 'PDF — Treinamentos (Últimas 24h)',
-          body: caption,
-          documentFilename: filename,
-          documentCaption: caption,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-      }
-
+    const meta = ARMARIA_CATEGORIA_META[categoria];
+    const items = await findUnitCautelasByCategoryAndPeriod(pool, categoria, granularity, isoFilter, scope.unitIds);
+    if (items.length === 0) {
       replies.push({
         kind: 'buttons',
-        body: `PDF enviado! Deseja realizar outra consulta em ${labelMod} ou voltar ao menu principal?`,
+        header: `Cautelas de ${meta.label}`,
+        body: `Nenhuma cautela de *${meta.label}* foi encontrada para *${scope.unitLabel}* no período *${displayFilter}*.`,
         buttons: [
-          { id: `MOD_POR_DATA::${modulo}`, title: 'Outra Data' },
+          { id: `ARM_ACT::${categoria}::UNIDADE`, title: 'Outro Período' },
           { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
         ]
       });
@@ -1057,21 +1105,146 @@ export async function processWhatsappBotInteraction(
       return;
     }
 
-    // CASO 2: POR DATA -> LISTA OS RELATÓRIOS DA UNIDADE ESCOLHIDA PARA BAIXAR EM PDF
-    const gran: 'DIA' | 'MES' | 'ANO' =
-      nextContexto.granularity === 'MES' || nextContexto.granularity === 'ANO' ? nextContexto.granularity : 'DIA';
-    const isoFilter = String(nextContexto.isoFilter || '');
-    const displayFilter = String(nextContexto.displayFilter || isoFilter);
+    const { buffer, filename } = await generateCategoryCautelasPdf(
+      categoria,
+      items,
+      `CAUTELAS DE ${meta.label.toUpperCase()} — ${scope.unitLabel.toUpperCase()}`,
+      `Período: ${displayFilter} • ${items.length} registro(s)`,
+      `Unidade_${scope.unitLabel}_${isoFilter}`
+    );
+    const token = createSignedPdfToken(
+      {
+        scope: 'arm_unit_cautelas',
+        categoria,
+        granularity,
+        isoFilter,
+        unitIds: scope.unitIds,
+        unitLabel: scope.unitLabel
+      },
+      options.signingKey
+    );
+    const caption = `Cautelas de ${meta.label} • ${scope.unitLabel} • Período: ${displayFilter} • ${items.length} registro(s)`;
+    replies.push({
+      kind: 'document',
+      header: `PDF — Cautelas de ${meta.label}`,
+      body: caption,
+      documentFilename: filename,
+      documentCaption: caption,
+      documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+      documentBuffer: buffer
+    });
+    replies.push({
+      kind: 'buttons',
+      body: 'PDF enviado! O que deseja fazer agora?',
+      buttons: [
+        { id: `ARM_CAT::${categoria}`, title: meta.label },
+        { id: 'MENU_ARMARIA', title: 'Armaria' },
+        { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+      ]
+    });
+    nextEtapa = 'MENU_PRINCIPAL';
+  };
 
+  const emitUnitVaultsPdf = async (categoria: ArmariaCategoria, unitChoice: string) => {
+    const scope = resolveSelectedUnitScope(unitChoice);
+    if (!scope) {
+      replies.push({
+        kind: 'buttons',
+        header: 'Unidade não autorizada',
+        body: 'Você não possui permissão para consultar esta unidade.',
+        buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
+      });
+      nextEtapa = 'MENU_PRINCIPAL';
+      return;
+    }
+    const meta = ARMARIA_CATEGORIA_META[categoria];
+    const { groups, totalRecords } = await findVaultInventoryByCategory(pool, categoria, scope.unitIds);
+    if (totalRecords === 0) {
+      replies.push({
+        kind: 'buttons',
+        header: `${meta.label} da Unidade`,
+        body: `Nenhum registro de *${meta.label}* encontrado nos cofres de *${scope.unitLabel}*.`,
+        buttons: [
+          { id: `ARM_CAT::${categoria}`, title: meta.label },
+          { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+        ]
+      });
+      nextEtapa = 'MENU_PRINCIPAL';
+      return;
+    }
+
+    const { buffer, filename } = await generateUnitVaultInventoryPdf(
+      categoria,
+      groups,
+      totalRecords,
+      scope.unitLabel,
+      scope.unitLabel
+    );
+    const token = createSignedPdfToken(
+      {
+        scope: 'arm_unit_vaults',
+        categoria,
+        unitIds: scope.unitIds,
+        unitLabel: scope.unitLabel
+      },
+      options.signingKey
+    );
+    const caption = `Inventário de ${meta.label} por Cofres • ${scope.unitLabel} • ${totalRecords} registro(s)`;
+    replies.push({
+      kind: 'document',
+      header: `PDF — ${meta.label} por Cofres`,
+      body: caption,
+      documentFilename: filename,
+      documentCaption: caption,
+      documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+      documentBuffer: buffer
+    });
+    replies.push({
+      kind: 'buttons',
+      body: 'Inventário dos cofres enviado em PDF! Deseja outra consulta?',
+      buttons: [
+        { id: `ARM_CAT::${categoria}`, title: meta.label },
+        { id: 'MENU_ARMARIA', title: 'Armaria' },
+        { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+      ]
+    });
+    nextEtapa = 'MENU_PRINCIPAL';
+  };
+
+  const emitRelatorioPeriodPdf = async (
+    modulo: 'OP' | 'TR',
+    periodo: RelatorioPeriodoTipo,
+    unitIds: string[],
+    unitLabel: string,
+    isoFilter?: string
+  ) => {
+    const safeUnitIds = unitIds.filter(id => allPermittedUnitIds.includes(id));
+    if (safeUnitIds.length === 0) {
+      replies.push({
+        kind: 'buttons',
+        header: 'Unidade não autorizada',
+        body: 'Você não possui permissão para consultar esta unidade.',
+        buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
+      });
+      nextEtapa = 'MENU_PRINCIPAL';
+      return;
+    }
+
+    const modLabel = modulo === 'OP' ? 'Operações' : 'Treinamento';
     if (modulo === 'OP') {
-      const reports = await findOperationReportsByDate(pool, gran, isoFilter, scope.unitIds);
+      const { reports, periodLabel, periodSlug } = await findOperationReportsByPeriod(
+        pool,
+        periodo,
+        safeUnitIds,
+        isoFilter
+      );
       if (reports.length === 0) {
         replies.push({
           kind: 'buttons',
-          header: `Sem Operações — ${scope.unitLabel}`,
-          body: `Nenhum relatório de operações encontrado para *${displayFilter}* na unidade *${scope.unitLabel}*.`,
+          header: `Relatório de ${modLabel}`,
+          body: `Nenhum relatório de *${modLabel}* encontrado para *${unitLabel}* no período *${periodLabel}*.`,
           buttons: [
-            { id: 'MOD_POR_DATA::OP', title: 'Outra Data' },
+            { id: 'REL_TIPO::OP', title: 'Outro Período' },
             { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
           ]
         });
@@ -1079,51 +1252,45 @@ export async function processWhatsappBotInteraction(
         return;
       }
 
-      const rows: BotListRow[] = [];
-      if (reports.length > 1) {
-        rows.push({
-          id: 'MOD_PDF_ALL',
-          title: truncateText(`Baixar Todos (${reports.length} PDF)`, 24),
-          description: truncateText(`PDF consolidado — ${scope.unitLabel} (${displayFilter})`, 72)
-        });
-      }
-      const maxInd = reports.length > 1 ? 8 : 9;
-      reports.slice(0, maxInd).forEach((r: UnifiedOperationReport, idx: number) => {
-        rows.push({
-          id: `MOD_PDF_ONE::OP::${r.origem}::${r.id}`,
-          title: truncateText(`${idx + 1}. ${formatIsoDateBr(r.dataOperacao).slice(0, 5)} ${r.municipio}`, 24),
-          description: truncateText(`${r.unidadeNome} • ${r.horaOperacao} • ${r.criadorNome}`, 72)
-        });
-      });
-      rows.push({ id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal' });
-
-      nextEtapa = 'SELECIONAR_RELATORIO_PDF';
-      nextContexto = {
-        modulo: 'OP',
-        granularity: gran,
-        isoFilter,
-        displayFilter,
-        unitIds: scope.unitIds,
-        unitLabel: scope.unitLabel,
-        items: reports.slice(0, maxInd).map(r => ({ origem: r.origem, id: r.id }))
-      };
+      const { buffer, filename } = await generateMultipleOperationsPdf(
+        reports,
+        `RELATORIO DE OPERACOES — ${periodLabel.toUpperCase()} (${unitLabel})`,
+        `${unitLabel}_${periodSlug}`
+      );
+      const token = createSignedPdfToken(
+        {
+          scope: 'op_rel_period',
+          relPeriodo: periodo,
+          isoFilter,
+          unitIds: safeUnitIds,
+          unitLabel
+        },
+        options.signingKey
+      );
+      const caption = `Relatório de Operações • ${unitLabel} • ${periodLabel} • ${reports.length} registro(s)`;
       replies.push({
-        kind: 'list',
-        header: `Operações • ${scope.unitLabel}`,
-        body: `Encontramos *${reports.length}* relatório(s) de operações em *${displayFilter}* (${scope.unitLabel}). Selecione qual deseja baixar em *PDF*:`,
-        footer: 'Selecione na lista ou digite o número',
-        listButtonText: 'Selecionar PDF',
-        listRows: rows
+        kind: 'document',
+        header: `PDF — Relatório de Operações`,
+        body: caption,
+        documentFilename: filename,
+        documentCaption: caption,
+        documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+        documentBuffer: buffer
       });
     } else {
-      const reports = await findTrainingReportsByDate(pool, gran, isoFilter, scope.unitIds);
+      const { reports, periodLabel, periodSlug } = await findTrainingReportsByPeriod(
+        pool,
+        periodo,
+        safeUnitIds,
+        isoFilter
+      );
       if (reports.length === 0) {
         replies.push({
           kind: 'buttons',
-          header: `Sem Treinamentos — ${scope.unitLabel}`,
-          body: `Nenhum relatório de treinamento encontrado para *${displayFilter}* na unidade *${scope.unitLabel}*.`,
+          header: `Relatório de ${modLabel}`,
+          body: `Nenhum relatório de *${modLabel}* encontrado para *${unitLabel}* no período *${periodLabel}*.`,
           buttons: [
-            { id: 'MOD_POR_DATA::TR', title: 'Outra Data' },
+            { id: 'REL_TIPO::TR', title: 'Outro Período' },
             { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
           ]
         });
@@ -1131,700 +1298,560 @@ export async function processWhatsappBotInteraction(
         return;
       }
 
-      const rows: BotListRow[] = [];
-      if (reports.length > 1) {
-        rows.push({
-          id: 'MOD_PDF_ALL',
-          title: truncateText(`Baixar Todos (${reports.length} PDF)`, 24),
-          description: truncateText(`PDF consolidado — ${scope.unitLabel} (${displayFilter})`, 72)
-        });
-      }
-      const maxInd = reports.length > 1 ? 8 : 9;
-      reports.slice(0, maxInd).forEach((r: UnifiedTrainingReport, idx: number) => {
-        rows.push({
-          id: `MOD_PDF_ONE::TR::${r.origem}::${r.id}`,
-          title: truncateText(`${idx + 1}. ${formatIsoDateBr(r.dataTreinamento).slice(0, 5)} ${r.titulo}`, 24),
-          description: truncateText(`${r.unidadeNome} • ${r.responsavelNome}`, 72)
-        });
-      });
-      rows.push({ id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal' });
-
-      nextEtapa = 'SELECIONAR_RELATORIO_PDF';
-      nextContexto = {
-        modulo: 'TR',
-        granularity: gran,
-        isoFilter,
-        displayFilter,
-        unitIds: scope.unitIds,
-        unitLabel: scope.unitLabel,
-        items: reports.slice(0, maxInd).map(r => ({ origem: r.origem, id: r.id }))
-      };
+      const { buffer, filename } = await generateMultipleTrainingsPdf(
+        reports,
+        `RELATORIO DE TREINAMENTO — ${periodLabel.toUpperCase()} (${unitLabel})`,
+        `${unitLabel}_${periodSlug}`
+      );
+      const token = createSignedPdfToken(
+        {
+          scope: 'tr_rel_period',
+          relPeriodo: periodo,
+          isoFilter,
+          unitIds: safeUnitIds,
+          unitLabel
+        },
+        options.signingKey
+      );
+      const caption = `Relatório de Treinamento • ${unitLabel} • ${periodLabel} • ${reports.length} registro(s)`;
       replies.push({
-        kind: 'list',
-        header: `Treinamentos • ${scope.unitLabel}`,
-        body: `Encontramos *${reports.length}* relatório(s) de treinamento em *${displayFilter}* (${scope.unitLabel}). Selecione qual deseja baixar em *PDF*:`,
-        footer: 'Selecione na lista ou digite o número',
-        listButtonText: 'Selecionar PDF',
-        listRows: rows
+        kind: 'document',
+        header: `PDF — Relatório de Treinamento`,
+        body: caption,
+        documentFilename: filename,
+        documentCaption: caption,
+        documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+        documentBuffer: buffer
       });
     }
-  };
 
-  // --- Helpers de Armaria (Recibos & Usuários da Unidade) ---
-  const showUsersOfUnitForReceipts = async (unitId: string, unitLabel: string, searchFilter = '') => {
-    const likeParam = `%${searchFilter.trim()}%`;
-    const [uRows]: any = await pool.query(
-      searchFilter.trim()
-        ? `SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS
-           FROM USUARIOS
-           WHERE UNIDADE_ID_USUARIOS = ? AND (NOME_USUARIOS LIKE ? OR MASP_USUARIOS LIKE ?)
-           ORDER BY NOME_USUARIOS ASC LIMIT 8`
-        : `SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS
-           FROM USUARIOS
-           WHERE UNIDADE_ID_USUARIOS = ?
-           ORDER BY NOME_USUARIOS ASC LIMIT 8`,
-      searchFilter.trim() ? [unitId, likeParam, likeParam] : [unitId]
-    );
-
-    const rows: BotListRow[] = [];
-    if (resolvedUser) {
-      rows.push({
-        id: `ARM_REC_USER::${resolvedUser.id}`,
-        title: truncateText(`Meus Recibos (${resolvedUser.name.split(' ')[0]})`, 24),
-        description: `MASP ${resolvedUser.masp} • Emitir seus próprios recibos`
-      });
-    }
-    for (const u of uRows || []) {
-      if (resolvedUser && String(u.ID_USUARIOS) === resolvedUser.id) continue;
-      rows.push({
-        id: `ARM_REC_USER::${u.ID_USUARIOS}`,
-        title: truncateText(String(u.NOME_USUARIOS || 'Usuário'), 24),
-        description: truncateText(`MASP ${u.MASP_USUARIOS || '—'} • ${u.CARGO_USUARIOS || ''}`, 72)
-      });
-    }
-    rows.push({ id: 'MENU_ARMARIA', title: 'Voltar p/ Armaria', description: 'Voltar às opções da Armaria' });
-
-    nextEtapa = 'ARMARIA_RECIBOS_ESCOLHER_USUARIO';
-    nextContexto = { recUnitId: unitId, recUnitLabel: unitLabel };
     replies.push({
-      kind: 'list',
-      header: `Recibos — ${truncateText(unitLabel, 20)}`,
-      body:
-        `Selecione o policial/usuário para emitir o recibo de cautela (ou digite o *nome* ou *MASP* para filtrar):`,
-      footer: 'Armeiros e Administradores podem emitir recibos de terceiros',
-      listButtonText: 'Escolher Usuário',
-      listRows: rows.slice(0, 10)
+      kind: 'buttons',
+      body: 'Relatório enviado em PDF! Deseja outra consulta?',
+      buttons: [
+        { id: 'MENU_RELATORIOS', title: 'Outros Relatórios' },
+        { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+      ]
     });
+    nextEtapa = 'MENU_PRINCIPAL';
   };
 
   // ==========================================================================
-  // ROTEAMENTO COMPLETO DA MÁQUINA DE ESTADOS
+  // ROTEAMENTO DA MÁQUINA DE ESTADOS
   // ==========================================================================
-  const isResetCommand =
-    actionId === 'VOLTAR_MENU' ||
-    ['menu', 'inicio', 'voltar', 'oi', 'ola', 'bom dia', 'boa tarde', 'boa noite', 'start', 'ajuda'].includes(normText);
-
-  if (isResetCommand) {
-    nextEtapa = 'MENU_PRINCIPAL';
-    nextContexto = {};
-    replies.push(buildMainMenuReply(resolvedUser));
-  } else if (
-    actionId === 'MENU_OPERACOES' ||
-    normText === 'operacoes' ||
-    (session.etapa === 'MENU_PRINCIPAL' && normText === '1')
-  ) {
-    if (ensureAuthenticatedUser()) {
-      nextEtapa = 'MODULO_MENU';
-      nextContexto = { modulo: 'OP' };
-      replies.push(buildModuloRelatoriosMenuReply('OP'));
-    }
-  } else if (
-    actionId === 'MENU_TREINAMENTOS' ||
-    normText === 'treinamentos' ||
-    (session.etapa === 'MENU_PRINCIPAL' && normText === '2')
-  ) {
-    if (ensureAuthenticatedUser()) {
-      nextEtapa = 'MODULO_MENU';
-      nextContexto = { modulo: 'TR' };
-      replies.push(buildModuloRelatoriosMenuReply('TR'));
-    }
-  } else if (
-    actionId === 'MENU_ARMARIA' ||
-    normText === 'armaria' ||
-    (session.etapa === 'MENU_PRINCIPAL' && normText === '3')
-  ) {
-    if (ensureAuthenticatedUser()) {
-      nextEtapa = 'ARMARIA_MENU';
-      nextContexto = {};
-      replies.push(buildArmariaMenuReply());
+  if (isGreetingOrMenuReset) {
+    if (!resolvedUser) {
+      ensureAuthenticatedUser(false);
+    } else {
+      nextEtapa = 'MENU_PRINCIPAL';
+      nextContexto = { userId: resolvedUser.id, userName: resolvedUser.name, userMasp: resolvedUser.masp };
+      replies.push(buildMainMenuReply(resolvedUser));
     }
   }
-  // --- OPERAÇÕES / TREINAMENTOS: POR DATA vs 24H ---
-  else if (actionId.startsWith('MOD_POR_DATA::')) {
-    if (ensureAuthenticatedUser()) {
-      const mod: 'OP' | 'TR' = actionId.endsWith('::TR') ? 'TR' : 'OP';
-      nextEtapa = 'ESCOLHER_TIPO_DATA';
-      nextContexto = { modulo: mod };
-      replies.push(buildEscolherTipoDataReply(mod));
+  // --------------------------------------------------------------------------
+  // RAMO 1: ARMARIA
+  // --------------------------------------------------------------------------
+  else if (actionId === 'MENU_ARMARIA' || (session.etapa === 'MENU_PRINCIPAL' && normText === 'armaria')) {
+    if (ensureAuthenticatedUser(false)) {
+      nextEtapa = 'ARMARIA_CATEGORIAS';
+      replies.push(buildArmariaCategoriesReply());
     }
-  } else if (actionId.startsWith('MOD_24H::')) {
-    if (ensureAuthenticatedUser()) {
-      const mod: 'OP' | 'TR' = actionId.endsWith('::TR') ? 'TR' : 'OP';
-      askUnitBeforeReport({ modulo: mod, mode: 'ULTIMAS_24H' });
-    }
-  } else if (actionId.startsWith('MOD_GRAN::')) {
-    if (ensureAuthenticatedUser()) {
-      const [, modRaw, granRaw] = actionId.split('::');
-      const mod: 'OP' | 'TR' = modRaw === 'TR' ? 'TR' : 'OP';
-      const gran: 'DIA' | 'MES' | 'ANO' = granRaw === 'MES' || granRaw === 'ANO' ? granRaw : 'DIA';
-      await showDateOptionsForModulo(mod, gran);
-    }
-  } else if (actionId.startsWith('MOD_DATEVAL::')) {
-    if (ensureAuthenticatedUser()) {
-      const [, modRaw, granRaw, isoVal] = actionId.split('::');
-      const mod: 'OP' | 'TR' = modRaw === 'TR' ? 'TR' : 'OP';
-      const gran: 'DIA' | 'MES' | 'ANO' = granRaw === 'MES' || granRaw === 'ANO' ? granRaw : 'DIA';
-      const parsed = parseUserDate(gran, isoVal);
-      if (parsed) {
-        askUnitBeforeReport({
-          modulo: mod,
-          mode: 'POR_DATA',
-          granularity: gran,
-          isoFilter: parsed.iso,
-          displayFilter: parsed.display
-        });
+  } else if (actionId.startsWith('ARM_CAT::')) {
+    if (ensureAuthenticatedUser(false)) {
+      const catRaw = actionId.split('::')[1];
+      if (isArmariaCategoria(catRaw)) {
+        nextEtapa = 'ARMARIA_ACOES';
+        nextContexto = { ...nextContexto, armCategoria: catRaw };
+        replies.push(buildArmariaCategoryActionsReply(catRaw));
       } else {
-        await showDateOptionsForModulo(mod, gran);
+        replies.push(buildArmariaCategoriesReply());
       }
     }
-  } else if (actionId.startsWith('REL_UNIT::')) {
-    if (ensureAuthenticatedUser()) {
-      const chosenUnit = actionId.split('::')[1] || '';
-      await emitReportsAfterUnitChoice(chosenUnit);
-    }
-  } else if (actionId.startsWith('MOD_PDF_ONE::')) {
-    if (ensureAuthenticatedUser()) {
-      const [, modRaw, origemRaw, repId] = actionId.split('::');
-      if (modRaw === 'OP' && (origemRaw === 'CANIL' || origemRaw === 'POLICIAL' || origemRaw === 'CAT') && repId) {
-        const report = await findSingleOperationReport(pool, origemRaw, repId);
-        if (!report || (report.unidadeId && !allPermittedUnitIds.includes(report.unidadeId))) {
+  } else if (actionId.startsWith('ARM_ACT::')) {
+    const [, catRaw, actRaw] = actionId.split('::');
+    if (isArmariaCategoria(catRaw)) {
+      const meta = ARMARIA_CATEGORIA_META[catRaw];
+      if (actRaw === 'MINHAS') {
+        if (ensureAuthenticatedUser(false)) {
+          await emitMyCautelasPdf(catRaw, { onlyActive: true });
+        }
+      } else if (actRaw === 'UNIDADE') {
+        if (ensureAuthenticatedUser(true)) {
+          nextEtapa = 'ARM_UNIDADE_TIPO_PERIODO';
+          nextContexto = { ...nextContexto, armCategoria: catRaw };
           replies.push({
             kind: 'buttons',
-            header: 'Relatório indisponível',
-            body: 'Relatório não encontrado ou sem permissão para sua unidade.',
-            buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
-          });
-        } else {
-          const { buffer, filename } = await generateSingleOperationReportPdf(report);
-          const token = createSignedPdfToken({ scope: 'op_single', origem: origemRaw, id: report.id }, options.signingKey);
-          const caption = `Relatório de Operação — ${report.unidadeNome} (${formatIsoDateBr(report.dataOperacao)} • ${report.municipio}/${report.estado})`;
-          replies.push({
-            kind: 'document',
-            header: 'PDF Operação Pronto',
-            body: caption,
-            documentFilename: filename,
-            documentCaption: caption,
-            documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-            documentBuffer: buffer
-          });
-          replies.push({
-            kind: 'buttons',
-            body: 'Deseja consultar outro relatório ou voltar ao menu principal?',
+            header: `Cautelas da Unidade — ${meta.label}`,
+            body: `Como deseja filtrar o período das cautelas de *${meta.label}* da unidade?`,
+            footer: 'Em seguida você escolherá a unidade permitida',
             buttons: [
-              { id: 'MOD_POR_DATA::OP', title: 'Outra Data' },
+              { id: `ARM_UNIT_GRAN::${catRaw}::MES`, title: 'Mês e Ano' },
+              { id: `ARM_UNIT_GRAN::${catRaw}::ANO`, title: 'Somente Ano' },
               { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
             ]
           });
         }
-      } else if (modRaw === 'TR' && (origemRaw === 'CANIL' || origemRaw === 'POLICIAL') && repId) {
-        const report = await findSingleTrainingReport(pool, origemRaw, repId);
-        if (!report || (report.unidadeId && !allPermittedUnitIds.includes(report.unidadeId))) {
-          replies.push({
-            kind: 'buttons',
-            header: 'Relatório indisponível',
-            body: 'Relatório de treinamento não encontrado ou sem permissão para sua unidade.',
-            buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
-          });
-        } else {
-          const { buffer, filename } = await generateSingleTrainingReportPdf(report);
-          const token = createSignedPdfToken({ scope: 'tr_single', origem: origemRaw, id: report.id }, options.signingKey);
-          const caption = `Relatório de Treinamento — ${report.unidadeNome} (${formatIsoDateBr(report.dataTreinamento)})`;
-          replies.push({
-            kind: 'document',
-            header: 'PDF Treinamento Pronto',
-            body: caption,
-            documentFilename: filename,
-            documentCaption: caption,
-            documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-            documentBuffer: buffer
-          });
-          replies.push({
-            kind: 'buttons',
-            body: 'Deseja consultar outro treinamento ou voltar ao menu principal?',
-            buttons: [
-              { id: 'MOD_POR_DATA::TR', title: 'Outra Data' },
-              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-            ]
-          });
+      } else if (actRaw === 'COFRES') {
+        if (ensureAuthenticatedUser(true)) {
+          nextEtapa = 'ARM_COFRES_ESCOLHER_UNIDADE';
+          nextContexto = { ...nextContexto, armCategoria: catRaw };
+          replies.push(
+            buildEscolherUnidadeListReply({
+              permittedUnits,
+              header: `${meta.label} da Unidade (Cofres)`,
+              body: `Escolha a unidade para receber o PDF dos cofres de *${meta.label}*${
+                permittedUnits.length > 1 ? ' ou selecione *Geral (Todas)* para incluir todas as unidades do seu perfil' : ''
+              }:`,
+              actionPrefix: `ARM_COFRE_UNIT::${catRaw}`,
+              allOptionTitle: 'Geral (Todas)',
+              allOptionDesc: `Cofres de ${meta.label.toLowerCase()} de todas as ${permittedUnits.length} unidades`
+            })
+          );
         }
       }
-      nextEtapa = 'MENU_PRINCIPAL';
     }
-  } else if (actionId === 'MOD_PDF_ALL') {
-    if (ensureAuthenticatedUser()) {
-      const mod: 'OP' | 'TR' = nextContexto.modulo === 'TR' ? 'TR' : 'OP';
-      const gran: 'DIA' | 'MES' | 'ANO' =
-        nextContexto.granularity === 'MES' || nextContexto.granularity === 'ANO' ? nextContexto.granularity : 'DIA';
-      const isoFilter = String(nextContexto.isoFilter || '');
-      const displayFilter = String(nextContexto.displayFilter || isoFilter);
-      const safeUnitIds = (Array.isArray(nextContexto.unitIds) ? nextContexto.unitIds : allPermittedUnitIds).filter(
-        (id: string) => allPermittedUnitIds.includes(id)
-      );
-      const unitLabel = String(nextContexto.unitLabel || 'Unidades');
-
-      if (mod === 'OP') {
-        const reps = await findOperationReportsByDate(pool, gran, isoFilter, safeUnitIds);
-        const { buffer, filename } = await generateMultipleOperationsPdf(
-          reps,
-          `OPERACOES — ${displayFilter} (${unitLabel})`,
-          `OP_${isoFilter}_${unitLabel}`
-        );
-        const token = createSignedPdfToken(
-          { scope: 'op_period', granularity: gran, isoFilter, unitIds: safeUnitIds, unitLabel },
-          options.signingKey
-        );
-        replies.push({
-          kind: 'document',
-          header: `PDF Consolidado — ${displayFilter}`,
-          body: `${reps.length} relatório(s) de operações (${unitLabel})`,
-          documentFilename: filename,
-          documentCaption: `Relatórios de Operações • ${displayFilter} • ${unitLabel}`,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-      } else {
-        const reps = await findTrainingReportsByDate(pool, gran, isoFilter, safeUnitIds);
-        const { buffer, filename } = await generateMultipleTrainingsPdf(
-          reps,
-          `TREINAMENTOS — ${displayFilter} (${unitLabel})`,
-          `TR_${isoFilter}_${unitLabel}`
-        );
-        const token = createSignedPdfToken(
-          { scope: 'tr_period', granularity: gran, isoFilter, unitIds: safeUnitIds, unitLabel },
-          options.signingKey
-        );
-        replies.push({
-          kind: 'document',
-          header: `PDF Consolidado — ${displayFilter}`,
-          body: `${reps.length} relatório(s) de treinamentos (${unitLabel})`,
-          documentFilename: filename,
-          documentCaption: `Relatórios de Treinamentos • ${displayFilter} • ${unitLabel}`,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-      }
+  } else if (actionId.startsWith('ARM_OLD_SIM::')) {
+    if (ensureAuthenticatedUser(false)) {
+      const catRaw = actionId.split('::')[1];
+      const cat: ArmariaCategoria = isArmariaCategoria(catRaw) ? catRaw : 'ARMAS';
+      const meta = ARMARIA_CATEGORIA_META[cat];
+      nextEtapa = 'ARM_OLD_TIPO_PERIODO';
+      nextContexto = { ...nextContexto, armCategoria: cat };
       replies.push({
         kind: 'buttons',
-        body: 'Arquivo PDF enviado! O que deseja fazer agora?',
+        header: `Cautelas Antigas — ${meta.label}`,
+        body: `Escolha se deseja consultar suas cautelas antigas de *${meta.label}* por *Mês e Ano* ou *Apenas Ano*:`,
+        footer: 'Selecione o filtro desejado',
         buttons: [
-          { id: `MOD_POR_DATA::${mod}`, title: 'Outra Data' },
+          { id: `ARM_OLD_GRAN::${cat}::MES`, title: 'Mês e Ano' },
+          { id: `ARM_OLD_GRAN::${cat}::ANO`, title: 'Apenas Ano' },
           { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
         ]
       });
+    }
+  } else if (actionId.startsWith('ARM_OLD_GRAN::')) {
+    if (ensureAuthenticatedUser(false)) {
+      const [, catRaw, granRaw] = actionId.split('::');
+      const cat: ArmariaCategoria = isArmariaCategoria(catRaw) ? catRaw : 'ARMAS';
+      const gran: 'MES' | 'ANO' = granRaw === 'ANO' ? 'ANO' : 'MES';
+      await showArmariaPeriodPicker({ mode: 'MINHAS_ANTIGAS', categoria: cat, granularity: gran });
+    }
+  } else if (actionId.startsWith('ARM_UNIT_GRAN::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const [, catRaw, granRaw] = actionId.split('::');
+      const cat: ArmariaCategoria = isArmariaCategoria(catRaw) ? catRaw : 'ARMAS';
+      const gran: 'MES' | 'ANO' = granRaw === 'ANO' ? 'ANO' : 'MES';
+      await showArmariaPeriodPicker({ mode: 'UNIDADE_CAUTELAS', categoria: cat, granularity: gran });
+    }
+  } else if (actionId.startsWith('ARM_PER_VAL::')) {
+    const [, modeRaw, catRaw, granRaw, isoValue] = actionId.split('::');
+    const cat: ArmariaCategoria = isArmariaCategoria(catRaw) ? catRaw : 'ARMAS';
+    const gran: 'MES' | 'ANO' = granRaw === 'ANO' ? 'ANO' : 'MES';
+    const parsed = parseMonthOrYear(gran, isoValue || '');
+    if (!parsed) {
+      replies.push(buildMainMenuReply(resolvedUser));
       nextEtapa = 'MENU_PRINCIPAL';
-    }
-  }
-  // --- ARMARIA: SOLICITAR CAUTELAS (PÁGINA TEMPORÁRIA AUTENTICADA) ---
-  else if (actionId === 'ARM_SOLICITAR' || normText.includes('solicitar cautela')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const sess = await createTemporaryWhatsappSession(pool, {
-        tipoFluxo: 'SOLICITAR_CAUTELA',
-        userId: resolvedUser.id,
-        fromPhone: phone
-      });
-      const base = buildPublicBaseUrl();
-      const tempUrl = `${base}/?wpp_sessao=${encodeURIComponent(sess.rawToken)}`;
-      nextEtapa = 'ARMARIA_MENU';
-      nextContexto = { lastSessionId: sess.sessionId };
-      replies.push({
-        kind: 'link',
-        header: 'Solicitar Cautela — Sessão Temporária',
-        body:
-          `Criamos uma sessão temporária segura com o seu acesso (*${resolvedUser.name}* — MASP ${resolvedUser.masp}), válida por *30 minutos*.\n\n` +
-          `Acesse o link abaixo para seguir o fluxo normal de cautela de *armas, munições e/ou materiais*.\n` +
-          `Ao concluir, você voltará para o WhatsApp e receberá a confirmação: *"Aguardando deferimento do responsável pela armaria para emitir recibo."*`,
-        footer: 'Sessão pessoal e intransferível • Expira em 30 min',
-        actionUrl: tempUrl,
-        actionLabel: 'Abrir Página Temporária — Solicitar Cautela'
-      });
-    }
-  }
-  // --- ARMARIA: DEVOLVER CAUTELAS (PÁGINA TEMPORÁRIA AUTENTICADA) ---
-  else if (actionId === 'ARM_DEVOLVER' || normText.includes('devolver cautela')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const sess = await createTemporaryWhatsappSession(pool, {
-        tipoFluxo: 'DEVOLVER_CAUTELA',
-        userId: resolvedUser.id,
-        fromPhone: phone
-      });
-      const base = buildPublicBaseUrl();
-      const tempUrl = `${base}/?wpp_sessao=${encodeURIComponent(sess.rawToken)}`;
-      nextEtapa = 'ARMARIA_MENU';
-      nextContexto = { lastSessionId: sess.sessionId };
-      replies.push({
-        kind: 'link',
-        header: 'Devolver Cautela — Sessão Temporária',
-        body:
-          `Criamos uma sessão temporária segura com o seu acesso (*${resolvedUser.name}* — MASP ${resolvedUser.masp}), válida por *30 minutos*.\n\n` +
-          `Acesse o link abaixo para seguir o fluxo normal de devolução de *armas, munições e/ou materiais*.\n` +
-          `Ao concluir, você voltará para o WhatsApp e receberá a confirmação: *"Aguardando deferimento do responsável pela armaria para emitir recibo."*`,
-        footer: 'Sessão pessoal e intransferível • Expira em 30 min',
-        actionUrl: tempUrl,
-        actionLabel: 'Abrir Página Temporária — Devolver Cautela'
-      });
-    }
-  }
-  // --- ARMARIA: RECIBOS ---
-  else if (actionId === 'ARM_RECIBOS' || (session.etapa === 'ARMARIA_MENU' && normText.includes('recibo'))) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      if (resolvedUser.isArmeiroOrAdmin) {
-        if (permittedUnits.length > 1) {
-          nextEtapa = 'ARMARIA_RECIBOS_ESCOLHER_UNIDADE';
-          nextContexto = {};
-          replies.push(
-            buildEscolherUnidadeReply(
-              permittedUnits,
-              'Recibos — Qual unidade?',
-              'ARM_REC_UNIT',
-              false
-            )
-          );
-        } else {
-          await showUsersOfUnitForReceipts(permittedUnits[0].id, permittedUnits[0].shortName);
-        }
-      } else {
-        // Policial comum: vai direto para seus próprios recibos (separados por Armas, Munições, Materiais)
-        nextEtapa = 'ARMARIA_RECIBOS_ESCOLHER_TIPO';
-        nextContexto = {
-          targetUserId: resolvedUser.id,
-          targetUserName: resolvedUser.name,
-          targetUserMasp: resolvedUser.masp,
-          recUnitIds: allPermittedUnitIds,
-          recUnitLabel: permittedUnits[0]?.shortName || ''
-        };
-        replies.push(buildRecibosCategoriaReply(resolvedUser.name, permittedUnits[0]?.shortName));
-      }
-    }
-  } else if (actionId.startsWith('ARM_REC_UNIT::')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const unitId = actionId.split('::')[1] || '';
-      const unitObj = permittedUnits.find(u => u.id === unitId);
-      if (!unitObj) {
-        replies.push(buildArmariaMenuReply());
-        nextEtapa = 'ARMARIA_MENU';
-      } else {
-        await showUsersOfUnitForReceipts(unitObj.id, unitObj.shortName);
-      }
-    }
-  } else if (actionId.startsWith('ARM_REC_USER::')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const targetId = actionId.split('::')[1] || resolvedUser.id;
-      // Verifica permissão: apenas Armeiro/Admin pode consultar recibos de terceiros
-      const allowedTargetId = resolvedUser.isArmeiroOrAdmin ? targetId : resolvedUser.id;
-      const [uRows]: any = await pool.query(
-        'SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, UNIDADE_ID_USUARIOS FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
-        [allowedTargetId]
-      );
-      const target = uRows?.[0];
-      if (!target) {
-        replies.push(buildArmariaMenuReply());
-        nextEtapa = 'ARMARIA_MENU';
-      } else {
-        const chosenUnitId = nextContexto.recUnitId || target.UNIDADE_ID_USUARIOS || permittedUnits[0]?.id;
-        const unitObj = permittedUnits.find(u => u.id === chosenUnitId);
-        const recUnitIds = unitObj ? [unitObj.id] : allPermittedUnitIds;
-        nextEtapa = 'ARMARIA_RECIBOS_ESCOLHER_TIPO';
-        nextContexto = {
-          targetUserId: String(target.ID_USUARIOS),
-          targetUserName: String(target.NOME_USUARIOS),
-          targetUserMasp: String(target.MASP_USUARIOS || ''),
-          recUnitIds,
-          recUnitLabel: unitObj?.shortName || nextContexto.recUnitLabel || ''
-        };
-        replies.push(buildRecibosCategoriaReply(String(target.NOME_USUARIOS), nextContexto.recUnitLabel));
-      }
-    }
-  } else if (actionId.startsWith('ARM_REC_TIPO::')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const tipoRaw = actionId.split('::')[1] || 'ARMAS';
-      const tipo: ReciboTipo = tipoRaw === 'MUNICOES' || tipoRaw === 'MATERIAIS' ? tipoRaw : 'ARMAS';
-      const targetUserId = String(nextContexto.targetUserId || resolvedUser.id);
-      const targetUserName = String(nextContexto.targetUserName || resolvedUser.name);
-      const targetUserMasp = String(nextContexto.targetUserMasp || resolvedUser.masp);
-      const safeUnitIds = (Array.isArray(nextContexto.recUnitIds) ? nextContexto.recUnitIds : allPermittedUnitIds).filter(
-        (id: string) => allPermittedUnitIds.includes(id)
-      );
-
-      const list = await listArmariaReceipts(
-        pool,
-        tipo,
-        { id: targetUserId, masp: targetUserMasp, name: targetUserName },
-        safeUnitIds
-      );
-      const tipoTitle = tipo === 'ARMAS' ? 'Armas' : tipo === 'MUNICOES' ? 'Munições' : 'Materiais';
-
-      if (list.length === 0) {
-        replies.push({
-          kind: 'buttons',
-          header: `Recibos de ${tipoTitle}`,
-          body: `Nenhum recibo de cautela de *${tipoTitle}* foi encontrado para *${targetUserName}*.`,
-          buttons: [
-            { id: 'ARM_RECIBOS', title: 'Outro Recibo' },
-            { id: 'MENU_ARMARIA', title: 'Menu Armaria' },
-            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-          ]
-        });
-        nextEtapa = 'ARMARIA_MENU';
-      } else {
-        const rows: BotListRow[] = list.slice(0, 9).map((rec: UnifiedArmariaReceipt, idx: number) => ({
-          id: `ARM_REC_PDF::${tipo}::${rec.id}`,
-          title: truncateText(`${idx + 1}. ${rec.itemTitulo}`, 24),
-          description: truncateText(`${formatIsoDateTimeBr(rec.dataSolicitacao)} • ${rec.status} • ${rec.unidadeNome}`, 72)
-        }));
-        rows.push({ id: 'MENU_ARMARIA', title: 'Voltar p/ Armaria', description: 'Voltar às opções da Armaria' });
-
-        nextEtapa = 'ARMARIA_RECIBOS_LISTA';
-        nextContexto = { ...nextContexto, recTipo: tipo, recItems: list.slice(0, 9).map(r => r.id) };
-        replies.push({
-          kind: 'list',
-          header: `Recibos de ${tipoTitle}`,
-          body: `Encontramos *${list.length}* recibo(s) de *${tipoTitle}* em nome de *${targetUserName}*.\nSelecione abaixo o recibo que deseja baixar em *PDF*:`,
-          footer: 'Toque no botão abaixo para escolher o recibo',
-          listButtonText: 'Selecionar Recibo',
-          listRows: rows
-        });
-      }
-    }
-  } else if (actionId.startsWith('ARM_REC_PDF::')) {
-    if (ensureAuthenticatedUser() && resolvedUser) {
-      const [, tipoRaw, recId] = actionId.split('::');
-      const tipo: ReciboTipo = tipoRaw === 'MUNICOES' || tipoRaw === 'MATERIAIS' ? tipoRaw : 'ARMAS';
-      const rec = await findSingleArmariaReceipt(pool, tipo, recId || '');
-      const canView =
-        rec &&
-        (!rec.unidadeId || allPermittedUnitIds.includes(rec.unidadeId)) &&
-        (resolvedUser.isArmeiroOrAdmin || rec.requerenteId === resolvedUser.id || rec.requerenteMasp === resolvedUser.masp);
-
-      if (!rec || !canView) {
-        replies.push({
-          kind: 'buttons',
-          header: 'Recibo indisponível',
-          body: 'Recibo não localizado ou sem permissão de visualização.',
-          buttons: [{ id: 'MENU_ARMARIA', title: 'Menu Armaria' }]
-        });
-      } else {
-        const { buffer, filename } = await generateArmariaReceiptPdf(rec);
-        const token = createSignedPdfToken({ scope: 'arm_receipt', receiptTipo: tipo, id: rec.id }, options.signingKey);
-        const caption = `Recibo de ${rec.tipoLabel} • ${rec.itemTitulo} • ${rec.requerenteNome} (${rec.status})`;
-        replies.push({
-          kind: 'document',
-          header: `PDF — Recibo de ${rec.tipoLabel}`,
-          body: caption,
-          documentFilename: filename,
-          documentCaption: caption,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-        replies.push({
-          kind: 'buttons',
-          body: 'Recibo emitido em PDF! Deseja emitir outro recibo ou voltar ao menu?',
-          buttons: [
-            { id: 'ARM_RECIBOS', title: 'Outro Recibo' },
-            { id: 'MENU_ARMARIA', title: 'Menu Armaria' },
-            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-          ]
-        });
-      }
-      nextEtapa = 'ARMARIA_MENU';
-    }
-  }
-  // --- ARMARIA: RELATÓRIOS DE CAUTELAS (UNIDADE / TODAS + 24H / SEMANA / MÊS / ANO) ---
-  else if (actionId === 'ARM_RELATORIOS' || (session.etapa === 'ARMARIA_MENU' && normText.includes('relatorio'))) {
-    if (ensureAuthenticatedUser()) {
-      nextEtapa = 'ARMARIA_REL_UNIDADE';
-      nextContexto = {};
-      const rows: BotListRow[] = [];
-      rows.push({
-        id: 'ARM_REL_UNIT::TODAS',
-        title: 'Todas as Unidades',
-        description:
-          permittedUnits.length > 1
-            ? `Consolidar todas as ${permittedUnits.length} unidades que você possui acesso`
-            : `Emitir relatório da unidade ${permittedUnits[0]?.shortName || ''}`
-      });
-      permittedUnits.slice(0, 8).forEach(u => {
-        rows.push({
-          id: `ARM_REL_UNIT::${u.id}`,
-          title: truncateText(u.shortName, 24),
-          description: truncateText(u.name, 72)
-        });
-      });
-      rows.push({ id: 'MENU_ARMARIA', title: 'Voltar p/ Armaria', description: 'Retornar às opções da Armaria' });
-
-      replies.push({
-        kind: 'list',
-        header: 'Relatórios da Armaria',
-        body: 'Selecione a unidade desejada ou *Todas as Unidades* para emitir o relatório de cautelas:',
-        footer: 'Exibindo apenas unidades do seu acesso',
-        listButtonText: 'Escolher Unidade',
-        listRows: rows
-      });
-    }
-  } else if (actionId.startsWith('ARM_REL_UNIT::')) {
-    if (ensureAuthenticatedUser()) {
-      const choice = actionId.split('::')[1] || 'TODAS';
-      const scope = resolveSelectedUnitScope(choice);
-      if (!scope) {
-        replies.push(buildArmariaMenuReply());
-        nextEtapa = 'ARMARIA_MENU';
-      } else {
-        nextEtapa = 'ARMARIA_REL_PERIODO';
-        nextContexto = { armRelUnitIds: scope.unitIds, armRelUnitLabel: scope.unitLabel };
-        replies.push(buildArmariaPeriodoReply(scope.unitLabel));
-      }
-    }
-  } else if (actionId.startsWith('ARM_REL_PER::')) {
-    if (ensureAuthenticatedUser()) {
-      const perRaw = actionId.split('::')[1] || '24H';
-      const period: ArmariaPeriodo =
-        perRaw === 'SEMANA' || perRaw === 'MES_ATUAL' || perRaw === 'ANO_ATUAL' ? perRaw : '24H';
-      const periodLabelMap: Record<ArmariaPeriodo, string> = {
-        '24H': 'Últimas 24h',
-        SEMANA: 'Última semana',
-        MES_ATUAL: 'Mês atual',
-        ANO_ATUAL: 'Ano atual'
-      };
-      const periodLabel = periodLabelMap[period];
-      const safeUnitIds = (Array.isArray(nextContexto.armRelUnitIds) ? nextContexto.armRelUnitIds : allPermittedUnitIds).filter(
-        (id: string) => allPermittedUnitIds.includes(id)
-      );
-      const unitLabel = String(nextContexto.armRelUnitLabel || 'Unidades');
-
-      const data = await findArmariaCautelasByPeriod(pool, period, safeUnitIds);
-      const total = data.armas.length + data.municoes.length + data.materiais.length;
-
-      if (total === 0) {
-        replies.push({
-          kind: 'buttons',
-          header: `Relatório Armaria — ${periodLabel}`,
-          body: `Nenhuma cautela de armas, munições ou materiais foi registrada no período *${periodLabel}* para *${unitLabel}*.`,
-          buttons: [
-            { id: 'ARM_RELATORIOS', title: 'Outro Período' },
-            { id: 'MENU_ARMARIA', title: 'Menu Armaria' },
-            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-          ]
-        });
-      } else {
-        const { buffer, filename } = await generateArmariaCautelasReportPdf(
-          data,
-          unitLabel,
-          periodLabel,
-          `${unitLabel}_${period}`
-        );
-        const token = createSignedPdfToken(
-          { scope: 'arm_report', period, unitIds: safeUnitIds, unitLabel },
-          options.signingKey
-        );
-        const caption = `Relatório de Cautelas (${periodLabel}) • ${unitLabel} • Armas: ${data.armas.length} | Munições: ${data.municoes.length} | Materiais: ${data.materiais.length}`;
-        replies.push({
-          kind: 'document',
-          header: `PDF — Relatório Armaria (${periodLabel})`,
-          body: caption,
-          documentFilename: filename,
-          documentCaption: caption,
-          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
-          documentBuffer: buffer
-        });
-        replies.push({
-          kind: 'buttons',
-          body: 'Relatório consolidado enviado em PDF! Deseja outra consulta?',
-          buttons: [
-            { id: 'ARM_RELATORIOS', title: 'Outro Relatório' },
-            { id: 'MENU_ARMARIA', title: 'Menu Armaria' },
-            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
-          ]
-        });
-      }
-      nextEtapa = 'ARMARIA_MENU';
-    }
-  }
-  // --- ENTRADAS DIGITADAS PELO USUÁRIO (DATAS, BUSCA DE USUÁRIO PARA RECIBO, NÚMEROS) ---
-  else if (session.etapa === 'AGUARDANDO_VALOR_DATA') {
-    if (ensureAuthenticatedUser()) {
-      const mod: 'OP' | 'TR' = session.contexto?.modulo === 'TR' ? 'TR' : 'OP';
-      const gran: 'DIA' | 'MES' | 'ANO' =
-        session.contexto?.granularity === 'MES' || session.contexto?.granularity === 'ANO'
-          ? session.contexto.granularity
-          : 'DIA';
-      const parsed = parseUserDate(gran, rawText);
-      if (parsed) {
-        askUnitBeforeReport({
-          modulo: mod,
-          mode: 'POR_DATA',
+    } else if (modeRaw === 'MINHAS_ANTIGAS') {
+      if (ensureAuthenticatedUser(false)) {
+        await emitMyCautelasPdf(cat, {
+          onlyActive: false,
           granularity: gran,
           isoFilter: parsed.iso,
           displayFilter: parsed.display
         });
-      } else {
-        const fmt =
-          gran === 'DIA' ? 'DD/MM/AAAA (ex: 24/11/2026)' : gran === 'MES' ? 'MM/AAAA (ex: 11/2026)' : 'AAAA (ex: 2026)';
+      }
+    } else if (ensureAuthenticatedUser(true)) {
+      const meta = ARMARIA_CATEGORIA_META[cat];
+      nextEtapa = 'ARM_UNIDADE_CAUTELA_ESCOLHER_UNIT';
+      nextContexto = {
+        ...nextContexto,
+        armCategoria: cat,
+        armGranularity: gran,
+        armIsoFilter: parsed.iso,
+        armDisplayFilter: parsed.display
+      };
+      replies.push(
+        buildEscolherUnidadeListReply({
+          permittedUnits,
+          header: `Cautelas ${meta.label} (${parsed.display})`,
+          body: `Período selecionado: *${parsed.display}*.\nEscolha qual unidade deseja consultar para receber o PDF:`,
+          actionPrefix: 'ARM_CAUT_UNIT'
+        })
+      );
+    }
+  } else if (actionId.startsWith('ARM_CAUT_UNIT::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const unitChoice = actionId.split('::')[1] || 'TODAS';
+      const cat: ArmariaCategoria = isArmariaCategoria(nextContexto.armCategoria) ? nextContexto.armCategoria : 'ARMAS';
+      const gran: 'MES' | 'ANO' = nextContexto.armGranularity === 'ANO' ? 'ANO' : 'MES';
+      const isoFilter = String(nextContexto.armIsoFilter || '');
+      const displayFilter = String(nextContexto.armDisplayFilter || isoFilter);
+      await emitUnitCautelasPdf(cat, gran, isoFilter, displayFilter, unitChoice);
+    }
+  } else if (actionId.startsWith('ARM_COFRE_UNIT::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const [, catRaw, unitChoice] = actionId.split('::');
+      const cat: ArmariaCategoria = isArmariaCategoria(catRaw) ? catRaw : 'ARMAS';
+      await emitUnitVaultsPdf(cat, unitChoice || 'TODAS');
+    }
+  }
+  // --------------------------------------------------------------------------
+  // RAMO 2: RELATÓRIOS (OPERAÇÕES & TREINAMENTO)
+  // --------------------------------------------------------------------------
+  else if (
+    actionId === 'MENU_RELATORIOS' ||
+    (session.etapa === 'MENU_PRINCIPAL' && (normText === 'relatorios' || normText === 'relatorio'))
+  ) {
+    if (ensureAuthenticatedUser(true)) {
+      nextEtapa = 'RELATORIOS_TIPO';
+      replies.push(buildRelatoriosMenuReply());
+    }
+  } else if (actionId.startsWith('REL_TIPO::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const modulo: 'OP' | 'TR' = actionId.split('::')[1] === 'TR' ? 'TR' : 'OP';
+      const modLabel = modulo === 'OP' ? 'Operações' : 'Treinamento';
+      nextEtapa = 'RELATORIOS_ESCOLHER_UNIDADE';
+      nextContexto = { ...nextContexto, relModulo: modulo };
+      replies.push(
+        buildEscolherUnidadeListReply({
+          permittedUnits,
+          header: `Relatório de ${modLabel}`,
+          body: `Escolha a unidade para emitir o relatório de *${modLabel}*${
+            permittedUnits.length > 1 ? ' (ou selecione *Todas as Unidades*)' : ''
+          }:`,
+          actionPrefix: `REL_UNIT::${modulo}`
+        })
+      );
+    }
+  } else if (actionId.startsWith('REL_UNIT::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const [, modRaw, unitChoice] = actionId.split('::');
+      const modulo: 'OP' | 'TR' = modRaw === 'TR' ? 'TR' : 'OP';
+      const scope = resolveSelectedUnitScope(unitChoice || 'TODAS');
+      if (!scope) {
         replies.push({
           kind: 'buttons',
-          header: 'Formato de data inválido',
-          body: `Informe a data no formato *${fmt}* ou clique abaixo para alterar o filtro:`,
+          header: 'Unidade não autorizada',
+          body: 'Você não possui permissão para acessar esta unidade.',
+          buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
+        });
+        nextEtapa = 'MENU_PRINCIPAL';
+      } else {
+        nextEtapa = 'RELATORIOS_ESCOLHER_PERIODO';
+        nextContexto = {
+          ...nextContexto,
+          relModulo: modulo,
+          relUnitIds: scope.unitIds,
+          relUnitLabel: scope.unitLabel
+        };
+        replies.push(buildRelatoriosPeriodosReply(modulo, scope.unitLabel));
+      }
+    }
+  } else if (actionId.startsWith('REL_PER::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const perRaw = actionId.split('::')[1] as RelatorioPeriodoTipo;
+      const modulo: 'OP' | 'TR' = nextContexto.relModulo === 'TR' ? 'TR' : 'OP';
+      const unitIds: string[] = Array.isArray(nextContexto.relUnitIds) ? nextContexto.relUnitIds : allPermittedUnitIds;
+      const unitLabel = String(nextContexto.relUnitLabel || 'Unidade');
+
+      if (perRaw === '24H' || perRaw === 'SEMANA' || perRaw === 'MES_ATUAL' || perRaw === 'ANO_ATUAL') {
+        await emitRelatorioPeriodPdf(modulo, perRaw, unitIds, unitLabel);
+      } else if (perRaw === 'MES_ANO' || perRaw === 'ANO') {
+        const gran: 'MES' | 'ANO' = perRaw === 'ANO' ? 'ANO' : 'MES';
+        const available =
+          modulo === 'OP'
+            ? await listAvailableOperationDates(pool, gran, unitIds)
+            : await listAvailableTrainingDates(pool, gran, unitIds);
+        const modLabel = modulo === 'OP' ? 'Operações' : 'Treinamento';
+        const fmt = gran === 'MES' ? 'MM/AAAA (ex: 11/2026)' : 'AAAA (ex: 2026)';
+        const granLabel = gran === 'MES' ? 'Mês e Ano' : 'Ano';
+
+        nextEtapa = 'REL_AGUARDANDO_PERIODO';
+        nextContexto = {
+          ...nextContexto,
+          relModulo: modulo,
+          relUnitIds: unitIds,
+          relUnitLabel: unitLabel,
+          relCustomGran: gran
+        };
+
+        if (available.length > 0) {
+          const rows: BotListRow[] = available.map(opt => ({
+            id: `REL_CUSTOM_VAL::${gran}::${opt.value}`,
+            title: truncateText(opt.label, 24),
+            description: `${opt.count} relatório(s) de ${modLabel.toLowerCase()} em ${unitLabel}`
+          }));
+          rows.push({ id: 'VOLTAR_MENU', title: 'Voltar ao Menu', description: 'Retornar ao menu principal' });
+          replies.push({
+            kind: 'list',
+            header: `${modLabel} — ${granLabel}`,
+            body: `Selecione um período abaixo ou digite diretamente no formato *${fmt}*:`,
+            footer: `Unidade: ${unitLabel}`,
+            listButtonText: `Escolher ${granLabel}`,
+            listRows: rows
+          });
+        } else {
+          replies.push({
+            kind: 'buttons',
+            header: `${modLabel} — ${granLabel}`,
+            body: `Digite o período desejado no formato *${fmt}* para gerar o PDF de *${modLabel}* (*${unitLabel}*):`,
+            buttons: [
+              { id: 'MENU_RELATORIOS', title: 'Voltar Relatórios' },
+              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+            ]
+          });
+        }
+      }
+    }
+  } else if (actionId.startsWith('REL_CUSTOM_VAL::')) {
+    if (ensureAuthenticatedUser(true)) {
+      const [, granRaw, isoVal] = actionId.split('::');
+      const gran: 'MES' | 'ANO' = granRaw === 'ANO' ? 'ANO' : 'MES';
+      const modulo: 'OP' | 'TR' = nextContexto.relModulo === 'TR' ? 'TR' : 'OP';
+      const unitIds: string[] = Array.isArray(nextContexto.relUnitIds) ? nextContexto.relUnitIds : allPermittedUnitIds;
+      const unitLabel = String(nextContexto.relUnitLabel || 'Unidade');
+      await emitRelatorioPeriodPdf(modulo, gran === 'MES' ? 'MES_ANO' : 'ANO', unitIds, unitLabel, isoVal);
+    }
+  }
+  // --------------------------------------------------------------------------
+  // RAMO 3: FICHA DE DESEMPENHO
+  // --------------------------------------------------------------------------
+  else if (
+    actionId === 'MENU_DESEMPENHO' ||
+    (session.etapa === 'MENU_PRINCIPAL' && (normText.includes('ficha') || normText.includes('desempenho')))
+  ) {
+    if (ensureAuthenticatedUser(false)) {
+      nextEtapa = 'DESEMPENHO_MENU';
+      replies.push(buildDesempenhoMenuReply());
+    }
+  } else if (actionId === 'DESEMP_MINHA') {
+    if (ensureAuthenticatedUser(false) && resolvedUser) {
+      const pdf = await generateMyPerformanceSheetPdf(pool, resolvedUser.id);
+      if (!pdf) {
+        replies.push({
+          kind: 'buttons',
+          header: 'Minha Ficha de Desempenho',
+          body: 'Não foi possível localizar seus dados de desempenho no sistema.',
+          buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
+        });
+      } else {
+        const token = createSignedPdfToken({ scope: 'desemp_my', userId: resolvedUser.id }, options.signingKey);
+        const caption = `Ficha Individual de Desempenho (Físico e Tático) • ${resolvedUser.name} • ${pdf.totalResults} avaliação(ões)`;
+        replies.push({
+          kind: 'document',
+          header: 'PDF — Minha Ficha de Desempenho',
+          body: caption,
+          documentFilename: pdf.filename,
+          documentCaption: caption,
+          documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+          documentBuffer: pdf.buffer
+        });
+        replies.push({
+          kind: 'buttons',
+          body: 'Sua ficha completa (Física e Tática) foi enviada em PDF! Deseja outra consulta?',
           buttons: [
-            { id: `MOD_POR_DATA::${mod}`, title: 'Trocar Filtro' },
+            { id: 'MENU_DESEMPENHO', title: 'Ficha Desempenho' },
             { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
           ]
         });
       }
+      nextEtapa = 'MENU_PRINCIPAL';
     }
-  } else if (session.etapa === 'ARMARIA_RECIBOS_ESCOLHER_USUARIO' && rawText) {
-    if (ensureAuthenticatedUser()) {
-      const unitId = String(session.contexto?.recUnitId || permittedUnits[0]?.id || '');
-      const unitLabel = String(session.contexto?.recUnitLabel || permittedUnits[0]?.shortName || '');
-      await showUsersOfUnitForReceipts(unitId, unitLabel, rawText);
+  } else if (actionId === 'DESEMP_UNIDADE') {
+    if (ensureAuthenticatedUser(true) && resolvedUser) {
+      if (!resolvedUser.isArmeiroOrAdmin) {
+        replies.push({
+          kind: 'buttons',
+          header: 'Acesso Restrito',
+          body:
+            'A consulta de *Desempenho por Unidade* é restrita a perfis com privilégio de gestão (Administrador ou Armeiro).\n' +
+            'Você pode baixar a qualquer momento a sua própria ficha clicando em *Minha ficha*.',
+          buttons: [
+            { id: 'DESEMP_MINHA', title: 'Minha ficha' },
+            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+          ]
+        });
+        nextEtapa = 'DESEMPENHO_MENU';
+      } else {
+        nextEtapa = 'DESEMPENHO_UNIDADE_CATEGORIA';
+        replies.push(buildDesempenhoCategoriaReply());
+      }
     }
-  } else if (session.etapa === 'SELECIONAR_RELATORIO_PDF' && /^\d+$/.test(normText)) {
-    if (ensureAuthenticatedUser()) {
-      const idx = Number(normText) - 1;
-      const items = Array.isArray(session.contexto?.items) ? session.contexto.items : [];
-      const chosen = items[idx];
-      const mod: 'OP' | 'TR' = session.contexto?.modulo === 'TR' ? 'TR' : 'OP';
-      if (chosen?.id && chosen?.origem) {
-        return processWhatsappBotInteraction(
-          pool,
-          cfgRow,
-          { fromPhone: phone, buttonId: `MOD_PDF_ONE::${mod}::${chosen.origem}::${chosen.id}` },
-          options
+  } else if (actionId.startsWith('DESEMP_CAT::')) {
+    if (ensureAuthenticatedUser(true) && resolvedUser) {
+      if (!resolvedUser.isArmeiroOrAdmin) {
+        replies.push(buildDesempenhoMenuReply());
+        nextEtapa = 'DESEMPENHO_MENU';
+      } else {
+        const cat: DesempenhoCategoria = actionId.split('::')[1] === 'TATICO' ? 'TATICO' : 'FISICO';
+        const catLabel = cat === 'FISICO' ? 'Físico' : 'Tático';
+        nextEtapa = 'DESEMPENHO_UNIDADE_ESCOLHER_UNIT';
+        nextContexto = { ...nextContexto, desempCategoria: cat };
+        replies.push(
+          buildEscolherUnidadeListReply({
+            permittedUnits,
+            header: `Desempenho ${catLabel} — Unidade`,
+            body:
+              `Escolha a unidade para gerar o PDF de *Desempenho ${catLabel}*.\n` +
+              `A 1ª folha trará o *Gráfico da Unidade* (média dos usuários) seguida de *1 ficha por folha*:`,
+            actionPrefix: `DESEMP_UNIT::${cat}`
+          })
         );
       }
-      replies.push({
-        kind: 'buttons',
-        body: `Número inválido. Escolha na lista ou digite um número entre 1 e ${items.length}.`,
-        buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
-      });
     }
-  } else {
-    nextEtapa = 'MENU_PRINCIPAL';
-    nextContexto = {};
-    replies.push(buildMainMenuReply(resolvedUser));
+  } else if (actionId.startsWith('DESEMP_UNIT::')) {
+    if (ensureAuthenticatedUser(true) && resolvedUser && resolvedUser.isArmeiroOrAdmin) {
+      const [, catRaw, unitChoice] = actionId.split('::');
+      const cat: DesempenhoCategoria = catRaw === 'TATICO' ? 'TATICO' : 'FISICO';
+      const catLabel = cat === 'FISICO' ? 'Físico' : 'Tático';
+      const scope = resolveSelectedUnitScope(unitChoice || 'TODAS');
+      if (!scope) {
+        replies.push({
+          kind: 'buttons',
+          header: 'Unidade não autorizada',
+          body: 'Você não possui permissão para consultar esta unidade.',
+          buttons: [{ id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }]
+        });
+        nextEtapa = 'MENU_PRINCIPAL';
+      } else {
+        const pdf = await generateUnitPerformanceReportPdf(pool, cat, scope.unitIds, scope.unitLabel);
+        if (!pdf) {
+          replies.push({
+            kind: 'buttons',
+            header: `Desempenho ${catLabel} — ${scope.unitLabel}`,
+            body: `Nenhum índice de *Desempenho ${catLabel}* foi lançado ainda para *${scope.unitLabel}*.`,
+            buttons: [
+              { id: 'DESEMP_UNIDADE', title: 'Outra Categoria' },
+              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+            ]
+          });
+        } else {
+          const token = createSignedPdfToken(
+            {
+              scope: 'desemp_unit',
+              desempCategoria: cat,
+              unitIds: scope.unitIds,
+              unitLabel: scope.unitLabel
+            },
+            options.signingKey
+          );
+          const caption = `Desempenho ${catLabel} (${scope.unitLabel}) • 1ª folha: Gráfico da Unidade + ${pdf.userCount} ficha(s) individuais`;
+          replies.push({
+            kind: 'document',
+            header: `PDF — Desempenho ${catLabel} (${scope.unitLabel})`,
+            body: caption,
+            documentFilename: pdf.filename,
+            documentCaption: caption,
+            documentDownloadUrl: `/api/whatsapp/pdf/download?token=${encodeURIComponent(token)}`,
+            documentBuffer: pdf.buffer
+          });
+          replies.push({
+            kind: 'buttons',
+            body: 'PDF consolidado enviado! Deseja realizar outra consulta?',
+            buttons: [
+              { id: 'DESEMP_UNIDADE', title: 'Outro Desempenho' },
+              { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+            ]
+          });
+        }
+        nextEtapa = 'MENU_PRINCIPAL';
+      }
+    }
+  }
+  // --------------------------------------------------------------------------
+  // ENTRADAS DIGITADAS DE PERÍODO (MM/AAAA ou AAAA)
+  // --------------------------------------------------------------------------
+  else if (session.etapa === 'ARM_AGUARDANDO_PERIODO' && rawText) {
+    if (ensureAuthenticatedUser(false)) {
+      const mode: 'MINHAS_ANTIGAS' | 'UNIDADE_CAUTELAS' =
+        session.contexto?.armPeriodMode === 'UNIDADE_CAUTELAS' ? 'UNIDADE_CAUTELAS' : 'MINHAS_ANTIGAS';
+      const cat: ArmariaCategoria = isArmariaCategoria(session.contexto?.armCategoria)
+        ? session.contexto.armCategoria
+        : 'ARMAS';
+      const gran: 'MES' | 'ANO' = session.contexto?.armGranularity === 'ANO' ? 'ANO' : 'MES';
+      const parsed = parseMonthOrYear(gran, rawText);
+
+      if (!parsed) {
+        const fmt = gran === 'MES' ? 'MM/AAAA (ex: 11/2026)' : 'AAAA (ex: 2026)';
+        replies.push({
+          kind: 'buttons',
+          header: 'Formato inválido',
+          body: `Digite o período no formato *${fmt}* ou clique abaixo para voltar ao menu:`,
+          buttons: [
+            { id: `ARM_CAT::${cat}`, title: 'Voltar Categoria' },
+            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+          ]
+        });
+      } else if (mode === 'MINHAS_ANTIGAS') {
+        await emitMyCautelasPdf(cat, {
+          onlyActive: false,
+          granularity: gran,
+          isoFilter: parsed.iso,
+          displayFilter: parsed.display
+        });
+      } else if (ensureAuthenticatedUser(true)) {
+        const meta = ARMARIA_CATEGORIA_META[cat];
+        nextEtapa = 'ARM_UNIDADE_CAUTELA_ESCOLHER_UNIT';
+        nextContexto = {
+          ...nextContexto,
+          armCategoria: cat,
+          armGranularity: gran,
+          armIsoFilter: parsed.iso,
+          armDisplayFilter: parsed.display
+        };
+        replies.push(
+          buildEscolherUnidadeListReply({
+            permittedUnits,
+            header: `Cautelas ${meta.label} (${parsed.display})`,
+            body: `Período selecionado: *${parsed.display}*.\nEscolha qual unidade deseja consultar para receber o PDF:`,
+            actionPrefix: 'ARM_CAUT_UNIT'
+          })
+        );
+      }
+    }
+  } else if (session.etapa === 'REL_AGUARDANDO_PERIODO' && rawText) {
+    if (ensureAuthenticatedUser(true)) {
+      const modulo: 'OP' | 'TR' = session.contexto?.relModulo === 'TR' ? 'TR' : 'OP';
+      const gran: 'MES' | 'ANO' = session.contexto?.relCustomGran === 'ANO' ? 'ANO' : 'MES';
+      const unitIds: string[] = Array.isArray(session.contexto?.relUnitIds)
+        ? session.contexto.relUnitIds
+        : allPermittedUnitIds;
+      const unitLabel = String(session.contexto?.relUnitLabel || 'Unidade');
+      const parsed = parseMonthOrYear(gran, rawText);
+
+      if (!parsed) {
+        const fmt = gran === 'MES' ? 'MM/AAAA (ex: 11/2026)' : 'AAAA (ex: 2026)';
+        replies.push({
+          kind: 'buttons',
+          header: 'Formato inválido',
+          body: `Digite o período no formato *${fmt}* ou volte ao menu principal:`,
+          buttons: [
+            { id: 'MENU_RELATORIOS', title: 'Voltar Relatórios' },
+            { id: 'VOLTAR_MENU', title: 'Voltar ao Menu' }
+          ]
+        });
+      } else {
+        await emitRelatorioPeriodPdf(modulo, gran === 'MES' ? 'MES_ANO' : 'ANO', unitIds, unitLabel, parsed.iso);
+      }
+    }
+  }
+  // --------------------------------------------------------------------------
+  // QUALQUER MENSAGEM -> EXIBE O MENU INTERATIVO DO COEapp
+  // --------------------------------------------------------------------------
+  else {
+    if (!resolvedUser) {
+      ensureAuthenticatedUser(false);
+    } else {
+      nextEtapa = 'MENU_PRINCIPAL';
+      nextContexto = { userId: resolvedUser.id, userName: resolvedUser.name, userMasp: resolvedUser.masp };
+      replies.push(buildMainMenuReply(resolvedUser));
+    }
   }
 
-  await saveSession(pool, phone, nextEtapa, nextContexto);
+  await saveSession(pool, sessionKeyPhone, nextEtapa, nextContexto);
 
   if (!options.dryRun) {
-    await dispatchBotRepliesToMeta(pool, cfgRow, phone, replies, options.decryptSecret);
+    await dispatchBotRepliesToMeta(pool, cfgRow, rawPhoneDigits || sessionKeyPhone, replies, options.decryptSecret);
   }
 
   const publicReplies: BotReplyItem[] = replies.map(({ documentBuffer: _buf, ...rest }) => rest);

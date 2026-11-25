@@ -9,20 +9,33 @@ import {
 import {
   OperacaoOrigem,
   TreinamentoOrigem,
+  ArmariaCategoria,
+  RelatorioPeriodoTipo,
+  DesempenhoCategoria,
+  ARMARIA_CATEGORIA_META,
   findSingleOperationReport,
   findOperationReportsLast24h,
   findOperationReportsByDate,
+  findOperationReportsByPeriod,
   generateSingleOperationReportPdf,
   generateMultipleOperationsPdf,
   findSingleTrainingReport,
   findTrainingReportsLast24h,
   findTrainingReportsByDate,
+  findTrainingReportsByPeriod,
   generateSingleTrainingReportPdf,
   generateMultipleTrainingsPdf,
   findSingleArmariaReceipt,
   generateArmariaReceiptPdf,
   findArmariaCautelasByPeriod,
   generateArmariaCautelasReportPdf,
+  findUserCautelasByCategory,
+  findUnitCautelasByCategoryAndPeriod,
+  generateCategoryCautelasPdf,
+  findVaultInventoryByCategory,
+  generateUnitVaultInventoryPdf,
+  generateMyPerformanceSheetPdf,
+  generateUnitPerformanceReportPdf,
   formatIsoDateBr
 } from './whatsappPdfService';
 
@@ -320,7 +333,12 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
       );
     }
 
-    // Seed idempotente da template interativa de Menu Principal (Operações, Treinamentos, Armaria)
+    // Seed idempotente da template interativa de Menu Principal COEapp (Armaria, Relatórios, Ficha de desempenho)
+    const coeappMainButtons = JSON.stringify([
+      { type: 'QUICK_REPLY', text: 'Armaria' },
+      { type: 'QUICK_REPLY', text: 'Relatórios' },
+      { type: 'QUICK_REPLY', text: 'Ficha de desempenho' }
+    ]);
     await pool.query(
       `INSERT IGNORE INTO WHATSAPP_TEMPLATES (
         ID_TEMPLATE, NOME_TEMPLATE, IDIOMA, CATEGORIA, STATUS_META,
@@ -333,8 +351,8 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         'UTILITY',
         'RASCUNHO',
         'TEXT',
-        'Central Operacional — PCMG',
-        'Olá! Bem-vindo ao atendimento automático do sistema. Selecione abaixo uma das opções desejadas para prosseguir:',
+        'Bem vindo(a) ao COEapp',
+        'O que podemos fazer por você agora?',
         'Escolha uma opção nos botões abaixo',
         '[]',
         ?,
@@ -342,13 +360,18 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         1,
         NOW()
       )`,
-      [
-        JSON.stringify([
-          { type: 'QUICK_REPLY', text: 'Operações' },
-          { type: 'QUICK_REPLY', text: 'Treinamentos' },
-          { type: 'QUICK_REPLY', text: 'Armaria' }
-        ])
-      ]
+      [coeappMainButtons]
+    );
+    // Atualiza automaticamente template padrão antiga caso ainda não tenha sido personalizada pelo usuário
+    await pool.query(
+      `UPDATE WHATSAPP_TEMPLATES
+       SET CABECALHO_TEXTO = 'Bem vindo(a) ao COEapp',
+           CORPO_TEXTO = 'O que podemos fazer por você agora?',
+           BOTOES_JSON = ?,
+           DATA_ATUALIZACAO = NOW()
+       WHERE ID_TEMPLATE = 'wpp-tpl-menu-principal'
+         AND CABECALHO_TEXTO = 'Central Operacional — PCMG'`,
+      [coeappMainButtons]
     );
 
     // Seed das regras padrão de comunicação
@@ -414,7 +437,7 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
       }
     }
 
-    // Seed idempotente da regra do Atendimento Interativo via Webhook
+    // Seed idempotente da regra do Atendimento Interativo via Webhook (COEapp)
     await pool.query(
       `INSERT IGNORE INTO WHATSAPP_REGRAS_COMUNICACAO (
         ID_REGRA, EVENTO_SISTEMA, NOME_EXIBICAO, DESCRICAO, TEMPLATE_ID, TEMPLATE_NOME,
@@ -422,8 +445,8 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
       ) VALUES (
         'wpp-regra-07',
         'ATENDIMENTO_BOT_INTERATIVO',
-        'Menu Interativo de Atendimento (Operações / Treinamentos / Armaria)',
-        'Responde automaticamente quando um cliente envia mensagem, exibindo o menu de botões e permitindo baixar relatórios de operações por data (dia/mês/ano) ou das últimas 24h em PDF.',
+        'Menu Interativo COEapp (Armaria / Relatórios / Ficha de desempenho)',
+        'Identifica automaticamente o usuário pelo telefone (ignorando sinais e +55) e abre o menu "Bem vindo(a) ao COEapp" com PDFs de Armaria (Armas, Munições, Explosivos, Materiais e Cofres), Relatórios (Operações/Treinamento) e Ficha de Desempenho.',
         'wpp-tpl-menu-principal',
         'menu_atendimento_principal',
         'USUARIO_DESTINO',
@@ -431,6 +454,14 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         1,
         NOW()
       )`
+    );
+    await pool.query(
+      `UPDATE WHATSAPP_REGRAS_COMUNICACAO
+       SET NOME_EXIBICAO = 'Menu Interativo COEapp (Armaria / Relatórios / Ficha de desempenho)',
+           DESCRICAO = 'Identifica automaticamente o usuário pelo telefone (ignorando sinais e +55) e abre o menu "Bem vindo(a) ao COEapp" com PDFs de Armaria (Armas, Munições, Explosivos, Materiais e Cofres), Relatórios (Operações/Treinamento) e Ficha de Desempenho.',
+           DATA_ATUALIZACAO = NOW()
+       WHERE ID_REGRA = 'wpp-regra-07'
+         AND NOME_EXIBICAO = 'Menu Interativo de Atendimento (Operações / Treinamentos / Armaria)'`
     );
 
     whatsappSchemaEnsured = true;
@@ -2362,6 +2393,118 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           periodLabel,
           `${verified.period}_${unitLabel}_${todayIso}`
         );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'op_rel_period' && verified.relPeriodo) {
+        const { reports, periodLabel, periodSlug } = await findOperationReportsByPeriod(
+          pool,
+          verified.relPeriodo as RelatorioPeriodoTipo,
+          unitIds,
+          verified.isoFilter
+        );
+        if (reports.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório de operação encontrado para o período solicitado.' });
+        }
+        const pdf = await generateMultipleOperationsPdf(
+          reports,
+          `RELATORIO DE OPERACOES — ${periodLabel.toUpperCase()} (${unitLabel})`,
+          `${unitLabel}_${periodSlug}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'tr_rel_period' && verified.relPeriodo) {
+        const { reports, periodLabel, periodSlug } = await findTrainingReportsByPeriod(
+          pool,
+          verified.relPeriodo as RelatorioPeriodoTipo,
+          unitIds,
+          verified.isoFilter
+        );
+        if (reports.length === 0) {
+          return res.status(404).json({ error: 'Nenhum relatório de treinamento encontrado para o período solicitado.' });
+        }
+        const pdf = await generateMultipleTrainingsPdf(
+          reports,
+          `RELATORIO DE TREINAMENTO — ${periodLabel.toUpperCase()} (${unitLabel})`,
+          `${unitLabel}_${periodSlug}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'arm_my_cautelas' && verified.categoria && verified.userId) {
+        const cat = verified.categoria as ArmariaCategoria;
+        const meta = ARMARIA_CATEGORIA_META[cat];
+        const gran = verified.granularity === 'MES' || verified.granularity === 'ANO' ? verified.granularity : undefined;
+        const items = await findUserCautelasByCategory(
+          pool,
+          cat,
+          { id: verified.userId, name: verified.userName, masp: verified.userMasp },
+          { onlyActive: Boolean(verified.onlyActive), granularity: gran, isoFilter: verified.isoFilter }
+        );
+        if (items.length === 0) {
+          return res.status(404).json({ error: 'Nenhuma cautela encontrada para o filtro informado.' });
+        }
+        const periodText = verified.onlyActive ? 'Cautelas Ativas' : `Período ${verified.isoFilter || ''}`;
+        const pdf = await generateCategoryCautelasPdf(
+          cat,
+          items,
+          `MINHAS CAUTELAS DE ${meta.label.toUpperCase()} — ${verified.onlyActive ? 'ATIVAS' : 'HISTORICO'}`,
+          `${verified.userName || 'Policial'} (MASP ${verified.userMasp || '—'}) • ${periodText} • ${items.length} registro(s)`,
+          `Minhas_${verified.onlyActive ? 'Ativas' : verified.isoFilter || 'Hist'}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (
+        verified.scope === 'arm_unit_cautelas' &&
+        verified.categoria &&
+        (verified.granularity === 'MES' || verified.granularity === 'ANO') &&
+        verified.isoFilter
+      ) {
+        const cat = verified.categoria as ArmariaCategoria;
+        const meta = ARMARIA_CATEGORIA_META[cat];
+        const items = await findUnitCautelasByCategoryAndPeriod(
+          pool,
+          cat,
+          verified.granularity,
+          verified.isoFilter,
+          unitIds
+        );
+        if (items.length === 0) {
+          return res.status(404).json({ error: 'Nenhuma cautela encontrada para a unidade e período solicitados.' });
+        }
+        const pdf = await generateCategoryCautelasPdf(
+          cat,
+          items,
+          `CAUTELAS DE ${meta.label.toUpperCase()} — ${unitLabel.toUpperCase()}`,
+          `Período: ${verified.isoFilter} • ${items.length} registro(s)`,
+          `Unidade_${unitLabel}_${verified.isoFilter}`
+        );
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'arm_unit_vaults' && verified.categoria) {
+        const cat = verified.categoria as ArmariaCategoria;
+        const { groups, totalRecords } = await findVaultInventoryByCategory(pool, cat, unitIds);
+        if (totalRecords === 0) {
+          return res.status(404).json({ error: 'Nenhum item localizado nos cofres para o escopo selecionado.' });
+        }
+        const pdf = await generateUnitVaultInventoryPdf(cat, groups, totalRecords, unitLabel, unitLabel);
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'desemp_my' && verified.userId) {
+        const pdf = await generateMyPerformanceSheetPdf(pool, verified.userId);
+        if (!pdf) {
+          return res.status(404).json({ error: 'Ficha individual de desempenho não encontrada.' });
+        }
+        buffer = pdf.buffer;
+        filename = pdf.filename;
+      } else if (verified.scope === 'desemp_unit' && verified.desempCategoria && unitIds && unitIds.length > 0) {
+        const pdf = await generateUnitPerformanceReportPdf(
+          pool,
+          verified.desempCategoria as DesempenhoCategoria,
+          unitIds,
+          unitLabel
+        );
+        if (!pdf) {
+          return res.status(404).json({ error: 'Nenhum índice de desempenho encontrado para a unidade selecionada.' });
+        }
         buffer = pdf.buffer;
         filename = pdf.filename;
       } else {

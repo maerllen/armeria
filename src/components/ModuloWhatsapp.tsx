@@ -1807,56 +1807,78 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
               <div className="space-y-2.5 text-xs">
                 <div className="bg-slate-950/90 border border-emerald-500/35 rounded-xl p-3 space-y-1.5">
                   <div className="text-[10px] font-black uppercase text-emerald-400">
-                    1. Mensagem Recebida → Menu Principal (Template: menu_atendimento_principal)
+                    1. Qualquer mensagem (ex: &quot;Oi&quot;) → Cabeçalho: Bem vindo(a) ao COEapp
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold">
-                      Operações
-                    </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-bold">
-                      Treinamentos
-                    </span>
+                  <p className="text-[11px] text-slate-300">
+                    Sessão automática pelo telefone cadastrado (desconsiderando pontos, traços, sinais e +55). Mensagem:{' '}
+                    <em>&quot;O que podemos fazer por você agora?&quot;</em>
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 pt-0.5">
                     <span className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 font-bold">
                       Armaria
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-200 font-bold">
+                      Relatórios
+                    </span>
+                    <span className="px-2.5 py-1 rounded-lg bg-emerald-500/20 border border-emerald-400/40 text-emerald-200 font-bold">
+                      Ficha de desempenho
                     </span>
                   </div>
                 </div>
 
                 <div className="pl-3 space-y-2 border-l-2 border-emerald-500/30 ml-2">
-                  <div className="bg-slate-950/80 border border-cyan-500/30 rounded-xl p-3 space-y-1.5">
-                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-cyan-300">
-                      <CornerDownRight className="w-3.5 h-3.5" />
-                      <span>2A. Operações &amp; Treinamentos (mesma lógica)</span>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-relaxed">
-                      Escolhe <strong className="text-slate-200">Relatórios Por data</strong> (
-                      <strong className="text-cyan-200">DIA/MÊS/ANO</strong>,{' '}
-                      <strong className="text-cyan-200">MÊS/ANO</strong> ou{' '}
-                      <strong className="text-cyan-200">ANO</strong>) ou{' '}
-                      <strong className="text-amber-200">Relatório das últimas 24h</strong>. Antes de imprimir/baixar o
-                      PDF, pergunta <strong className="text-emerald-300">Qual unidade?</strong> (CAC, CAT, CAP, CORE,
-                      COC ou TODAS — exibindo somente as unidades permitidas ao usuário).
-                    </p>
-                  </div>
-
                   <div className="bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 space-y-1.5">
                     <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-amber-300">
                       <CornerDownRight className="w-3.5 h-3.5" />
-                      <span>2B. Armaria (4 sub-opções)</span>
+                      <span>2A. Armaria → Armas, Munições, Explosivos, Materiais</span>
                     </div>
                     <ul className="text-[11px] text-slate-400 leading-relaxed space-y-1">
                       <li>
-                        • <strong className="text-slate-200">Solicitar / Devolver Cautelas:</strong> gera link de sessão
-                        temporária autenticada (Armas, Munições e Materiais). Ao concluir, retorna ao WhatsApp
-                        informando <em>&quot;Aguardando deferimento do responsável pela armaria para emitir recibo&quot;</em>.
+                        • <strong className="text-slate-200">Minhas Cautelas:</strong> envia PDF das cautelas ativas; se
+                        não houver ativa, pergunta se deseja consultar antigas por <em>Mês/Ano</em> ou <em>Ano</em>.
                       </li>
                       <li>
-                        • <strong className="text-slate-200">Recibos:</strong> lista recibos separados (Armas, Munições
-                        e Materiais). Armeiros e Administradores podem emitir para terceiros escolhendo unidade e usuário.
+                        • <strong className="text-slate-200">Cautelas da Unidade:</strong> escolhe <em>Mês/Ano</em> ou{' '}
+                        <em>Ano</em> e a(s) unidade(s) permitida(s) para receber PDF completo.
                       </li>
                       <li>
-                        • <strong className="text-slate-200">Relatórios:</strong> escolhe a unidade permitida ou Todas e
-                        o período (Últimas 24h, Última semana, Mês atual ou Ano atual) para download em PDF.
+                        • <strong className="text-slate-200">Itens da Unidade (Cofres):</strong> escolhe unidade ou geral
+                        (todas permitidas) e recebe PDF detalhado dos cofres.
+                      </li>
+                    </ul>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-cyan-500/30 rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-cyan-300">
+                      <CornerDownRight className="w-3.5 h-3.5" />
+                      <span>2B. Relatórios → Operações &amp; Treinamento</span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Escolhe a unidade permitida (ou <strong className="text-emerald-300">Todas as Unidades</strong>) e o
+                      período: <strong className="text-cyan-200">Últimas 24h</strong>,{' '}
+                      <strong className="text-cyan-200">Essa semana</strong> (segunda até hoje/domingo),{' '}
+                      <strong className="text-cyan-200">Mês atual</strong>,{' '}
+                      <strong className="text-cyan-200">Ano atual</strong>,{' '}
+                      <strong className="text-amber-200">Mês/Ano</strong> ou{' '}
+                      <strong className="text-amber-200">Ano</strong>, recebendo o PDF consolidado.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-950/80 border border-emerald-500/30 rounded-xl p-3 space-y-1.5">
+                    <div className="flex items-center gap-1.5 text-[10px] font-black uppercase text-emerald-300">
+                      <CornerDownRight className="w-3.5 h-3.5" />
+                      <span>2C. Ficha de desempenho</span>
+                    </div>
+                    <ul className="text-[11px] text-slate-400 leading-relaxed space-y-1">
+                      <li>
+                        • <strong className="text-slate-200">Minha ficha:</strong> PDF completo com desempenho{' '}
+                        <em>Físico e Tático</em> do policial.
+                      </li>
+                      <li>
+                        • <strong className="text-slate-200">Desempenho por unidade:</strong> escolhe <em>Físico</em> ou{' '}
+                        <em>Tático</em> e a unidade (ou todas), recebendo PDF com{' '}
+                        <strong className="text-emerald-200">gráfico da unidade na 1ª folha</strong> +{' '}
+                        <strong className="text-emerald-200">1 ficha por folha</strong>.
                       </li>
                     </ul>
                   </div>
@@ -1921,21 +1943,21 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     </div>
                     <div className="space-y-1">
                       <p className="text-xs font-bold text-slate-200">
-                        Envie uma mensagem para iniciar o menu interativo
+                        Envie uma mensagem para iniciar o menu interativo COEapp
                       </p>
                       <p className="text-[11px] text-slate-400 max-w-sm">
-                        Clique no botão abaixo para simular o usuário selecionado enviando &quot;Olá&quot; e teste
-                        Operações, Treinamentos e Armaria com filtros de unidade, sessões temporárias e PDFs reais.
+                        Clique no botão abaixo para simular o usuário enviando &quot;Oi&quot; e testar Armaria,
+                        Relatórios e Ficha de desempenho com PDFs reais.
                       </p>
                     </div>
                     <button
                       type="button"
                       disabled={simLoading}
-                      onClick={() => sendBotSimulation({ displayLabel: 'Olá', text: 'Olá' })}
+                      onClick={() => sendBotSimulation({ displayLabel: 'Oi', text: 'Oi' })}
                       className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs flex items-center gap-1.5 transition"
                     >
                       <Send className="w-3.5 h-3.5" />
-                      <span>Simular Mensagem &quot;Olá&quot;</span>
+                      <span>Simular Mensagem &quot;Oi&quot;</span>
                     </button>
                   </div>
                 ) : (
