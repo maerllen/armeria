@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { User, UserCargo, Department, Unit, Course, getSystemLogo, DEFAULT_SYSTEM_LOGO } from '../types';
 import { formatMasp, formatPhone, formatDisplayDate, isCourseExpired, cleanPhone } from '../utils/masks';
 import { storage } from '../services/storage';
-import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, Package, CheckCircle2 } from 'lucide-react';
+import { getSafeProfilePhotoUrl, cropImageFileTo3x4DataUrl } from '../utils/profilePhoto';
+import { User as UserIcon, Briefcase, GraduationCap, Calendar, AlertTriangle, Check, KeyRound, Palette, Printer, Crosshair, Disc, Package, CheckCircle2, Camera, Trash2, Loader2 } from 'lucide-react';
 import { ThemeToggle } from './AlternadorTema';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -43,6 +44,10 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
   const [name, setName] = useState(activeUser.name || '');
   const [phone, setPhone] = useState(activeUser.phone || '');
   const [cargo, setCargo] = useState<UserCargo>(activeUser.cargo || 'Investigador');
+  const [photoUrl, setPhotoUrl] = useState<string | null>(activeUser.fotoUrl || null);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+  const [confirmRemovePhoto, setConfirmRemovePhoto] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
   const [successMsg, setSuccessMsg] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -123,8 +128,59 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
       setName(activeUser.name || '');
       setPhone(activeUser.phone || '');
       setCargo(activeUser.cargo || 'Investigador');
+      setPhotoUrl(activeUser.fotoUrl || null);
     }
   }, [activeUser]);
+
+  const safeProfilePhoto = getSafeProfilePhotoUrl(photoUrl);
+
+  const handlePhotoFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setSuccessMsg('');
+    setErrorMsg('');
+    setConfirmRemovePhoto(false);
+    setUploadingPhoto(true);
+    try {
+      const croppedDataUrl = await cropImageFileTo3x4DataUrl(file);
+      const res = await storage.updateMyProfilePhoto(croppedDataUrl);
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao salvar foto 3x4.');
+      } else {
+        setPhotoUrl(res.fotoUrl ?? croppedDataUrl);
+        setSuccessMsg('Foto 3x4 do perfil atualizada com sucesso!');
+        if (onUserUpdated) onUserUpdated();
+        if (onRefresh) onRefresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Não foi possível processar a foto selecionada.');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const handleConfirmRemovePhoto = async () => {
+    setSuccessMsg('');
+    setErrorMsg('');
+    setUploadingPhoto(true);
+    try {
+      const res = await storage.updateMyProfilePhoto(null);
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao remover foto do perfil.');
+      } else {
+        setPhotoUrl(null);
+        setConfirmRemovePhoto(false);
+        setSuccessMsg('Foto 3x4 removida do seu perfil.');
+        if (onUserUpdated) onUserUpdated();
+        if (onRefresh) onRefresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Erro ao remover foto do perfil.');
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
 
   const dept = departments.find(d => d.id === activeUser.departmentId);
   const unit = units.find(u => u.id === activeUser.unitId);
@@ -219,25 +275,109 @@ export const ProfileModule: React.FC<ProfileModuleProps> = ({
       )}
 
       {/* Module Title Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center space-x-4">
-          <div className="relative shrink-0">
-            <img
-              src={getSystemLogo(unit, dept)}
-              alt="Logo da Unidade / Departamento"
-              className="w-14 h-14 object-contain rounded-2xl bg-slate-950 p-1 border border-amber-500/30 shadow-md shadow-amber-500/5"
-              onError={(e) => {
-                if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
-                  e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
-                }
-              }}
-            />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-100">{activeUser.name}</h1>
-            <p className="text-xs text-slate-400 mt-0.5">
-              MASP: <span className="font-mono text-amber-400 font-semibold">{formatMasp(activeUser.masp)}</span> (Campo inalterável)
-            </p>
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-5">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+          {/* Foto 3x4 do Perfil (gerenciada pelo próprio usuário) */}
+          <div className="flex items-center gap-4">
+            <div className="shrink-0 flex flex-col items-center">
+              <div className="w-24 h-32 aspect-[3/4] rounded-xl overflow-hidden bg-slate-950 border-2 border-amber-500/40 shadow-lg flex flex-col items-center justify-center relative">
+                {safeProfilePhoto ? (
+                  <img
+                    src={safeProfilePhoto}
+                    alt={`Foto 3x4 de ${activeUser.name}`}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <>
+                    <UserIcon className="w-9 h-9 text-slate-600" />
+                    <span className="text-[10px] font-bold text-slate-500 mt-1 uppercase">Foto 3x4</span>
+                  </>
+                )}
+                {uploadingPhoto && (
+                  <div className="absolute inset-0 bg-slate-950/80 flex items-center justify-center">
+                    <Loader2 className="w-6 h-6 text-amber-400 animate-spin" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2 min-w-0">
+              <div className="flex items-center gap-2.5">
+                <img
+                  src={getSystemLogo(unit, dept)}
+                  alt="Logo da Unidade / Departamento"
+                  className="w-10 h-10 object-contain rounded-xl bg-slate-950 p-1 border border-amber-500/30 shadow-sm shrink-0"
+                  onError={(e) => {
+                    if (e.currentTarget.src !== window.location.origin + DEFAULT_SYSTEM_LOGO) {
+                      e.currentTarget.src = DEFAULT_SYSTEM_LOGO;
+                    }
+                  }}
+                />
+                <div className="min-w-0">
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-100 truncate">{activeUser.name}</h1>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    MASP: <span className="font-mono text-amber-400 font-semibold">{formatMasp(activeUser.masp)}</span> (Campo inalterável)
+                  </p>
+                </div>
+              </div>
+
+              {/* Controles de Foto 3x4 */}
+              <div className="flex flex-wrap items-center gap-2 pt-0.5">
+                <input
+                  ref={photoInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handlePhotoFileChange}
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={uploadingPhoto}
+                  onClick={() => photoInputRef.current?.click()}
+                  className="inline-flex items-center space-x-1.5 text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 px-3 py-1.5 rounded-xl transition disabled:opacity-50"
+                >
+                  <Camera className="w-3.5 h-3.5" />
+                  <span>{safeProfilePhoto ? 'Alterar Foto 3x4' : 'Colocar Foto 3x4'}</span>
+                </button>
+
+                {safeProfilePhoto && !confirmRemovePhoto && (
+                  <button
+                    type="button"
+                    disabled={uploadingPhoto}
+                    onClick={() => setConfirmRemovePhoto(true)}
+                    className="inline-flex items-center space-x-1 text-xs font-semibold bg-slate-800 hover:bg-red-950/60 text-slate-300 hover:text-red-300 border border-slate-700 hover:border-red-500/40 px-2.5 py-1.5 rounded-xl transition disabled:opacity-50"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Remover</span>
+                  </button>
+                )}
+
+                {safeProfilePhoto && confirmRemovePhoto && (
+                  <div className="inline-flex items-center gap-1.5 bg-red-950/60 border border-red-500/40 px-2.5 py-1 rounded-xl text-[11px]">
+                    <span className="text-red-200 font-semibold">Remover foto?</span>
+                    <button
+                      type="button"
+                      disabled={uploadingPhoto}
+                      onClick={handleConfirmRemovePhoto}
+                      className="px-2 py-0.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold transition"
+                    >
+                      Sim
+                    </button>
+                    <button
+                      type="button"
+                      disabled={uploadingPhoto}
+                      onClick={() => setConfirmRemovePhoto(false)}
+                      className="px-2 py-0.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+                    >
+                      Não
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Formato 3x4 ajustado automaticamente. Visível em Meu Perfil, na edição de cadastro e no Módulo Relatórios.
+              </p>
+            </div>
           </div>
         </div>
 

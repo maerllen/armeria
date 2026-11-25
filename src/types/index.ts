@@ -53,6 +53,7 @@ export interface User {
   name: string;
   cargo: UserCargo;
   phone: string;
+  fotoUrl?: string | null;
   role: UserRole;
   roles?: UserRole[];
   activeRole?: UserRole;

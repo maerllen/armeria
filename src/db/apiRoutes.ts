@@ -211,9 +211,12 @@ async function ensureUsuariosCatColumns(pool: any): Promise<void> {
       FROM INFORMATION_SCHEMA.COLUMNS
       WHERE TABLE_SCHEMA = DATABASE()
         AND TABLE_NAME = 'USUARIOS'
-        AND COLUMN_NAME IN ('CAT_FUNCAO_USUARIOS', 'CAT_AERONAVES_JSON', 'CAT_HABILITACOES_JSON')
+        AND COLUMN_NAME IN ('CAT_FUNCAO_USUARIOS', 'CAT_AERONAVES_JSON', 'CAT_HABILITACOES_JSON', 'FOTO_URL_USUARIOS')
     `);
     const existing = new Set((cols || []).map((c: any) => String(c.COLUMN_NAME || '').toUpperCase()));
+    if (!existing.has('FOTO_URL_USUARIOS')) {
+      await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `FOTO_URL_USUARIOS` MEDIUMTEXT DEFAULT NULL AFTER `TELEFONE_USUARIOS`');
+    }
     if (!existing.has('CAT_FUNCAO_USUARIOS')) {
       await pool.query('ALTER TABLE `USUARIOS` ADD COLUMN `CAT_FUNCAO_USUARIOS` VARCHAR(64) DEFAULT NULL');
     }
@@ -242,7 +245,7 @@ async function ensureUsuariosCatColumns(pool: any): Promise<void> {
     }
     usuariosCatColumnsEnsured = true;
   } catch (err) {
-    console.warn('Aviso ao verificar colunas CAT em USUARIOS:', err);
+    console.warn('Aviso ao verificar colunas CAT/FOTO em USUARIOS:', err);
   }
 }
 
@@ -283,6 +286,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             SENHA_USUARIOS as password,
             NOME_USUARIOS as name,
             TELEFONE_USUARIOS as phone,
+            FOTO_URL_USUARIOS as foto_url,
             CARGO_USUARIOS as cargo,
             PERFIL_USUARIOS as role,
             ROLES_USUARIOS as roles_json,
@@ -320,6 +324,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
             SENHA_USUARIOS as password,
             NOME_USUARIOS as name,
             TELEFONE_USUARIOS as phone,
+            NULL as foto_url,
             CARGO_USUARIOS as cargo,
             PERFIL_USUARIOS as role,
             NULL as roles_json,
@@ -415,6 +420,7 @@ apiRouter.post('/auth/login', async (req: Request, res: Response) => {
       masp: dbUser.masp,
       name: dbUser.name,
       phone: dbUser.phone || '',
+      fotoUrl: dbUser.foto_url || null,
       cargo: dbUser.cargo,
       role: dbUser.role,
       roles: userRoles,
@@ -676,6 +682,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           SENHA_USUARIOS as password,
           NOME_USUARIOS as name,
           TELEFONE_USUARIOS as phone,
+          FOTO_URL_USUARIOS as foto_url,
           CARGO_USUARIOS as cargo,
           PERFIL_USUARIOS as role,
           ROLES_USUARIOS as roles_json,
@@ -713,6 +720,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
           SENHA_USUARIOS as password,
           NOME_USUARIOS as name,
           TELEFONE_USUARIOS as phone,
+          NULL as foto_url,
           CARGO_USUARIOS as cargo,
           PERFIL_USUARIOS as role,
           NULL as roles_json,
@@ -768,6 +776,7 @@ apiRouter.get('/users', async (req: Request, res: Response) => {
         password: u.password,
         name: u.name,
         phone: u.phone || '',
+        fotoUrl: u.foto_url || null,
         cargo: u.cargo,
         role: u.role,
         roles: parseUserRoles(u.roles_json, u.role),
@@ -1572,6 +1581,71 @@ apiRouter.put('/users/:id', async (req: Request, res: Response) => {
     return res.json({ success: true });
   } catch (err: any) {
     return res.status(500).json({ error: err.message });
+  }
+});
+
+// Atualização exclusiva da foto 3x4 pelo próprio usuário em "Meu Perfil"
+apiRouter.put('/users/:id/photo', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { fotoUrl, actor } = req.body || {};
+
+    if (!actor || !actor.id || String(actor.id) !== String(id)) {
+      return res.status(403).json({
+        error: 'Apenas o próprio usuário pode adicionar, alterar ou remover sua foto em Meu Perfil.'
+      });
+    }
+
+    const pool = getPool();
+    await ensureUsuariosCatColumns(pool);
+
+    const [rows]: any = await pool.query(
+      'SELECT ID_USUARIOS as id, MASP_USUARIOS as masp, NOME_USUARIOS as name, TEM_ACESSO_SISTEMA_USUARIOS as has_access FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
+      [id]
+    );
+    if (!rows || rows.length === 0) {
+      return res.status(404).json({ error: 'Usuário não encontrado.' });
+    }
+    const dbUser = rows[0];
+    if (!dbUser.has_access) {
+      return res.status(403).json({ error: 'Usuário sem acesso ativo ao sistema.' });
+    }
+    if (actor.masp) {
+      const actorMasp = String(actor.masp).replace(/\D/g, '');
+      const dbMasp = String(dbUser.masp || '').replace(/\D/g, '');
+      if (actorMasp && dbMasp && actorMasp !== dbMasp) {
+        return res.status(403).json({ error: 'Sessão incompatível para atualização da foto do perfil.' });
+      }
+    }
+
+    let cleanFoto: string | null = null;
+    if (fotoUrl !== null && fotoUrl !== undefined && String(fotoUrl).trim() !== '') {
+      const raw = String(fotoUrl).trim();
+      if (raw.length > 2_500_000) {
+        return res.status(400).json({ error: 'A foto enviada excede o tamanho máximo permitido.' });
+      }
+      if (!/^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/i.test(raw)) {
+        return res.status(400).json({ error: 'Formato de imagem inválido. Utilize JPG, PNG ou WEBP.' });
+      }
+      cleanFoto = raw;
+    }
+
+    await pool.query(
+      'UPDATE USUARIOS SET FOTO_URL_USUARIOS = ? WHERE ID_USUARIOS = ?',
+      [cleanFoto, id]
+    );
+
+    await insertAuditLog(
+      'Meu Perfil',
+      cleanFoto ? 'Atualizar Foto 3x4' : 'Remover Foto 3x4',
+      `${cleanFoto ? 'Atualizou' : 'Removeu'} a foto 3x4 do próprio perfil: ${dbUser.name} (MASP: ${dbUser.masp})`,
+      actor,
+      req.ip
+    );
+
+    return res.json({ success: true, fotoUrl: cleanFoto });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Erro ao atualizar foto do perfil.' });
   }
 });
 

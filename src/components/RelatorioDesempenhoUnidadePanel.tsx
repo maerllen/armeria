@@ -15,6 +15,7 @@ import {
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
+import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
   UsuarioDesempenhoDashboard,
@@ -903,35 +904,55 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 displayedUsers.map(u => {
                   const isSel = selectedUserObj?.id === u.id;
                   const st = statsByUserId.get(u.id);
+                  const thumb = getSafeProfilePhotoUrl(u.fotoUrl);
+                  const uInitials = (u.name || 'P')
+                    .split(/\s+/)
+                    .filter(Boolean)
+                    .slice(0, 2)
+                    .map(w => w[0]?.toUpperCase() || '')
+                    .join('');
                   return (
                     <button
                       key={u.id}
                       type="button"
                       onClick={() => setSelectedUserId(u.id)}
-                      className={`w-full text-left p-3 rounded-xl border transition flex items-center justify-between gap-2 ${
+                      className={`w-full text-left p-2.5 rounded-xl border transition flex items-center justify-between gap-2.5 ${
                         isSel
                           ? 'bg-amber-500/15 border-amber-500 text-white shadow'
                           : 'bg-slate-950/70 border-slate-800 text-slate-300 hover:border-slate-700 hover:bg-slate-800/40'
                       }`}
                     >
-                      <div className="min-w-0">
-                        <div className="font-bold text-xs truncate text-white">{u.name}</div>
-                        <div className="text-[11px] text-slate-400 truncate mt-0.5">
-                          MASP {formatMasp(u.masp || '')} • {unitNameById(u.unitId)}
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          {st ? (
-                            <>
-                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
-                                {st.avgPct}% média
-                              </span>
-                              <span className="text-[10px] text-slate-400">
-                                {st.count} avaliação(ões)
-                              </span>
-                            </>
+                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                        <div className="w-9 h-12 aspect-[3/4] rounded-lg overflow-hidden bg-slate-800 border border-slate-700 shrink-0 flex items-center justify-center">
+                          {thumb ? (
+                            <img
+                              src={thumb}
+                              alt={`Foto 3x4 de ${u.name}`}
+                              className="w-full h-full object-cover"
+                            />
                           ) : (
-                            <span className="text-[10px] text-slate-500">Sem avaliações lançadas</span>
+                            <span className="text-[11px] font-black text-amber-300/80">{uInitials}</span>
                           )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-bold text-xs truncate text-white">{u.name}</div>
+                          <div className="text-[11px] text-slate-400 truncate mt-0.5">
+                            MASP {formatMasp(u.masp || '')} • {unitNameById(u.unitId)}
+                          </div>
+                          <div className="flex items-center gap-2 mt-1">
+                            {st ? (
+                              <>
+                                <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300">
+                                  {st.avgPct}% média
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {st.count} avaliação(ões)
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-[10px] text-slate-500">Sem avaliações lançadas</span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       <ChevronRight

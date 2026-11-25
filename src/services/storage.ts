@@ -777,6 +777,40 @@ class StorageService {
     return true;
   }
 
+  public async updateMyProfilePhoto(
+    fotoUrl: string | null
+  ): Promise<{ success: boolean; fotoUrl?: string | null; error?: string }> {
+    const current = this.state.currentUser;
+    if (!current || !current.id) {
+      return { success: false, error: 'Sessão de usuário não identificada.' };
+    }
+    try {
+      const res = await fetch(`/api/users/${encodeURIComponent(current.id)}/photo`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fotoUrl, actor: current })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return { success: false, error: data.error || 'Erro ao salvar foto do perfil.' };
+      }
+      const nextFoto = data.fotoUrl ?? null;
+      this.state.currentUser = { ...current, fotoUrl: nextFoto };
+      this.state.users = this.state.users.map(u =>
+        u.id === current.id ? { ...u, fotoUrl: nextFoto } : u
+      );
+      try {
+        sessionStorage.setItem('armeria_session_user', JSON.stringify(this.state.currentUser));
+      } catch {
+        // ignore storage quota errors
+      }
+      await this.refreshFromServer();
+      return { success: true, fotoUrl: nextFoto };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erro de conexão ao salvar foto.' };
+    }
+  }
+
   public async deleteUser(id: string): Promise<boolean> {
     const res = await fetch(`/api/users/${id}`, {
       method: 'DELETE',

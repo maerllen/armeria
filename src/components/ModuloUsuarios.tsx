@@ -4,7 +4,8 @@ import { User, UserRole, UserCargo, CatFuncaoUsuario, CatHabilitacaoUsuario, CAT
 import { formatMasp, formatPhone, cleanMasp, cleanPhone, isCourseExpired, formatDisplayDate } from '../utils/masks';
 import { storage } from '../services/storage';
 import { buildStandardDocumentFilename } from '../utils/printHelper';
-import { Users, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X, Plane } from 'lucide-react';
+import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
+import { Users, User as UserIcon, Plus, Edit2, Trash2, GraduationCap, AlertCircle, Check, Shield, Search, Calendar, AlertTriangle, KeyRound, Building, Building2, ChevronRight, ArrowLeft, Filter, Lock, FileSpreadsheet, Upload, Download, X, Plane } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TopLayerAlert } from './TopLayerAlert';
 
@@ -1690,6 +1691,45 @@ export const UserModule: React.FC<UserModuleProps> = ({
             </div>
 
             <form onSubmit={handleSaveUser} className="space-y-4">
+              {/* Foto 3x4 do policial: visível exclusivamente ao editar um usuário já cadastrado (não aparece no cadastro novo) */}
+              {editingUser && (() => {
+                const safeEditPhoto = getSafeProfilePhotoUrl(editingUser.fotoUrl);
+                return (
+                  <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 flex items-center gap-4">
+                    <div className="w-20 h-[106px] aspect-[3/4] rounded-xl overflow-hidden bg-slate-900 border-2 border-amber-500/40 shadow-md flex flex-col items-center justify-center shrink-0">
+                      {safeEditPhoto ? (
+                        <img
+                          src={safeEditPhoto}
+                          alt={`Foto 3x4 de ${editingUser.name}`}
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <>
+                          <UserIcon className="w-7 h-7 text-slate-600" />
+                          <span className="text-[9px] font-bold text-slate-500 mt-1 uppercase">Sem Foto</span>
+                        </>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-amber-400">
+                        Foto 3x4 do Perfil Funcional
+                      </span>
+                      <div className="text-sm font-bold text-slate-100 truncate mt-0.5">
+                        {editingUser.name}
+                      </div>
+                      <div className="text-xs text-slate-400 font-mono mt-0.5">
+                        MASP: {formatMasp(editingUser.masp)} • {editingUser.cargo}
+                      </div>
+                      <p className="text-[11px] text-slate-500 mt-1.5">
+                        {safeEditPhoto
+                          ? 'Foto inserida pelo próprio policial em "Meu Perfil".'
+                          : 'Este policial ainda não inseriu foto 3x4 em "Meu Perfil".'}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 
                 {/* MASP */}

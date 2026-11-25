@@ -96,6 +96,7 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`SENHA_USUARIOS\` VARCHAR(255) NOT NULL,
         \`NOME_USUARIOS\` VARCHAR(255) NOT NULL,
         \`TELEFONE_USUARIOS\` VARCHAR(32) DEFAULT NULL,
+        \`FOTO_URL_USUARIOS\` MEDIUMTEXT DEFAULT NULL,
         \`CARGO_USUARIOS\` VARCHAR(64) NOT NULL,
         \`PERFIL_USUARIOS\` ENUM('Policial', 'Armeiro', 'Administrador', 'Geral', 'Explosivista', 'operador_canino') NOT NULL DEFAULT 'Policial',
         \`ROLES_USUARIOS\` TEXT NULL,
@@ -148,6 +149,13 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
       `);
       if (colScope[0]?.cnt === 0) {
         await connection.query(`ALTER TABLE \`USUARIOS\` ADD COLUMN \`ABRANGENCIA_GESTAO_USUARIOS\` VARCHAR(32) NOT NULL DEFAULT 'unit' AFTER \`UNIDADE_ID_USUARIOS\``);
+      }
+      const [colFoto]: any = await connection.query(`
+        SELECT COUNT(*) as cnt FROM information_schema.COLUMNS 
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'USUARIOS' AND COLUMN_NAME = 'FOTO_URL_USUARIOS'
+      `);
+      if (colFoto[0]?.cnt === 0) {
+        await connection.query(`ALTER TABLE \`USUARIOS\` ADD COLUMN \`FOTO_URL_USUARIOS\` MEDIUMTEXT DEFAULT NULL AFTER \`TELEFONE_USUARIOS\``);
       }
     } catch (migErr) {
       console.warn('[Aviso Migração USUARIOS]', migErr);

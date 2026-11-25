@@ -10,6 +10,7 @@ import {
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { buildStandardDocumentTitle, printDocumentInPage, escapeHtmlText } from '../utils/printHelper';
+import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
 import {
   Award,
   TrendingUp,
@@ -366,6 +367,7 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
       )
       .join('');
 
+    const safePrintPhoto = getSafeProfilePhotoUrl(targetUser.fotoUrl);
     const html = `
       <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;padding:12px;">
         <div style="display:flex;align-items:center;justify-content:space-between;border-bottom:2px solid #0f172a;padding-bottom:10px;margin-bottom:14px;">
@@ -383,11 +385,16 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
           </div>
         </div>
 
-        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;font-size:11px;">
-          <div><div style="color:#64748b;font-weight:600;">POLICIAL</div><div style="font-weight:800;font-size:13px;">${escapeHtmlText(targetUser.name)}</div></div>
-          <div><div style="color:#64748b;font-weight:600;">MASP</div><div style="font-weight:700;">${escapeHtmlText(formatMasp(targetUser.masp || ''))}</div></div>
-          <div><div style="color:#64748b;font-weight:600;">CARGO</div><div style="font-weight:700;">${escapeHtmlText(targetUser.cargo || '—')}</div></div>
-          <div><div style="color:#64748b;font-weight:600;">APROVEITAMENTO / APROVAÇÃO</div><div style="font-weight:800;color:#059669;">${kpis.mediaPct}% • ${kpis.taxaAprovacao}% aprov.</div></div>
+        <div style="background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px;padding:10px 14px;margin-bottom:14px;display:flex;align-items:center;gap:14px;font-size:11px;">
+          <div style="width:72px;height:96px;border-radius:6px;overflow:hidden;border:1.5px solid #cbd5e1;background:#e2e8f0;flex-shrink:0;display:flex;align-items:center;justify-content:center;color:#64748b;font-weight:700;font-size:10px;text-align:center;">
+            ${safePrintPhoto ? `<img src="${escapeHtmlText(safePrintPhoto)}" alt="Foto 3x4" style="width:100%;height:100%;object-fit:cover;" />` : 'FOTO<br/>3x4'}
+          </div>
+          <div style="flex:1;display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+            <div><div style="color:#64748b;font-weight:600;">POLICIAL</div><div style="font-weight:800;font-size:13px;">${escapeHtmlText(targetUser.name)}</div></div>
+            <div><div style="color:#64748b;font-weight:600;">MASP</div><div style="font-weight:700;">${escapeHtmlText(formatMasp(targetUser.masp || ''))}</div></div>
+            <div><div style="color:#64748b;font-weight:600;">CARGO</div><div style="font-weight:700;">${escapeHtmlText(targetUser.cargo || '—')}</div></div>
+            <div><div style="color:#64748b;font-weight:600;">APROVEITAMENTO / APROVAÇÃO</div><div style="font-weight:800;color:#059669;">${kpis.mediaPct}% • ${kpis.taxaAprovacao}% aprov.</div></div>
+          </div>
         </div>
 
         <h3 style="font-size:13px;font-weight:800;margin:14px 0 8px;text-transform:uppercase;">Índices por Marcador (Última Marca Registrada)</h3>
@@ -465,14 +472,27 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
     .map(w => w[0]?.toUpperCase() || '')
     .join('');
 
+  const safeUserPhoto = getSafeProfilePhotoUrl(targetUser.fotoUrl);
+
   return (
     <div className="space-y-5">
       {/* Cabeçalho do Policial (similar ao card de perfil do animal na aba COC) */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-sm">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="flex items-center space-x-4 min-w-0">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-amber-500/25 to-slate-800 border border-amber-500/40 flex items-center justify-center shrink-0 text-amber-300 font-black text-xl">
-              {initials}
+            <div className="w-24 h-32 aspect-[3/4] rounded-xl overflow-hidden bg-slate-950 border-2 border-amber-500/40 shadow-lg flex flex-col items-center justify-center shrink-0">
+              {safeUserPhoto ? (
+                <img
+                  src={safeUserPhoto}
+                  alt={`Foto 3x4 de ${targetUser.name}`}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <>
+                  <span className="text-amber-300 font-black text-2xl">{initials}</span>
+                  <span className="text-[10px] font-bold text-slate-500 mt-1 uppercase">Foto 3x4</span>
+                </>
+              )}
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
