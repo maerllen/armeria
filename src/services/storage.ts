@@ -4567,6 +4567,23 @@ class StorageService {
 
     if (target) {
       const prevLinkedAmmoId = target.linkedAmmoCautelaId;
+      const previousWeaponId = target.weaponId;
+      const chosenWeaponId = opts.weaponId || target.weaponId;
+
+      if (chosenWeaponId && previousWeaponId && chosenWeaponId !== previousWeaponId) {
+        const prevWeap = (this.state.weapons || []).find(w => w.id === previousWeaponId);
+        if (prevWeap && (prevWeap.status || '').trim().toLowerCase() === 'cautela pendente') {
+          prevWeap.status = 'No Cofre';
+        }
+        const swappedWeap = (this.state.weapons || []).find(w => w.id === chosenWeaponId);
+        target.weaponId = chosenWeaponId;
+        target.weaponSerialNumber = opts.weaponSerialNumber || swappedWeap?.serialNumber || target.weaponSerialNumber;
+        target.weaponModel = opts.weaponModel || swappedWeap?.model || target.weaponModel;
+        target.weaponCaliber = opts.weaponCaliber || swappedWeap?.caliber || target.weaponCaliber;
+        if (swappedWeap?.type) target.weaponType = swappedWeap.type;
+        if (swappedWeap?.vaultSpaceId) target.vaultSpaceId = swappedWeap.vaultSpaceId;
+      }
+
       target.status = 'AUTORIZADA';
       target.authorizedAt = new Date().toISOString();
       target.armorerId = opts.armorerId || this.state.currentUser?.id;

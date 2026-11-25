@@ -315,6 +315,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
+  const [authWeaponId, setAuthWeaponId] = useState('');
   const [cancelPendingModal, setCancelPendingModal] = useState<CautelaArma | null>(null);
   const [editingCautela, setEditingCautela] = useState<CautelaArma | null>(null);
   const [editWeaponId, setEditWeaponId] = useState('');
@@ -1946,6 +1947,118 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return list;
   }, [editingCautela, userUnitWeapons, weapons, currentUser.departmentId, currentUser.unitId]);
 
+  // Helpers para exibição agrupada (somente modelo e calibre, sem repetir nem expor quantidade/série) ao perfil Policial
+  const normalizeWeaponModelCaliberKey = useCallback((w: { model?: string; caliber?: string }) => {
+    const norm = (v?: string) =>
+      String(v || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/,/g, '.')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return `${norm(w.model)}||${norm(w.caliber)}`;
+  }, []);
+
+  const formatPolicialWeaponLabel = useCallback((w: { type?: string; model?: string }) => {
+    const rawType = String(w.type || '').trim();
+    const rawModel = String(w.model || '').trim();
+    if (!rawType || rawType.toLowerCase() === 'arma de fogo') return rawModel || rawType || 'Armamento';
+    if (!rawModel) return rawType;
+    const norm = (s: string) =>
+      s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim();
+    if (norm(rawModel).startsWith(norm(rawType))) return rawModel;
+    return `${rawType} ${rawModel}`;
+  }, []);
+
+  // Para perfil Policial: exibe apenas 1 entrada por combinação única de (modelo, calibre), sem revelar estoque
+  const displayedUnitWeapons = useMemo(() => {
+    if (!isPolicial) return userUnitWeapons;
+    const seen = new Set<string>();
+    const unique: Weapon[] = [];
+    const sorted = [...userUnitWeapons].sort((a, b) => {
+      const labelA = `${formatPolicialWeaponLabel(a)} ${a.caliber || ''}`;
+      const labelB = `${formatPolicialWeaponLabel(b)} ${b.caliber || ''}`;
+      return labelA.localeCompare(labelB, 'pt-BR', { sensitivity: 'base' });
+    });
+    for (const w of sorted) {
+      const key = normalizeWeaponModelCaliberKey(w);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(w);
+      }
+    }
+    return unique;
+  }, [isPolicial, userUnitWeapons, normalizeWeaponModelCaliberKey, formatPolicialWeaponLabel]);
+
+  // Para perfil Policial na edição de solicitação pendente: agrupa por (modelo, calibre) mantendo a arma atual no topo do seu grupo
+  const displayedEditableUnitWeapons = useMemo(() => {
+    if (!isPolicial) return editableUnitWeapons;
+    const seen = new Set<string>();
+    const unique: Weapon[] = [];
+    const originalId = editingCautela?.weaponId;
+    const ordered = [...editableUnitWeapons].sort((a, b) => {
+      if (originalId && a.id === originalId && b.id !== originalId) return -1;
+      if (originalId && b.id === originalId && a.id !== originalId) return 1;
+      const labelA = `${formatPolicialWeaponLabel(a)} ${a.caliber || ''}`;
+      const labelB = `${formatPolicialWeaponLabel(b)} ${b.caliber || ''}`;
+      return labelA.localeCompare(labelB, 'pt-BR', { sensitivity: 'base' });
+    });
+    for (const w of ordered) {
+      const key = normalizeWeaponModelCaliberKey(w);
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push(w);
+      }
+    }
+    return unique;
+  }, [isPolicial, editableUnitWeapons, editingCautela?.weaponId, normalizeWeaponModelCaliberKey, formatPolicialWeaponLabel]);
+
+  // Armas disponíveis na unidade do mesmo modelo e calibre para o Armeiro escolher o número de série na autorização
+  const matchingWeaponsForAuthorization = useMemo(() => {
+    if (!authorizingCautela) return [];
+    const sourceWeapons = (weapons && weapons.length > 0) ? weapons : storage.getAllWeapons();
+    const targetKey = normalizeWeaponModelCaliberKey({
+      model: authorizingCautela.weaponModel,
+      caliber: authorizingCautela.weaponCaliber
+    });
+    const reserved = sourceWeapons.find(
+      w =>
+        w.id === authorizingCautela.weaponId ||
+        (authorizingCautela.weaponSerialNumber && w.serialNumber === authorizingCautela.weaponSerialNumber)
+    );
+    const list: Weapon[] = [];
+    if (reserved) {
+      list.push(reserved);
+    } else if (authorizingCautela.weaponId) {
+      list.push({
+        id: authorizingCautela.weaponId,
+        serialNumber: authorizingCautela.weaponSerialNumber,
+        model: authorizingCautela.weaponModel,
+        type: authorizingCautela.weaponType || 'Arma de Fogo',
+        caliber: authorizingCautela.weaponCaliber || 'Padrão',
+        magazineQuantity: authorizingCautela.magazineQuantity || 2,
+        status: 'Cautela Pendente',
+        vaultSpaceId: authorizingCautela.vaultSpaceId,
+        departmentId: authorizingCautela.departmentId || currentUser.departmentId || '',
+        unitId: authorizingCautela.unitId || currentUser.unitId || '',
+        shotCount: 0,
+        createdAt: authorizingCautela.createdAt || new Date().toISOString()
+      } as Weapon);
+    }
+    const targetUnitId = authorizingCautela.unitId || reserved?.unitId;
+    for (const w of sourceWeapons) {
+      if (list.some(item => item.id === w.id)) continue;
+      const st = (w.status || '').trim().toLowerCase();
+      if (st !== 'no cofre' && st !== 'nocofre') continue;
+      if (targetUnitId && w.unitId && w.unitId !== targetUnitId) continue;
+      if (normalizeWeaponModelCaliberKey(w) === targetKey) {
+        list.push(w);
+      }
+    }
+    return list;
+  }, [authorizingCautela, weapons, normalizeWeaponModelCaliberKey, currentUser.departmentId, currentUser.unitId]);
+
   const editSelectedWeapon = useMemo(() => {
     return editableUnitWeapons.find(w => w.id === editWeaponId) || null;
   }, [editableUnitWeapons, editWeaponId]);
@@ -2921,7 +3034,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           }, 150);
           setActiveTab(isOwnDirect ? 'DEFERIDAS_PROPRIA' : 'DEFERIDAS');
         } else {
-          setSuccessMsg(`Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Cautela de arma em análise" aguardando comando do armeiro.`);
+          setSuccessMsg(
+            isPolicial
+              ? `Solicitação de cautela da arma ${formatPolicialWeaponLabel(weapon)} (${weapon.caliber}) realizada com sucesso! A solicitação está listada em "Cautela de arma em análise" aguardando comando do armeiro.`
+              : `Solicitação de cautela da arma ${weapon.model} (Série: ${weapon.serialNumber}) realizada com sucesso! A solicitação está listada em "Cautela de arma em análise" aguardando comando do armeiro.`
+          );
           setActiveTab('MINHAS');
         }
         setSelectedWeaponId('');
@@ -2944,6 +3061,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     const resolvedMotivo = getResolvedMotivoFinalidade(cautela);
     setErrorMsg('');
     setAuthStockId('');
+    setAuthWeaponId(cautela.weaponId || '');
     setAuthorizingCautela(cautela);
     // Inicia desmarcado: somente acautela munições caso o usuário Armeiro marque explicitamente a opção
     setAuthWithAmmo(false);
@@ -3025,14 +3143,24 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           : `Justificativa do Armeiro (${authAmmoComparison.selectedCaliberDisplay} - ${authAmmoComparison.selectedTipoDisplay}): ${justificationText}`
         : undefined;
 
+      const selectedAuthWeapon =
+        matchingWeaponsForAuthorization.find(w => w.id === authWeaponId) ||
+        matchingWeaponsForAuthorization[0] ||
+        null;
+      const finalAuthWeaponId = selectedAuthWeapon?.id || authorizingCautela.weaponId;
+      const finalAuthWeaponSerial = selectedAuthWeapon?.serialNumber || authorizingCautela.weaponSerialNumber;
+      const finalAuthWeaponModel = selectedAuthWeapon?.model || authorizingCautela.weaponModel;
+      const finalAuthWeaponCaliber = selectedAuthWeapon?.caliber || authorizingCautela.weaponCaliber;
+      const finalAuthWeaponVaultId = selectedAuthWeapon?.vaultSpaceId || authorizingCautela.vaultSpaceId;
+
       const res = await storage.authorizeCautelaArma(authorizingCautela.id, {
         withAmmo: authWithAmmo,
         notes: notesToPersist,
         armorerJustification: justificationText,
         stockId: authWithAmmo ? (selectedStock?.id || authStockId || undefined) : undefined,
         vaultSpaceId: authWithAmmo
-          ? (selectedStock?.vaultSpaceId || authorizingCautela.vaultSpaceId)
-          : authorizingCautela.vaultSpaceId,
+          ? (selectedStock?.vaultSpaceId || finalAuthWeaponVaultId)
+          : finalAuthWeaponVaultId,
         seraDevolvida: authWithAmmo ? authSeraDevolvida : undefined,
         ammoQuantity: authWithAmmo ? Number(authAmmoQty) : 0,
         destinacao: authWithAmmo ? authAmmoDestinacao : undefined,
@@ -3043,10 +3171,10 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         pesoMunicao: authWithAmmo ? (selectedStock?.pesoMunicao || authAmmoComparison.selectedCalObj?.peso) : undefined,
         loteMunicao: authWithAmmo ? selectedStock?.loteMunicao : undefined,
         anoFabricacao: authWithAmmo ? selectedStock?.anoFabricacao : undefined,
-        weaponId: authorizingCautela.weaponId,
-        weaponSerialNumber: authorizingCautela.weaponSerialNumber,
-        weaponModel: authorizingCautela.weaponModel,
-        weaponCaliber: authorizingCautela.weaponCaliber,
+        weaponId: finalAuthWeaponId,
+        weaponSerialNumber: finalAuthWeaponSerial,
+        weaponModel: finalAuthWeaponModel,
+        weaponCaliber: finalAuthWeaponCaliber,
         departmentId: authorizingCautela.departmentId || matchedUser?.departmentId || currentUser.departmentId,
         unitId: authorizingCautela.unitId || matchedUser?.unitId || currentUser.unitId,
         reason: resolvedMotivo,
@@ -3065,13 +3193,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         const isOwnAuth =
           resolvedRequesterId === currentUser.id || isOwnRecipientCautela(authorizingCautela);
         setSuccessMsg(
-          `Cautela da arma ${authorizingCautela.weaponModel} (Série: ${authorizingCautela.weaponSerialNumber}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${
+          `Cautela da arma ${finalAuthWeaponModel} (Série: ${finalAuthWeaponSerial}) autorizada com sucesso! A arma passou de "Cautela Pendente" para "Acautelada — ${resolvedAuthReq.name} (MASP: ${resolvedAuthReq.masp})".${
             authWithAmmo
               ? ` Cautela de munições (${authAmmoQty} un. • Destinação: ${authAmmoDestinacao}) gerada em nome de ${resolvedAuthReq.name}.`
               : ' Cautela exclusiva do armamento (sem geração de cautela de munições).'
           }${isOwnAuth ? ' Disponível na aba "Deferidas/Ativas Própria".' : ''}`
         );
         setAuthorizingCautela(null);
+        setAuthWeaponId('');
         setLocalSyncTick(t => t + 1);
         await onRefresh();
         setLocalSyncTick(t => t + 1);
@@ -3262,7 +3391,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         setErrorMsg(res.error || 'Erro ao salvar alterações na solicitação de cautela.');
       } else {
         setSuccessMsg(
-          `Solicitação de cautela atualizada com sucesso! Arma: ${chosenWeapon.model} (Série: ${chosenWeapon.serialNumber}). A cautela permanece em análise aguardando decisão do armeiro da unidade.`
+          isPolicial
+            ? `Solicitação de cautela atualizada com sucesso! Arma: ${formatPolicialWeaponLabel(chosenWeapon)} (${chosenWeapon.caliber}). A cautela permanece em análise aguardando decisão do armeiro da unidade.`
+            : `Solicitação de cautela atualizada com sucesso! Arma: ${chosenWeapon.model} (Série: ${chosenWeapon.serialNumber}). A cautela permanece em análise aguardando decisão do armeiro da unidade.`
         );
         setEditingCautela(null);
         setLocalSyncTick(t => t + 1);
@@ -3791,7 +3922,11 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         setCancelPendingModal(null);
         await onRefresh();
       } else {
-        setSuccessMsg(`Solicitação de cautela da arma ${cautela.weaponModel} (Série: ${cautela.weaponSerialNumber}) excluída com sucesso! O armamento retornou ao cofre no status "No Cofre".`);
+        setSuccessMsg(
+          isPolicial
+            ? `Solicitação de cautela da arma ${formatPolicialWeaponLabel({ type: cautela.weaponType, model: cautela.weaponModel })} (${cautela.weaponCaliber || 'Padrão'}) excluída com sucesso!`
+            : `Solicitação de cautela da arma ${cautela.weaponModel} (Série: ${cautela.weaponSerialNumber}) excluída com sucesso! O armamento retornou ao cofre no status "No Cofre".`
+        );
         setCancelPendingModal(null);
         setLocalSyncTick(t => t + 1);
         await onRefresh();
@@ -7517,7 +7652,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 <span>Solicitação de Cautela de Armamento Individual</span>
               </h3>
               <p className="text-xs text-slate-400 mt-1">
-                Visualização de todas as armas disponíveis no cofre da sua unidade para solicitação de cautela.
+                {isPolicial
+                  ? 'Selecione o modelo e o calibre do armamento disponível na sua unidade para solicitação de cautela.'
+                  : 'Visualização de todas as armas disponíveis no cofre da sua unidade para solicitação de cautela.'}
               </p>
             </div>
 
@@ -7629,19 +7766,46 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                  1. Selecione a Arma Disponível {hasDeptWideScope ? 'no Departamento / Unidade' : 'na Unidade'} ({userUnitWeapons.length} disponível{userUnitWeapons.length === 1 ? '' : 'is'})
+                  {isPolicial
+                    ? '1. Selecione a Arma Disponível na Unidade'
+                    : `1. Selecione a Arma Disponível ${hasDeptWideScope ? 'no Departamento / Unidade' : 'na Unidade'} (${userUnitWeapons.length} disponível${userUnitWeapons.length === 1 ? '' : 'is'})`}
                 </label>
-                {userUnitWeapons.length === 0 ? (
+                {displayedUnitWeapons.length === 0 ? (
                   <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
                     <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-                    Não há armas com status "No Cofre" disponíveis {hasDeptWideScope ? 'nas unidades selecionadas' : 'na sua unidade'} no momento.
+                    {isPolicial
+                      ? 'Não há armas disponíveis na sua unidade no momento.'
+                      : `Não há armas com status "No Cofre" disponíveis ${hasDeptWideScope ? 'nas unidades selecionadas' : 'na sua unidade'} no momento.`}
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">
-                    {userUnitWeapons.map(w => {
+                    {displayedUnitWeapons.map(w => {
                       const isSelected = selectedWeaponId === w.id;
                       const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
                       const weapUnit = departmentUnits.find(u => u.id === w.unitId) || units.find(u => u.id === w.unitId);
+                      if (isPolicial) {
+                        return (
+                          <div
+                            key={w.id}
+                            onClick={() => {
+                              setSelectedWeaponId(w.id);
+                              setMagazineQuantity(w.magazineQuantity || 2);
+                            }}
+                            className={`p-3 rounded-xl border text-left cursor-pointer transition flex items-center justify-between gap-2 ${
+                              isSelected
+                                ? 'bg-amber-950/70 border-amber-500 shadow-md ring-1 ring-amber-500'
+                                : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                            }`}
+                          >
+                            <span className="text-xs font-bold text-slate-100 truncate">
+                              {formatPolicialWeaponLabel(w)}
+                            </span>
+                            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                              {w.caliber}
+                            </span>
+                          </div>
+                        );
+                      }
                       return (
                         <div
                           key={w.id}
@@ -7668,9 +7832,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           </div>
                           <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60 gap-2">
                             <span className="truncate">
-                              {isPolicial
-                                ? 'Disponível na Unidade'
-                                : `${hasDeptWideScope && weapUnit ? `${weapUnit.name} • ` : ''}Local: ${vault ? vault.code : 'Cofre'}`}
+                              {`${hasDeptWideScope && weapUnit ? `${weapUnit.name} • ` : ''}Local: ${vault ? vault.code : 'Cofre'}`}
                             </span>
                             <span className="shrink-0">{w.magazineQuantity || 1} carregadores</span>
                           </div>
@@ -7684,7 +7846,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               {selectedWeapon && (
                 <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-xs text-amber-200 flex items-center justify-between">
                   <div>
-                    Arma selecionada: <strong>{selectedWeapon.model}</strong> (Série: <span className="font-mono">{selectedWeapon.serialNumber}</span>) - Calibre: <strong>{selectedWeapon.caliber}</strong>
+                    {isPolicial ? (
+                      <>
+                        Arma selecionada: <strong>{formatPolicialWeaponLabel(selectedWeapon)}</strong> — Calibre: <strong>{selectedWeapon.caliber}</strong>
+                      </>
+                    ) : (
+                      <>
+                        Arma selecionada: <strong>{selectedWeapon.model}</strong> (Série: <span className="font-mono">{selectedWeapon.serialNumber}</span>) - Calibre: <strong>{selectedWeapon.caliber}</strong>
+                      </>
+                    )}
                   </div>
                   {!isPolicial && (
                     <div className="text-[10px] text-slate-400">
@@ -7987,7 +8157,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={!selectedWeaponId || isSubmitting || userUnitWeapons.length === 0}
+                  disabled={!selectedWeaponId || isSubmitting || displayedUnitWeapons.length === 0}
                   className="px-5 py-2.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
                 >
                   <Crosshair className="w-4 h-4" />
@@ -8671,10 +8841,16 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                         </div>
                                         <div>
                                           <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                                            <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
-                                            <span className="font-mono text-xs text-amber-400 font-bold">
-                                              Nº {cautela.weaponSerialNumber}
-                                            </span>
+                                            <h4 className="text-sm font-bold text-slate-100">
+                                              {isPolicial
+                                                ? formatPolicialWeaponLabel({ type: cautela.weaponType, model: cautela.weaponModel })
+                                                : cautela.weaponModel}
+                                            </h4>
+                                            {!isPolicial && (
+                                              <span className="font-mono text-xs text-amber-400 font-bold">
+                                                Nº {cautela.weaponSerialNumber}
+                                              </span>
+                                            )}
                                             {cautela.weaponCaliber && (
                                               <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
                                                 {cautela.weaponCaliber}
@@ -9350,17 +9526,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                           <Crosshair className="w-5 h-5" />
                                         </div>
                                         <div>
-                                          <div className="flex items-center space-x-2">
-                                            <h4 className="text-sm font-bold text-slate-100">{cautela.weaponModel}</h4>
-                                            <span className="font-mono text-xs text-red-400 font-bold">
-                                              Nº {cautela.weaponSerialNumber}
-                                            </span>
+                                          <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                                            <h4 className="text-sm font-bold text-slate-100">
+                                              {isPolicial
+                                                ? formatPolicialWeaponLabel({ type: cautela.weaponType, model: cautela.weaponModel })
+                                                : cautela.weaponModel}
+                                            </h4>
+                                            {!isPolicial && (
+                                              <span className="font-mono text-xs text-red-400 font-bold">
+                                                Nº {cautela.weaponSerialNumber}
+                                              </span>
+                                            )}
+                                            {isPolicial && cautela.weaponCaliber && (
+                                              <span className="font-mono text-[11px] text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                                                {cautela.weaponCaliber}
+                                              </span>
+                                            )}
                                             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-red-500/20 text-red-300 border-red-500/30">
                                               Recusada
                                             </span>
                                           </div>
                                           <p className="text-xs text-slate-400 mt-0.5">
-                                            Solicitante: <strong className="text-slate-200">{requesterInfo.name}</strong> (MASP: {requesterInfo.masp}) • Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong>
+                                            Solicitante: <strong className="text-slate-200">{requesterInfo.name}</strong> (MASP: {requesterInfo.masp})
+                                            {!isPolicial && (
+                                              <> • Arma retornada ao cofre: <strong className="text-slate-200">{vault ? vault.code : 'No Cofre de Origem'}</strong></>
+                                            )}
                                           </p>
                                         </div>
                                       </div>
@@ -10587,10 +10777,35 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                         {authRequesterInfo.name} — MASP: {authRequesterInfo.masp}
                       </strong>
                     </div>
-                    <div className="flex items-center justify-between text-slate-300">
-                      <span>Arma Solicitada:</span>
-                      <strong className="text-slate-100 font-mono">{authorizingCautela.weaponModel} - Série: {authorizingCautela.weaponSerialNumber} ({authorizingCautela.weaponCaliber})</strong>
+                    <div className="flex items-center justify-between gap-3 text-slate-300">
+                      <span className="shrink-0">Arma Solicitada:</span>
+                      <strong className="text-slate-100 font-mono text-right">
+                        {authorizingCautela.weaponModel} ({authorizingCautela.weaponCaliber})
+                        {matchingWeaponsForAuthorization.length <= 1 ? ` - Série: ${authorizingCautela.weaponSerialNumber}` : ''}
+                      </strong>
                     </div>
+                    {matchingWeaponsForAuthorization.length > 1 && (
+                      <div className="pt-1.5 border-t border-slate-800/80 space-y-1">
+                        <label className="block text-[11px] font-semibold text-amber-300 uppercase tracking-wider">
+                          Número de Série a Entregar ({matchingWeaponsForAuthorization.length} disponíveis deste modelo/calibre)
+                        </label>
+                        <select
+                          value={authWeaponId || authorizingCautela.weaponId}
+                          onChange={(e) => setAuthWeaponId(e.target.value)}
+                          className="w-full bg-slate-900 border border-amber-600/60 focus:border-amber-400 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 font-mono"
+                        >
+                          {matchingWeaponsForAuthorization.map(mw => {
+                            const mwVault = vaultSpaces.find(v => v.id === mw.vaultSpaceId);
+                            const isReserved = mw.id === authorizingCautela.weaponId;
+                            return (
+                              <option key={mw.id} value={mw.id}>
+                                Série: {mw.serialNumber} • Local: {mwVault ? mwVault.code : 'Cofre'}{isReserved ? ' (Pré-reservada)' : ' (No Cofre)'}
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
                     {(() => {
                       const authMotivoFinalidade = getResolvedMotivoFinalidade(authorizingCautela);
                       return (
@@ -11037,13 +11252,42 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               {/* 1. Seleção do Armamento */}
               <div>
                 <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">
-                  1. Armamento Solicitado ({editableUnitWeapons.length} opção{editableUnitWeapons.length === 1 ? '' : 'ões'} disponível{editableUnitWeapons.length === 1 ? '' : 'is'})
+                  {isPolicial
+                    ? '1. Armamento Solicitado'
+                    : `1. Armamento Solicitado (${editableUnitWeapons.length} opção${editableUnitWeapons.length === 1 ? '' : 'ões'} disponível${editableUnitWeapons.length === 1 ? '' : 'is'})`}
                 </label>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-52 overflow-y-auto p-1">
-                  {editableUnitWeapons.map(w => {
+                  {displayedEditableUnitWeapons.map(w => {
                     const isSelected = editWeaponId === w.id;
                     const isOriginalWeapon = w.id === editingCautela.weaponId;
                     const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+                    if (isPolicial) {
+                      return (
+                        <div
+                          key={`edit-w-${w.id}`}
+                          onClick={() => setEditWeaponId(w.id)}
+                          className={`p-3 rounded-xl border text-left cursor-pointer transition flex items-center justify-between gap-2 ${
+                            isSelected
+                              ? 'bg-amber-950/70 border-amber-500 shadow-md ring-1 ring-amber-500'
+                              : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-bold text-slate-100 truncate">
+                              {formatPolicialWeaponLabel(w)}
+                            </span>
+                            {isOriginalWeapon && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 shrink-0">
+                                Atual
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-800 text-amber-300 shrink-0">
+                            {w.caliber}
+                          </span>
+                        </div>
+                      );
+                    }
                     return (
                       <div
                         key={`edit-w-${w.id}`}
@@ -11073,11 +11317,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                           </div>
                         </div>
                         <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60">
-                          <span>
-                            {isPolicial
-                              ? (isOriginalWeapon ? 'Reservada nesta solicitação' : 'Disponível na Unidade')
-                              : `Local: ${vault ? vault.code : 'Cofre'}`}
-                          </span>
+                          <span>{`Local: ${vault ? vault.code : 'Cofre'}`}</span>
                           <span>{w.magazineQuantity || 1} carregadores</span>
                         </div>
                       </div>
@@ -11089,7 +11329,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
               {editSelectedWeapon && (
                 <div className="p-3 bg-amber-950/30 border border-amber-800/50 rounded-xl text-xs text-amber-200 flex items-center justify-between">
                   <div>
-                    Arma selecionada: <strong>{editSelectedWeapon.model}</strong> (Série: <span className="font-mono">{editSelectedWeapon.serialNumber}</span>) - Calibre: <strong>{editSelectedWeapon.caliber}</strong>
+                    {isPolicial ? (
+                      <>
+                        Arma selecionada: <strong>{formatPolicialWeaponLabel(editSelectedWeapon)}</strong> — Calibre: <strong>{editSelectedWeapon.caliber}</strong>
+                      </>
+                    ) : (
+                      <>
+                        Arma selecionada: <strong>{editSelectedWeapon.model}</strong> (Série: <span className="font-mono">{editSelectedWeapon.serialNumber}</span>) - Calibre: <strong>{editSelectedWeapon.caliber}</strong>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -11635,8 +11883,15 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                   Você tem certeza que deseja excluir esta solicitação de cautela do armamento:
                 </p>
                 <div className="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-slate-200 space-y-1">
-                  <div><strong>Modelo:</strong> {cancelPendingModal.weaponModel}</div>
-                  <div><strong>Nº de Série:</strong> <span className="text-amber-400 font-bold">{cancelPendingModal.weaponSerialNumber}</span></div>
+                  <div>
+                    <strong>Modelo:</strong>{' '}
+                    {isPolicial
+                      ? formatPolicialWeaponLabel({ type: cancelPendingModal.weaponType, model: cancelPendingModal.weaponModel })
+                      : cancelPendingModal.weaponModel}
+                  </div>
+                  {!isPolicial && (
+                    <div><strong>Nº de Série:</strong> <span className="text-amber-400 font-bold">{cancelPendingModal.weaponSerialNumber}</span></div>
+                  )}
                   <div><strong>Calibre:</strong> {cancelPendingModal.weaponCaliber}</div>
                 </div>
                 <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-lg text-amber-300 text-[11px] leading-relaxed">

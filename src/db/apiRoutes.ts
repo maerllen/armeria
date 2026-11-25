@@ -16448,6 +16448,59 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
     const isDirect = Boolean(req.body.directAuthorized || req.body.status === 'AUTORIZADA');
     const armorer = req.body.armorer || req.body.actor || (isDirect ? { id: req.body.armorerId, name: req.body.armorerName, masp: req.body.armorerMasp } : null);
 
+    // Garante que uma solicitação pendente (ex.: policial selecionando apenas Modelo + Calibre)
+    // sempre reserve uma unidade efetivamente "No Cofre", evitando colisão em pedidos simultâneos
+    if (!isDirect) {
+      const [currentWeaponRows]: any = await pool.query(
+        `SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, MODELO_ARMAS, TIPO_ARMAS, CALIBRE_ARMAS,
+                QUANTIDADE_CARREGADORES_ARMAS, COFRE_ID_ARMAS, DEPARTAMENTO_ID_ARMAS, UNIDADE_ID_ARMAS, STATUS_ARMAS
+         FROM ARMAS WHERE ID_ARMAS = ? LIMIT 1`,
+        [weaponId]
+      );
+      const currentRow = currentWeaponRows?.[0];
+      const currentStatus = String(currentRow?.STATUS_ARMAS || '').trim().toLowerCase();
+      const isCurrentNoCofre = currentStatus === 'no cofre' || currentStatus === 'nocofre';
+
+      if (!isCurrentNoCofre) {
+        const lookupModel = String(currentRow?.MODELO_ARMAS || weaponModel || '').trim();
+        const lookupCaliber = String(currentRow?.CALIBRE_ARMAS || weaponCaliber || '').trim();
+        const lookupUnitId = currentRow?.UNIDADE_ID_ARMAS || unitId || null;
+
+        let replacementRow: any = null;
+        if (lookupModel && lookupCaliber) {
+          const [altRows]: any = await pool.query(
+            `SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, MODELO_ARMAS, TIPO_ARMAS, CALIBRE_ARMAS,
+                    QUANTIDADE_CARREGADORES_ARMAS, COFRE_ID_ARMAS, DEPARTAMENTO_ID_ARMAS, UNIDADE_ID_ARMAS
+             FROM ARMAS
+             WHERE LOWER(TRIM(STATUS_ARMAS)) IN ('no cofre', 'nocofre')
+               AND LOWER(TRIM(MODELO_ARMAS)) = LOWER(?)
+               AND REPLACE(LOWER(TRIM(CALIBRE_ARMAS)), ',', '.') = REPLACE(LOWER(?), ',', '.')
+               AND (? IS NULL OR UNIDADE_ID_ARMAS = ?)
+             ORDER BY ID_ARMAS ASC
+             LIMIT 1`,
+            [lookupModel, lookupCaliber, lookupUnitId, lookupUnitId]
+          );
+          replacementRow = altRows?.[0] || null;
+        }
+
+        if (!replacementRow) {
+          return res.status(409).json({
+            error: 'Não há unidades disponíveis deste modelo e calibre no cofre no momento.'
+          });
+        }
+
+        weaponId = replacementRow.ID_ARMAS;
+        weaponSerialNumber = replacementRow.NUMERO_SERIE_ARMAS;
+        weaponModel = replacementRow.MODELO_ARMAS;
+        weaponType = replacementRow.TIPO_ARMAS || weaponType;
+        weaponCaliber = replacementRow.CALIBRE_ARMAS;
+        vaultSpaceId = replacementRow.COFRE_ID_ARMAS || vaultSpaceId;
+        magazineQuantity = replacementRow.QUANTIDADE_CARREGADORES_ARMAS || magazineQuantity || 2;
+        departmentId = replacementRow.DEPARTAMENTO_ID_ARMAS || departmentId;
+        unitId = replacementRow.UNIDADE_ID_ARMAS || unitId;
+      }
+    }
+
     const initialStatus = isDirect ? 'AUTORIZADA' : 'PENDENTE';
 
     if (ammunition && Number(ammunition.quantity) > 0) {
@@ -16845,10 +16898,69 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
       req.body.reason ||
       'Serviço Ordinário';
 
-    // 1. Atualiza status da cautela para AUTORIZADA com Armeiro Autorizador e dados resolvidos do solicitante
+    // Permite ao Armeiro escolher outro número de série "No Cofre" (do mesmo modelo/calibre) no momento da autorização
+    const originalWeaponId = cautela.ARMA_ID_ACAUTELAR_ARMAS;
+    const requestedAuthWeaponId = String(req.body.weaponId || '').trim();
+    let finalWeaponId = originalWeaponId;
+    let finalWeaponSerial = cautela.NUMERO_SERIE_ACAUTELAR_ARMAS;
+    let finalWeaponModel = cautela.MODELO_ACAUTELAR_ARMAS;
+    let finalWeaponType = cautela.TIPO_ARMA_ACAUTELAR_ARMAS;
+    let finalWeaponCaliber = cautela.CALIBRE_ACAUTELAR_ARMAS;
+    let finalOriginVaultId = cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS || vaultSpaceId || null;
+
+    if (requestedAuthWeaponId && requestedAuthWeaponId !== originalWeaponId) {
+      const [swapRows]: any = await pool.query(
+        `SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, MODELO_ARMAS, TIPO_ARMAS, CALIBRE_ARMAS,
+                COFRE_ID_ARMAS, STATUS_ARMAS
+         FROM ARMAS WHERE ID_ARMAS = ? LIMIT 1`,
+        [requestedAuthWeaponId]
+      );
+      const swapWeapon = swapRows?.[0];
+      const swapStatus = String(swapWeapon?.STATUS_ARMAS || '').trim().toLowerCase();
+      if (!swapWeapon || (swapStatus !== 'no cofre' && swapStatus !== 'nocofre')) {
+        return res.status(409).json({
+          error: 'O número de série selecionado para autorização não está mais disponível ("No Cofre").'
+        });
+      }
+      finalWeaponId = swapWeapon.ID_ARMAS;
+      finalWeaponSerial = swapWeapon.NUMERO_SERIE_ARMAS;
+      finalWeaponModel = swapWeapon.MODELO_ARMAS || finalWeaponModel;
+      finalWeaponType = swapWeapon.TIPO_ARMAS || finalWeaponType;
+      finalWeaponCaliber = swapWeapon.CALIBRE_ARMAS || finalWeaponCaliber;
+      finalOriginVaultId = swapWeapon.COFRE_ID_ARMAS || finalOriginVaultId;
+
+      // Devolve a arma originalmente reservada (pendente) ao status "No Cofre"
+      if (originalWeaponId) {
+        try {
+          await pool.query(
+            `UPDATE ARMAS
+             SET STATUS_ARMAS = 'No Cofre',
+                 OBSERVACAO_LOCALIZACAO_ARMAS = NULL
+             WHERE ID_ARMAS = ? AND LOWER(TRIM(STATUS_ARMAS)) = 'cautela pendente'`,
+            [originalWeaponId]
+          );
+        } catch (_) {}
+      }
+
+      // Atualiza os campos em memória para uso nos logs/munição vinculada abaixo
+      cautela.ARMA_ID_ACAUTELAR_ARMAS = finalWeaponId;
+      cautela.NUMERO_SERIE_ACAUTELAR_ARMAS = finalWeaponSerial;
+      cautela.MODELO_ACAUTELAR_ARMAS = finalWeaponModel;
+      cautela.TIPO_ARMA_ACAUTELAR_ARMAS = finalWeaponType;
+      cautela.CALIBRE_ACAUTELAR_ARMAS = finalWeaponCaliber;
+      cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS = finalOriginVaultId;
+    }
+
+    // 1. Atualiza status da cautela para AUTORIZADA com Armeiro Autorizador, arma efetiva e dados resolvidos do solicitante
     await pool.query(`
       UPDATE ACAUTELAR_ARMAS SET
         STATUS_ACAUTELAR_ARMAS = 'AUTORIZADA',
+        ARMA_ID_ACAUTELAR_ARMAS = ?,
+        NUMERO_SERIE_ACAUTELAR_ARMAS = ?,
+        MODELO_ACAUTELAR_ARMAS = ?,
+        TIPO_ARMA_ACAUTELAR_ARMAS = ?,
+        CALIBRE_ACAUTELAR_ARMAS = ?,
+        COFRE_ORIGEM_ID_ACAUTELAR_ARMAS = COALESCE(?, COFRE_ORIGEM_ID_ACAUTELAR_ARMAS),
         REQUERENTE_ID_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), REQUERENTE_ID_ACAUTELAR_ARMAS),
         REQUERENTE_NOME_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), REQUERENTE_NOME_ACAUTELAR_ARMAS),
         REQUERENTE_MASP_ACAUTELAR_ARMAS = COALESCE(NULLIF(?, ''), REQUERENTE_MASP_ACAUTELAR_ARMAS),
@@ -16861,6 +16973,12 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
         DATA_ATUALIZACAO_ACAUTELAR_ARMAS = NOW()
       WHERE ID_ACAUTELAR_ARMAS = ?
     `, [
+      finalWeaponId,
+      finalWeaponSerial,
+      finalWeaponModel,
+      finalWeaponType || null,
+      finalWeaponCaliber || null,
+      finalOriginVaultId || null,
       resolvedReqId || null,
       resolvedReqName || null,
       resolvedReqMasp || null,
@@ -16874,7 +16992,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
 
     // 2. Atualiza a arma para status 'Acautelada', retirando do cofre físico mas mantendo último cofre e policial
     let vaultCode = '';
-    const originVaultId = cautela.COFRE_ORIGEM_ID_ACAUTELAR_ARMAS || vaultSpaceId;
+    const originVaultId = finalOriginVaultId || vaultSpaceId;
     if (originVaultId) {
       try {
         const [vRows]: any = await pool.query('SELECT CODIGO_COFRES FROM COFRES WHERE ID_COFRES = ?', [originVaultId]);
@@ -16895,7 +17013,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
           OBSERVACAO_LOCALIZACAO_ARMAS = ?,
           LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS)
         WHERE ID_ARMAS = ?
-      `, [locationNote, originVaultId || null, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+      `, [locationNote, originVaultId || null, finalWeaponId]);
     } catch (e) {
       await pool.query(`
         UPDATE ARMAS SET 
@@ -16903,7 +17021,7 @@ apiRouter.put('/cautelas-armas/:id/autorizar', async (req: Request, res: Respons
           COFRE_ID_ARMAS = NULL,
           OBSERVACAO_LOCALIZACAO_ARMAS = ?
         WHERE ID_ARMAS = ?
-      `, [locationNote, cautela.ARMA_ID_ACAUTELAR_ARMAS]);
+      `, [locationNote, finalWeaponId]);
     }
 
     // 3. Somente se o Armeiro marcou explicitamente "Acautelar munições junto com a arma?" (wantsWithAmmo),
