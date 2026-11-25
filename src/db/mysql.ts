@@ -2523,6 +2523,8 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         \`NOTA_APROVACAO_REF\` DECIMAL(10,2) NOT NULL DEFAULT 6.00,
         \`TEMPO_APROVACAO_REF\` INT DEFAULT NULL,
         \`APROVADO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`AUSENTE\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`AUSENCIA_INFORMADA\` TINYINT(1) DEFAULT NULL,
         \`TEVE_TIRO\` TINYINT(1) NOT NULL DEFAULT 0,
         \`TIPO_ARMA\` VARCHAR(40) DEFAULT NULL,
         \`TIROS_EFETUADOS\` INT DEFAULT NULL,
@@ -2540,6 +2542,24 @@ export async function initializeDatabaseSchema(): Promise<{ success: boolean; me
         KEY \`idx_desemp_res_grupo\` (\`ID_GRUPO\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
     `);
+    try {
+      const [colAus]: any = await connection.query(`
+        SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DESEMPENHO_RESULTADOS' AND COLUMN_NAME = 'AUSENTE'
+      `);
+      if (colAus[0]?.cnt === 0) {
+        await connection.query(`ALTER TABLE \`DESEMPENHO_RESULTADOS\` ADD COLUMN \`AUSENTE\` TINYINT(1) NOT NULL DEFAULT 0 AFTER \`APROVADO\``);
+      }
+      const [colAusInf]: any = await connection.query(`
+        SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DESEMPENHO_RESULTADOS' AND COLUMN_NAME = 'AUSENCIA_INFORMADA'
+      `);
+      if (colAusInf[0]?.cnt === 0) {
+        await connection.query(`ALTER TABLE \`DESEMPENHO_RESULTADOS\` ADD COLUMN \`AUSENCIA_INFORMADA\` TINYINT(1) DEFAULT NULL AFTER \`AUSENTE\``);
+      }
+    } catch (migErr) {
+      console.warn('[Aviso Migração DESEMPENHO_RESULTADOS]', migErr);
+    }
     logs.push('Tabelas do módulo Índices de Desempenho (Físico e Tático) verificadas/criadas.');
 
 

@@ -5766,6 +5766,8 @@ class StorageService {
       valorMarca?: number | null;
       tempoSegundos?: number | null;
       notaObtida: number;
+      ausente?: boolean;
+      ausenciaInformada?: boolean | null;
       tirosEfetuados?: number | null;
       observacoes?: string | null;
     }>

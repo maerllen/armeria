@@ -2460,6 +2460,8 @@ export interface DesempenhoResultado {
   notaAprovacaoRef: number;
   tempoAprovacaoRef?: number | null;
   aprovado: boolean;
+  ausente?: boolean;
+  ausenciaInformada?: boolean | null;
   teveTiro: boolean;
   tipoArma?: TipoArmaDesempenho | null;
   tirosEfetuados?: number | null;

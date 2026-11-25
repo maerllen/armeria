@@ -74,6 +74,11 @@ export function formatNumberBr(val?: number | null): string {
 }
 
 export function formatResultadoResumo(r: DesempenhoResultado): string {
+  if (r.ausente) {
+    if (r.ausenciaInformada === true) return 'Ausente (Informada previamente)';
+    if (r.ausenciaInformada === false) return 'Ausente (Não informada previamente)';
+    return 'Ausente';
+  }
   const parts: string[] = [];
   if (r.valorMarca !== undefined && r.valorMarca !== null) {
     const unitLabel = r.unidadeMedida || (r.tipoMarca === 'Distância' ? 'm' : r.tipoMarca === 'Repetição' ? 'rep.' : 'exec.');
@@ -234,18 +239,20 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
 
   const kpis = useMemo(() => {
     const total = filteredResultados.length;
+    const ausencias = filteredResultados.filter(r => r.ausente).length;
+    const presentes = filteredResultados.filter(r => !r.ausente);
     const fisicos = filteredResultados.filter(r => r.categoria === 'FISICO').length;
     const taticos = filteredResultados.filter(r => r.categoria === 'TATICO').length;
-    const aprovados = filteredResultados.filter(r => r.aprovado).length;
-    const taxaAprovacao = total > 0 ? Math.round((aprovados / total) * 100) : 0;
+    const aprovados = presentes.filter(r => r.aprovado).length;
+    const taxaAprovacao = presentes.length > 0 ? Math.round((aprovados / presentes.length) * 100) : 0;
     const mediaPct =
-      total > 0
+      presentes.length > 0
         ? Math.round(
-            filteredResultados.reduce((s, r) => s + calcPercent(r.notaObtida, r.notaMaxRef), 0) / total
+            presentes.reduce((s, r) => s + calcPercent(r.notaObtida, r.notaMaxRef), 0) / presentes.length
           )
         : 0;
-    const totalTiros = filteredResultados.reduce((s, r) => s + Number(r.tirosEfetuados || 0), 0);
-    return { total, fisicos, taticos, aprovados, taxaAprovacao, mediaPct, totalTiros };
+    const totalTiros = presentes.reduce((s, r) => s + Number(r.tirosEfetuados || 0), 0);
+    return { total, ausencias, presentesCount: presentes.length, fisicos, taticos, aprovados, taxaAprovacao, mediaPct, totalTiros };
   }, [filteredResultados]);
 
   const bestMarker = markerSummaries.length > 0 ? markerSummaries[0] : null;
@@ -312,8 +319,10 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
 
     const barsHtml = markerSummaries
       .map(m => {
-        const pct = Math.round(m.latestPct);
-        const barColor = m.latest.aprovado ? '#10b981' : '#f59e0b';
+        const pct = m.latest.ausente ? 0 : Math.round(m.latestPct);
+        const barColor = m.latest.ausente ? '#f43f5e' : m.latest.aprovado ? '#10b981' : '#f59e0b';
+        const statusLabel = m.latest.ausente ? 'AUSENTE' : m.latest.aprovado ? 'APROVADO' : 'ABAIXO DA META';
+        const statusColor = m.latest.ausente ? '#e11d48' : m.latest.aprovado ? '#059669' : '#d97706';
         return `
           <tr>
             <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;font-weight:700;color:#0f172a;">
@@ -329,10 +338,10 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
               <div style="background:#e2e8f0;height:10px;border-radius:4px;overflow:hidden;">
                 <div style="background:${barColor};height:10px;width:${pct}%;"></div>
               </div>
-              <div style="font-size:10px;color:#475569;margin-top:2px;">${pct}% (mín. ${Math.round(m.approvalPct)}%)</div>
+              <div style="font-size:10px;color:#475569;margin-top:2px;">${m.latest.ausente ? 'Ausente' : `${pct}% (mín. ${Math.round(m.approvalPct)}%)`}</div>
             </td>
-            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${m.latest.aprovado ? '#059669' : '#d97706'};">
-              ${m.latest.aprovado ? 'APROVADO' : 'ABAIXO'}
+            <td style="padding:7px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${statusColor};">
+              ${statusLabel}
             </td>
           </tr>
         `;
@@ -349,8 +358,8 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;font-weight:600;">${escapeHtmlText(r.marcadorNome)}</td>
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtmlText(r.atividadeNome || r.grupoNome || '—')}</td>
             <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;">${escapeHtmlText(formatResultadoResumo(r))}</td>
-            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${r.aprovado ? '#059669' : '#dc2626'};">
-              ${r.aprovado ? 'Aprovado' : 'Abaixo'}
+            <td style="padding:6px 8px;border-bottom:1px solid #e2e8f0;text-align:center;font-weight:700;color:${r.ausente ? '#e11d48' : r.aprovado ? '#059669' : '#d97706'};">
+              ${r.ausente ? 'Ausente' : r.aprovado ? 'Aprovado' : 'Abaixo da Meta'}
             </td>
           </tr>
         `
@@ -530,7 +539,9 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
             <span className="text-[10px] font-bold uppercase text-slate-400">Taxa de Aprovação</span>
             <div className="text-xl font-black text-emerald-400 mt-0.5">{kpis.taxaAprovacao}%</div>
-            <span className="text-[10px] text-slate-500">{kpis.aprovados} de {kpis.total} aprovadas</span>
+            <span className="text-[10px] text-slate-500">
+              {kpis.aprovados} de {kpis.presentesCount} • {kpis.ausencias} ausência(s)
+            </span>
           </div>
           <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3">
             <span className="text-[10px] font-bold uppercase text-slate-400">Marcadores Avaliados</span>
@@ -730,12 +741,16 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                         )}
                         <span
                           className={`text-xs font-extrabold px-2.5 py-0.5 rounded-full ${
-                            m.latest.aprovado
+                            m.latest.ausente
+                              ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                              : m.latest.aprovado
                               ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
                               : 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                           }`}
                         >
-                          {pct}% ({formatNumberBr(m.latest.notaObtida)}/{formatNumberBr(m.latest.notaMaxRef)} pts)
+                          {m.latest.ausente
+                            ? 'Ausente'
+                            : `${pct}% (${formatNumberBr(m.latest.notaObtida)}/${formatNumberBr(m.latest.notaMaxRef)} pts)`}
                         </span>
                       </div>
                     </div>
@@ -1030,7 +1045,19 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                         {r.observacoes && <div className="text-[10px] text-slate-400 mt-0.5">{r.observacoes}</div>}
                       </td>
                       <td className="py-2.5 px-3 text-center whitespace-nowrap">
-                        {r.aprovado ? (
+                        {r.ausente ? (
+                          <div className="inline-flex flex-col items-center">
+                            <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-rose-500/15 text-rose-300 border border-rose-500/30 text-[10px] font-extrabold">
+                              <AlertTriangle className="w-3 h-3" />
+                              <span>Ausente</span>
+                            </span>
+                            {r.ausenciaInformada !== null && r.ausenciaInformada !== undefined && (
+                              <span className="text-[9px] text-slate-400 mt-0.5">
+                                {r.ausenciaInformada ? 'Informada' : 'Não informada'}
+                              </span>
+                            )}
+                          </div>
+                        ) : r.aprovado ? (
                           <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 text-[10px] font-extrabold">
                             <CheckCircle2 className="w-3 h-3" />
                             <span>Aprovado</span>
@@ -1038,7 +1065,7 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                         ) : (
                           <span className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-300 text-[10px] font-extrabold">
                             <AlertTriangle className="w-3 h-3" />
-                            <span>Abaixo</span>
+                            <span>Abaixo da Meta</span>
                           </span>
                         )}
                       </td>

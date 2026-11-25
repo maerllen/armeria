@@ -75,6 +75,14 @@ function getTodayIsoBr(): string {
   }
 }
 
+function maskTimeMMSS(raw: string): string {
+  const digits = String(raw || '').replace(/\D/g, '').replace(/^0+/, '');
+  if (!digits) return '';
+  const capped = digits.slice(0, 4);
+  const padded = capped.padStart(4, '0');
+  return `${padded.slice(0, 2)}:${padded.slice(2, 4)}`;
+}
+
 function parseTimeInputToSeconds(raw: string): number | null {
   const clean = String(raw || '').trim();
   if (!clean) return null;
@@ -101,6 +109,11 @@ interface DraftResultCell {
   notaObtida: string;
   tirosEfetuados: string;
   observacoes: string;
+}
+
+interface ParticipantAbsenceDraft {
+  ausente: boolean;
+  ausenciaInformada: '' | 'SIM' | 'NAO';
 }
 
 export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidadePanelProps> = ({
@@ -172,6 +185,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [groupStatusTab, setGroupStatusTab] = useState<'ABERTO' | 'ENCERRADO'>('ABERTO');
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null);
   const [draftCells, setDraftCells] = useState<Record<string, DraftResultCell>>({});
+  const [participantAbsence, setParticipantAbsence] = useState<Record<string, ParticipantAbsenceDraft>>({});
   const [savingResults, setSavingResults] = useState(false);
   const [confirmCloseGroupId, setConfirmCloseGroupId] = useState<string | null>(null);
   const [confirmDeleteGroupId, setConfirmDeleteGroupId] = useState<string | null>(null);
@@ -283,11 +297,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       grouped.set(r.usuarioId, list);
     }
     for (const [uid, items] of grouped.entries()) {
-      const avgPct = Math.round(
-        items.reduce((s, r) => s + (r.notaMaxRef > 0 ? Math.min(100, (r.notaObtida / r.notaMaxRef) * 100) : 0), 0) /
-          items.length
-      );
-      const approvedPct = Math.round((items.filter(r => r.aprovado).length / items.length) * 100);
+      const presentes = items.filter(r => !r.ausente);
+      const avgPct =
+        presentes.length > 0
+          ? Math.round(
+              presentes.reduce(
+                (s, r) => s + (r.notaMaxRef > 0 ? Math.min(100, (r.notaObtida / r.notaMaxRef) * 100) : 0),
+                0
+              ) / presentes.length
+            )
+          : 0;
+      const approvedPct =
+        presentes.length > 0 ? Math.round((presentes.filter(r => r.aprovado).length / presentes.length) * 100) : 0;
       map.set(uid, { count: items.length, avgPct, approvedPct });
     }
     return map;
@@ -299,16 +320,26 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     [grupos, activeGroupId]
   );
 
-  // Hydrate draft cells when activeGroup changes
+  // Hydrate draft cells & participant absence state when activeGroup changes
   useEffect(() => {
     if (!activeGroup) return;
     const nextDraft: Record<string, DraftResultCell> = {};
+    const nextAbs: Record<string, ParticipantAbsenceDraft> = {};
     for (const p of activeGroup.participantes) {
+      const userSavedList = activeGroup.resultados.filter(r => r.usuarioId === p.usuarioId);
+      const savedAbsent = userSavedList.find(r => r.ausente);
+      nextAbs[p.usuarioId] = {
+        ausente: Boolean(savedAbsent),
+        ausenciaInformada:
+          savedAbsent?.ausenciaInformada === true
+            ? 'SIM'
+            : savedAbsent?.ausenciaInformada === false
+            ? 'NAO'
+            : ''
+      };
       for (const m of activeGroup.marcadores) {
         const key = `${p.usuarioId}__${m.id}`;
-        const existing = activeGroup.resultados.find(
-          r => r.usuarioId === p.usuarioId && r.marcadorId === m.id
-        );
+        const existing = userSavedList.find(r => r.marcadorId === m.id);
         nextDraft[key] = {
           valorMarca:
             existing?.valorMarca !== undefined && existing?.valorMarca !== null ? String(existing.valorMarca) : '',
@@ -317,7 +348,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               ? secondsToInputString(existing.tempoSegundos)
               : '',
           notaObtida:
-            existing?.notaObtida !== undefined && existing?.notaObtida !== null ? String(existing.notaObtida) : '',
+            existing && !existing.ausente && existing.notaObtida !== undefined && existing.notaObtida !== null
+              ? String(existing.notaObtida)
+              : '',
           tirosEfetuados:
             existing?.tirosEfetuados !== undefined && existing?.tirosEfetuados !== null
               ? String(existing.tirosEfetuados)
@@ -329,6 +362,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       }
     }
     setDraftCells(nextDraft);
+    setParticipantAbsence(nextAbs);
   }, [activeGroup]);
 
   // Open Marker Modal
@@ -582,11 +616,38 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       valorMarca?: number | null;
       tempoSegundos?: number | null;
       notaObtida: number;
+      ausente?: boolean;
+      ausenciaInformada?: boolean | null;
       tirosEfetuados?: number | null;
       observacoes?: string | null;
     }> = [];
 
     for (const p of activeGroup.participantes) {
+      const abs = participantAbsence[p.usuarioId];
+      if (abs?.ausente) {
+        if (abs.ausenciaInformada !== 'SIM' && abs.ausenciaInformada !== 'NAO') {
+          notify('error', `Informe se a ausência de "${p.usuarioNome}" foi informada previamente ou não.`);
+          return;
+        }
+        const informedBool = abs.ausenciaInformada === 'SIM';
+        for (const m of activeGroup.marcadores) {
+          const key = `${p.usuarioId}__${m.id}`;
+          const cell = draftCells[key];
+          payload.push({
+            usuarioId: p.usuarioId,
+            marcadorId: m.id,
+            valorMarca: null,
+            tempoSegundos: null,
+            notaObtida: 0,
+            ausente: true,
+            ausenciaInformada: informedBool,
+            tirosEfetuados: null,
+            observacoes: cell?.observacoes?.trim() || null
+          });
+        }
+        continue;
+      }
+
       for (const m of activeGroup.marcadores) {
         const key = `${p.usuarioId}__${m.id}`;
         const cell = draftCells[key];
@@ -606,6 +667,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
           valorMarca,
           tempoSegundos,
           notaObtida: notaNum,
+          ausente: false,
+          ausenciaInformada: null,
           tirosEfetuados,
           observacoes: cell.observacoes.trim() || null
         });
@@ -613,7 +676,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     }
 
     if (payload.length === 0) {
-      notify('error', 'Informe a nota de ao menos um marcador/policial antes de salvar.');
+      notify('error', 'Informe a nota ou marque ausência de ao menos um policial antes de salvar.');
       return;
     }
 
@@ -1219,12 +1282,19 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
 
                   {/* Participantes & Lançamento por Marcador */}
                   <div className="space-y-4">
-                    {activeGroup.participantes.map(p => (
+                    {activeGroup.participantes.map(p => {
+                      const absState = participantAbsence[p.usuarioId] || {
+                        ausente: false,
+                        ausenciaInformada: ''
+                      };
+                      const isParticipantAbsent = activeGroup.status === 'ABERTO' && absState.ausente;
+
+                      return (
                       <div
                         key={p.usuarioId}
                         className="bg-slate-950/70 border border-slate-800 rounded-xl p-4 space-y-3"
                       >
-                        <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800/80">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2.5 border-b border-slate-800/80">
                           <div>
                             <div className="font-extrabold text-sm text-white">{p.usuarioNome}</div>
                             <div className="text-[11px] text-slate-400">
@@ -1232,6 +1302,51 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                               <span className="text-sky-300">{p.usuarioUnitName || unitNameById(p.usuarioUnitId)}</span>
                             </div>
                           </div>
+
+                          {activeGroup.status === 'ABERTO' && (
+                            <div className="flex flex-wrap items-center gap-2.5">
+                              <label className="inline-flex items-center space-x-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 hover:border-rose-500/50 cursor-pointer select-none">
+                                <input
+                                  type="checkbox"
+                                  checked={absState.ausente}
+                                  onChange={e => {
+                                    const checked = e.target.checked;
+                                    setParticipantAbsence(prev => ({
+                                      ...prev,
+                                      [p.usuarioId]: {
+                                        ausente: checked,
+                                        ausenciaInformada: checked ? prev[p.usuarioId]?.ausenciaInformada || '' : ''
+                                      }
+                                    }));
+                                  }}
+                                  className="rounded border-slate-600 text-rose-500 focus:ring-rose-500"
+                                />
+                                <span className={`text-xs font-bold ${absState.ausente ? 'text-rose-300' : 'text-slate-300'}`}>
+                                  Usuário ausente
+                                </span>
+                              </label>
+
+                              {absState.ausente && (
+                                <select
+                                  value={absState.ausenciaInformada}
+                                  onChange={e =>
+                                    setParticipantAbsence(prev => ({
+                                      ...prev,
+                                      [p.usuarioId]: {
+                                        ausente: true,
+                                        ausenciaInformada: e.target.value as '' | 'SIM' | 'NAO'
+                                      }
+                                    }))
+                                  }
+                                  className="bg-slate-900 border border-rose-500/50 rounded-xl px-3 py-1.5 text-xs font-bold text-rose-200 focus:outline-none focus:border-rose-400"
+                                >
+                                  <option value="">Ausência informada previamente?</option>
+                                  <option value="SIM">Sim — Ausência informada previamente</option>
+                                  <option value="NAO">Não — Ausência não informada previamente</option>
+                                </select>
+                              )}
+                            </div>
+                          )}
                         </div>
 
                         {activeGroup.status === 'ENCERRADO' ? (
@@ -1247,7 +1362,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 >
                                   <div className="min-w-0">
                                     <div className="text-xs font-bold text-white truncate">{m.nome}</div>
-                                    <div className="text-xs text-amber-200 mt-0.5">
+                                    <div className={`text-xs mt-0.5 ${saved?.ausente ? 'text-rose-300 font-semibold' : 'text-amber-200'}`}>
                                       {saved ? formatResultadoResumo(saved) : 'Não lançado'}
                                     </div>
                                     {saved?.observacoes && (
@@ -1257,12 +1372,14 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                   {saved && (
                                     <span
                                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
-                                        saved.aprovado
+                                        saved.ausente
+                                          ? 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                                          : saved.aprovado
                                           ? 'bg-emerald-500/15 text-emerald-300'
                                           : 'bg-amber-500/15 text-amber-300'
                                       }`}
                                     >
-                                      {saved.aprovado ? 'Aprovado' : 'Abaixo'}
+                                      {saved.ausente ? 'Ausente' : saved.aprovado ? 'Aprovado' : 'Abaixo da Meta'}
                                     </span>
                                   )}
                                 </div>
@@ -1301,7 +1418,9 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                               return (
                                 <div
                                   key={m.id}
-                                  className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-2.5"
+                                  className={`bg-slate-900 border rounded-xl p-3 space-y-2.5 ${
+                                    isParticipantAbsent ? 'border-rose-500/30 bg-rose-950/10' : 'border-slate-800'
+                                  }`}
                                 >
                                   <div className="flex flex-wrap items-center justify-between gap-2">
                                     <div>
@@ -1314,7 +1433,16 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           : ''}
                                       </span>
                                     </div>
-                                    {hasNota && (
+                                    {isParticipantAbsent ? (
+                                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                                        Ausente
+                                        {absState.ausenciaInformada === 'SIM'
+                                          ? ' • Informada'
+                                          : absState.ausenciaInformada === 'NAO'
+                                          ? ' • Não informada'
+                                          : ''}
+                                      </span>
+                                    ) : hasNota ? (
                                       <span
                                         className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold ${
                                           isAprovPreview
@@ -1324,7 +1452,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       >
                                         {isAprovPreview ? 'Aprovado' : 'Abaixo da Meta'}
                                       </span>
-                                    )}
+                                    ) : null}
                                   </div>
 
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
@@ -1335,39 +1463,47 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                       <input
                                         type="text"
                                         inputMode="decimal"
-                                        value={cell.valorMarca}
+                                        disabled={isParticipantAbsent}
+                                        value={isParticipantAbsent ? '' : cell.valorMarca}
                                         onChange={e => updateCell({ valorMarca: e.target.value })}
-                                        placeholder={m.tipoMarca === 'Distância' ? 'Ex: 2400' : 'Ex: 35'}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                        placeholder={isParticipantAbsent ? 'Ausente' : m.tipoMarca === 'Distância' ? 'Ex: 2400' : 'Ex: 35'}
+                                        className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                                       />
                                     </div>
 
                                     {m.usaTempo && (
                                       <div>
                                         <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                          Tempo (MM:SS ou seg)
+                                          Tempo (MM:SS)
                                         </label>
                                         <input
                                           type="text"
-                                          value={cell.tempoInput}
-                                          onChange={e => updateCell({ tempoInput: e.target.value })}
-                                          placeholder="Ex: 01:00 ou 60"
-                                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                          inputMode="numeric"
+                                          disabled={isParticipantAbsent}
+                                          value={isParticipantAbsent ? '' : cell.tempoInput}
+                                          onChange={e => updateCell({ tempoInput: maskTimeMMSS(e.target.value) })}
+                                          placeholder={isParticipantAbsent ? 'Ausente' : '00:00'}
+                                          className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
                                         />
                                       </div>
                                     )}
 
                                     <div>
                                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                        Pontuação / Nota *
+                                        Pontuação / Nota {isParticipantAbsent ? '' : '*'}
                                       </label>
                                       <input
                                         type="text"
                                         inputMode="decimal"
-                                        value={cell.notaObtida}
+                                        disabled={isParticipantAbsent}
+                                        value={isParticipantAbsent ? '' : cell.notaObtida}
                                         onChange={e => updateCell({ notaObtida: e.target.value })}
-                                        placeholder={`${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`}
-                                        className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-300 focus:outline-none focus:border-amber-500"
+                                        placeholder={
+                                          isParticipantAbsent
+                                            ? 'Ausente'
+                                            : `${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`
+                                        }
+                                        className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-300 focus:outline-none focus:border-amber-500"
                                       />
                                     </div>
 
@@ -1379,9 +1515,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                         <input
                                           type="number"
                                           min={0}
-                                          value={cell.tirosEfetuados}
+                                          disabled={isParticipantAbsent}
+                                          value={isParticipantAbsent ? '' : cell.tirosEfetuados}
                                           onChange={e => updateCell({ tirosEfetuados: e.target.value })}
-                                          className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                          className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
                                         />
                                       </div>
                                     )}
@@ -1394,7 +1531,7 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                         type="text"
                                         value={cell.observacoes}
                                         onChange={e => updateCell({ observacoes: e.target.value })}
-                                        placeholder="Opcional"
+                                        placeholder={isParticipantAbsent ? 'Justificativa / detalhe da ausência (opcional)' : 'Opcional'}
                                         maxLength={500}
                                         className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-amber-500"
                                       />
@@ -1406,7 +1543,8 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                           </div>
                         )}
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -1737,33 +1875,36 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               {mUsaTempo && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
                   <div>
-                    <label className="block font-bold text-slate-300 mb-1">Tempo Mínimo (MM:SS ou seg)</label>
+                    <label className="block font-bold text-slate-300 mb-1">Tempo Mínimo (MM:SS)</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={mTempoMin}
-                      onChange={e => setMTempoMin(e.target.value)}
-                      placeholder="Ex: 00:30"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                      onChange={e => setMTempoMin(maskTimeMMSS(e.target.value))}
+                      placeholder="00:00"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div>
-                    <label className="block font-bold text-slate-300 mb-1">Tempo Máximo (MM:SS ou seg)</label>
+                    <label className="block font-bold text-slate-300 mb-1">Tempo Máximo (MM:SS)</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={mTempoMax}
-                      onChange={e => setMTempoMax(e.target.value)}
-                      placeholder="Ex: 02:00"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                      onChange={e => setMTempoMax(maskTimeMMSS(e.target.value))}
+                      placeholder="00:00"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
                   <div>
                     <label className="block font-bold text-amber-300 mb-1">Tempo de Aprovação (MM:SS)</label>
                     <input
                       type="text"
+                      inputMode="numeric"
                       value={mTempoAprov}
-                      onChange={e => setMTempoAprov(e.target.value)}
-                      placeholder="Ex: 01:00"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                      onChange={e => setMTempoAprov(maskTimeMMSS(e.target.value))}
+                      placeholder="00:00"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
                 </div>

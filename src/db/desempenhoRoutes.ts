@@ -174,6 +174,8 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       \`NOTA_APROVACAO_REF\` DECIMAL(10,2) NOT NULL DEFAULT 6.00,
       \`TEMPO_APROVACAO_REF\` INT DEFAULT NULL,
       \`APROVADO\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`AUSENTE\` TINYINT(1) NOT NULL DEFAULT 0,
+      \`AUSENCIA_INFORMADA\` TINYINT(1) DEFAULT NULL,
       \`TEVE_TIRO\` TINYINT(1) NOT NULL DEFAULT 0,
       \`TIPO_ARMA\` VARCHAR(40) DEFAULT NULL,
       \`TIROS_EFETUADOS\` INT DEFAULT NULL,
@@ -191,6 +193,25 @@ async function ensureDesempenhoSchema(pool: any): Promise<void> {
       KEY \`idx_desemp_res_grupo\` (\`ID_GRUPO\`)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
+
+  try {
+    const [colAus]: any = await pool.query(`
+      SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DESEMPENHO_RESULTADOS' AND COLUMN_NAME = 'AUSENTE'
+    `);
+    if (Number(colAus?.[0]?.cnt || 0) === 0) {
+      await pool.query(`ALTER TABLE \`DESEMPENHO_RESULTADOS\` ADD COLUMN \`AUSENTE\` TINYINT(1) NOT NULL DEFAULT 0 AFTER \`APROVADO\``);
+    }
+    const [colAusInf]: any = await pool.query(`
+      SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'DESEMPENHO_RESULTADOS' AND COLUMN_NAME = 'AUSENCIA_INFORMADA'
+    `);
+    if (Number(colAusInf?.[0]?.cnt || 0) === 0) {
+      await pool.query(`ALTER TABLE \`DESEMPENHO_RESULTADOS\` ADD COLUMN \`AUSENCIA_INFORMADA\` TINYINT(1) DEFAULT NULL AFTER \`AUSENTE\``);
+    }
+  } catch (migErr) {
+    console.warn('[Aviso ensureDesempenhoSchema AUSENTE]', migErr);
+  }
 
   schemaEnsured = true;
 }
@@ -353,6 +374,8 @@ function mapResultadoRow(row: any) {
     notaAprovacaoRef: Number(row.NOTA_APROVACAO_REF ?? 6),
     tempoAprovacaoRef: row.TEMPO_APROVACAO_REF != null ? Number(row.TEMPO_APROVACAO_REF) : null,
     aprovado: Boolean(Number(row.APROVADO ?? 0)),
+    ausente: Boolean(Number(row.AUSENTE ?? 0)),
+    ausenciaInformada: row.AUSENCIA_INFORMADA != null ? Boolean(Number(row.AUSENCIA_INFORMADA)) : null,
     teveTiro: Boolean(Number(row.TEVE_TIRO ?? 0)),
     tipoArma: row.TIPO_ARMA ? String(row.TIPO_ARMA) : null,
     tirosEfetuados: row.TIROS_EFETUADOS != null ? Number(row.TIROS_EFETUADOS) : null,
@@ -1314,34 +1337,56 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
         const marker = marcMap.get(marcadorId);
         if (!participant || !marker) continue;
 
-        const notaObtida = toOptionalFloat(item?.notaObtida);
-        if (notaObtida === null) continue;
-
+        const isAusente = Boolean(item?.ausente);
         const notaMinRef = Number(marker.NOTA_MIN ?? 0);
         const notaMaxRef = Number(marker.NOTA_MAX ?? 10);
         const notaAprovRef = Number(marker.NOTA_APROVACAO ?? 6);
         const usaTempo = Boolean(Number(marker.USA_TEMPO ?? 1));
         const tempoMinRef = marker.TEMPO_MIN_SEG != null ? Number(marker.TEMPO_MIN_SEG) : null;
         const tempoAprovRef = marker.TEMPO_APROVACAO_SEG != null ? Number(marker.TEMPO_APROVACAO_SEG) : null;
-
-        const clampedNota = Math.max(notaMinRef, Math.min(notaMaxRef, notaObtida));
-        const valorMarca = toOptionalFloat(item?.valorMarca);
-        const tempoSegundos = usaTempo ? toOptionalInt(item?.tempoSegundos) : null;
         const teveTiro = Boolean(Number(marker.TEVE_TIRO ?? 0));
-        const tirosEfetuados = teveTiro ? toOptionalInt(item?.tirosEfetuados ?? marker.QUANTIDADE_TIROS) : null;
         const observacoes = item?.observacoes ? String(item.observacoes).trim().slice(0, 500) : null;
 
-        const scoreOk = clampedNota >= notaAprovRef;
-        let timeOk = true;
-        if (usaTempo && tempoSegundos !== null) {
-          if (tempoAprovRef !== null && tempoSegundos > tempoAprovRef) {
-            timeOk = false;
+        let clampedNota = 0;
+        let valorMarca: number | null = null;
+        let tempoSegundos: number | null = null;
+        let tirosEfetuados: number | null = null;
+        let aprovado = 0;
+        let ausenciaInformadaDb: number | null = null;
+
+        if (isAusente) {
+          if (typeof item?.ausenciaInformada !== 'boolean') {
+            return res.status(400).json({
+              error: `Informe se a ausência de "${participant.USUARIO_NOME}" foi informada previamente ou não.`
+            });
           }
-          if (tempoMinRef !== null && tempoSegundos < tempoMinRef) {
-            timeOk = false;
+          ausenciaInformadaDb = item.ausenciaInformada ? 1 : 0;
+          clampedNota = 0;
+          valorMarca = null;
+          tempoSegundos = null;
+          tirosEfetuados = null;
+          aprovado = 0;
+        } else {
+          const notaObtida = toOptionalFloat(item?.notaObtida);
+          if (notaObtida === null) continue;
+
+          clampedNota = Math.max(notaMinRef, Math.min(notaMaxRef, notaObtida));
+          valorMarca = toOptionalFloat(item?.valorMarca);
+          tempoSegundos = usaTempo ? toOptionalInt(item?.tempoSegundos) : null;
+          tirosEfetuados = teveTiro ? toOptionalInt(item?.tirosEfetuados ?? marker.QUANTIDADE_TIROS) : null;
+
+          const scoreOk = clampedNota >= notaAprovRef;
+          let timeOk = true;
+          if (usaTempo && tempoSegundos !== null) {
+            if (tempoAprovRef !== null && tempoSegundos > tempoAprovRef) {
+              timeOk = false;
+            }
+            if (tempoMinRef !== null && tempoSegundos < tempoMinRef) {
+              timeOk = false;
+            }
           }
+          aprovado = scoreOk && timeOk ? 1 : 0;
         }
-        const aprovado = scoreOk && timeOk ? 1 : 0;
 
         const resId = genId('res');
         await pool.query(
@@ -1352,14 +1397,16 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             DATA_AVALIACAO, HORA_AVALIACAO,
             VALOR_MARCA, TEMPO_SEGUNDOS, NOTA_OBTIDA,
             NOTA_MIN_REF, NOTA_MAX_REF, NOTA_APROVACAO_REF, TEMPO_APROVACAO_REF,
-            APROVADO, TEVE_TIRO, TIPO_ARMA, TIROS_EFETUADOS, OBSERVACOES,
+            APROVADO, AUSENTE, AUSENCIA_INFORMADA, TEVE_TIRO, TIPO_ARMA, TIROS_EFETUADOS, OBSERVACOES,
             LANCADO_POR_ID, LANCADO_POR_NOME
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON DUPLICATE KEY UPDATE
             VALOR_MARCA = VALUES(VALOR_MARCA),
             TEMPO_SEGUNDOS = VALUES(TEMPO_SEGUNDOS),
             NOTA_OBTIDA = VALUES(NOTA_OBTIDA),
             APROVADO = VALUES(APROVADO),
+            AUSENTE = VALUES(AUSENTE),
+            AUSENCIA_INFORMADA = VALUES(AUSENCIA_INFORMADA),
             TIROS_EFETUADOS = VALUES(TIROS_EFETUADOS),
             OBSERVACOES = VALUES(OBSERVACOES),
             LANCADO_POR_ID = VALUES(LANCADO_POR_ID),
@@ -1389,6 +1436,8 @@ export function registerDesempenhoRoutes(router: Router, deps: DesempenhoRoutesD
             notaAprovRef,
             tempoAprovRef,
             aprovado,
+            isAusente ? 1 : 0,
+            ausenciaInformadaDb,
             teveTiro ? 1 : 0,
             marker.TIPO_ARMA ? String(marker.TIPO_ARMA) : null,
             tirosEfetuados,
