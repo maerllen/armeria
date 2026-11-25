@@ -4,7 +4,8 @@ import {
   processWhatsappBotInteraction,
   resetBotSession,
   verifySignedPdfToken,
-  sendDirectWhatsappText
+  sendDirectWhatsappText,
+  resolveWhatsappUserContext
 } from './whatsappBotEngine';
 import {
   OperacaoOrigem,
@@ -113,12 +114,91 @@ function sanitizeSafePublicUrl(val?: string | null): string {
   try {
     const parsed = new URL(raw);
     if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
-      return parsed.origin + parsed.pathname.replace(/\/+$/, '');
+      const cleanPath = parsed.pathname
+        .replace(/\/+$/, '')
+        .replace(/\/api\/whatsapp\/webhook$/i, '');
+      return parsed.origin + cleanPath;
     }
   } catch {
     return '';
   }
   return '';
+}
+
+function isPrivateOrLocalHostname(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (
+    h === 'localhost' ||
+    h === '0.0.0.0' ||
+    h === '::1' ||
+    h.endsWith('.local') ||
+    h.endsWith('.internal') ||
+    h.endsWith('.localhost')
+  ) {
+    return true;
+  }
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
+    const parts = h.split('.').map(Number);
+    if (parts[0] === 127 || parts[0] === 10 || parts[0] === 0) return true;
+    if (parts[0] === 169 && parts[1] === 254) return true;
+    if (parts[0] === 192 && parts[1] === 168) return true;
+    if (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) return true;
+    if (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127) return true;
+  }
+  if (h.includes(':')) {
+    if (h === '::' || h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Valida URL de Custom Webhook do Make.com (apenas HTTPS em domínios oficiais *.make.com / *.integromat.com).
+ */
+function sanitizeMakeWebhookUrl(val?: string | null): string {
+  const raw = String(val || '').trim().slice(0, 500);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return '';
+    if (parsed.username || parsed.password) return '';
+    if (parsed.port && parsed.port !== '443') return '';
+    const host = parsed.hostname.toLowerCase();
+    if (isPrivateOrLocalHostname(host)) return '';
+    const isOfficialMakeHost =
+      host === 'make.com' ||
+      host.endsWith('.make.com') ||
+      host === 'integromat.com' ||
+      host.endsWith('.integromat.com');
+    if (!isOfficialMakeHost) return '';
+    if (!parsed.pathname || parsed.pathname === '/') return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function sanitizePublicHttpsMediaUrl(val?: string | null): string {
+  const raw = String(val || '').trim().slice(0, 1000);
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== 'https:') return '';
+    if (parsed.username || parsed.password) return '';
+    if (isPrivateOrLocalHostname(parsed.hostname)) return '';
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function stripBrazilDdiForDisplay(phone?: string | null): string {
+  let digits = normalizePhoneDigits(phone);
+  if (digits.startsWith('0055') && digits.length >= 14) digits = digits.slice(4);
+  else if (digits.startsWith('55') && digits.length >= 12) digits = digits.slice(2);
+  if (digits.startsWith('0') && digits.length >= 11) digits = digits.slice(1);
+  return digits;
 }
 
 function timingSafeTextEqual(a: string, b: string): boolean {
@@ -148,6 +228,15 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         \`WEBHOOK_VERIFY_TOKEN\` VARCHAR(160) DEFAULT NULL,
         \`CALLBACK_URL_PUBLICA\` VARCHAR(255) DEFAULT NULL,
         \`NUMERO_TESTE_PADRAO\` VARCHAR(32) DEFAULT NULL,
+        \`MODO_ATENDIMENTO\` VARCHAR(24) NOT NULL DEFAULT 'BOT_INTERNO',
+        \`MAKE_WEBHOOK_ATIVO\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`MAKE_WEBHOOK_URL\` VARCHAR(500) DEFAULT NULL,
+        \`MAKE_WEBHOOK_SECRET_ENC\` TEXT DEFAULT NULL,
+        \`MAKE_ENCAMINHAR_STATUS\` TINYINT(1) NOT NULL DEFAULT 0,
+        \`MAKE_API_KEY_ENC\` TEXT DEFAULT NULL,
+        \`MAKE_ULTIMO_TESTE_STATUS\` VARCHAR(32) NOT NULL DEFAULT 'NAO_TESTADO',
+        \`MAKE_ULTIMO_TESTE_MENSAGEM\` TEXT DEFAULT NULL,
+        \`MAKE_ULTIMO_TESTE_EM\` DATETIME DEFAULT NULL,
         \`ULTIMO_TESTE_STATUS\` VARCHAR(32) NOT NULL DEFAULT 'NAO_TESTADO',
         \`ULTIMO_TESTE_MENSAGEM\` TEXT DEFAULT NULL,
         \`ULTIMO_TESTE_EM\` DATETIME DEFAULT NULL,
@@ -158,6 +247,27 @@ async function ensureWhatsappSchema(pool: any): Promise<void> {
         PRIMARY KEY (\`ID_CONFIG\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // Migração idempotente das colunas de integração Make.com em tabelas pré-existentes
+    try {
+      const [cols]: any = await pool.query('SHOW COLUMNS FROM WHATSAPP_CONFIGURACAO_API');
+      const colNames = new Set((cols || []).map((c: any) => String(c.Field || '').toUpperCase()));
+      const alterClauses: string[] = [];
+      if (!colNames.has('MODO_ATENDIMENTO')) alterClauses.push("ADD COLUMN `MODO_ATENDIMENTO` VARCHAR(24) NOT NULL DEFAULT 'BOT_INTERNO'");
+      if (!colNames.has('MAKE_WEBHOOK_ATIVO')) alterClauses.push('ADD COLUMN `MAKE_WEBHOOK_ATIVO` TINYINT(1) NOT NULL DEFAULT 0');
+      if (!colNames.has('MAKE_WEBHOOK_URL')) alterClauses.push('ADD COLUMN `MAKE_WEBHOOK_URL` VARCHAR(500) DEFAULT NULL');
+      if (!colNames.has('MAKE_WEBHOOK_SECRET_ENC')) alterClauses.push('ADD COLUMN `MAKE_WEBHOOK_SECRET_ENC` TEXT DEFAULT NULL');
+      if (!colNames.has('MAKE_ENCAMINHAR_STATUS')) alterClauses.push('ADD COLUMN `MAKE_ENCAMINHAR_STATUS` TINYINT(1) NOT NULL DEFAULT 0');
+      if (!colNames.has('MAKE_API_KEY_ENC')) alterClauses.push('ADD COLUMN `MAKE_API_KEY_ENC` TEXT DEFAULT NULL');
+      if (!colNames.has('MAKE_ULTIMO_TESTE_STATUS')) alterClauses.push("ADD COLUMN `MAKE_ULTIMO_TESTE_STATUS` VARCHAR(32) NOT NULL DEFAULT 'NAO_TESTADO'");
+      if (!colNames.has('MAKE_ULTIMO_TESTE_MENSAGEM')) alterClauses.push('ADD COLUMN `MAKE_ULTIMO_TESTE_MENSAGEM` TEXT DEFAULT NULL');
+      if (!colNames.has('MAKE_ULTIMO_TESTE_EM')) alterClauses.push('ADD COLUMN `MAKE_ULTIMO_TESTE_EM` DATETIME DEFAULT NULL');
+      if (alterClauses.length > 0) {
+        await pool.query(`ALTER TABLE WHATSAPP_CONFIGURACAO_API ${alterClauses.join(', ')}`);
+      }
+    } catch (migErr) {
+      console.warn('Aviso ao migrar colunas Make em WHATSAPP_CONFIGURACAO_API:', migErr);
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS \`WHATSAPP_TEMPLATES\` (
@@ -506,6 +616,11 @@ async function loadRawWhatsappConfig(pool: any): Promise<any | null> {
 function mapPublicConfig(row: any) {
   const rawToken = decryptSecret(row?.ACCESS_TOKEN_ENC);
   const rawSecret = decryptSecret(row?.APP_SECRET_ENC);
+  const rawMakeSecret = decryptSecret(row?.MAKE_WEBHOOK_SECRET_ENC);
+  const rawMakeApiKey = decryptSecret(row?.MAKE_API_KEY_ENC);
+  const rawModo = String(row?.MODO_ATENDIMENTO || 'BOT_INTERNO').toUpperCase();
+  const modoAtendimento = rawModo === 'MAKE' || rawModo === 'AMBOS' ? rawModo : 'BOT_INTERNO';
+
   return {
     id: row?.ID_CONFIG || DEFAULT_CONFIG_ID,
     ambiente: row?.AMBIENTE === 'PRODUCAO' ? 'PRODUCAO' : 'TESTE',
@@ -523,12 +638,113 @@ function mapPublicConfig(row: any) {
     webhookVerifyToken: row?.WEBHOOK_VERIFY_TOKEN || '',
     callbackUrlPublica: row?.CALLBACK_URL_PUBLICA || '',
     numeroTestePadrao: row?.NUMERO_TESTE_PADRAO || '',
+    modoAtendimento,
+    makeWebhookAtivo: Boolean(row?.MAKE_WEBHOOK_ATIVO),
+    makeWebhookUrl: row?.MAKE_WEBHOOK_URL || '',
+    makeEncaminharStatus: Boolean(row?.MAKE_ENCAMINHAR_STATUS),
+    hasMakeWebhookSecret: Boolean(rawMakeSecret),
+    makeWebhookSecretMasked: rawMakeSecret ? maskSecret(rawMakeSecret) : '',
+    hasMakeApiKey: Boolean(rawMakeApiKey),
+    makeApiKeyMasked: rawMakeApiKey ? maskSecret(rawMakeApiKey) : '',
+    makeUltimoTesteStatus: row?.MAKE_ULTIMO_TESTE_STATUS || 'NAO_TESTADO',
+    makeUltimoTesteMensagem: row?.MAKE_ULTIMO_TESTE_MENSAGEM || '',
+    makeUltimoTesteEm: row?.MAKE_ULTIMO_TESTE_EM || null,
     ultimoTesteStatus: row?.ULTIMO_TESTE_STATUS || 'NAO_TESTADO',
     ultimoTesteMensagem: row?.ULTIMO_TESTE_MENSAGEM || '',
     ultimoTesteEm: row?.ULTIMO_TESTE_EM || null,
     atualizadoPorNome: row?.ATUALIZADO_POR_NOME || null,
     updatedAt: row?.DATA_ATUALIZACAO || null
   };
+}
+
+async function verifyMakeApiKey(
+  pool: any,
+  req: Request
+): Promise<{ ok: boolean; status?: number; error?: string; cfgRow?: any }> {
+  const cfgRow = await loadRawWhatsappConfig(pool);
+  const expectedKey = decryptSecret(cfgRow?.MAKE_API_KEY_ENC);
+  if (!expectedKey) {
+    return {
+      ok: false,
+      status: 503,
+      error: 'API Key de integração com o Make.com ainda não foi gerada na aba Configuração da API.'
+    };
+  }
+  const headerKey = String(req.headers['x-make-api-key'] || '').trim();
+  const authHeader = String(req.headers['authorization'] || '').trim();
+  const bearerKey = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
+  const provided = headerKey || bearerKey;
+  if (!provided || !timingSafeTextEqual(provided, expectedKey)) {
+    return {
+      ok: false,
+      status: 401,
+      error: 'Chave de autenticação inválida. Envie o header X-Make-Api-Key ou Authorization: Bearer <chave>.'
+    };
+  }
+  return { ok: true, cfgRow };
+}
+
+async function forwardPayloadToMake(
+  pool: any,
+  cfgRow: any,
+  payload: Record<string, any>
+): Promise<{ ok: boolean; status?: number; responseText?: string; error?: string }> {
+  const targetUrl = sanitizeMakeWebhookUrl(cfgRow?.MAKE_WEBHOOK_URL);
+  if (!targetUrl) {
+    return { ok: false, error: 'URL do Custom Webhook do Make.com não configurada ou inválida.' };
+  }
+
+  const webhookSecret = decryptSecret(cfgRow?.MAKE_WEBHOOK_SECRET_ENC);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'User-Agent': 'Armeria-PCMG-Webhook/1.0'
+  };
+  if (webhookSecret) {
+    headers['X-Webhook-Secret'] = webhookSecret;
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const res = await fetch(targetUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal
+    });
+    const text = (await res.text().catch(() => '')).slice(0, 500);
+    const evId = `wpp-mk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    await pool.query(
+      `INSERT INTO WHATSAPP_WEBHOOK_EVENTOS (
+        ID_EVENTO, TIPO_EVENTO, ASSINATURA_VALIDA, RESUMO, PAYLOAD_JSON, DATA_RECEBIMENTO
+      ) VALUES (?, ?, ?, ?, ?, NOW())`,
+      [
+        evId,
+        res.ok ? 'make_forward' : 'make_forward_error',
+        res.ok ? 1 : 0,
+        res.ok
+          ? `Encaminhado ao Make.com com sucesso (HTTP ${res.status}): ${payload.eventType || 'event'}`
+          : `Falha ao encaminhar ao Make.com (HTTP ${res.status}): ${text.slice(0, 140)}`,
+        JSON.stringify({ eventType: payload.eventType, httpStatus: res.status, response: text }).slice(0, 10000)
+      ]
+    );
+    return { ok: res.ok, status: res.status, responseText: text };
+  } catch (err: any) {
+    const msg = err?.name === 'AbortError' ? 'Timeout (8s) ao contatar o webhook do Make.com' : err?.message || 'Erro de rede';
+    try {
+      const evId = `wpp-mk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      await pool.query(
+        `INSERT INTO WHATSAPP_WEBHOOK_EVENTOS (
+          ID_EVENTO, TIPO_EVENTO, ASSINATURA_VALIDA, RESUMO, PAYLOAD_JSON, DATA_RECEBIMENTO
+        ) VALUES (?, 'make_forward_error', 0, ?, ?, NOW())`,
+        [evId, `Erro ao encaminhar ao Make.com: ${msg.slice(0, 180)}`, JSON.stringify({ eventType: payload.eventType, error: msg })]
+      );
+    } catch {}
+    return { ok: false, error: msg };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function mapTemplateRow(row: any) {
@@ -813,6 +1029,32 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       const cleanPublicUrl = sanitizeSafePublicUrl(body.callbackUrlPublica) || null;
       const cleanTestPhone = normalizePhoneDigits(body.numeroTestePadrao).slice(0, 20) || null;
 
+      const rawModo = String(body.modoAtendimento ?? existing?.MODO_ATENDIMENTO ?? 'BOT_INTERNO').toUpperCase();
+      const modoAtendimento = rawModo === 'MAKE' || rawModo === 'AMBOS' ? rawModo : 'BOT_INTERNO';
+      const makeWebhookAtivo =
+        body.makeWebhookAtivo !== undefined ? (body.makeWebhookAtivo ? 1 : 0) : existing?.MAKE_WEBHOOK_ATIVO ? 1 : 0;
+      const makeEncaminharStatus =
+        body.makeEncaminharStatus !== undefined
+          ? body.makeEncaminharStatus
+            ? 1
+            : 0
+          : existing?.MAKE_ENCAMINHAR_STATUS
+          ? 1
+          : 0;
+
+      const rawMakeUrl =
+        body.makeWebhookUrl !== undefined ? String(body.makeWebhookUrl || '').trim() : String(existing?.MAKE_WEBHOOK_URL || '').trim();
+      let cleanMakeWebhookUrl: string | null = null;
+      if (rawMakeUrl) {
+        const sanitizedMake = sanitizeMakeWebhookUrl(rawMakeUrl);
+        if (!sanitizedMake) {
+          return res.status(400).json({
+            error: 'URL do Webhook do Make inválida. Informe uma URL HTTPS oficial do Make (ex: https://hook.us2.make.com/...).'
+          });
+        }
+        cleanMakeWebhookUrl = sanitizedMake;
+      }
+
       let accessTokenEnc = existing?.ACCESS_TOKEN_ENC || null;
       if (body.clearAccessToken === true) {
         accessTokenEnc = null;
@@ -825,6 +1067,18 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         appSecretEnc = null;
       } else if (typeof body.appSecret === 'string' && body.appSecret.trim().length > 0) {
         appSecretEnc = encryptSecret(body.appSecret.trim());
+      }
+
+      let makeWebhookSecretEnc = existing?.MAKE_WEBHOOK_SECRET_ENC || null;
+      if (body.clearMakeWebhookSecret === true) {
+        makeWebhookSecretEnc = null;
+      } else if (typeof body.makeWebhookSecret === 'string' && body.makeWebhookSecret.trim().length > 0) {
+        makeWebhookSecretEnc = encryptSecret(body.makeWebhookSecret.trim());
+      }
+
+      let makeApiKeyEnc = existing?.MAKE_API_KEY_ENC || null;
+      if (body.clearMakeApiKey === true) {
+        makeApiKeyEnc = null;
       }
 
       await pool.query(
@@ -842,6 +1096,12 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           WEBHOOK_VERIFY_TOKEN = ?,
           CALLBACK_URL_PUBLICA = ?,
           NUMERO_TESTE_PADRAO = ?,
+          MODO_ATENDIMENTO = ?,
+          MAKE_WEBHOOK_ATIVO = ?,
+          MAKE_WEBHOOK_URL = ?,
+          MAKE_WEBHOOK_SECRET_ENC = ?,
+          MAKE_ENCAMINHAR_STATUS = ?,
+          MAKE_API_KEY_ENC = ?,
           ATUALIZADO_POR_ID = ?,
           ATUALIZADO_POR_NOME = ?,
           DATA_ATUALIZACAO = NOW()
@@ -860,6 +1120,12 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           cleanVerifyToken || null,
           cleanPublicUrl,
           cleanTestPhone,
+          modoAtendimento,
+          makeWebhookAtivo,
+          cleanMakeWebhookUrl,
+          makeWebhookSecretEnc,
+          makeEncaminharStatus,
+          makeApiKeyEnc,
           auth.user.id,
           auth.user.name,
           DEFAULT_CONFIG_ID
@@ -869,7 +1135,7 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       await insertAuditLog(
         'WhatsApp',
         'Atualizar Configuração API',
-        `Configuração da Meta WhatsApp Cloud API atualizada (Ambiente: ${ambiente}, Ativo: ${ativo ? 'Sim' : 'Não'}, Versão: ${rawVersion})`,
+        `Configuração Meta/Make atualizada (Ambiente: ${ambiente}, Ativo: ${ativo ? 'Sim' : 'Não'}, Modo: ${modoAtendimento}, Make: ${makeWebhookAtivo ? 'Ativo' : 'Inativo'})`,
         auth.user,
         req.ip
       );
@@ -1725,15 +1991,24 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
     }
   });
 
-  // 8. WEBHOOK OFICIAL DA META WHATSAPP CLOUD API (Verificação GET + Recebimento POST)
+  // 8. WEBHOOK OFICIAL DA META WHATSAPP CLOUD API (Verificação GET + Recebimento POST + Encaminhamento Make.com)
   apiRouter.get('/whatsapp/webhook', async (req: Request, res: Response) => {
     try {
       const pool = getPool();
       const cfgRow = await loadRawWhatsappConfig(pool);
-      const mode = String(req.query['hub.mode'] || '');
-      const token = String(req.query['hub.verify_token'] || '');
+      const mode = String(req.query['hub.mode'] || '').trim();
+      const token = String(req.query['hub.verify_token'] || '').trim();
       const challenge = String(req.query['hub.challenge'] || '');
       const expectedToken = String(cfgRow?.WEBHOOK_VERIFY_TOKEN || '').trim();
+
+      if (!mode && !token && !challenge) {
+        return res.status(200).json({
+          status: 'online',
+          endpoint: '/api/whatsapp/webhook',
+          verifyTokenConfigured: Boolean(expectedToken),
+          hint: 'Configure esta URL no Painel Meta Developers (Webhook) com hub.mode=subscribe e o Verify Token salvo.'
+        });
+      }
 
       const valid = mode === 'subscribe' && Boolean(expectedToken) && timingSafeTextEqual(token, expectedToken);
 
@@ -1778,12 +2053,74 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
       }
 
       const body = req.body || {};
-      const entry = Array.isArray(body.entry) ? body.entry[0] : null;
-      const change = Array.isArray(entry?.changes) ? entry.changes[0] : null;
-      const value = change?.value || {};
-      const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
-      const messages = Array.isArray(value?.messages) ? value.messages : [];
-      const tipoEvento = statuses.length > 0 ? 'statuses' : messages.length > 0 ? 'messages' : 'other';
+      const entries = Array.isArray(body.entry) ? body.entry : [];
+
+      interface CollectedStatus {
+        wabaId: string | null;
+        phoneNumberId: string | null;
+        displayPhoneNumber: string | null;
+        statusObj: any;
+      }
+      interface CollectedMessage {
+        wabaId: string | null;
+        phoneNumberId: string | null;
+        displayPhoneNumber: string | null;
+        contactName: string;
+        msgObj: any;
+      }
+
+      const collectedStatuses: CollectedStatus[] = [];
+      const collectedMessages: CollectedMessage[] = [];
+
+      for (const entry of entries) {
+        const wabaId = entry?.id ? String(entry.id).slice(0, 64) : null;
+        const changes = Array.isArray(entry?.changes) ? entry.changes : [];
+        for (const change of changes) {
+          const value = change?.value || {};
+          const phoneNumberId = value?.metadata?.phone_number_id
+            ? String(value.metadata.phone_number_id).slice(0, 64)
+            : null;
+          const displayPhoneNumber = value?.metadata?.display_phone_number
+            ? String(value.metadata.display_phone_number)
+            : null;
+          const contactsMap = new Map<string, string>();
+          if (Array.isArray(value?.contacts)) {
+            for (const c of value.contacts) {
+              const waId = normalizePhoneDigits(c?.wa_id);
+              const profName = String(c?.profile?.name || '').trim();
+              if (waId && profName) contactsMap.set(waId, profName);
+            }
+          }
+          if (Array.isArray(value?.statuses)) {
+            for (const st of value.statuses) {
+              collectedStatuses.push({ wabaId, phoneNumberId, displayPhoneNumber, statusObj: st });
+            }
+          }
+          if (Array.isArray(value?.messages)) {
+            for (const msg of value.messages) {
+              const fromDigits = normalizePhoneDigits(msg?.from);
+              collectedMessages.push({
+                wabaId,
+                phoneNumberId,
+                displayPhoneNumber,
+                contactName: contactsMap.get(fromDigits) || '',
+                msgObj: msg
+              });
+            }
+          }
+        }
+      }
+
+      const firstWabaId = collectedMessages[0]?.wabaId || collectedStatuses[0]?.wabaId || (entries[0]?.id ? String(entries[0].id).slice(0, 64) : null);
+      const firstPhoneId = collectedMessages[0]?.phoneNumberId || collectedStatuses[0]?.phoneNumberId || null;
+      const tipoEvento =
+        collectedMessages.length > 0 && collectedStatuses.length > 0
+          ? 'messages_and_statuses'
+          : collectedMessages.length > 0
+          ? 'messages'
+          : collectedStatuses.length > 0
+          ? 'statuses'
+          : 'other';
 
       const evId = `wpp-wh-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
       await pool.query(
@@ -1794,13 +2131,15 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
           evId,
           tipoEvento,
           signatureValid ? 1 : 0,
-          entry?.id ? String(entry.id).slice(0, 64) : null,
-          value?.metadata?.phone_number_id ? String(value.metadata.phone_number_id).slice(0, 64) : null,
+          firstWabaId,
+          firstPhoneId,
           signatureValid
             ? tipoEvento === 'statuses'
-              ? `${statuses.length} atualização(ões) de status recebida(s)`
+              ? `${collectedStatuses.length} atualização(ões) de status recebida(s)`
               : tipoEvento === 'messages'
-              ? `${messages.length} mensagem(ns) recebida(s)`
+              ? `${collectedMessages.length} mensagem(ns) recebida(s)`
+              : tipoEvento === 'messages_and_statuses'
+              ? `${collectedMessages.length} mensagem(ns) e ${collectedStatuses.length} status recebido(s)`
               : 'Evento Webhook Meta recebido'
             : 'Assinatura HMAC X-Hub-Signature-256 inválida — evento ignorado',
           JSON.stringify(body).slice(0, 60000)
@@ -1811,110 +2150,731 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         return res.status(403).json({ error: 'Invalid webhook signature' });
       }
 
-      // Atualiza status de entrega nas mensagens enviadas
-      const statusMap: Record<string, string> = {
-        sent: 'ENVIADA',
-        delivered: 'ENTREGUE',
-        read: 'LIDA',
-        failed: 'FALHOU'
-      };
-      for (const st of statuses) {
-        const wamid = String(st?.id || '').trim();
-        const mappedStatus = statusMap[String(st?.status || '').toLowerCase()];
-        if (!wamid || !mappedStatus) continue;
-        const firstErr = Array.isArray(st?.errors) ? st.errors[0] : null;
-        await pool.query(
-          `UPDATE WHATSAPP_MENSAGENS SET
-            STATUS_ENTREGA = ?,
-            ERRO_CODIGO = COALESCE(?, ERRO_CODIGO),
-            ERRO_MENSAGEM = COALESCE(?, ERRO_MENSAGEM),
-            DATA_ATUALIZACAO = NOW()
-           WHERE META_MESSAGE_ID = ?`,
-          [
-            mappedStatus,
-            firstErr?.code ? String(firstErr.code) : null,
-            firstErr?.title || firstErr?.message ? String(firstErr.title || firstErr.message) : null,
-            wamid
-          ]
-        );
-      }
+      const publicBaseUrl =
+        sanitizeSafePublicUrl(cfgRow?.CALLBACK_URL_PUBLICA) ||
+        sanitizeSafePublicUrl(`${req.protocol}://${req.get('host')}`);
 
-      // Verifica se a regra do bot interativo está ativa
-      let botRuleActive = true;
-      try {
-        const [botRuleRows]: any = await pool.query(
-          "SELECT ATIVO FROM WHATSAPP_REGRAS_COMUNICACAO WHERE EVENTO_SISTEMA = 'ATENDIMENTO_BOT_INTERATIVO' LIMIT 1"
-        );
-        if (botRuleRows?.[0] !== undefined) {
-          botRuleActive = Boolean(botRuleRows[0].ATIVO);
-        }
-      } catch {}
+      // Responde 200 OK imediatamente para cumprir o SLA de <5s da Meta e evitar retries duplicados
+      res.status(200).json({ received: true });
 
-      // Registra mensagens recebidas e dispara o fluxo interativo automático
-      for (const msg of messages) {
-        const fromPhone = normalizePhoneDigits(msg?.from);
-        if (!fromPhone) continue;
-        const buttonReplyId = msg?.interactive?.button_reply?.id || msg?.button?.payload || '';
-        const buttonReplyTitle = msg?.interactive?.button_reply?.title || msg?.button?.text || '';
-        const listReplyId = msg?.interactive?.list_reply?.id || '';
-        const listReplyTitle = msg?.interactive?.list_reply?.title || '';
-        const textContent =
-          msg?.text?.body ||
-          buttonReplyTitle ||
-          listReplyTitle ||
-          `[Mensagem tipo: ${msg?.type || 'desconhecido'}]`;
+      // Processamento assíncrono seguro (status, deduplicação de mensagens, encaminhamento Make.com e bot interno)
+      void (async () => {
+        try {
+          const modoAtendimento = String(cfgRow?.MODO_ATENDIMENTO || 'BOT_INTERNO').toUpperCase();
+          const shouldForwardToMake =
+            Boolean(cfgRow?.MAKE_WEBHOOK_ATIVO) &&
+            Boolean(sanitizeMakeWebhookUrl(cfgRow?.MAKE_WEBHOOK_URL)) &&
+            (modoAtendimento === 'MAKE' || modoAtendimento === 'AMBOS');
+          const shouldRunInternalBot = modoAtendimento === 'BOT_INTERNO' || modoAtendimento === 'AMBOS';
 
-        const inboundId = `wpp-in-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-        await pool.query(
-          `INSERT INTO WHATSAPP_MENSAGENS (
-            ID_MENSAGEM, DIRECAO, TELEFONE_DESTINO, TELEFONE_ORIGEM,
-            TIPO_MENSAGEM, CONTEUDO_RESUMO, META_MESSAGE_ID, STATUS_ENTREGA,
-            PAYLOAD_RESPOSTA_JSON, DATA_CRIACAO
-          ) VALUES (?, 'ENTRADA', ?, ?, 'inbound', ?, ?, 'RECEBIDA', ?, NOW())`,
-          [
-            inboundId,
-            value?.metadata?.display_phone_number || cfgRow?.NUMERO_TELEFONE_EXIBICAO || 'sistema',
-            fromPhone,
-            String(textContent).slice(0, 1000),
-            msg?.id ? String(msg.id) : null,
-            JSON.stringify(msg)
-          ]
-        );
+          // 1) Atualiza status de entrega/leitura
+          const statusMap: Record<string, string> = {
+            sent: 'ENVIADA',
+            delivered: 'ENTREGUE',
+            read: 'LIDA',
+            failed: 'FALHOU'
+          };
+          for (const item of collectedStatuses) {
+            const st = item.statusObj;
+            const wamid = String(st?.id || '').trim();
+            const mappedStatus = statusMap[String(st?.status || '').toLowerCase()];
+            if (wamid && mappedStatus) {
+              const firstErr = Array.isArray(st?.errors) ? st.errors[0] : null;
+              await pool.query(
+                `UPDATE WHATSAPP_MENSAGENS SET
+                  STATUS_ENTREGA = ?,
+                  ERRO_CODIGO = COALESCE(?, ERRO_CODIGO),
+                  ERRO_MENSAGEM = COALESCE(?, ERRO_MENSAGEM),
+                  DATA_ATUALIZACAO = NOW()
+                 WHERE META_MESSAGE_ID = ?`,
+                [
+                  mappedStatus,
+                  firstErr?.code ? String(firstErr.code) : null,
+                  firstErr?.title || firstErr?.message ? String(firstErr.title || firstErr.message) : null,
+                  wamid
+                ]
+              );
+            }
 
-        // Dispara o atendimento interativo (Operações, Treinamentos e Armaria)
-        if (botRuleActive && cfgRow?.ATIVO) {
-          try {
-            const publicBaseUrl =
-              sanitizeSafePublicUrl(cfgRow?.CALLBACK_URL_PUBLICA) ||
-              sanitizeSafePublicUrl(`${req.protocol}://${req.get('host')}`);
-            await processWhatsappBotInteraction(
-              pool,
-              cfgRow,
-              {
-                fromPhone,
-                text: msg?.text?.body || '',
-                buttonId: buttonReplyId,
-                buttonTitle: buttonReplyTitle,
-                listRowId: listReplyId,
-                listRowTitle: listReplyTitle
-              },
-              {
-                dryRun: false,
-                publicBaseUrl,
-                signingKey: getEncryptionKey(),
-                decryptSecret
-              }
-            );
-          } catch (botErr) {
-            console.error('Erro no fluxo automático do Bot WhatsApp:', botErr);
+            if (shouldForwardToMake && Boolean(cfgRow?.MAKE_ENCAMINHAR_STATUS)) {
+              await forwardPayloadToMake(pool, cfgRow, {
+                source: 'armeria_pcmg_whatsapp',
+                eventType: 'status',
+                receivedAt: new Date().toISOString(),
+                wabaId: item.wabaId,
+                phoneNumberId: item.phoneNumberId,
+                displayPhoneNumber: item.displayPhoneNumber,
+                status: {
+                  messageId: wamid,
+                  recipientId: normalizePhoneDigits(st?.recipient_id),
+                  status: String(st?.status || ''),
+                  statusPtBr: mappedStatus || String(st?.status || ''),
+                  timestamp: st?.timestamp || null,
+                  errors: Array.isArray(st?.errors) ? st.errors : []
+                }
+              });
+            }
           }
-        }
-      }
 
-      return res.status(200).json({ received: true });
+          // 2) Verifica se a regra do bot interativo está ativa
+          let botRuleActive = true;
+          if (shouldRunInternalBot) {
+            try {
+              const [botRuleRows]: any = await pool.query(
+                "SELECT ATIVO FROM WHATSAPP_REGRAS_COMUNICACAO WHERE EVENTO_SISTEMA = 'ATENDIMENTO_BOT_INTERATIVO' LIMIT 1"
+              );
+              if (botRuleRows?.[0] !== undefined) {
+                botRuleActive = Boolean(botRuleRows[0].ATIVO);
+              }
+            } catch {}
+          }
+
+          // 3) Processa cada mensagem recebida com deduplicação por META_MESSAGE_ID (wamid)
+          for (const item of collectedMessages) {
+            const msg = item.msgObj;
+            const fromPhone = normalizePhoneDigits(msg?.from);
+            if (!fromPhone) continue;
+
+            const wamid = msg?.id ? String(msg.id).trim() : null;
+            if (wamid) {
+              const [dupRows]: any = await pool.query(
+                "SELECT ID_MENSAGEM FROM WHATSAPP_MENSAGENS WHERE META_MESSAGE_ID = ? AND DIRECAO = 'ENTRADA' LIMIT 1",
+                [wamid]
+              );
+              if (dupRows && dupRows.length > 0) {
+                continue; // Ignora retry duplicado da Meta
+              }
+            }
+
+            const buttonReplyId = msg?.interactive?.button_reply?.id || msg?.button?.payload || '';
+            const buttonReplyTitle = msg?.interactive?.button_reply?.title || msg?.button?.text || '';
+            const listReplyId = msg?.interactive?.list_reply?.id || '';
+            const listReplyTitle = msg?.interactive?.list_reply?.title || '';
+            const textContent =
+              msg?.text?.body ||
+              buttonReplyTitle ||
+              listReplyTitle ||
+              msg?.image?.caption ||
+              msg?.document?.caption ||
+              `[Mensagem tipo: ${msg?.type || 'desconhecido'}]`;
+
+            const inboundId = `wpp-in-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+            await pool.query(
+              `INSERT INTO WHATSAPP_MENSAGENS (
+                ID_MENSAGEM, DIRECAO, TELEFONE_DESTINO, TELEFONE_ORIGEM,
+                TIPO_MENSAGEM, CONTEUDO_RESUMO, META_MESSAGE_ID, STATUS_ENTREGA,
+                PAYLOAD_RESPOSTA_JSON, DATA_CRIACAO
+              ) VALUES (?, 'ENTRADA', ?, ?, 'inbound', ?, ?, 'RECEBIDA', ?, NOW())`,
+              [
+                inboundId,
+                item.displayPhoneNumber || cfgRow?.NUMERO_TELEFONE_EXIBICAO || 'sistema',
+                fromPhone,
+                String(textContent).slice(0, 1000),
+                wamid,
+                JSON.stringify(msg)
+              ]
+            );
+
+            // Encaminha para o Make.com com payload estruturado + dados do usuário no sistema
+            if (shouldForwardToMake) {
+              const matchedUser = await resolveWhatsappUserContext(pool, fromPhone).catch(() => null);
+              await forwardPayloadToMake(pool, cfgRow, {
+                source: 'armeria_pcmg_whatsapp',
+                eventType: 'message',
+                receivedAt: new Date().toISOString(),
+                wabaId: item.wabaId,
+                phoneNumberId: item.phoneNumberId,
+                displayPhoneNumber: item.displayPhoneNumber || cfgRow?.NUMERO_TELEFONE_EXIBICAO || null,
+                message: {
+                  id: wamid,
+                  from: fromPhone,
+                  fromNormalized: stripBrazilDdiForDisplay(fromPhone),
+                  contactName: item.contactName || null,
+                  type: String(msg?.type || 'unknown'),
+                  text: msg?.text?.body || '',
+                  displayText: String(textContent),
+                  buttonId: buttonReplyId || null,
+                  buttonTitle: buttonReplyTitle || null,
+                  listRowId: listReplyId || null,
+                  listRowTitle: listReplyTitle || null,
+                  timestamp: msg?.timestamp || null
+                },
+                usuarioSistema: matchedUser
+                  ? {
+                      encontrado: true,
+                      id: matchedUser.id,
+                      nome: matchedUser.name,
+                      masp: matchedUser.masp,
+                      cargo: matchedUser.cargo,
+                      perfil: matchedUser.role,
+                      perfis: matchedUser.roles,
+                      unidadeId: matchedUser.unitId,
+                      departamentoId: matchedUser.departmentId,
+                      isArmeiroOrAdmin: matchedUser.isArmeiroOrAdmin,
+                      unidadesPermitidas: matchedUser.permittedUnits.map(u => ({
+                        id: u.id,
+                        nome: u.name,
+                        sigla: u.shortName
+                      }))
+                    }
+                  : { encontrado: false },
+                rawMetaMessage: msg
+              });
+            }
+
+            // Dispara o atendimento interativo interno (se modo for BOT_INTERNO ou AMBOS)
+            if (shouldRunInternalBot && botRuleActive && cfgRow?.ATIVO) {
+              try {
+                await processWhatsappBotInteraction(
+                  pool,
+                  cfgRow,
+                  {
+                    fromPhone,
+                    text: msg?.text?.body || '',
+                    buttonId: buttonReplyId,
+                    buttonTitle: buttonReplyTitle,
+                    listRowId: listReplyId,
+                    listRowTitle: listReplyTitle
+                  },
+                  {
+                    dryRun: false,
+                    publicBaseUrl,
+                    signingKey: getEncryptionKey(),
+                    decryptSecret
+                  }
+                );
+              } catch (botErr) {
+                console.error('Erro no fluxo automático do Bot WhatsApp:', botErr);
+              }
+            }
+          }
+        } catch (asyncErr) {
+          console.error('Erro no processamento assíncrono do webhook WhatsApp:', asyncErr);
+        }
+      })();
+      return;
     } catch (err: any) {
       console.error('Erro ao processar webhook WhatsApp:', err);
-      return res.status(200).json({ received: true });
+      if (!res.headersSent) {
+        return res.status(200).json({ received: true });
+      }
+      return;
+    }
+  });
+
+  // 8B. DIAGNÓSTICO COMPLETO DO WEBHOOK (META + MAKE)
+  apiRouter.post('/whatsapp/webhook/testar', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const verifyToken = String(cfgRow?.WEBHOOK_VERIFY_TOKEN || '').trim();
+      const accessToken = decryptSecret(cfgRow?.ACCESS_TOKEN_ENC);
+      const appSecret = decryptSecret(cfgRow?.APP_SECRET_ENC);
+      const makeApiKey = decryptSecret(cfgRow?.MAKE_API_KEY_ENC);
+      const rawBase = sanitizeSafePublicUrl(cfgRow?.CALLBACK_URL_PUBLICA) || sanitizeSafePublicUrl(`${req.protocol}://${req.get('host')}`);
+      const webhookUrl = `${rawBase}/api/whatsapp/webhook`;
+      const makeUrl = sanitizeMakeWebhookUrl(cfgRow?.MAKE_WEBHOOK_URL);
+      const modo = String(cfgRow?.MODO_ATENDIMENTO || 'BOT_INTERNO').toUpperCase();
+
+      const checks: Array<{ key: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string }> = [
+        {
+          key: 'https_url',
+          label: 'URL Pública HTTPS do Webhook',
+          status: webhookUrl.startsWith('https://') ? 'ok' : 'warn',
+          detail: webhookUrl.startsWith('https://')
+            ? `URL válida para Meta e Make: ${webhookUrl}`
+            : `URL atual não usa HTTPS (${webhookUrl}). A Meta exige HTTPS público válido.`
+        },
+        {
+          key: 'verify_token',
+          label: 'Verify Token (Handshake GET Meta)',
+          status: verifyToken.length >= 8 ? 'ok' : 'error',
+          detail:
+            verifyToken.length >= 8
+              ? `Token configurado (${verifyToken.length} caracteres) com comparação segura timing-safe.`
+              : 'Defina um Verify Token com pelo menos 8 caracteres e salve a configuração.'
+        },
+        {
+          key: 'app_secret',
+          label: 'App Secret (Validação HMAC X-Hub-Signature-256)',
+          status: appSecret ? 'ok' : 'warn',
+          detail: appSecret
+            ? 'Ativo — todas as requisições POST da Meta são validadas criptograficamente via SHA-256.'
+            : 'Opcional em testes, mas altamente recomendado preencher o App Secret para produção.'
+        },
+        {
+          key: 'meta_credentials',
+          label: 'Credenciais Meta Cloud API (Phone Number ID + Access Token)',
+          status: sanitizeNumericId(cfgRow?.PHONE_NUMBER_ID) && accessToken ? 'ok' : 'error',
+          detail:
+            sanitizeNumericId(cfgRow?.PHONE_NUMBER_ID) && accessToken
+              ? `Configuradas (Phone ID ${cfgRow.PHONE_NUMBER_ID} • API ${cfgRow.API_VERSAO || 'v22.0'}).`
+              : 'Preencha e salve o Phone Number ID e o Access Token para enviar mensagens.'
+        },
+        {
+          key: 'integration_active',
+          label: 'Status da Integração & Modo de Atendimento',
+          status: cfgRow?.ATIVO ? 'ok' : 'warn',
+          detail: cfgRow?.ATIVO
+            ? `Integração ATIVA • Modo: ${modo === 'MAKE' ? 'Somente Make.com' : modo === 'AMBOS' ? 'Make.com + Bot Interno' : 'Bot Interno'}.`
+            : 'A integração está DESATIVADA. Ative o botão "ATIVA" para responder automaticamente.'
+        },
+        {
+          key: 'make_outbound',
+          label: 'Webhook de Saída para Make.com (Sistema → Make)',
+          status:
+            cfgRow?.MAKE_WEBHOOK_ATIVO && makeUrl
+              ? 'ok'
+              : modo === 'MAKE'
+              ? 'error'
+              : 'warn',
+          detail:
+            cfgRow?.MAKE_WEBHOOK_ATIVO && makeUrl
+              ? `Ativo e apontando para ${new URL(makeUrl).hostname}.`
+              : modo === 'MAKE'
+              ? 'Modo "Somente Make.com" selecionado, mas o Custom Webhook do Make ainda não está ativo/preenchido.'
+              : 'Não ativado. Preencha a URL do Custom Webhook do Make e ative para enviar eventos ao Make.'
+        },
+        {
+          key: 'make_inbound',
+          label: 'API Key para Make.com (Make → Sistema)',
+          status: makeApiKey ? 'ok' : 'warn',
+          detail: makeApiKey
+            ? 'API Key gerada — Make.com já pode chamar /api/whatsapp/make/enviar e /consultar-usuario.'
+            : 'Clique em "Gerar API Key do Make" para permitir que cenários do Make enviem mensagens pelo sistema.'
+        }
+      ];
+
+      // Validação real de assinatura HMAC e contagem dos últimos eventos recebidos
+      const [lastEvRows]: any = await pool.query(
+        'SELECT TIPO_EVENTO, ASSINATURA_VALIDA, RESUMO, DATA_RECEBIMENTO FROM WHATSAPP_WEBHOOK_EVENTOS ORDER BY DATA_RECEBIMENTO DESC LIMIT 5'
+      );
+
+      const hasError = checks.some(c => c.status === 'error');
+      const hasWarn = checks.some(c => c.status === 'warn');
+
+      return res.json({
+        success: !hasError,
+        overall: hasError ? 'ERROR' : hasWarn ? 'WARN' : 'OK',
+        webhookUrl,
+        checks,
+        recentEvents: lastEvRows || []
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 8C. GERAR / ROTACIONAR API KEY DE INTEGRAÇÃO PARA O MAKE.COM
+  apiRouter.post('/whatsapp/make/gerar-api-key', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      await loadRawWhatsappConfig(pool);
+      const plainKey = `pcmg_make_${crypto.randomBytes(24).toString('hex')}`;
+      const encryptedKey = encryptSecret(plainKey);
+
+      await pool.query(
+        `UPDATE WHATSAPP_CONFIGURACAO_API SET
+          MAKE_API_KEY_ENC = ?,
+          ATUALIZADO_POR_ID = ?,
+          ATUALIZADO_POR_NOME = ?,
+          DATA_ATUALIZACAO = NOW()
+         WHERE ID_CONFIG = ?`,
+        [encryptedKey, auth.user.id, auth.user.name, DEFAULT_CONFIG_ID]
+      );
+
+      await insertAuditLog(
+        'WhatsApp',
+        'Gerar API Key Make.com',
+        'Nova API Key de integração bidirecional Make.com gerada.',
+        auth.user,
+        req.ip
+      );
+
+      const updated = await loadRawWhatsappConfig(pool);
+      return res.json({
+        success: true,
+        apiKey: plainKey,
+        config: mapPublicConfig(updated)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 8D. ENVIAR EVENTO DE TESTE ESTRUTURADO PARA O CUSTOM WEBHOOK DO MAKE.COM (para "Determine data structure")
+  apiRouter.post('/whatsapp/make/testar', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyWhatsappAdmin(pool, req);
+      if (!auth.ok) return res.status(auth.status || 403).json({ error: auth.error });
+
+      const cfgRow = await loadRawWhatsappConfig(pool);
+      const overrideUrl = typeof req.body?.makeWebhookUrl === 'string' && req.body.makeWebhookUrl.trim()
+        ? req.body.makeWebhookUrl.trim()
+        : cfgRow?.MAKE_WEBHOOK_URL;
+      const validMakeUrl = sanitizeMakeWebhookUrl(overrideUrl);
+
+      if (!validMakeUrl) {
+        return res.status(400).json({
+          error: 'Informe e salve uma URL HTTPS válida de Custom Webhook do Make.com (ex: https://hook.us2.make.com/...).'
+        });
+      }
+
+      const testPayload = {
+        source: 'armeria_pcmg_whatsapp',
+        eventType: 'message',
+        isTestEvent: true,
+        receivedAt: new Date().toISOString(),
+        wabaId: cfgRow?.WABA_ID || '000000000000000',
+        phoneNumberId: cfgRow?.PHONE_NUMBER_ID || '000000000000000',
+        displayPhoneNumber: cfgRow?.NUMERO_TELEFONE_EXIBICAO || '+55 31 99999-0000',
+        message: {
+          id: `wamid.TEST_${Date.now()}`,
+          from: normalizePhoneDigits(cfgRow?.NUMERO_TESTE_PADRAO) || '5531999990000',
+          fromNormalized: stripBrazilDdiForDisplay(cfgRow?.NUMERO_TESTE_PADRAO || '5531999990000'),
+          contactName: auth.user.name || 'Policial Teste',
+          type: 'text',
+          text: 'Oi',
+          displayText: 'Oi',
+          buttonId: null,
+          buttonTitle: null,
+          listRowId: null,
+          listRowTitle: null,
+          timestamp: String(Math.floor(Date.now() / 1000))
+        },
+        usuarioSistema: {
+          encontrado: true,
+          id: auth.user.id,
+          nome: auth.user.name,
+          masp: auth.user.masp || '0000000',
+          cargo: 'Policial Civil',
+          perfil: auth.user.role || 'Administrador',
+          perfis: [auth.user.role || 'Administrador'],
+          unidadeId: 'unidade-teste',
+          departamentoId: 'dep-teste',
+          isArmeiroOrAdmin: true,
+          unidadesPermitidas: [{ id: 'unidade-teste', nome: 'Unidade Exemplo', sigla: 'COE' }]
+        }
+      };
+
+      const effectiveCfg = { ...cfgRow, MAKE_WEBHOOK_URL: validMakeUrl };
+      const forwardResult = await forwardPayloadToMake(pool, effectiveCfg, testPayload);
+
+      const statusMsg = forwardResult.ok
+        ? `Conectado ao Make.com com sucesso (HTTP ${forwardResult.status} — ${forwardResult.responseText || 'Accepted'})`
+        : forwardResult.error || `Erro HTTP ${forwardResult.status}: ${forwardResult.responseText || 'Falha no webhook Make'}`;
+
+      await pool.query(
+        `UPDATE WHATSAPP_CONFIGURACAO_API SET
+          MAKE_ULTIMO_TESTE_STATUS = ?,
+          MAKE_ULTIMO_TESTE_MENSAGEM = ?,
+          MAKE_ULTIMO_TESTE_EM = NOW()
+         WHERE ID_CONFIG = ?`,
+        [forwardResult.ok ? 'CONECTADO' : 'ERRO', statusMsg.slice(0, 1000), DEFAULT_CONFIG_ID]
+      );
+
+      await insertAuditLog(
+        'WhatsApp',
+        'Testar Webhook Make.com',
+        `Teste de envio para Make.com: ${forwardResult.ok ? 'OK' : 'ERRO'} — ${statusMsg.slice(0, 200)}`,
+        auth.user,
+        req.ip
+      );
+
+      const updated = await loadRawWhatsappConfig(pool);
+      return res.status(forwardResult.ok ? 200 : 400).json({
+        success: forwardResult.ok,
+        message: statusMsg,
+        httpStatus: forwardResult.status,
+        config: mapPublicConfig(updated)
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  // 8E. ENDPOINTS DE ENTRADA PARA CENÁRIOS DO MAKE.COM (Autenticados via X-Make-Api-Key ou Bearer)
+  apiRouter.get('/whatsapp/make/status', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyMakeApiKey(pool, req);
+      if (!auth.ok) return res.status(auth.status || 401).json({ error: auth.error });
+
+      const cfg = mapPublicConfig(auth.cfgRow);
+      return res.json({
+        ok: true,
+        status: 'connected',
+        ambiente: cfg.ambiente,
+        ativo: cfg.ativo,
+        apiVersion: cfg.apiVersion,
+        modoAtendimento: cfg.modoAtendimento,
+        makeWebhookAtivo: cfg.makeWebhookAtivo,
+        hasMetaCredentials: Boolean(cfg.phoneNumberId && cfg.hasAccessToken),
+        serverTime: new Date().toISOString()
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  apiRouter.post('/whatsapp/make/consultar-usuario', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyMakeApiKey(pool, req);
+      if (!auth.ok) return res.status(auth.status || 401).json({ error: auth.error });
+
+      const phone = String(req.body?.phone || req.body?.telefone || '').trim();
+      if (!phone) {
+        return res.status(400).json({ error: 'Informe o campo "phone" no corpo JSON.' });
+      }
+
+      const matched = await resolveWhatsappUserContext(pool, phone);
+      if (!matched) {
+        return res.json({
+          encontrado: false,
+          phoneInformado: phone,
+          phoneNormalizado: stripBrazilDdiForDisplay(phone)
+        });
+      }
+
+      return res.json({
+        encontrado: true,
+        usuario: {
+          id: matched.id,
+          nome: matched.name,
+          masp: matched.masp,
+          cargo: matched.cargo,
+          telefone: matched.phone,
+          perfil: matched.role,
+          perfis: matched.roles,
+          unidadeId: matched.unitId,
+          departamentoId: matched.departmentId,
+          isArmeiroOrAdmin: matched.isArmeiroOrAdmin,
+          isGlobal: matched.isGlobal,
+          unidadesPermitidas: matched.permittedUnits.map(u => ({
+            id: u.id,
+            nome: u.name,
+            sigla: u.shortName
+          }))
+        }
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
+
+  apiRouter.post('/whatsapp/make/enviar', async (req: Request, res: Response) => {
+    try {
+      const pool = getPool();
+      const auth = await verifyMakeApiKey(pool, req);
+      if (!auth.ok) return res.status(auth.status || 401).json({ error: auth.error });
+
+      const cfgRow = auth.cfgRow;
+      const body = req.body || {};
+      const toPhone = normalizePhoneDigits(body.to || body.toPhone || body.telefone);
+      if (toPhone.length < 10 || toPhone.length > 15) {
+        return res.status(400).json({
+          error: 'Informe o telefone de destino "to" com DDI e DDD (ex: 5531999990000).'
+        });
+      }
+
+      const msgType = String(body.type || body.mode || 'text').toLowerCase().trim();
+
+      // Reusa o enviador oficial para text e template
+      if (msgType === 'text' || msgType === 'template') {
+        const result = await sendMetaCloudMessage(pool, cfgRow, {
+          toPhone,
+          mode: msgType === 'template' ? 'template' : 'text',
+          templateName: body.templateName,
+          languageCode: body.languageCode || 'pt_BR',
+          bodyParameters: Array.isArray(body.bodyParameters) ? body.bodyParameters : [],
+          textBody: body.text || body.textBody || body.body,
+          eventoSistema: 'MAKE_AUTOMACAO',
+          tipoMensagem: msgType,
+          actor: { id: 'make-automation', name: 'Make.com' }
+        });
+        return res.status(result.success ? 200 : 400).json(result);
+      }
+
+      // Mensagens interativas (buttons / list) e documentos (PDF/arquivo por URL HTTPS)
+      const apiVersion = ALLOWED_API_VERSIONS.has(cfgRow?.API_VERSAO) ? cfgRow.API_VERSAO : 'v22.0';
+      const phoneNumberId = sanitizeNumericId(cfgRow?.PHONE_NUMBER_ID);
+      const accessToken = decryptSecret(cfgRow?.ACCESS_TOKEN_ENC);
+      if (!phoneNumberId || !accessToken) {
+        return res.status(400).json({
+          error: 'Configure o Phone Number ID e o Access Token na aba Configuração da API.'
+        });
+      }
+
+      let payload: any = null;
+      let resumo = '';
+
+      if (msgType === 'buttons') {
+        const textBody = String(body.body || body.text || '').trim().slice(0, 1024);
+        const rawButtons = Array.isArray(body.buttons) ? body.buttons : [];
+        const buttons = rawButtons
+          .map((b: any, idx: number) => ({
+            id: String(typeof b === 'string' ? `btn_${idx + 1}` : b?.id || `btn_${idx + 1}`).slice(0, 256),
+            title: String(typeof b === 'string' ? b : b?.title || '').trim().slice(0, 20)
+          }))
+          .filter((b: any) => b.title.length > 0)
+          .slice(0, 3);
+        if (!textBody || buttons.length === 0) {
+          return res.status(400).json({ error: 'Para type="buttons", informe "body" e de 1 a 3 itens em "buttons".' });
+        }
+        payload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: toPhone,
+          type: 'interactive',
+          interactive: {
+            type: 'button',
+            ...(body.header ? { header: { type: 'text', text: String(body.header).trim().slice(0, 60) } } : {}),
+            body: { text: textBody },
+            ...(body.footer ? { footer: { text: String(body.footer).trim().slice(0, 60) } } : {}),
+            action: {
+              buttons: buttons.map((b: any) => ({ type: 'reply', reply: { id: b.id, title: b.title } }))
+            }
+          }
+        };
+        resumo = `[Make Botões] ${body.header || ''} • ${buttons.map((b: any) => b.title).join(' | ')}`;
+      } else if (msgType === 'list') {
+        const textBody = String(body.body || body.text || '').trim().slice(0, 1024);
+        const rawRows = Array.isArray(body.listRows || body.rows) ? body.listRows || body.rows : [];
+        const rows = rawRows
+          .map((r: any, idx: number) => ({
+            id: String(r?.id || `row_${idx + 1}`).slice(0, 200),
+            title: String(r?.title || '').trim().slice(0, 24),
+            ...(r?.description ? { description: String(r.description).trim().slice(0, 72) } : {})
+          }))
+          .filter((r: any) => r.title.length > 0)
+          .slice(0, 10);
+        if (!textBody || rows.length === 0) {
+          return res.status(400).json({ error: 'Para type="list", informe "body" e de 1 a 10 itens em "listRows".' });
+        }
+        payload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: toPhone,
+          type: 'interactive',
+          interactive: {
+            type: 'list',
+            ...(body.header ? { header: { type: 'text', text: String(body.header).trim().slice(0, 60) } } : {}),
+            body: { text: textBody },
+            ...(body.footer ? { footer: { text: String(body.footer).trim().slice(0, 60) } } : {}),
+            action: {
+              button: String(body.listButtonText || 'Selecionar').trim().slice(0, 20),
+              sections: [
+                {
+                  title: String(body.sectionTitle || body.header || 'Opções').trim().slice(0, 24),
+                  rows
+                }
+              ]
+            }
+          }
+        };
+        resumo = `[Make Lista] ${body.header || ''} (${rows.length} opções)`;
+      } else if (msgType === 'document') {
+        const docUrl = sanitizePublicHttpsMediaUrl(body.documentUrl || body.link);
+        if (!docUrl) {
+          return res.status(400).json({ error: 'Para type="document", informe uma URL HTTPS pública válida em "documentUrl".' });
+        }
+        const filename = String(body.filename || 'documento.pdf').trim().slice(0, 120);
+        const caption = String(body.caption || body.body || '').trim().slice(0, 1024);
+        payload = {
+          messaging_product: 'whatsapp',
+          recipient_type: 'individual',
+          to: toPhone,
+          type: 'document',
+          document: {
+            link: docUrl,
+            filename,
+            ...(caption ? { caption } : {})
+          }
+        };
+        resumo = `[Make Documento] ${filename}`;
+      } else {
+        return res.status(400).json({
+          error: 'Tipo inválido. Use type: "text", "template", "buttons", "list" ou "document".'
+        });
+      }
+
+      const msgId = `wpp-mk-out-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const endpointUrl = `${META_GRAPH_BASE_URL}/${apiVersion}/${phoneNumberId}/messages`;
+      let metaMessageId: string | null = null;
+      let statusEntrega = 'PENDENTE';
+      let erroCodigo: string | null = null;
+      let erroMensagem: string | null = null;
+      let responseJson: any = null;
+
+      try {
+        const metaRes = await fetch(endpointUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(payload)
+        });
+        responseJson = await metaRes.json().catch(() => ({}));
+        if (metaRes.ok && responseJson?.messages?.[0]?.id) {
+          metaMessageId = String(responseJson.messages[0].id);
+          statusEntrega = 'ENVIADA';
+        } else {
+          statusEntrega = 'FALHOU';
+          erroCodigo = String(responseJson?.error?.code || metaRes.status);
+          erroMensagem =
+            responseJson?.error?.error_user_msg ||
+            responseJson?.error?.message ||
+            `Erro HTTP ${metaRes.status} na Meta Cloud API`;
+        }
+      } catch (netErr: any) {
+        statusEntrega = 'FALHOU';
+        erroCodigo = 'NETWORK_ERROR';
+        erroMensagem = netErr?.message || 'Falha de rede ao enviar via Meta Cloud API';
+      }
+
+      await pool.query(
+        `INSERT INTO WHATSAPP_MENSAGENS (
+          ID_MENSAGEM, DIRECAO, TELEFONE_DESTINO, TELEFONE_ORIGEM,
+          TIPO_MENSAGEM, EVENTO_SISTEMA, CONTEUDO_RESUMO, META_MESSAGE_ID,
+          STATUS_ENTREGA, ERRO_CODIGO, ERRO_MENSAGEM, PAYLOAD_REQUISICAO_JSON,
+          PAYLOAD_RESPOSTA_JSON, ENVIADO_POR_NOME, DATA_CRIACAO
+        ) VALUES (?, 'SAIDA', ?, ?, ?, 'MAKE_AUTOMACAO', ?, ?, ?, ?, ?, ?, ?, 'Make.com', NOW())`,
+        [
+          msgId,
+          toPhone,
+          cfgRow?.NUMERO_TELEFONE_EXIBICAO || null,
+          msgType,
+          resumo.slice(0, 600),
+          metaMessageId,
+          statusEntrega,
+          erroCodigo,
+          erroMensagem,
+          JSON.stringify(payload),
+          responseJson ? JSON.stringify(responseJson) : null
+        ]
+      );
+
+      if (statusEntrega === 'ENVIADA') {
+        return res.json({ success: true, id: msgId, metaMessageId, statusEntrega, response: responseJson });
+      }
+      return res.status(400).json({
+        success: false,
+        id: msgId,
+        statusEntrega,
+        errorCode: erroCodigo,
+        error: erroMensagem || 'Falha ao enviar mensagem pelo WhatsApp Cloud API.'
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 

@@ -2249,6 +2249,8 @@ export type WhatsappDestinatarioTipo =
   | 'ADMINISTRADORES'
   | 'NUMERO_FIXO';
 
+export type WhatsappModoAtendimento = 'BOT_INTERNO' | 'MAKE' | 'AMBOS';
+
 export interface WhatsappApiConfig {
   id: string;
   ambiente: WhatsappAmbiente;
@@ -2266,6 +2268,17 @@ export interface WhatsappApiConfig {
   webhookVerifyToken: string;
   callbackUrlPublica: string;
   numeroTestePadrao: string;
+  modoAtendimento: WhatsappModoAtendimento;
+  makeWebhookAtivo: boolean;
+  makeWebhookUrl: string;
+  makeEncaminharStatus: boolean;
+  hasMakeWebhookSecret: boolean;
+  makeWebhookSecretMasked: string;
+  hasMakeApiKey: boolean;
+  makeApiKeyMasked: string;
+  makeUltimoTesteStatus: 'CONECTADO' | 'ERRO' | 'NAO_TESTADO';
+  makeUltimoTesteMensagem: string;
+  makeUltimoTesteEm?: string | null;
   ultimoTesteStatus: 'CONECTADO' | 'ERRO' | 'NAO_TESTADO';
   ultimoTesteMensagem: string;
   ultimoTesteEm?: string | null;

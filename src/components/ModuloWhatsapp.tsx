@@ -7,6 +7,7 @@ import {
   WhatsappMensagemLog,
   WhatsappWebhookEvento,
   WhatsappAmbiente,
+  WhatsappModoAtendimento,
   WhatsappTemplateCategoria,
   WhatsappTemplateHeaderTipo,
   WhatsappDestinatarioTipo,
@@ -143,6 +144,23 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
   const [formCallbackPublica, setFormCallbackPublica] = useState('');
   const [formNumeroTeste, setFormNumeroTeste] = useState('');
 
+  // --- STATE: INTEGRAÇÃO MAKE.COM & DIAGNÓSTICO DE WEBHOOK ---
+  const [formModoAtendimento, setFormModoAtendimento] = useState<WhatsappModoAtendimento>('BOT_INTERNO');
+  const [formMakeWebhookAtivo, setFormMakeWebhookAtivo] = useState(false);
+  const [formMakeWebhookUrl, setFormMakeWebhookUrl] = useState('');
+  const [formMakeEncaminharStatus, setFormMakeEncaminharStatus] = useState(false);
+  const [formMakeWebhookSecret, setFormMakeWebhookSecret] = useState('');
+  const [showMakeWebhookSecret, setShowMakeWebhookSecret] = useState(false);
+  const [newlyGeneratedMakeApiKey, setNewlyGeneratedMakeApiKey] = useState<string | null>(null);
+  const [generatingMakeApiKey, setGeneratingMakeApiKey] = useState(false);
+  const [testingMakeWebhook, setTestingMakeWebhook] = useState(false);
+  const [checkingWebhookHealth, setCheckingWebhookHealth] = useState(false);
+  const [webhookDiagnostics, setWebhookDiagnostics] = useState<{
+    overall: 'OK' | 'WARN' | 'ERROR';
+    webhookUrl: string;
+    checks: Array<{ key: string; label: string; status: 'ok' | 'warn' | 'error'; detail: string }>;
+  } | null>(null);
+
   // Disparo de teste na aba Config API
   const [testMode, setTestMode] = useState<'template' | 'text'>('template');
   const [testPhone, setTestPhone] = useState('');
@@ -247,6 +265,11 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     setFormVerifyToken(cfg.webhookVerifyToken || '');
     setFormCallbackPublica(cfg.callbackUrlPublica || '');
     setFormNumeroTeste(cfg.numeroTestePadrao || '');
+    setFormModoAtendimento(cfg.modoAtendimento || 'BOT_INTERNO');
+    setFormMakeWebhookAtivo(Boolean(cfg.makeWebhookAtivo));
+    setFormMakeWebhookUrl(cfg.makeWebhookUrl || '');
+    setFormMakeEncaminharStatus(Boolean(cfg.makeEncaminharStatus));
+    setFormMakeWebhookSecret('');
     setTestPhone(prev => prev || cfg.numeroTestePadrao || '');
     setFormAccessToken('');
     setFormAppSecret('');
@@ -314,13 +337,26 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
   }, [currentUser.id]);
 
   const computedBasePublicUrl = useMemo(() => {
-    return formCallbackPublica.trim()
-      ? formCallbackPublica.trim().replace(/\/+$/, '')
+    const raw = formCallbackPublica.trim()
+      ? formCallbackPublica.trim().replace(/\/+$/, '').replace(/\/api\/whatsapp\/webhook$/i, '')
       : window.location.origin;
+    return raw;
   }, [formCallbackPublica]);
 
   const computedWebhookUrl = useMemo(() => {
     return `${computedBasePublicUrl}/api/whatsapp/webhook`;
+  }, [computedBasePublicUrl]);
+
+  const computedMakeEnviarUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/whatsapp/make/enviar`;
+  }, [computedBasePublicUrl]);
+
+  const computedMakeUsuarioUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/whatsapp/make/consultar-usuario`;
+  }, [computedBasePublicUrl]);
+
+  const computedMakeStatusUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/whatsapp/make/status`;
   }, [computedBasePublicUrl]);
 
   const computedTermsUrl = useMemo(() => {
@@ -363,6 +399,11 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
           webhookVerifyToken: formVerifyToken.trim(),
           callbackUrlPublica: formCallbackPublica.trim(),
           numeroTestePadrao: formNumeroTeste.trim(),
+          modoAtendimento: formModoAtendimento,
+          makeWebhookAtivo: formMakeWebhookAtivo,
+          makeWebhookUrl: formMakeWebhookUrl.trim(),
+          makeEncaminharStatus: formMakeEncaminharStatus,
+          makeWebhookSecret: formMakeWebhookSecret.trim() || undefined,
           actor: currentUser
         })
       });
@@ -371,7 +412,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
         notifyError(data.error || 'Erro ao salvar configuração da API WhatsApp.');
       } else {
         if (data.config) hydrateConfigForm(data.config);
-        notifySuccess('Configuração da API Oficial do WhatsApp salva com sucesso.');
+        notifySuccess('Configuração da API Oficial do WhatsApp e Make.com salva com sucesso.');
       }
     } catch (err: any) {
       notifyError(err.message);
@@ -380,7 +421,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     }
   };
 
-  const handleClearSecret = async (field: 'accessToken' | 'appSecret') => {
+  const handleClearSecret = async (field: 'accessToken' | 'appSecret' | 'makeWebhookSecret' | 'makeApiKey') => {
     setSavingConfig(true);
     try {
       const res = await fetch('/api/whatsapp/config', {
@@ -398,20 +439,120 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
           webhookVerifyToken: formVerifyToken.trim(),
           callbackUrlPublica: formCallbackPublica.trim(),
           numeroTestePadrao: formNumeroTeste.trim(),
+          modoAtendimento: formModoAtendimento,
+          makeWebhookAtivo: formMakeWebhookAtivo,
+          makeWebhookUrl: formMakeWebhookUrl.trim(),
+          makeEncaminharStatus: formMakeEncaminharStatus,
           clearAccessToken: field === 'accessToken',
           clearAppSecret: field === 'appSecret',
+          clearMakeWebhookSecret: field === 'makeWebhookSecret',
+          clearMakeApiKey: field === 'makeApiKey',
           actor: currentUser
         })
       });
       const data = await res.json();
       if (res.ok && data.config) {
         hydrateConfigForm(data.config);
-        notifySuccess(field === 'accessToken' ? 'Access Token removido.' : 'App Secret removido.');
+        if (field === 'makeApiKey') setNewlyGeneratedMakeApiKey(null);
+        notifySuccess(
+          field === 'accessToken'
+            ? 'Access Token removido.'
+            : field === 'appSecret'
+            ? 'App Secret removido.'
+            : field === 'makeWebhookSecret'
+            ? 'Segredo do Webhook Make removido.'
+            : 'API Key do Make removida.'
+        );
       } else {
         notifyError(data.error || 'Erro ao remover credencial.');
       }
     } finally {
       setSavingConfig(false);
+    }
+  };
+
+  const handleCheckWebhookHealth = async () => {
+    setCheckingWebhookHealth(true);
+    try {
+      const res = await fetch('/api/whatsapp/webhook/testar', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ actor: currentUser })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setWebhookDiagnostics({
+          overall: data.overall || 'OK',
+          webhookUrl: data.webhookUrl || computedWebhookUrl,
+          checks: Array.isArray(data.checks) ? data.checks : []
+        });
+        if (data.overall === 'OK') {
+          notifySuccess('Diagnóstico concluído: Webhook pronto para Meta e Make.com!');
+        } else if (data.overall === 'WARN') {
+          notifySuccess('Diagnóstico concluído com alertas opcionais. Veja os detalhes no cartão.');
+        } else {
+          notifyError('Diagnóstico encontrou pendências obrigatórias. Veja o cartão de saúde do Webhook.');
+        }
+      } else {
+        notifyError(data.error || 'Erro ao executar diagnóstico do Webhook.');
+      }
+    } catch (err: any) {
+      notifyError(err.message);
+    } finally {
+      setCheckingWebhookHealth(false);
+    }
+  };
+
+  const handleGenerateMakeApiKey = async () => {
+    setGeneratingMakeApiKey(true);
+    try {
+      const res = await fetch('/api/whatsapp/make/gerar-api-key', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({ actor: currentUser })
+      });
+      const data = await res.json();
+      if (res.ok && data.apiKey) {
+        setNewlyGeneratedMakeApiKey(data.apiKey);
+        if (data.config) hydrateConfigForm(data.config);
+        notifySuccess('Nova API Key do Make gerada! Copie e guarde agora no seu cenário do Make.com.');
+      } else {
+        notifyError(data.error || 'Erro ao gerar API Key do Make.');
+      }
+    } catch (err: any) {
+      notifyError(err.message);
+    } finally {
+      setGeneratingMakeApiKey(false);
+    }
+  };
+
+  const handleTestMakeWebhook = async () => {
+    if (!formMakeWebhookUrl.trim()) {
+      notifyError('Cole a URL do Custom Webhook do Make.com antes de testar.');
+      return;
+    }
+    setTestingMakeWebhook(true);
+    try {
+      const res = await fetch('/api/whatsapp/make/testar', {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify({
+          makeWebhookUrl: formMakeWebhookUrl.trim(),
+          actor: currentUser
+        })
+      });
+      const data = await res.json();
+      if (data.config) hydrateConfigForm(data.config);
+      if (res.ok && data.success) {
+        notifySuccess(data.message || 'Evento de teste recebido pelo Make.com com sucesso!');
+        loadComunicacao();
+      } else {
+        notifyError(data.message || data.error || 'Falha ao enviar evento de teste para o Make.com.');
+      }
+    } catch (err: any) {
+      notifyError(err.message);
+    } finally {
+      setTestingMakeWebhook(false);
     }
   };
 
@@ -1382,6 +1523,227 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
               </div>
             </div>
 
+            {/* Integração Bidirecional com a Plataforma Make.com */}
+            <div className="bg-slate-950/75 border border-violet-500/35 rounded-xl p-4 space-y-4 text-xs">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2 text-violet-300 font-black uppercase">
+                  <Sparkles className="w-4 h-4" />
+                  <span>Integração com Make.com (Automação Bidirecional)</span>
+                </div>
+                {config && config.makeUltimoTesteStatus !== 'NAO_TESTADO' && renderStatusBadge(config.makeUltimoTesteStatus)}
+              </div>
+
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                O Webhook oficial da Meta recebe e valida as mensagens com assinatura HMAC, deduplica reenvios e
+                encaminha o JSON enriquecido (com os dados do policial no sistema) para o seu cenário no{' '}
+                <strong className="text-violet-300">Make.com</strong>.
+              </p>
+
+              {/* Modo de Atendimento */}
+              <div className="space-y-1.5">
+                <label className="font-bold text-slate-300 block">Modo de Atendimento ao Receber Mensagem</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {[
+                    { id: 'BOT_INTERNO' as WhatsappModoAtendimento, label: 'Bot Interno', desc: 'Apenas bot nativo' },
+                    { id: 'MAKE' as WhatsappModoAtendimento, label: 'Somente Make.com', desc: 'Automação no Make' },
+                    { id: 'AMBOS' as WhatsappModoAtendimento, label: 'Make + Bot Interno', desc: 'Ambos simultâneos' }
+                  ].map(opt => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setFormModoAtendimento(opt.id);
+                        if (opt.id !== 'BOT_INTERNO') setFormMakeWebhookAtivo(true);
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition ${
+                        formModoAtendimento === opt.id
+                          ? 'bg-violet-500/20 border-violet-400 text-violet-200'
+                          : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                      }`}
+                    >
+                      <div className="font-black text-[11px]">{opt.label}</div>
+                      <div className="text-[10px] opacity-80">{opt.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Direção 1: Sistema -> Make (Custom Webhook) */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-200">1. Sistema → Make.com (Gatilho Custom Webhook)</span>
+                  <button
+                    type="button"
+                    onClick={() => setFormMakeWebhookAtivo(v => !v)}
+                    className={`px-3 py-1 rounded-lg text-[10px] font-black border transition ${
+                      formMakeWebhookAtivo
+                        ? 'bg-violet-500 text-slate-950 border-violet-400'
+                        : 'bg-slate-800 text-slate-400 border-slate-700'
+                    }`}
+                  >
+                    {formMakeWebhookAtivo ? 'ENCAMINHAMENTO ATIVO' : 'ENCAMINHAMENTO PAUSADO'}
+                  </button>
+                </div>
+
+                <div>
+                  <label className="font-bold text-slate-300 block mb-1">
+                    URL do Custom Webhook do Make.com (ex: https://hook.us2.make.com/...)
+                  </label>
+                  <div className="flex flex-col sm:flex-row gap-2">
+                    <input
+                      type="url"
+                      value={formMakeWebhookUrl}
+                      onChange={e => setFormMakeWebhookUrl(e.target.value)}
+                      placeholder="https://hook.us2.make.com/xxxxxxxxxxxxxxxxxxxx"
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-100 font-mono focus:outline-none focus:border-violet-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={testingMakeWebhook || !formMakeWebhookUrl.trim()}
+                      onClick={handleTestMakeWebhook}
+                      className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black text-[11px] flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>{testingMakeWebhook ? 'Enviando...' : 'Testar Webhook Make'}</span>
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Dica: No Make, clique em <strong>Redetermine data structure</strong> no módulo Custom Webhook e
+                    depois clique em <strong>Testar Webhook Make</strong> acima para mapear todos os campos automaticamente.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <label className="font-bold text-slate-300">Header X-Webhook-Secret (opcional)</label>
+                      {config?.hasMakeWebhookSecret && (
+                        <button
+                          type="button"
+                          onClick={() => handleClearSecret('makeWebhookSecret')}
+                          className="text-[10px] text-red-400 hover:text-red-300 underline"
+                        >
+                          Limpar
+                        </button>
+                      )}
+                    </div>
+                    <div className="relative">
+                      <input
+                        type={showMakeWebhookSecret ? 'text' : 'password'}
+                        value={formMakeWebhookSecret}
+                        onChange={e => setFormMakeWebhookSecret(e.target.value)}
+                        placeholder={
+                          config?.hasMakeWebhookSecret
+                            ? `Salvo (${config.makeWebhookSecretMasked}) — deixe vazio para manter`
+                            : 'Segredo opcional para validar no filtro do Make'
+                        }
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-3 pr-9 py-2 text-slate-100 font-mono focus:outline-none focus:border-violet-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowMakeWebhookSecret(v => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                      >
+                        {showMakeWebhookSecret ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <label className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={formMakeEncaminharStatus}
+                      onChange={e => setFormMakeEncaminharStatus(e.target.checked)}
+                      className="rounded border-slate-600 text-violet-500"
+                    />
+                    <span className="text-[11px] text-slate-300 font-semibold">
+                      Também encaminhar status (entregue/lida)
+                    </span>
+                  </label>
+                </div>
+
+                {config?.makeUltimoTesteMensagem && (
+                  <div
+                    className={`p-2.5 rounded-lg border text-[11px] ${
+                      config.makeUltimoTesteStatus === 'CONECTADO'
+                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                        : 'bg-red-500/10 border-red-500/30 text-red-300'
+                    }`}
+                  >
+                    {config.makeUltimoTesteMensagem}
+                  </div>
+                )}
+              </div>
+
+              {/* Direção 2: Make -> Sistema (HTTP Request Modules) */}
+              <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-bold text-slate-200">2. Make.com → Sistema (Módulo HTTP Request)</span>
+                  <div className="flex items-center gap-2">
+                    {config?.hasMakeApiKey && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                        Chave ativa: {config.makeApiKeyMasked}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      disabled={generatingMakeApiKey}
+                      onClick={handleGenerateMakeApiKey}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-200 font-bold text-[10px] flex items-center gap-1"
+                    >
+                      <Key className="w-3 h-3" />
+                      <span>{generatingMakeApiKey ? 'Gerando...' : config?.hasMakeApiKey ? 'Rotacionar API Key' : 'Gerar API Key'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {newlyGeneratedMakeApiKey && (
+                  <div className="bg-amber-500/10 border border-amber-400/40 rounded-xl p-2.5 space-y-1">
+                    <div className="text-[10px] font-black text-amber-300 uppercase">
+                      Copie agora sua API Key (exibida apenas uma vez) — Header: X-Make-Api-Key
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-950 border border-amber-500/30 rounded-lg px-2.5 py-1.5">
+                      <code className="flex-1 text-amber-200 font-mono text-[11px] break-all">
+                        {newlyGeneratedMakeApiKey}
+                      </code>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy('makeApiKey', newlyGeneratedMakeApiKey)}
+                        className="px-2 py-1 rounded bg-amber-500 text-slate-950 font-black text-[10px] shrink-0"
+                      >
+                        {copiedKey === 'makeApiKey' ? 'Copiado!' : 'Copiar'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-1.5 text-[11px]">
+                  {[
+                    { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
+                    { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
+                    { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }
+                  ].map(ep => (
+                    <div key={ep.key} className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 space-y-0.5">
+                      <div className="text-[10px] text-slate-400">{ep.label}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-mono font-black text-[9px]">
+                          {ep.method}
+                        </span>
+                        <code className="flex-1 text-cyan-300 font-mono text-[10px] truncate">{ep.url}</code>
+                        <button
+                          type="button"
+                          onClick={() => handleCopy(ep.key, ep.url)}
+                          className="text-cyan-300 hover:text-white text-[10px] font-bold shrink-0"
+                        >
+                          {copiedKey === ep.key ? 'Copiado' : 'Copiar'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800">
               <div className="text-[11px] text-slate-500">
                 {config?.updatedAt
@@ -1440,6 +1802,77 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
               >
                 <RefreshCw className={`w-4 h-4 ${testingConn ? 'animate-spin' : ''}`} />
                 <span>{testingConn ? 'Validando na Meta Graph API...' : 'Testar Conexão com a API Meta'}</span>
+              </button>
+            </div>
+
+            {/* Cartão 1B: Diagnóstico Completo do Webhook (Meta + Make) */}
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm font-black text-cyan-300 uppercase flex items-center gap-2">
+                  <Webhook className="w-4 h-4" />
+                  <span>Diagnóstico do Webhook (Meta + Make)</span>
+                </h3>
+                {webhookDiagnostics && (
+                  <span
+                    className={`px-2 py-0.5 rounded-md text-[10px] font-black uppercase border ${
+                      webhookDiagnostics.overall === 'OK'
+                        ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                        : webhookDiagnostics.overall === 'WARN'
+                        ? 'bg-amber-500/15 border-amber-500/40 text-amber-300'
+                        : 'bg-red-500/15 border-red-500/40 text-red-300'
+                    }`}
+                  >
+                    {webhookDiagnostics.overall === 'OK'
+                      ? '100% PRONTO'
+                      : webhookDiagnostics.overall === 'WARN'
+                      ? 'COM ALERTAS'
+                      : 'PENDÊNCIAS'}
+                  </span>
+                )}
+              </div>
+
+              {webhookDiagnostics ? (
+                <div className="space-y-2 text-[11px]">
+                  {webhookDiagnostics.checks.map(chk => (
+                    <div
+                      key={chk.key}
+                      className={`p-2.5 rounded-xl border flex items-start gap-2 ${
+                        chk.status === 'ok'
+                          ? 'bg-emerald-500/5 border-emerald-500/25 text-emerald-200'
+                          : chk.status === 'warn'
+                          ? 'bg-amber-500/5 border-amber-500/25 text-amber-200'
+                          : 'bg-red-500/10 border-red-500/30 text-red-200'
+                      }`}
+                    >
+                      {chk.status === 'ok' ? (
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                      ) : chk.status === 'warn' ? (
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
+                      ) : (
+                        <XCircle className="w-3.5 h-3.5 text-red-400 shrink-0 mt-0.5" />
+                      )}
+                      <div>
+                        <div className="font-bold">{chk.label}</div>
+                        <div className="text-[10px] opacity-85 mt-0.5 break-all">{chk.detail}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-slate-400">
+                  Clique abaixo para auditar a URL HTTPS, Verify Token, assinatura HMAC, credenciais Meta e conexão com
+                  o Make.com.
+                </p>
+              )}
+
+              <button
+                type="button"
+                disabled={checkingWebhookHealth}
+                onClick={handleCheckWebhookHealth}
+                className="w-full py-2.5 px-4 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black text-xs flex items-center justify-center gap-2 transition"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>{checkingWebhookHealth ? 'Verificando configurações...' : 'Verificar Saúde do Webhook'}</span>
               </button>
             </div>
 
