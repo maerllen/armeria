@@ -13678,7 +13678,8 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
         DEPARTAMENTO_ID as departmentId,
         UNIDADE_ID as unitId,
-        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAtFormatted,
+        DATA_CRIACAO as createdAtRaw,
         DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
       FROM RELATORIOS_TREINAMENTO_CANIL
       ORDER BY DATA_TREINAMENTO DESC, DATA_CRIACAO DESC
@@ -13734,7 +13735,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
       return {
         id: r.id,
         dataTreinamento: r.dataTreinamento,
-        horaTreinamento: r.horaTreinamento || (r.createdAt ? String(r.createdAt).slice(11, 16) : undefined),
+        horaTreinamento: r.horaTreinamento || (r.createdAtFormatted ? String(r.createdAtFormatted).slice(11, 16) : undefined),
         condutorId: r.condutorId,
         condutorNome: r.condutorNome,
         condutorMasp: r.condutorMasp || '',
@@ -13755,7 +13756,7 @@ apiRouter.get('/relatorios-treinamento-canil', async (_req: Request, res: Respon
         condutorAssinadoEm: r.condutorAssinadoEm || undefined,
         departmentId: r.departmentId || undefined,
         unitId: r.unitId || undefined,
-        createdAt: r.createdAt || '',
+        createdAt: r.createdAtRaw ? new Date(r.createdAtRaw).toISOString() : (r.createdAtFormatted || ''),
         updatedAt: r.updatedAt || undefined
       };
     });
@@ -13858,9 +13859,11 @@ apiRouter.post('/relatorios-treinamento-canil', async (req: Request, res: Respon
     }
 
     const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-    const dataTreinamento = /^\d{4}-\d{2}-\d{2}$/.test(String(body.dataTreinamento || ''))
-      ? String(body.dataTreinamento)
-      : todayBr;
+    const validatedDate = validatePastOrTodayIsoDate(body.dataTreinamento, todayBr, todayBr);
+    if (!validatedDate.ok) {
+      return res.status(400).json({ error: validatedDate.error });
+    }
+    const dataTreinamento = validatedDate.date;
     const horaTreinamento = /^\d{2}:\d{2}$/.test(String(body.horaTreinamento || '').trim())
       ? String(body.horaTreinamento).trim()
       : getCurrentTimeBrHHmm();
@@ -14011,7 +14014,8 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         DATE_FORMAT(CONDUTOR_ASSINADO_EM, '%Y-%m-%d %H:%i:%s') as condutorAssinadoEm,
         DEPARTAMENTO_ID as departmentId,
         UNIDADE_ID as unitId,
-        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt
+        DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATA_CRIACAO as createdAtRaw
       FROM RELATORIOS_TREINAMENTO_CANIL
       WHERE ID_REL_TREINAMENTO = ?
       LIMIT 1`,
@@ -14023,7 +14027,10 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
 
     const existing = rows[0];
     const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-    if (String(existing.dataTreinamento || '').slice(0, 10) !== todayBr) {
+    const createdDayBr =
+      formatDateBrIso(existing.createdAtRaw || existing.createdAt) ||
+      String(existing.dataTreinamento || '').slice(0, 10);
+    if (createdDayBr !== todayBr) {
       return res.status(403).json({
         error: 'O relatório de treinamento só pode ser modificado ao longo do mesmo dia em que foi criado.'
       });
@@ -14150,12 +14157,23 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
     }
     const { disparoReal, disparosReais } = disparoSanitized;
 
+    const validatedDate = validatePastOrTodayIsoDate(
+      body.dataTreinamento,
+      todayBr,
+      String(existing.dataTreinamento || todayBr).slice(0, 10)
+    );
+    if (!validatedDate.ok) {
+      return res.status(400).json({ error: validatedDate.error });
+    }
+    const nextDataTreinamento = validatedDate.date;
+
     const horaTreinamento =
       existing.horaTreinamento ||
       (existing.createdAt ? String(existing.createdAt).slice(11, 16) : getCurrentTimeBrHHmm());
 
     await pool.query(
       `UPDATE RELATORIOS_TREINAMENTO_CANIL SET
+        DATA_TREINAMENTO = ?,
         CACHORRO_ID = ?,
         CACHORRO_NOME = ?,
         CACHORRO_RACA = ?,
@@ -14171,6 +14189,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
         DATA_ATUALIZACAO = NOW()
       WHERE ID_REL_TREINAMENTO = ?`,
       [
+        nextDataTreinamento,
         primaryDog.id,
         primaryDog.nome,
         primaryDog.raca || null,
@@ -14191,7 +14210,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       pool,
       {
         idRelTreinamento: String(existing.id),
-        dataTreinamento: String(existing.dataTreinamento),
+        dataTreinamento: nextDataTreinamento,
         horaTreinamento,
         condutorId: String(existing.condutorId),
         condutorNome: String(existing.condutorNome),
@@ -14207,7 +14226,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
 
     const updatedRecord = {
       id: existing.id,
-      dataTreinamento: existing.dataTreinamento,
+      dataTreinamento: nextDataTreinamento,
       horaTreinamento,
       condutorId: existing.condutorId,
       condutorNome: existing.condutorNome,
@@ -14229,7 +14248,7 @@ apiRouter.put('/relatorios-treinamento-canil/:id', async (req: Request, res: Res
       condutorAssinadoEm: existing.condutorAssinadoEm || undefined,
       departmentId: existing.departmentId || undefined,
       unitId: existing.unitId || undefined,
-      createdAt: existing.createdAt || '',
+      createdAt: existing.createdAtRaw ? new Date(existing.createdAtRaw).toISOString() : (existing.createdAt || ''),
       updatedAt: new Date().toISOString()
     };
 
@@ -14454,6 +14473,36 @@ function formatDateBrIso(value: unknown): string {
     return fmt.format(parsed);
   }
   return str.slice(0, 10);
+}
+
+function validatePastOrTodayIsoDate(
+  rawValue: unknown,
+  todayBr: string,
+  fallbackDate: string
+): { ok: boolean; date: string; error?: string } {
+  const raw = String(rawValue ?? '').trim();
+  if (!raw) {
+    return { ok: true, date: fallbackDate };
+  }
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) {
+    return { ok: false, date: fallbackDate, error: 'Data do treinamento inválida. Utilize o formato AAAA-MM-DD.' };
+  }
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (
+    probe.getUTCFullYear() !== year ||
+    probe.getUTCMonth() + 1 !== month ||
+    probe.getUTCDate() !== day
+  ) {
+    return { ok: false, date: fallbackDate, error: 'Data do treinamento inválida.' };
+  }
+  if (raw > todayBr) {
+    return { ok: false, date: fallbackDate, error: 'Não é permitido informar uma data futura para o treinamento.' };
+  }
+  return { ok: true, date: raw };
 }
 
 function sanitizeOperadoresOperacao(raw: any): any[] {
@@ -20601,7 +20650,7 @@ function mapPolTreinoRow(r: any) {
     departmentId: r.departmentId || undefined,
     unitId: r.unitId || undefined,
     unitName: r.unitName || undefined,
-    createdAt: r.createdAt || new Date().toISOString(),
+    createdAt: r.createdAtRaw ? new Date(r.createdAtRaw).toISOString() : (r.createdAt || new Date().toISOString()),
     updatedAt: r.updatedAt || undefined
   };
 }
@@ -20633,6 +20682,7 @@ apiRouter.get('/relatorios-treinamento-policial', async (_req: Request, res: Res
         UNIDADE_ID as unitId,
         UNIDADE_NOME as unitName,
         DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATA_CRIACAO as createdAtRaw,
         DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
       FROM RELATORIOS_TREINAMENTO_POLICIAL
       ORDER BY DATA_TREINAMENTO DESC, DATA_CRIACAO DESC`
@@ -20661,8 +20711,11 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
     }
 
     const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-    const rawDate = String(body.dataTreinamento || '').trim();
-    const dataTreinamento = /^\d{4}-\d{2}-\d{2}$/.test(rawDate) ? rawDate : todayBr;
+    const validatedDate = validatePastOrTodayIsoDate(body.dataTreinamento, todayBr, todayBr);
+    if (!validatedDate.ok) {
+      return res.status(400).json({ error: validatedDate.error });
+    }
+    const dataTreinamento = validatedDate.date;
 
     const modalidadeLocal = String(body.modalidadeLocal || '').trim();
     if (!POL_TREINO_ALLOWED_LOCAIS.has(modalidadeLocal)) {
@@ -20795,6 +20848,7 @@ apiRouter.post('/relatorios-treinamento-policial', async (req: Request, res: Res
         UNIDADE_ID as unitId,
         UNIDADE_NOME as unitName,
         DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATA_CRIACAO as createdAtRaw,
         DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
       FROM RELATORIOS_TREINAMENTO_POLICIAL
       WHERE ID_REL_TREIN_POL = ?
@@ -20840,7 +20894,8 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
         DATA_TREINAMENTO as dataTreinamento,
         OPERADOR_ID as operadorId,
         OPERADOR_NOME as operadorNome,
-        PARTICIPANTES_JSON as participantesJson
+        PARTICIPANTES_JSON as participantesJson,
+        DATA_CRIACAO as createdAtRaw
       FROM RELATORIOS_TREINAMENTO_POLICIAL
       WHERE ID_REL_TREIN_POL = ?
       LIMIT 1`,
@@ -20852,7 +20907,10 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
 
     const existing = rows[0];
     const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-    if (String(existing.dataTreinamento || '').slice(0, 10) !== todayBr) {
+    const createdDayBr =
+      formatDateBrIso(existing.createdAtRaw) ||
+      String(existing.dataTreinamento || '').slice(0, 10);
+    if (createdDayBr !== todayBr) {
       return res.status(403).json({
         error: 'O relatório de treinamento só pode ser modificado durante o mesmo dia em que foi criado.'
       });
@@ -20931,9 +20989,20 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
     }
     const { disparoReal, disparosReais } = disparoSanitized;
 
+    const validatedDate = validatePastOrTodayIsoDate(
+      body.dataTreinamento,
+      todayBr,
+      String(existing.dataTreinamento || todayBr).slice(0, 10)
+    );
+    if (!validatedDate.ok) {
+      return res.status(400).json({ error: validatedDate.error });
+    }
+    const nextDataTreinamento = validatedDate.date;
+
     await pool.query(
       `UPDATE RELATORIOS_TREINAMENTO_POLICIAL
-       SET MODALIDADE_LOCAL = ?,
+       SET DATA_TREINAMENTO = ?,
+           MODALIDADE_LOCAL = ?,
            TITULO_TREINAMENTO = ?,
            MODALIDADE_PARTICIPACAO = ?,
            PARTICIPACAO_OUTRAS_UNIDADES = ?,
@@ -20944,6 +21013,7 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
            DESCRICAO = ?
        WHERE ID_REL_TREIN_POL = ?`,
       [
+        nextDataTreinamento,
         modalidadeLocal,
         tituloTreinamento,
         modalidadeParticipacao,
@@ -20980,6 +21050,7 @@ apiRouter.put('/relatorios-treinamento-policial/:id', async (req: Request, res: 
         UNIDADE_ID as unitId,
         UNIDADE_NOME as unitName,
         DATE_FORMAT(DATA_CRIACAO, '%Y-%m-%d %H:%i:%s') as createdAt,
+        DATA_CRIACAO as createdAtRaw,
         DATE_FORMAT(DATA_ATUALIZACAO, '%Y-%m-%d %H:%i:%s') as updatedAt
       FROM RELATORIOS_TREINAMENTO_POLICIAL
       WHERE ID_REL_TREIN_POL = ?
@@ -21099,7 +21170,7 @@ apiRouter.delete('/relatorios-treinamento-policial/:id', async (req: Request, re
     }
 
     const [rows]: any = await pool.query(
-      'SELECT ID_REL_TREIN_POL, DATA_TREINAMENTO, OPERADOR_ID, TITULO_TREINAMENTO FROM RELATORIOS_TREINAMENTO_POLICIAL WHERE ID_REL_TREIN_POL = ? LIMIT 1',
+      'SELECT ID_REL_TREIN_POL, DATA_TREINAMENTO, DATA_CRIACAO, OPERADOR_ID, TITULO_TREINAMENTO FROM RELATORIOS_TREINAMENTO_POLICIAL WHERE ID_REL_TREIN_POL = ? LIMIT 1',
       [id]
     );
     if (!rows || rows.length === 0) {
@@ -21115,7 +21186,9 @@ apiRouter.delete('/relatorios-treinamento-policial/:id', async (req: Request, re
     }
 
     const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
-    if (!isGeralDb && String(row.DATA_TREINAMENTO || '').slice(0, 10) !== todayBr) {
+    const createdDayBr =
+      formatDateBrIso(row.DATA_CRIACAO) || String(row.DATA_TREINAMENTO || '').slice(0, 10);
+    if (!isGeralDb && createdDayBr !== todayBr) {
       return res.status(403).json({
         error: 'O relatório só pode ser excluído durante o mesmo dia em que foi criado.'
       });

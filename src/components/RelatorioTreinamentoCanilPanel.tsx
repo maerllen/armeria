@@ -275,6 +275,17 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
 
   // Relatório de Treinamento state
   const getTodayIsoBr = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+  const getIsoDayBr = (value?: string | null): string => {
+    if (!value) return '';
+    const str = String(value).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const normalized = str.includes('T') ? str : str.replace(' ', 'T');
+    const d = new Date(normalized);
+    if (!Number.isNaN(d.getTime())) {
+      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+    }
+    return str.slice(0, 10);
+  };
   const computeRemainingEditCountdownBr = () => {
     try {
       const parts = new Intl.DateTimeFormat('en-GB', {
@@ -441,7 +452,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
   const canEditRelatorioTreinamento = (rel?: RelatorioTreinamentoCanil | null): boolean => {
     if (!rel || !currentUser?.id) return false;
     const todayIso = getTodayIsoBr();
-    if (String(rel.dataTreinamento || '').slice(0, 10) !== todayIso) return false;
+    const createdDay = getIsoDayBr(rel.createdAt) || String(rel.dataTreinamento || '').slice(0, 10);
+    if (createdDay !== todayIso) return false;
     if (rel.condutorId === currentUser.id) return true;
     return (rel.participantes || []).some(p => p.userId === currentUser.id && Boolean(p.signed));
   };
@@ -774,6 +786,16 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
 
   const handleSaveTreinamento = async (shouldPrintAfter: boolean) => {
     if (!currentUser) return;
+    const todayIso = getTodayIsoBr();
+    const selectedDate = String(treinoForm.dataTreinamento || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+      notifyError('Informe uma data válida para o treinamento.');
+      return;
+    }
+    if (selectedDate > todayIso) {
+      notifyError('Não é permitido informar uma data futura para o treinamento.');
+      return;
+    }
     if (treinoForm.cachorros.length === 0) {
       notifyError('Selecione ao menos um cachorro participante do treinamento.');
       return;
@@ -833,6 +855,7 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
     let res: { success: boolean; error?: string; data?: RelatorioTreinamentoCanil };
     if (editingTreinoReport) {
       res = await storage.updateRelatorioTreinamentoCanil(editingTreinoReport.id, {
+        dataTreinamento: selectedDate,
         cachorroId: primaryDogEntry.id,
         cachorroNome: primaryDogEntry.nome,
         cachorroRaca: primaryDogEntry.raca || '',
@@ -847,9 +870,8 @@ export const RelatorioTreinamentoCanilPanel: React.FC<RelatorioTreinamentoCanilP
         disparosReais: disparoValidation.normalized
       });
     } else {
-      const todayDate = getTodayIsoBr();
       res = await storage.saveRelatorioTreinamentoCanil({
-        dataTreinamento: todayDate,
+        dataTreinamento: selectedDate,
         condutorId: currentUser.id,
         condutorNome: currentUser.name,
         condutorMasp: currentUser.masp || '',
@@ -1390,16 +1412,6 @@ ${infoTableHtml}
   // =========================================================================
   // RELATÓRIO DE OPERAÇÕES CANIL K9: PERMISSÕES, FILTROS, CRUD E IMPRESSÃO
   // =========================================================================
-  const getIsoDayBr = (value?: string): string => {
-    if (!value) return '';
-    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-    const d = new Date(value);
-    if (!Number.isNaN(d.getTime())) {
-      return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
-    }
-    return String(value).slice(0, 10);
-  };
-
   const canEditOrDeleteOperacao = (rel?: RelatorioOperacaoCanil | null): boolean => {
     if (!rel || !currentUser?.id) return false;
     const todayIso = getTodayIsoBr();
@@ -2270,10 +2282,10 @@ ${infoTableHtml}
                   <Clock className="w-4 h-4 text-cyan-400" />
                   <div>
                     <h3 className="text-xs font-black text-cyan-300 uppercase tracking-wide font-mono">
-                      Relatórios de Hoje Disponíveis para Edição ({editableTodayReports.length})
+                      Relatórios Criados Hoje Disponíveis para Edição ({editableTodayReports.length})
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Relatórios criados ou assinados por você hoje podem ser modificados ou excluídos ao longo do dia.
+                      Relatórios criados hoje (mesmo com data de treinamento anterior) podem ser modificados ou excluídos até o fim do dia da criação.
                     </p>
                   </div>
                 </div>
@@ -2327,6 +2339,9 @@ ${infoTableHtml}
                     >
                       <div className="min-w-0 space-y-1">
                         <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-mono font-bold text-amber-300">
+                            {formatDateBr(rel.dataTreinamento)}
+                          </span>
                           <span className="font-bold text-slate-100 truncate">{dogsText}</span>
                           <span className="px-1.5 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
                             {rel.modalidadeLocal} • {rel.modalidadeParticipacao}
@@ -2462,8 +2477,8 @@ ${infoTableHtml}
                   </div>
                   <p className="text-xs text-slate-400">
                     {editingTreinoReport
-                      ? 'As assinaturas já registradas serão preservadas. Alterações são permitidas ao longo do dia de hoje.'
-                      : 'Registre o treinamento diário do cão K9 com condutor, modalidade, descrição e assinaturas.'}
+                      ? 'As assinaturas já registradas serão preservadas. Alterações são permitidas até o fim do dia da criação.'
+                      : 'Registre o treinamento do cão K9 com data atual ou anterior. O prazo de edição conta a partir do dia da criação.'}
                   </p>
                 </div>
               </div>
@@ -2478,11 +2493,22 @@ ${infoTableHtml}
                     <span>Cancelar Edição</span>
                   </button>
                 )}
-                <div className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs font-mono">
-                  <Calendar className="w-4 h-4 text-amber-400" />
-                  <span className="text-slate-400">Data de Criação:</span>
-                  <span className="font-bold text-slate-100">{formatDateBr(treinoForm.dataTreinamento)}</span>
-                </div>
+                <label className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-700 focus-within:border-amber-500 px-3 py-1.5 rounded-xl text-xs font-mono transition">
+                  <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-slate-400 whitespace-nowrap">Data do Treinamento:</span>
+                  <input
+                    type="date"
+                    value={treinoForm.dataTreinamento}
+                    max={getTodayIsoBr()}
+                    onChange={(e) =>
+                      setTreinoForm(prev => ({
+                        ...prev,
+                        dataTreinamento: e.target.value
+                      }))
+                    }
+                    className="bg-transparent text-slate-100 font-bold focus:outline-none cursor-pointer"
+                  />
+                </label>
               </div>
             </div>
 

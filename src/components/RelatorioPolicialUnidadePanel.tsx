@@ -112,6 +112,18 @@ const getTodayBrasilia = (): string => {
   }
 };
 
+const getIsoDayBrasilia = (value?: string | null): string => {
+  if (!value) return '';
+  const str = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const normalized = str.includes('T') ? str : str.replace(' ', 'T');
+  const d = new Date(normalized);
+  if (!Number.isNaN(d.getTime())) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(d);
+  }
+  return str.slice(0, 10);
+};
+
 const getRemainingSecondsTodayBrasilia = (): { formatted: string; totalSeconds: number } => {
   try {
     const parts = new Intl.DateTimeFormat('en-GB', {
@@ -375,10 +387,11 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     });
   }, [allReports, currentUser.id]);
 
-  // Today's editable reports for this user (creator or signed participant)
+  // Today's editable reports for this user (created today, creator or signed participant)
   const todayEditableReports = useMemo(() => {
     return myReports.filter(rel => {
-      if (String(rel.dataTreinamento || '').slice(0, 10) !== todayBr) return false;
+      const createdDay = getIsoDayBrasilia(rel.createdAt) || String(rel.dataTreinamento || '').slice(0, 10);
+      if (createdDay !== todayBr) return false;
       const isCreator = rel.operadorId === currentUser.id;
       const isSignedParticipant = (rel.participantes || []).some(
         p => p.userId === currentUser.id && Boolean(p.signed)
@@ -1585,6 +1598,17 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
   const handleSave = async (shouldPrint: boolean) => {
     setFeedback(null);
 
+    const todayIso = getTodayBrasilia();
+    const selectedDate = String(dataTreinamento || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) {
+      setFeedback({ type: 'error', message: 'Informe uma data válida para o treinamento.' });
+      return;
+    }
+    if (selectedDate > todayIso) {
+      setFeedback({ type: 'error', message: 'Não é permitido informar uma data futura para o treinamento.' });
+      return;
+    }
+
     const trimmedDesc = descricao.trim();
     if (!trimmedDesc) {
       setFeedback({ type: 'error', message: 'Informe a descrição do treinamento do dia.' });
@@ -1614,7 +1638,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
     setIsSubmitting(true);
     try {
       const payload: Partial<RelatorioTreinamentoPolicial> = {
-        dataTreinamento: editingReport ? editingReport.dataTreinamento : dataTreinamento,
+        dataTreinamento: selectedDate,
         modalidadeLocal,
         tituloTreinamento,
         modalidadeParticipacao,
@@ -1915,7 +1939,7 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                 <div className="flex items-center space-x-2">
                   <Clock className="w-4 h-4 text-cyan-400" />
                   <h3 className="text-xs font-bold uppercase tracking-wider text-cyan-300">
-                    Relatórios de Hoje Disponíveis para Edição ({todayEditableReports.length})
+                    Relatórios Criados Hoje Disponíveis para Edição ({todayEditableReports.length})
                   </h3>
                 </div>
                 <div className="inline-flex items-center space-x-2 bg-slate-950 border border-cyan-500/30 px-3 py-1.5 rounded-xl text-[11px] font-mono">
@@ -2044,8 +2068,8 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                   </div>
                   <p className="text-xs text-slate-400">
                     {editingReport
-                      ? 'As assinaturas já registradas serão preservadas. Alterações são permitidas ao longo do dia de hoje.'
-                      : `Registre o treinamento diário da unidade ${activeUnitName} com modalidade, título, participantes e descrição.`}
+                      ? 'As assinaturas já registradas serão preservadas. Alterações são permitidas até o fim do dia da criação.'
+                      : `Registre o treinamento da unidade ${activeUnitName} com data atual ou anterior. O prazo de edição conta a partir do dia da criação.`}
                   </p>
                 </div>
               </div>
@@ -2061,11 +2085,17 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                     <span>Cancelar Edição</span>
                   </button>
                 )}
-                <div className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-xs font-mono">
-                  <Calendar className="w-4 h-4 text-amber-400" />
-                  <span className="text-slate-400">Data de Criação:</span>
-                  <span className="font-bold text-slate-100">{formatDateBr(dataTreinamento)}</span>
-                </div>
+                <label className="inline-flex items-center space-x-2 bg-slate-950 border border-slate-700 focus-within:border-amber-500 px-3 py-1.5 rounded-xl text-xs font-mono transition">
+                  <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span className="text-slate-400 whitespace-nowrap">Data do Treinamento:</span>
+                  <input
+                    type="date"
+                    value={dataTreinamento}
+                    max={todayBr}
+                    onChange={(e) => setDataTreinamento(e.target.value)}
+                    className="bg-transparent text-slate-100 font-bold focus:outline-none cursor-pointer"
+                  />
+                </label>
               </div>
             </div>
 
@@ -2693,11 +2723,13 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
                     const isColetivoMulti = rel.modalidadeParticipacao === 'Coletivo' && parts.length > 0;
                     const myPart = parts.find(p => p.userId === currentUser.id);
                     const needsMySignature = Boolean(myPart && !myPart.signed);
-                    const isToday = String(rel.dataTreinamento || '').slice(0, 10) === todayBr;
+                    const createdDay =
+                      getIsoDayBrasilia(rel.createdAt) || String(rel.dataTreinamento || '').slice(0, 10);
+                    const isCreatedToday = createdDay === todayBr;
                     const canEditToday =
-                      isToday &&
+                      isCreatedToday &&
                       (rel.operadorId === currentUser.id || Boolean(myPart && myPart.signed));
-                    const canDeleteToday = isToday && rel.operadorId === currentUser.id;
+                    const canDeleteToday = isCreatedToday && rel.operadorId === currentUser.id;
 
                     const allSignersTooltip = [
                       `${rel.operadorNome} (Operador Digitador)`,
