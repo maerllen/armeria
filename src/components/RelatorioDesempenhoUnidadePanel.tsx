@@ -391,10 +391,10 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       nome: mNome.trim(),
       tipoMarca: mCategoria === 'FISICO' ? mTipoMarca : null,
       unidadeMedida: mUnidadeMedida.trim() || null,
-      usaTempo: mCategoria === 'TATICO' ? true : mUsaTempo,
-      tempoMinSegundos: mCategoria === 'TATICO' || mUsaTempo ? parseTimeInputToSeconds(mTempoMin) : null,
-      tempoMaxSegundos: mCategoria === 'TATICO' || mUsaTempo ? parseTimeInputToSeconds(mTempoMax) : null,
-      tempoAprovacaoSegundos: mCategoria === 'TATICO' || mUsaTempo ? parseTimeInputToSeconds(mTempoAprov) : null,
+      usaTempo: mUsaTempo,
+      tempoMinSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoMin) : null,
+      tempoMaxSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoMax) : null,
+      tempoAprovacaoSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoAprov) : null,
       notaMinima: Number(mNotaMin.replace(',', '.')),
       notaMaxima: Number(mNotaMax.replace(',', '.')),
       notaAprovacao: Number(mNotaAprov.replace(',', '.')),
@@ -1716,27 +1716,25 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 </div>
               </div>
 
-              {/* Controle de Tempo (opcional para marcadores Físicos) */}
-              {mCategoria === 'FISICO' && (
-                <label className="flex items-center space-x-2.5 bg-slate-950/70 border border-slate-800 rounded-xl p-3 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={mUsaTempo}
-                    onChange={e => setMUsaTempo(e.target.checked)}
-                    className="rounded border-slate-600 text-amber-500 focus:ring-amber-500"
-                  />
-                  <div>
-                    <div className="font-bold text-slate-200">
-                      Este marcador físico exige controle de tempo (mínimo / máximo / aprovação)
-                    </div>
-                    <div className="text-[11px] text-slate-400">
-                      Desmarque para exercícios físicos que não precisam de tempo mínimo, máximo ou tempo de aprovação.
-                    </div>
+              {/* Controle de Tempo (opcional para marcadores Físicos e Táticos) */}
+              <label className="flex items-center space-x-2.5 bg-slate-950/70 border border-slate-800 rounded-xl p-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={mUsaTempo}
+                  onChange={e => setMUsaTempo(e.target.checked)}
+                  className="rounded border-slate-600 text-amber-500 focus:ring-amber-500"
+                />
+                <div>
+                  <div className="font-bold text-slate-200">
+                    Este marcador {mCategoria === 'FISICO' ? 'físico' : 'tático'} exige controle de tempo (mínimo / máximo / aprovação)
                   </div>
-                </label>
-              )}
+                  <div className="text-[11px] text-slate-400">
+                    Desmarque para exercícios {mCategoria === 'FISICO' ? 'físicos' : 'táticos'} que não precisam de tempo mínimo, máximo ou tempo de aprovação.
+                  </div>
+                </div>
+              </label>
 
-              {(mCategoria === 'TATICO' || mUsaTempo) && (
+              {mUsaTempo && (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
                   <div>
                     <label className="block font-bold text-slate-300 mb-1">Tempo Mínimo (MM:SS ou seg)</label>

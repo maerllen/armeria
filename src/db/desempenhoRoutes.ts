@@ -401,7 +401,7 @@ function validateMarcadorPayload(body: any): { ok: boolean; error?: string; clea
 
   let tipoMarca: string | null = null;
   let unidadeMedida: string | null = body?.unidadeMedida ? String(body.unidadeMedida).trim().slice(0, 60) : null;
-  let usaTempo = categoria === 'TATICO' ? body?.usaTempo !== false : Boolean(body?.usaTempo);
+  const usaTempo = Boolean(body?.usaTempo);
 
   if (categoria === 'FISICO') {
     const rawTipo = String(body?.tipoMarca || '').trim();
