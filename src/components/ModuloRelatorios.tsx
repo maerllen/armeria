@@ -33,11 +33,14 @@ import {
   Pill,
   Syringe,
   PenTool,
-  Layers
+  Layers,
+  BarChart3
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, buildStandardDocumentFilename } from '../utils/printHelper';
 import { RelatorioTreinamentoCanilPanel } from './RelatorioTreinamentoCanilPanel';
 import { RelatorioPolicialUnidadePanel } from './RelatorioPolicialUnidadePanel';
+import { UsuarioDesempenhoDashboard } from './UsuarioDesempenhoDashboard';
+import { RelatorioDesempenhoUnidadePanel } from './RelatorioDesempenhoUnidadePanel';
 
 interface ReportModuleProps {
   currentUser: User;
@@ -60,7 +63,8 @@ type ReportTab =
   | 'MATERIAIS'
   | 'EXPLOSIVOS'
   | 'CANIL'
-  | 'TREINAMENTO_CANIL';
+  | 'TREINAMENTO_CANIL'
+  | 'MEUS_INDICES';
 
 interface SectionSelection {
   cofres: boolean;
@@ -328,6 +332,9 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
     return ownUnitBtn || reportUnitButtons[0];
   }, [reportUnitButtons, activeUnitButtonId, isOperadorCanino, currentUser.unitId]);
 
+  const [isUnitPerformanceTabActive, setIsUnitPerformanceTabActive] = useState(false);
+  const canAccessUnitPerformanceTab = isAdministradorRole || isArmeiroRole || isGeral;
+
   const isCocActive = Boolean(activeUnitButton?.isCoc);
   const isCocAcervoView = false;
   const isCanilTrainingView = isCocActive;
@@ -336,6 +343,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
   const canRenderCanilSection = hasCanilAccess || isCocActive;
 
   const handleSelectUnitButton = (btn: ReportUnitButton) => {
+    setIsUnitPerformanceTabActive(false);
     setActiveUnitButtonId(btn.id);
     setSelectedVaultSpace('ALL');
     if (btn.isCoc) {
@@ -2344,6 +2352,12 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         label: `Canil — Acervo (${screenData.cachorrosCanil.length} / ${screenData.movimentacoesCanil.length})`,
         icon: <Dog className="w-4 h-4" />,
         visible: !hideInventoryTabs && isCanilOnly
+      },
+      {
+        id: 'MEUS_INDICES',
+        label: 'Meus Índices de Desempenho',
+        icon: <BarChart3 className="w-4 h-4" />,
+        visible: !hideInventoryTabs
       }
     ];
     return allTabs.filter(t => t.visible);
@@ -2464,7 +2478,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
             </div>
           </div>
 
-          {!isCanilTrainingView && !isPolicialUnitReportView && (
+          {!isUnitPerformanceTabActive && !isCanilTrainingView && !isPolicialUnitReportView && activeTab !== 'MEUS_INDICES' && (
             <div className="flex items-center space-x-3 shrink-0">
               <button
                 type="button"
@@ -2533,7 +2547,7 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
 
         <div className="flex flex-wrap gap-2">
           {reportUnitButtons.map(btn => {
-            const isSelected = activeUnitButton?.id === btn.id;
+            const isSelected = !isUnitPerformanceTabActive && activeUnitButton?.id === btn.id;
             return (
               <button
                 key={btn.id}
@@ -2563,13 +2577,28 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
               </button>
             );
           })}
+
+          {canAccessUnitPerformanceTab && (
+            <button
+              type="button"
+              onClick={() => setIsUnitPerformanceTabActive(true)}
+              className={`px-4 py-2.5 rounded-xl border text-xs font-extrabold transition flex items-center space-x-2 ${
+                isUnitPerformanceTabActive
+                  ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-lg shadow-emerald-500/20'
+                  : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/40 hover:bg-emerald-500/20 hover:border-emerald-400'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4 shrink-0" />
+              <span>Índices de Desempenho da Unidade</span>
+            </button>
+          )}
         </div>
       </div>
 
       {/* Sub-navegação Acervo Canil removida da aba COC para todos os perfis */}
 
       {/* Main Sector Tabs (for non-COC units) */}
-      {!isCocActive && !isPolicialUnitReportView && (
+      {!isUnitPerformanceTabActive && !isCocActive && !isPolicialUnitReportView && (
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-900 border border-slate-800 p-1.5 rounded-2xl print:hidden">
           {tabsConfig.map(t => (
             <button
@@ -2589,8 +2618,17 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
         </div>
       )}
 
-      {/* UNIDADE COC: LÓGICA INTEGRAL DOS RELATÓRIOS DO CANIL (TREINAMENTO, MEUS RELATÓRIOS E RELATÓRIOS DA UNIDADE) */}
-      {isCanilTrainingView ? (
+      {/* ABA ÍNDICES DE DESEMPENHO DA UNIDADE (ADMINISTRADOR / ARMEIRO / GERAL) */}
+      {isUnitPerformanceTabActive && canAccessUnitPerformanceTab ? (
+        <RelatorioDesempenhoUnidadePanel
+          currentUser={currentUser}
+          departments={allDepartments}
+          units={allUnits}
+          allUsers={allUsersList}
+          activeUnitId={activeUnitButton?.realUnitId || currentUser.unitId}
+          activeDeptId={activeUnitButton?.departmentId || currentUser.departmentId}
+        />
+      ) : isCanilTrainingView ? (
         <RelatorioTreinamentoCanilPanel
           currentUser={currentUser}
           departments={allDepartments}
@@ -2612,6 +2650,15 @@ export const ReportModule: React.FC<ReportModuleProps> = ({
           activeDeptName={activeDeptDisplayName}
           onRefresh={handlePanelRefresh}
           dataVersion={dataVersion}
+        />
+      ) : activeTab === 'MEUS_INDICES' ? (
+        <UsuarioDesempenhoDashboard
+          targetUser={currentUser}
+          currentUser={currentUser}
+          units={allUnits}
+          departments={allDepartments}
+          refreshTrigger={dataVersion}
+          titleOverride="Meus Índices de Desempenho"
         />
       ) : (
         <>

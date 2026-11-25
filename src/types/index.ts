@@ -2368,5 +2368,133 @@ export interface WhatsappBotReplyItem {
   actionLabel?: string;
 }
 
+// =========================================================================
+// MÓDULO RELATÓRIOS — ÍNDICES DE DESEMPENHO (FÍSICO E TÉCNICO / TÁTICO)
+// =========================================================================
+
+export type CategoriaDesempenho = 'FISICO' | 'TATICO';
+export type TipoMarcaFisica = 'Execução' | 'Repetição' | 'Distância';
+export type DificuldadeDesempenho = 'Fácil' | 'Médio' | 'Difícil' | 'Muito Difícil';
+export type TipoArmaDesempenho = 'Fuzil' | 'Pistola' | 'Espingarda' | 'Submetralhadora';
+export type ModoLancamentoDesempenho = 'INDIVIDUAL' | 'COLETIVO';
+export type StatusGrupoDesempenho = 'ABERTO' | 'ENCERRADO';
+
+export interface DesempenhoMarcador {
+  id: string;
+  categoria: CategoriaDesempenho;
+  nome: string;
+  tipoMarca?: TipoMarcaFisica | null; // Obrigatório para FISICO: Execução, Repetição, Distância
+  unidadeMedida?: string | null; // Ex: flexões, metros, execuções, pontos
+  usaTempo: boolean; // Para FISICO pode ser false (sem tempo min/max/aprovação)
+  tempoMinSegundos?: number | null;
+  tempoMaxSegundos?: number | null;
+  tempoAprovacaoSegundos?: number | null;
+  notaMinima: number;
+  notaMaxima: number;
+  notaAprovacao: number;
+  dificuldade: DificuldadeDesempenho | string;
+  teveTiro: boolean; // Para TATICO
+  tipoArma?: TipoArmaDesempenho | null;
+  quantidadeTiros?: number | null;
+  descricao?: string | null; // Máx 200 linhas
+  departmentId?: string | null;
+  unitId?: string | null;
+  criadorId: string;
+  criadorNome: string;
+  ativo: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DesempenhoAtividade {
+  id: string;
+  categoria: CategoriaDesempenho;
+  nome: string;
+  dataAtividade: string; // YYYY-MM-DD
+  horaAtividade: string; // HH:mm
+  descricao: string; // Máx 500 caracteres
+  marcadoresIds: string[];
+  marcadores?: DesempenhoMarcador[];
+  departmentId?: string | null;
+  unitId?: string | null;
+  criadorId: string;
+  criadorNome: string;
+  ativo: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DesempenhoGrupoParticipante {
+  usuarioId: string;
+  usuarioNome: string;
+  usuarioMasp?: string;
+  usuarioCargo?: string;
+  usuarioUnitId?: string | null;
+  usuarioUnitName?: string | null;
+}
+
+export interface DesempenhoResultado {
+  id: string;
+  grupoId: string;
+  grupoNome?: string;
+  grupoStatus?: StatusGrupoDesempenho;
+  atividadeId: string;
+  atividadeNome?: string;
+  marcadorId: string;
+  usuarioId: string;
+  usuarioNome: string;
+  usuarioMasp?: string;
+  usuarioUnitId?: string | null;
+  usuarioUnitName?: string | null;
+  categoria: CategoriaDesempenho;
+  marcadorNome: string;
+  tipoMarca?: TipoMarcaFisica | null;
+  unidadeMedida?: string | null;
+  dataAvaliacao: string; // YYYY-MM-DD
+  horaAvaliacao?: string | null; // HH:mm
+  valorMarca?: number | null; // Ex: 35 (flexões), 2400 (metros)
+  tempoSegundos?: number | null; // Ex: 60 (1 minuto)
+  notaObtida: number; // Ex: 10
+  notaMaxRef: number;
+  notaMinRef?: number;
+  notaAprovacaoRef: number;
+  tempoAprovacaoRef?: number | null;
+  aprovado: boolean;
+  teveTiro: boolean;
+  tipoArma?: TipoArmaDesempenho | null;
+  tirosEfetuados?: number | null;
+  observacoes?: string | null;
+  lancadoPorId?: string;
+  lancadoPorNome?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DesempenhoGrupo {
+  id: string;
+  atividadeId: string;
+  atividadeNome: string;
+  atividadeDescricao?: string;
+  nomeGrupo: string;
+  categoria: CategoriaDesempenho;
+  modoLancamento: ModoLancamentoDesempenho;
+  dataPrevista: string; // YYYY-MM-DD
+  horaPrevista: string; // HH:mm
+  status: StatusGrupoDesempenho;
+  encerradoEm?: string | null;
+  encerradoPorId?: string | null;
+  encerradoPorNome?: string | null;
+  departmentId?: string | null;
+  unitId?: string | null;
+  criadorId: string;
+  criadorNome: string;
+  participantes: DesempenhoGrupoParticipante[];
+  marcadores: DesempenhoMarcador[];
+  resultados: DesempenhoResultado[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+
 
 

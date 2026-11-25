@@ -52,6 +52,7 @@ import {
   formatDronePilotOriginLabel
 } from './RelatorioOperacoesCatForm';
 import { TopLayerAlert } from './TopLayerAlert';
+import { UsuarioDesempenhoDashboard } from './UsuarioDesempenhoDashboard';
 import {
   PenTool,
   ClipboardList,
@@ -80,7 +81,8 @@ import {
   Crosshair,
   Zap,
   Skull,
-  Plane
+  Plane,
+  BarChart3
 } from 'lucide-react';
 
 interface RelatorioPolicialUnidadePanelProps {
@@ -96,7 +98,7 @@ interface RelatorioPolicialUnidadePanelProps {
   dataVersion?: number;
 }
 
-type PolicialSubTab = 'TREINAMENTO' | 'OPERACOES' | 'MEUS_RELATORIOS' | 'RELATORIOS_UNIDADE';
+type PolicialSubTab = 'TREINAMENTO' | 'OPERACOES' | 'MEUS_RELATORIOS' | 'MEUS_INDICES' | 'RELATORIOS_UNIDADE';
 type MyReportFilter = 'TODOS' | 'CRIADOS' | 'ASSINADOS' | 'PENDENTES';
 type MyCategoryFilter = 'TODOS' | 'TREINAMENTO' | 'OPERACOES';
 
@@ -1891,6 +1893,19 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
           )}
         </button>
 
+        <button
+          type="button"
+          onClick={() => setSubTab('MEUS_INDICES')}
+          className={`px-4 py-2.5 text-xs font-bold rounded-xl transition flex items-center space-x-2 ${
+            subTab === 'MEUS_INDICES'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>MEUS ÍNDICES DE DESEMPENHO</span>
+        </button>
+
         {canViewUnitReports && (
           <button
             type="button"
@@ -1924,6 +1939,20 @@ export const RelatorioPolicialUnidadePanel: React.FC<RelatorioPolicialUnidadePan
           message={feedback.message}
           autoHideMs={3000}
           onClose={() => setFeedback(null)}
+        />
+      )}
+
+      {/* ================================================================= */}
+      {/* GUIA MEUS ÍNDICES DE DESEMPENHO                                    */}
+      {/* ================================================================= */}
+      {subTab === 'MEUS_INDICES' && (
+        <UsuarioDesempenhoDashboard
+          targetUser={currentUser}
+          currentUser={currentUser}
+          units={units}
+          departments={departments}
+          refreshTrigger={dataVersion}
+          titleOverride="Meus Índices de Desempenho"
         />
       )}
 

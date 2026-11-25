@@ -61,7 +61,12 @@ import {
   AmmoTransfer,
   ExplosivoTransfer,
   MaterialTransfer,
-  UserRole
+  UserRole,
+  CategoriaDesempenho,
+  DesempenhoMarcador,
+  DesempenhoAtividade,
+  DesempenhoGrupo,
+  DesempenhoResultado
 } from '../types';
 import { isCourseExpired } from '../utils/masks';
 
@@ -5580,6 +5585,258 @@ class StorageService {
       };
     } catch (err: any) {
       return { success: true, pendingReceipt: isPendingReceipt };
+    }
+  }
+
+  // =========================================================
+  // MÓDULO RELATÓRIOS — ÍNDICES DE DESEMPENHO (FÍSICO E TÁTICO)
+  // =========================================================
+
+  public async getDesempenhoMarcadores(params?: {
+    categoria?: CategoriaDesempenho;
+    includeInactive?: boolean;
+  }): Promise<{ success: boolean; marcadores: DesempenhoMarcador[]; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      if (params?.categoria) qs.set('categoria', params.categoria);
+      if (params?.includeInactive) qs.set('includeInactive', '1');
+      const res = await fetch(`/api/desempenho/marcadores?${qs.toString()}`);
+      const data = await res.json();
+      if (!res.ok) return { success: false, marcadores: [], error: data.error };
+      return { success: true, marcadores: Array.isArray(data.marcadores) ? data.marcadores : [] };
+    } catch (err: any) {
+      return { success: false, marcadores: [], error: err.message };
+    }
+  }
+
+  public async createDesempenhoMarcador(
+    payload: Partial<DesempenhoMarcador>
+  ): Promise<{ success: boolean; marcador?: DesempenhoMarcador; error?: string }> {
+    try {
+      const res = await fetch('/api/desempenho/marcadores', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, marcador: data.marcador };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async updateDesempenhoMarcador(
+    id: string,
+    payload: Partial<DesempenhoMarcador>
+  ): Promise<{ success: boolean; marcador?: DesempenhoMarcador; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/marcadores/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, marcador: data.marcador };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteDesempenhoMarcador(id: string): Promise<{ success: boolean; archived?: boolean; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      const res = await fetch(`/api/desempenho/marcadores/${encodeURIComponent(id)}?${qs.toString()}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, archived: Boolean(data.archived) };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async getDesempenhoAtividades(): Promise<{ success: boolean; atividades: DesempenhoAtividade[]; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      const res = await fetch(`/api/desempenho/atividades?${qs.toString()}`);
+      const data = await res.json();
+      if (!res.ok) return { success: false, atividades: [], error: data.error };
+      return { success: true, atividades: Array.isArray(data.atividades) ? data.atividades : [] };
+    } catch (err: any) {
+      return { success: false, atividades: [], error: err.message };
+    }
+  }
+
+  public async createDesempenhoAtividade(
+    payload: {
+      categoria: CategoriaDesempenho;
+      nome: string;
+      dataAtividade: string;
+      horaAtividade: string;
+      descricao: string;
+      marcadoresIds: string[];
+      departmentId?: string;
+      unitId?: string;
+    }
+  ): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/desempenho/atividades', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteDesempenhoAtividade(id: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      const res = await fetch(`/api/desempenho/atividades/${encodeURIComponent(id)}?${qs.toString()}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async getDesempenhoGrupos(status?: 'ABERTO' | 'ENCERRADO'): Promise<{
+    success: boolean;
+    grupos: DesempenhoGrupo[];
+    error?: string;
+  }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      if (status) qs.set('status', status);
+      const res = await fetch(`/api/desempenho/grupos?${qs.toString()}`);
+      const data = await res.json();
+      if (!res.ok) return { success: false, grupos: [], error: data.error };
+      return { success: true, grupos: Array.isArray(data.grupos) ? data.grupos : [] };
+    } catch (err: any) {
+      return { success: false, grupos: [], error: err.message };
+    }
+  }
+
+  public async createDesempenhoGrupo(payload: {
+    atividadeId: string;
+    nomeGrupo?: string;
+    modoLancamento: 'INDIVIDUAL' | 'COLETIVO';
+    dataPrevista: string;
+    horaPrevista: string;
+    participantesIds: string[];
+  }): Promise<{ success: boolean; id?: string; error?: string }> {
+    try {
+      const res = await fetch('/api/desempenho/grupos', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, id: data.id };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async saveDesempenhoGrupoResultados(
+    grupoId: string,
+    resultados: Array<{
+      usuarioId: string;
+      marcadorId: string;
+      valorMarca?: number | null;
+      tempoSegundos?: number | null;
+      notaObtida: number;
+      tirosEfetuados?: number | null;
+      observacoes?: string | null;
+    }>
+  ): Promise<{ success: boolean; savedCount?: number; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}/resultados`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resultados, actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true, savedCount: data.savedCount };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async encerrarDesempenhoGrupo(grupoId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}/encerrar`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async deleteDesempenhoGrupo(grupoId: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      const res = await fetch(`/api/desempenho/grupos/${encodeURIComponent(grupoId)}?${qs.toString()}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ actor: this.state.currentUser })
+      });
+      const data = await res.json();
+      if (!res.ok) return { success: false, error: data.error };
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  public async getDesempenhoResultados(params?: {
+    usuarioId?: string;
+    categoria?: CategoriaDesempenho;
+    marcadorId?: string;
+    ano?: string;
+    unitId?: string;
+  }): Promise<{ success: boolean; resultados: DesempenhoResultado[]; error?: string }> {
+    try {
+      const qs = new URLSearchParams();
+      if (this.state.currentUser?.id) qs.set('actorId', this.state.currentUser.id);
+      if (params?.usuarioId) qs.set('usuarioId', params.usuarioId);
+      if (params?.categoria) qs.set('categoria', params.categoria);
+      if (params?.marcadorId) qs.set('marcadorId', params.marcadorId);
+      if (params?.ano) qs.set('ano', params.ano);
+      if (params?.unitId) qs.set('unitId', params.unitId);
+      const res = await fetch(`/api/desempenho/resultados?${qs.toString()}`);
+      const data = await res.json();
+      if (!res.ok) return { success: false, resultados: [], error: data.error };
+      return { success: true, resultados: Array.isArray(data.resultados) ? data.resultados : [] };
+    } catch (err: any) {
+      return { success: false, resultados: [], error: err.message };
     }
   }
 }

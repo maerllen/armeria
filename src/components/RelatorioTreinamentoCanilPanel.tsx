@@ -40,6 +40,7 @@ import {
 import { TopLayerAlert } from './TopLayerAlert';
 import { RelatorioOperacoesCanilForm } from './RelatorioOperacoesCanilForm';
 import { RelatorioCanilAnimaisTab } from './RelatorioCanilAnimaisTab';
+import { UsuarioDesempenhoDashboard } from './UsuarioDesempenhoDashboard';
 import {
   Dog,
   Search,
@@ -64,7 +65,8 @@ import {
   ChevronRight,
   Tag,
   Settings,
-  Save
+  Save,
+  BarChart3
 } from 'lucide-react';
 
 interface RelatorioTreinamentoCanilPanelProps {
@@ -81,6 +83,7 @@ type CanilTrainingTab =
   | 'relatorio-treinamento'
   | 'relatorio-operacoes'
   | 'meus-relatorios'
+  | 'meus-indices'
   | 'animais'
   | 'relatorio-unidade';
 
@@ -2201,6 +2204,19 @@ ${infoTableHtml}
 
         <button
           type="button"
+          onClick={() => setActiveTab('meus-indices')}
+          className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
+            activeTab === 'meus-indices'
+              ? 'bg-amber-500 text-slate-950 shadow'
+              : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <BarChart3 className="w-4 h-4" />
+          <span>MEUS ÍNDICES DE DESEMPENHO</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('animais')}
           className={`px-3.5 py-2 text-xs font-bold rounded-xl transition flex items-center space-x-1.5 ${
             activeTab === 'animais'
@@ -2227,6 +2243,20 @@ ${infoTableHtml}
           </button>
         )}
       </div>
+
+      {/* ========================================================================= */}
+      {/* TAB MEUS ÍNDICES DE DESEMPENHO                                            */}
+      {/* ========================================================================= */}
+      {activeTab === 'meus-indices' && (
+        <UsuarioDesempenhoDashboard
+          targetUser={currentUser}
+          currentUser={currentUser}
+          units={units}
+          departments={departments}
+          refreshTrigger={dataVersion + localVersion}
+          titleOverride="Meus Índices de Desempenho"
+        />
+      )}
 
       {/* ========================================================================= */}
       {/* TAB ANIMAIS: DOSSIÊ K9 + GRÁFICOS INTERATIVOS DE TÓPICOS DE TREINAMENTO  */}

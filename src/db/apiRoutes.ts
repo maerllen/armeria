@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getPool, dbConfig } from './mysql';
 import { registerWhatsappRoutes } from './whatsappRoutes';
+import { registerDesempenhoRoutes } from './desempenhoRoutes';
 import crypto from 'crypto';
 
 export const apiRouter = Router();
@@ -24227,6 +24228,9 @@ apiRouter.delete('/relatorios-operacoes-cat/:id', async (req: Request, res: Resp
 
 // --- MÓDULO WHATSAPP (API OFICIAL META CLOUD API) ---
 registerWhatsappRoutes(apiRouter, { getPool, insertAuditLog });
+
+// --- MÓDULO RELATÓRIOS: ÍNDICES DE DESEMPENHO (FÍSICO E TÁTICO) ---
+registerDesempenhoRoutes(apiRouter, { getPool, insertAuditLog });
 
 
 
