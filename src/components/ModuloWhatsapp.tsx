@@ -526,7 +526,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     }
   };
 
-  const handleTestMakeWebhook = async () => {
+  const handleTestMakeWebhook = async (options?: { minimal?: boolean; skipSecret?: boolean }) => {
     if (!formMakeWebhookUrl.trim()) {
       notifyError('Cole a URL do Custom Webhook do Make.com antes de testar.');
       return;
@@ -538,6 +538,9 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
         headers: authHeaders,
         body: JSON.stringify({
           makeWebhookUrl: formMakeWebhookUrl.trim(),
+          makeWebhookSecret: options?.skipSecret ? undefined : (formMakeWebhookSecret.trim() || undefined),
+          minimal: Boolean(options?.minimal),
+          skipSecret: Boolean(options?.skipSecret),
           actor: currentUser
         })
       });
@@ -1600,23 +1603,32 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     <button
                       type="button"
                       disabled={testingMakeWebhook || !formMakeWebhookUrl.trim()}
-                      onClick={handleTestMakeWebhook}
+                      onClick={() => handleTestMakeWebhook()}
                       className="px-3.5 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white font-black text-[11px] flex items-center justify-center gap-1.5 shrink-0"
                     >
                       <Send className="w-3.5 h-3.5" />
                       <span>{testingMakeWebhook ? 'Enviando...' : 'Testar Webhook Make'}</span>
                     </button>
+                    <button
+                      type="button"
+                      disabled={testingMakeWebhook || !formMakeWebhookUrl.trim()}
+                      onClick={() => handleTestMakeWebhook({ minimal: true, skipSecret: true })}
+                      title="Envia POST puro com Content-Type: application/json, sem headers de autenticação e corpo mínimo WhatsApp"
+                      className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 border border-slate-700 text-slate-200 font-bold text-[11px] shrink-0"
+                    >
+                      POST Mínimo (sem auth)
+                    </button>
                   </div>
                   <p className="text-[10px] text-slate-500 mt-1">
-                    Dica: No Make, clique em <strong>Redetermine data structure</strong> no módulo Custom Webhook e
-                    depois clique em <strong>Testar Webhook Make</strong> acima para mapear todos os campos automaticamente.
+                    Dica: No Make, use o módulo <strong>Webhooks → Custom Webhook</strong>, clique em{' '}
+                    <strong>Redetermine data structure</strong> e depois em <strong>Testar Webhook Make</strong>. Quando o campo de API Key abaixo está vazio, o envio é feito como <code>POST</code> limpo sem headers de autenticação.
                   </p>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
                   <div>
                     <div className="flex items-center justify-between gap-2 mb-1">
-                      <label className="font-bold text-slate-300">Header X-Webhook-Secret (opcional)</label>
+                      <label className="font-bold text-slate-300">API Key do Webhook Make — header x-make-apikey (opcional)</label>
                       {config?.hasMakeWebhookSecret && (
                         <button
                           type="button"
@@ -1635,7 +1647,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                         placeholder={
                           config?.hasMakeWebhookSecret
                             ? `Salvo (${config.makeWebhookSecretMasked}) — deixe vazio para manter`
-                            : 'Segredo opcional para validar no filtro do Make'
+                            : 'Deixe vazio se o Custom Webhook estiver sem API Key no Make'
                         }
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-3 pr-9 py-2 text-slate-100 font-mono focus:outline-none focus:border-violet-500"
                       />

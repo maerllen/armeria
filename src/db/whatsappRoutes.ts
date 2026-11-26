@@ -687,19 +687,34 @@ async function verifyMakeApiKey(
 async function forwardPayloadToMake(
   pool: any,
   cfgRow: any,
-  payload: Record<string, any>
-): Promise<{ ok: boolean; status?: number; responseText?: string; error?: string }> {
+  payload: Record<string, any>,
+  options?: { overrideSecret?: string; skipSecret?: boolean }
+): Promise<{
+  ok: boolean;
+  status?: number;
+  responseText?: string;
+  gatewayHeader?: string;
+  makeActualStatus?: string;
+  sentAuthHeader?: boolean;
+  error?: string;
+}> {
   const targetUrl = sanitizeMakeWebhookUrl(cfgRow?.MAKE_WEBHOOK_URL);
   if (!targetUrl) {
     return { ok: false, error: 'URL do Custom Webhook do Make.com não configurada ou inválida.' };
   }
 
-  const webhookSecret = decryptSecret(cfgRow?.MAKE_WEBHOOK_SECRET_ENC);
+  const webhookSecret = options?.skipSecret
+    ? ''
+    : typeof options?.overrideSecret === 'string' && options.overrideSecret.trim()
+      ? options.overrideSecret.trim()
+      : decryptSecret(cfgRow?.MAKE_WEBHOOK_SECRET_ENC);
+
+  // Envia POST limpo apenas com Content-Type: application/json quando não houver segredo configurado
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'Armeria-PCMG-Webhook/1.0'
+    'Content-Type': 'application/json'
   };
   if (webhookSecret) {
+    headers['x-make-apikey'] = webhookSecret;
     headers['X-Webhook-Secret'] = webhookSecret;
   }
 
@@ -714,6 +729,8 @@ async function forwardPayloadToMake(
       signal: controller.signal
     });
     const text = (await res.text().catch(() => '')).slice(0, 500);
+    const gatewayHeader = res.headers.get('x-powered-by') || '';
+    const makeActualStatus = res.headers.get('make-actual-status') || '';
     const evId = `wpp-mk-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
     await pool.query(
       `INSERT INTO WHATSAPP_WEBHOOK_EVENTOS (
@@ -726,10 +743,24 @@ async function forwardPayloadToMake(
         res.ok
           ? `Encaminhado ao Make.com com sucesso (HTTP ${res.status}): ${payload.eventType || 'event'}`
           : `Falha ao encaminhar ao Make.com (HTTP ${res.status}): ${text.slice(0, 140)}`,
-        JSON.stringify({ eventType: payload.eventType, httpStatus: res.status, response: text }).slice(0, 10000)
+        JSON.stringify({
+          eventType: payload.eventType || 'minimal_test',
+          httpStatus: res.status,
+          gatewayHeader: gatewayHeader || undefined,
+          makeActualStatus: makeActualStatus || undefined,
+          sentAuthHeader: Boolean(webhookSecret),
+          response: text
+        }).slice(0, 10000)
       ]
     );
-    return { ok: res.ok, status: res.status, responseText: text };
+    return {
+      ok: res.ok,
+      status: res.status,
+      responseText: text,
+      gatewayHeader,
+      makeActualStatus,
+      sentAuthHeader: Boolean(webhookSecret)
+    };
   } catch (err: any) {
     const msg = err?.name === 'AbortError' ? 'Timeout (8s) ao contatar o webhook do Make.com' : err?.message || 'Erro de rede';
     try {
@@ -2527,49 +2558,77 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         });
       }
 
-      const testPayload = {
-        source: 'armeria_pcmg_whatsapp',
-        eventType: 'message',
-        isTestEvent: true,
-        receivedAt: new Date().toISOString(),
-        wabaId: cfgRow?.WABA_ID || '000000000000000',
-        phoneNumberId: cfgRow?.PHONE_NUMBER_ID || '000000000000000',
-        displayPhoneNumber: cfgRow?.NUMERO_TELEFONE_EXIBICAO || '+55 31 99999-0000',
-        message: {
-          id: `wamid.TEST_${Date.now()}`,
-          from: normalizePhoneDigits(cfgRow?.NUMERO_TESTE_PADRAO) || '5531999990000',
-          fromNormalized: stripBrazilDdiForDisplay(cfgRow?.NUMERO_TESTE_PADRAO || '5531999990000'),
-          contactName: auth.user.name || 'Policial Teste',
-          type: 'text',
-          text: 'Oi',
-          displayText: 'Oi',
-          buttonId: null,
-          buttonTitle: null,
-          listRowId: null,
-          listRowTitle: null,
-          timestamp: String(Math.floor(Date.now() / 1000))
-        },
-        usuarioSistema: {
-          encontrado: true,
-          id: auth.user.id,
-          nome: auth.user.name,
-          masp: auth.user.masp || '0000000',
-          cargo: 'Policial Civil',
-          perfil: auth.user.role || 'Administrador',
-          perfis: [auth.user.role || 'Administrador'],
-          unidadeId: 'unidade-teste',
-          departamentoId: 'dep-teste',
-          isArmeiroOrAdmin: true,
-          unidadesPermitidas: [{ id: 'unidade-teste', nome: 'Unidade Exemplo', sigla: 'COE' }]
-        }
-      };
+      const minimal = Boolean(req.body?.minimal);
+      const skipSecret = Boolean(req.body?.skipSecret);
+      const overrideSecret =
+        typeof req.body?.makeWebhookSecret === 'string' && req.body.makeWebhookSecret.trim()
+          ? req.body.makeWebhookSecret.trim()
+          : undefined;
+
+      const testPayload: Record<string, any> = minimal
+        ? {
+            object: 'whatsapp_business_account',
+            entry: []
+          }
+        : {
+            object: 'whatsapp_business_account',
+            entry: [],
+            source: 'armeria_pcmg_whatsapp',
+            eventType: 'message',
+            isTestEvent: true,
+            receivedAt: new Date().toISOString(),
+            wabaId: cfgRow?.WABA_ID || '000000000000000',
+            phoneNumberId: cfgRow?.PHONE_NUMBER_ID || '000000000000000',
+            displayPhoneNumber: cfgRow?.NUMERO_TELEFONE_EXIBICAO || '+55 31 99999-0000',
+            message: {
+              id: `wamid.TEST_${Date.now()}`,
+              from: normalizePhoneDigits(cfgRow?.NUMERO_TESTE_PADRAO) || '5531999990000',
+              fromNormalized: stripBrazilDdiForDisplay(cfgRow?.NUMERO_TESTE_PADRAO || '5531999990000'),
+              contactName: auth.user.name || 'Policial Teste',
+              type: 'text',
+              text: 'Oi',
+              displayText: 'Oi',
+              buttonId: null,
+              buttonTitle: null,
+              listRowId: null,
+              listRowTitle: null,
+              timestamp: String(Math.floor(Date.now() / 1000))
+            },
+            usuarioSistema: {
+              encontrado: true,
+              id: auth.user.id,
+              nome: auth.user.name,
+              masp: auth.user.masp || '0000000',
+              cargo: 'Policial Civil',
+              perfil: auth.user.role || 'Administrador',
+              perfis: [auth.user.role || 'Administrador'],
+              unidadeId: 'unidade-teste',
+              departamentoId: 'dep-teste',
+              isArmeiroOrAdmin: true,
+              unidadesPermitidas: [{ id: 'unidade-teste', nome: 'Unidade Exemplo', sigla: 'COE' }]
+            }
+          };
 
       const effectiveCfg = { ...cfgRow, MAKE_WEBHOOK_URL: validMakeUrl };
-      const forwardResult = await forwardPayloadToMake(pool, effectiveCfg, testPayload);
+      const forwardResult = await forwardPayloadToMake(pool, effectiveCfg, testPayload, {
+        overrideSecret,
+        skipSecret
+      });
 
-      const statusMsg = forwardResult.ok
-        ? `Conectado ao Make.com com sucesso (HTTP ${forwardResult.status} — ${forwardResult.responseText || 'Accepted'})`
-        : forwardResult.error || `Erro HTTP ${forwardResult.status}: ${forwardResult.responseText || 'Falha no webhook Make'}`;
+      let statusMsg: string;
+      if (forwardResult.ok) {
+        statusMsg = `Conectado ao Make.com com sucesso (HTTP ${forwardResult.status} — ${forwardResult.responseText || 'Accepted'})`;
+      } else if (forwardResult.status === 401) {
+        const originInfo = forwardResult.gatewayHeader
+          ? `Resposta direta de "${forwardResult.gatewayHeader}"`
+          : 'Resposta HTTP 401 do servidor de destino';
+        const authInfo = forwardResult.sentAuthHeader
+          ? 'com header x-make-apikey'
+          : 'em POST puro sem headers de autenticação';
+        statusMsg = `Erro HTTP 401 (${forwardResult.responseText || 'Unauthorized'}) — ${originInfo} (${authInfo}). No Make.com, verifique se o webhook exige API Key (informe no campo x-make-apikey acima ou desative a autenticação no webhook) ou se a URL foi criada em "WhatsApp Business Cloud → Watch Events" em vez de "Webhooks → Custom Webhook".`;
+      } else {
+        statusMsg = forwardResult.error || `Erro HTTP ${forwardResult.status}: ${forwardResult.responseText || 'Falha no webhook Make'}`;
+      }
 
       await pool.query(
         `UPDATE WHATSAPP_CONFIGURACAO_API SET
@@ -2593,6 +2652,12 @@ export function registerWhatsappRoutes(apiRouter: Router, deps: WhatsappRoutesDe
         success: forwardResult.ok,
         message: statusMsg,
         httpStatus: forwardResult.status,
+        diagnostics: {
+          method: 'POST',
+          sentAuthHeader: forwardResult.sentAuthHeader,
+          gatewayHeader: forwardResult.gatewayHeader || null,
+          makeActualStatus: forwardResult.makeActualStatus || null
+        },
         config: mapPublicConfig(updated)
       });
     } catch (err: any) {
