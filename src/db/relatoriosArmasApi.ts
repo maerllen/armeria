@@ -358,7 +358,7 @@ function resolveWeaponReportSpec(raw?: string | null): WeaponReportSpec | null {
 function stripInteractiveUnitPrefix(raw: string): string {
   return normalizeKey(raw)
     .replace(
-      /^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|MUNICOES?|MUNICAO|MUN|CALIBRE|CAL|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i,
+      /^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|MUNICOES?|MUNICAO|MUN|EXPLOSIVOS?|EXPLOSIVO|EXP|MATERIAIS?|MATERIAL|MAT|CALIBRE|CAL|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i,
       ''
     )
     .trim();
@@ -1668,6 +1668,393 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
   apiRouter.post('/relatorios/municoes/:calibre', (req: Request, res: Response) =>
     handleMunicoesReportRequest(req, res, String(req.params.calibre || ''))
   );
+
+  // ============================================================================
+  // ENDPOINTS DE EXPLOSIVOS E MATERIAIS POR UNIDADE (Make.com / Chatbot WhatsApp)
+  // ============================================================================
+  const handleAssetUnitReportRequest = async (
+    req: Request,
+    res: Response,
+    kind: 'explosivos' | 'materiais'
+  ) => {
+    const pool = getPool();
+    const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
+    const isExplosivos = kind === 'explosivos';
+    const tipoRelatorioDb = isExplosivos ? 'EXPLOSIVOS' : 'MATERIAIS';
+    const idPrefix = isExplosivos ? 'rel-exp' : 'rel-mat';
+    const acessoAlvo = isExplosivos ? 'os explosivos' : 'os materiais';
+    const tituloAcao = isExplosivos ? 'Explosivos' : 'Materiais';
+    const semRegistrosMsg = isExplosivos
+      ? 'Não temos explosivos disponíveis na unidade selecionada'
+      : 'Não temos materiais disponíveis na unidade selecionada';
+
+    try {
+      await ensureRelatoriosApiSchema(pool);
+      void cleanupExpiredPdfFiles(pool);
+
+      // 1. Limite de requisições por IP
+      const ipLimit = checkRateLimit(ipRateBuckets, clientIp, RATE_LIMIT_MAX_PER_IP);
+      if (!ipLimit.allowed) {
+        res.setHeader('Retry-After', String(ipLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de requisições atingido. Tente novamente em ${ipLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const idRegistro = `${idPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
+      const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
+      const rawPhoneForLog = normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
+      const rawSolicitacaoForLog = String(body.solicitacao_id || '').trim() || `make-${Date.now()}`;
+
+      // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
+      const tokenCheck = await verifyRelatoriosApiToken(pool, req);
+      if (!tokenCheck.ok) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          erroMensagem: tokenCheck.error || 'Token ausente ou inválido.',
+          ipOrigem: clientIp
+        });
+        return res.status(tokenCheck.status || 401).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          mensagem: tokenCheck.error || 'Não autorizado.'
+        });
+      }
+
+      // 3. Validar corpo da requisição
+      const unidade = String(body.unidade || '').trim();
+      const unidadeCodigo = String(body.unidade_codigo || unidade || '').trim();
+      const telefoneRaw = String(body.telefone_usuario || body.telefone || body.phone || body.from || '').trim();
+      const telefoneDigits = normalizePhoneDigits(telefoneRaw);
+      const solicitacaoId = String(body.solicitacao_id || '').trim().slice(0, 128) || `make-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const formato = String(body.formato || 'pdf').trim().toLowerCase() || 'pdf';
+      const dataHoraRaw = body.data_hora_solicitacao ? String(body.data_hora_solicitacao).trim() : '';
+
+      if (!unidade && !unidadeCodigo) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: 'NAO_INFORMADA',
+          unidadeCodigo: 'NAO_INFORMADA',
+          telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          erroMensagem: 'Campo unidade/unidade_codigo ausente na requisição.',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          mensagem: 'Informe o campo obrigatório "unidade" ou "unidade_codigo".'
+        });
+      }
+
+      if (telefoneDigits.length < 10 || telefoneDigits.length > 15) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits || 'INVALIDO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'TELEFONE_INVALIDO',
+          erroMensagem: 'Campo telefone_usuario ausente ou fora do padrão (10-15 dígitos).',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'TELEFONE_INVALIDO',
+          mensagem: 'Informe "telefone_usuario" válido com DDD (ex: 5531999999999).'
+        });
+      }
+
+      if (formato !== 'pdf') {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'FORMATO_NAO_SUPORTADO',
+          erroMensagem: `Formato não suportado: ${formato}`,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'FORMATO_NAO_SUPORTADO',
+          mensagem: 'Formato não suportado. Utilize formato "pdf".'
+        });
+      }
+
+      let dataSolicitacao = new Date();
+      if (dataHoraRaw) {
+        const parsedDate = new Date(dataHoraRaw);
+        if (!Number.isNaN(parsedDate.getTime())) {
+          dataSolicitacao = parsedDate;
+        }
+      }
+
+      // Limite de requisições por telefone
+      const phoneLimit = checkRateLimit(phoneRateBuckets, telefoneDigits, RATE_LIMIT_MAX_PER_PHONE);
+      if (!phoneLimit.allowed) {
+        res.setHeader('Retry-After', String(phoneLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de solicitações por usuário atingido. Tente novamente em ${phoneLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      // 4. Identificar usuário ativo pelo telefone
+      const user = await resolveWhatsappUserContext(pool, telefoneDigits);
+      if (!user) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: 'USUARIO_NAO_AUTORIZADO',
+          erroMensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.',
+          ipOrigem: clientIp
+        });
+        return res.status(403).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'USUARIO_NAO_AUTORIZADO',
+          mensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.'
+        });
+      }
+
+      // 5. Validar unidade e permissão de acesso
+      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo, acessoAlvo);
+      if ('codigo' in unitResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: unitResolution.codigo,
+          erroMensagem: unitResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(unitResolution.status).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: unitResolution.codigo,
+          mensagem: unitResolution.mensagem
+        });
+      }
+
+      const { selection } = unitResolution;
+
+      // 6. Consultar registros no banco
+      const explosivosRecords = isExplosivos ? await queryExplosivosByUnit(pool, selection.unitIds) : [];
+      const materiaisRecords = !isExplosivos ? await queryMateriaisByUnit(pool, selection.unitIds) : [];
+      const totalRegistros = isExplosivos ? explosivosRecords.length : materiaisRecords.length;
+
+      if (totalRegistros === 0) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'sem_registros',
+          totalRegistros: 0,
+          dataSolicitacao,
+          ipOrigem: clientIp
+        });
+
+        await insertAuditLog(
+          'WhatsApp / API Relatórios',
+          `Relatório de ${tituloAcao} (Sem Registros)`,
+          `Solicitação ${solicitacaoId} via Make.com para unidade ${selection.displayName} — nenhum registro de ${kind} encontrado.`,
+          { id: user.id, name: user.name, masp: user.masp, role: user.role },
+          clientIp
+        );
+
+        return res.status(200).json({
+          sucesso: true,
+          status: 'sem_registros',
+          tipo_relatorio: kind,
+          unidade: selection.displayName,
+          mensagem: semRegistrosMsg
+        });
+      }
+
+      // 7. Gerar PDF detalhado e salvar em diretório confinado acessível por HTTPS
+      const geradoEm = new Date();
+      const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
+      const arquivoNome = `relacao-${kind}-${selection.fileSlug}.pdf`;
+      const arquivoToken = crypto.randomBytes(16).toString('hex');
+      const storedFilename = `${arquivoToken}__${arquivoNome}`;
+      const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
+
+      if (!targetPath.startsWith(PDF_STORAGE_DIR + path.sep)) {
+        throw new Error('Caminho de armazenamento inválido.');
+      }
+
+      try {
+        const pdfBuffer = isExplosivos
+          ? await generateExplosivosPdfBuffer({
+              unidadeLabel: selection.displayName,
+              solicitacaoId,
+              geradoEm,
+              solicitanteNome: user.name,
+              solicitanteMasp: user.masp,
+              telefoneUsuario: telefoneDigits,
+              logoDataUri: selection.logoDataUri,
+              records: explosivosRecords
+            })
+          : await generateMateriaisPdfBuffer({
+              unidadeLabel: selection.displayName,
+              solicitacaoId,
+              geradoEm,
+              solicitanteNome: user.name,
+              solicitanteMasp: user.masp,
+              telefoneUsuario: telefoneDigits,
+              logoDataUri: selection.logoDataUri,
+              records: materiaisRecords
+            });
+        fs.mkdirSync(PDF_STORAGE_DIR, { recursive: true });
+        fs.writeFileSync(targetPath, pdfBuffer);
+      } catch (pdfErr: any) {
+        console.error(`[Relatorios API] Erro ao gerar/salvar PDF de ${kind}:`, pdfErr?.message);
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          totalRegistros,
+          dataSolicitacao,
+          erroCodigo: 'ERRO_GERACAO_PDF',
+          erroMensagem: pdfErr?.message || 'Falha ao gerar PDF.',
+          ipOrigem: clientIp
+        });
+        return res.status(500).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'ERRO_GERACAO_PDF',
+          mensagem: 'Não foi possível gerar o relatório.'
+        });
+      }
+
+      const baseUrl = resolvePublicHttpsBaseUrl(req, tokenCheck.callbackUrlPublica);
+      const arquivoUrl = `${baseUrl}/arquivos/${arquivoToken}/${encodeURIComponent(arquivoNome)}`;
+
+      await logSolicitacaoDb(pool, {
+        idRegistro,
+        solicitacaoId,
+        tipoRelatorio: tipoRelatorioDb,
+        unidadeSolicitada: selection.displayName,
+        unidadeCodigo: selection.fileSlug,
+        unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+        telefoneUsuario: telefoneDigits,
+        usuario: user,
+        status: 'concluido',
+        arquivoNome,
+        arquivoToken,
+        arquivoCaminho: storedFilename,
+        totalRegistros,
+        expiraEm,
+        dataSolicitacao,
+        ipOrigem: clientIp
+      });
+
+      await insertAuditLog(
+        'WhatsApp / API Relatórios',
+        `Gerar PDF de ${tituloAcao} (Make.com)`,
+        `Solicitação ${solicitacaoId}: ${totalRegistros} registro(s) de ${kind} da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
+        { id: user.id, name: user.name, masp: user.masp, role: user.role },
+        clientIp
+      );
+
+      const extraStats = isExplosivos
+        ? {}
+        : {
+            quantidade_total: materiaisRecords.reduce((s, r) => s + r.quantidadeTotal, 0),
+            quantidade_disponivel: materiaisRecords.reduce((s, r) => s + r.quantidadeDisponivel, 0),
+            quantidade_em_uso: materiaisRecords.reduce((s, r) => s + r.quantidadeEmUso, 0)
+          };
+
+      return res.status(200).json({
+        sucesso: true,
+        status: 'concluido',
+        tipo_relatorio: kind,
+        unidade: selection.displayName,
+        unidade_codigo: selection.fileSlug,
+        solicitacao_id: solicitacaoId,
+        total_registros: totalRegistros,
+        ...extraStats,
+        arquivo_nome: arquivoNome,
+        arquivo_url: arquivoUrl,
+        gerado_em: geradoEm.toISOString(),
+        expira_em: expiraEm.toISOString()
+      });
+    } catch (err: any) {
+      console.error(`[Relatorios API] Erro inesperado em POST /api/relatorios/${kind}:`, err?.message);
+      return res.status(500).json({
+        sucesso: false,
+        status: 'erro',
+        codigo: 'ERRO_GERACAO_PDF',
+        mensagem: 'Não foi possível gerar o relatório.'
+      });
+    }
+  };
+
+  // Endpoints de Explosivos por unidade
+  apiRouter.post(
+    ['/relatorios/explosivos', '/relatorios/explosivos/unidade', '/relatorios/explosivos/por-unidade', '/relatorios/explosivo'],
+    (req: Request, res: Response) => handleAssetUnitReportRequest(req, res, 'explosivos')
+  );
+
+  // Endpoints de Materiais por unidade
+  apiRouter.post(
+    ['/relatorios/materiais', '/relatorios/materiais/unidade', '/relatorios/materiais/por-unidade', '/relatorios/material'],
+    (req: Request, res: Response) => handleAssetUnitReportRequest(req, res, 'materiais')
+  );
 }
 
 // ============================================================================
@@ -2255,6 +2642,921 @@ async function generateMunicoesPdfBuffer(params: {
     });
     p.drawText(
       `Sistema Arsenal PCMG - Relatorio de Municoes (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
+      {
+        x: marginX,
+        y: 13,
+        size: 7.5,
+        font: fontRegular,
+        color: rgb(0.42, 0.47, 0.54)
+      }
+    );
+    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
+    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
+    p.drawText(pageLabel, {
+      x: pageWidth - marginX - labelW,
+      y: 13,
+      size: 7.5,
+      font: fontBold,
+      color: rgb(0.3, 0.35, 0.42)
+    });
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
+
+// ============================================================================
+// AUXILIARES E GERADORES DE PDF DETALHADO — EXPLOSIVOS E MATERIAIS POR UNIDADE
+// ============================================================================
+interface ExplosivoReportRecord {
+  id: string;
+  nome: string;
+  tipo: string;
+  subtipo: string;
+  quantidade: number;
+  unidadeMedida: string;
+  lote: string;
+  fabricante: string;
+  dataFabricacao: string;
+  dataValidade: string;
+  validadeRaw: Date | null;
+  classeRisco: string;
+  localArmazenamento: string;
+  cofreCodigo: string;
+  cofreDescricao: string;
+  status: string;
+  unidadeNome: string;
+  observacoes: string;
+}
+
+interface MaterialReportRecord {
+  id: string;
+  nome: string;
+  tipoNome: string;
+  categoria: string;
+  consumivel: boolean;
+  numeroSerie: string;
+  quantidadeTotal: number;
+  quantidadeDisponivel: number;
+  quantidadeEmUso: number;
+  quantidadeConsumida: number;
+  validade: string;
+  validadeRaw: Date | null;
+  localGuarda: string;
+  cofreCodigo: string;
+  cofreDescricao: string;
+  unidadeNome: string;
+  observacoes: string;
+  atualizadoEm: string;
+}
+
+function formatDateOnlyBr(val?: any): { formatted: string; dateObj: Date | null } {
+  if (!val) return { formatted: '—', dateObj: null };
+  const d = new Date(val);
+  if (Number.isNaN(d.getTime())) return { formatted: '—', dateObj: null };
+  try {
+    const formatted = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'UTC',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }).format(d);
+    return { formatted, dateObj: d };
+  } catch {
+    return { formatted: d.toISOString().slice(0, 10), dateObj: d };
+  }
+}
+
+function formatDecimalBr(n: number): string {
+  const num = Number(n || 0);
+  if (!Number.isFinite(num)) return '0';
+  try {
+    return new Intl.NumberFormat('pt-BR', {
+      minimumFractionDigits: Number.isInteger(num) ? 0 : 1,
+      maximumFractionDigits: 3
+    }).format(num);
+  } catch {
+    return String(num);
+  }
+}
+
+async function queryExplosivosByUnit(pool: any, unitIds: string[]): Promise<ExplosivoReportRecord[]> {
+  let sql = `
+    SELECT
+      e.ID_EXPLOSIVOS,
+      e.NOME_EXPLOSIVOS,
+      e.TIPO_EXPLOSIVOS,
+      e.SUBTIPO_EXPLOSIVOS,
+      e.QUANTIDADE_EXPLOSIVOS,
+      e.UNIDADE_MEDIDA_EXPLOSIVOS,
+      e.LOTE_EXPLOSIVOS,
+      e.FABRICANTE_EXPLOSIVOS,
+      e.DATA_FABRICACAO_EXPLOSIVOS,
+      e.DATA_VALIDADE_EXPLOSIVOS,
+      e.CLASSE_RISCO_EXPLOSIVOS,
+      e.LOCAL_ARMAZENAMENTO_EXPLOSIVOS,
+      e.STATUS_EXPLOSIVOS,
+      e.OBSERVACOES_EXPLOSIVOS,
+      u.NOME_UNIDADES,
+      cf.CODIGO_COFRES,
+      cf.DESCRICAO_CURTA_COFRES
+    FROM EXPLOSIVOS e
+    LEFT JOIN UNIDADES u ON u.ID_UNIDADES = e.UNIDADE_ID_EXPLOSIVOS
+    LEFT JOIN COFRES cf ON cf.ID_COFRES = e.COFRE_ID_EXPLOSIVOS
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (unitIds.length > 0) {
+    const placeholders = unitIds.map(() => '?').join(', ');
+    sql += ` AND e.UNIDADE_ID_EXPLOSIVOS IN (${placeholders})`;
+    params.push(...unitIds);
+  }
+
+  sql += ' ORDER BY u.NOME_UNIDADES ASC, e.TIPO_EXPLOSIVOS ASC, e.SUBTIPO_EXPLOSIVOS ASC, e.NOME_EXPLOSIVOS ASC';
+
+  const [rows]: any = await pool.query(sql, params);
+  return (rows || []).map((r: any) => {
+    const fab = formatDateOnlyBr(r.DATA_FABRICACAO_EXPLOSIVOS);
+    const val = formatDateOnlyBr(r.DATA_VALIDADE_EXPLOSIVOS);
+    return {
+      id: String(r.ID_EXPLOSIVOS || ''),
+      nome: String(r.NOME_EXPLOSIVOS || '—'),
+      tipo: String(r.TIPO_EXPLOSIVOS || '—'),
+      subtipo: String(r.SUBTIPO_EXPLOSIVOS || ''),
+      quantidade: Number(r.QUANTIDADE_EXPLOSIVOS || 0),
+      unidadeMedida: String(r.UNIDADE_MEDIDA_EXPLOSIVOS || 'un'),
+      lote: String(r.LOTE_EXPLOSIVOS || '—'),
+      fabricante: String(r.FABRICANTE_EXPLOSIVOS || '—'),
+      dataFabricacao: fab.formatted,
+      dataValidade: val.formatted,
+      validadeRaw: val.dateObj,
+      classeRisco: String(r.CLASSE_RISCO_EXPLOSIVOS || '—'),
+      localArmazenamento: String(r.LOCAL_ARMAZENAMENTO_EXPLOSIVOS || ''),
+      cofreCodigo: String(r.CODIGO_COFRES || ''),
+      cofreDescricao: String(r.DESCRICAO_CURTA_COFRES || ''),
+      status: String(r.STATUS_EXPLOSIVOS || 'Operacional'),
+      unidadeNome: String(r.NOME_UNIDADES || 'Sem Unidade'),
+      observacoes: String(r.OBSERVACOES_EXPLOSIVOS || '').trim()
+    };
+  });
+}
+
+async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<MaterialReportRecord[]> {
+  let sql = `
+    SELECT
+      m.ID_MATERIAIS,
+      m.NOME_MATERIAIS,
+      COALESCE(NULLIF(TRIM(m.TIPO_MATERIAL_NOME_MATERIAIS), ''), tm.NOME_TIPOS_MATERIAIS, 'Geral') AS TIPO_FINAL,
+      COALESCE(tm.CATEGORIA_TIPOS_MATERIAIS, '') AS CATEGORIA_FINAL,
+      COALESCE(tm.EH_CONSUMIVEL_TIPOS_MATERIAIS, 0) AS EH_CONSUMIVEL_FINAL,
+      m.NUMERO_SERIE_MATERIAIS,
+      m.QUANTIDADE_MATERIAIS,
+      m.QUANTIDADE_DISPONIVEL_MATERIAIS,
+      m.QUANTIDADE_EM_USO_MATERIAIS,
+      m.QUANTIDADE_CONSUMIDA_MATERIAIS,
+      m.VALIDADE_MATERIAIS,
+      m.LOCAL_GUARDA_MATERIAIS,
+      m.OBSERVACOES_MATERIAIS,
+      m.DATA_ATUALIZACAO_MATERIAIS,
+      m.DATA_CRIACAO_MATERIAIS,
+      COALESCE(u.NOME_UNIDADES, m.UNIDADE_NOME_MATERIAIS, 'Sem Unidade') AS UNIDADE_FINAL,
+      cf.CODIGO_COFRES,
+      cf.DESCRICAO_CURTA_COFRES
+    FROM MATERIAIS m
+    LEFT JOIN TIPOS_MATERIAIS tm ON tm.ID_TIPOS_MATERIAIS = m.TIPO_MATERIAL_ID_MATERIAIS
+    LEFT JOIN UNIDADES u ON u.ID_UNIDADES = m.UNIDADE_ID_MATERIAIS
+    LEFT JOIN COFRES cf ON cf.ID_COFRES = m.COFRE_ID_MATERIAIS
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (unitIds.length > 0) {
+    const placeholders = unitIds.map(() => '?').join(', ');
+    sql += ` AND m.UNIDADE_ID_MATERIAIS IN (${placeholders})`;
+    params.push(...unitIds);
+  }
+
+  sql += ' ORDER BY UNIDADE_FINAL ASC, TIPO_FINAL ASC, m.NOME_MATERIAIS ASC, m.NUMERO_SERIE_MATERIAIS ASC';
+
+  const [rows]: any = await pool.query(sql, params);
+  return (rows || []).map((r: any) => {
+    const val = formatDateOnlyBr(r.VALIDADE_MATERIAIS);
+    const upd = r.DATA_ATUALIZACAO_MATERIAIS || r.DATA_CRIACAO_MATERIAIS;
+    return {
+      id: String(r.ID_MATERIAIS || ''),
+      nome: String(r.NOME_MATERIAIS || '—'),
+      tipoNome: String(r.TIPO_FINAL || 'Geral'),
+      categoria: String(r.CATEGORIA_FINAL || ''),
+      consumivel: Boolean(Number(r.EH_CONSUMIVEL_FINAL || 0)),
+      numeroSerie: String(r.NUMERO_SERIE_MATERIAIS || '—'),
+      quantidadeTotal: Number(r.QUANTIDADE_MATERIAIS || 0),
+      quantidadeDisponivel: Number(r.QUANTIDADE_DISPONIVEL_MATERIAIS || 0),
+      quantidadeEmUso: Number(r.QUANTIDADE_EM_USO_MATERIAIS || 0),
+      quantidadeConsumida: Number(r.QUANTIDADE_CONSUMIDA_MATERIAIS || 0),
+      validade: val.formatted,
+      validadeRaw: val.dateObj,
+      localGuarda: String(r.LOCAL_GUARDA_MATERIAIS || ''),
+      cofreCodigo: String(r.CODIGO_COFRES || ''),
+      cofreDescricao: String(r.DESCRICAO_CURTA_COFRES || ''),
+      unidadeNome: String(r.UNIDADE_FINAL || 'Sem Unidade'),
+      observacoes: String(r.OBSERVACOES_MATERIAIS || '').trim(),
+      atualizadoEm: upd ? formatDateTimeBr(new Date(upd)).slice(0, 10) : ''
+    };
+  });
+}
+
+async function generateExplosivosPdfBuffer(params: {
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp: string;
+  telefoneUsuario: string;
+  logoDataUri: string | null;
+  records: ExplosivoReportRecord[];
+}): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Relação de Explosivos - ${params.unidadeLabel}`);
+  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
+  doc.setCreator('API Arsenal Make.com / WhatsApp');
+
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
+
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2;
+  const footerHeight = 32;
+
+  const nowMs = Date.now();
+  const in90DaysMs = nowMs + 90 * 24 * 60 * 60 * 1000;
+
+  const totalItens = params.records.length;
+  const operacionais = params.records.filter(r => normalizeKey(r.status).includes('OPERAC')).length;
+  const outrosStatus = Math.max(0, totalItens - operacionais);
+  const vencidos = params.records.filter(r => r.validadeRaw && r.validadeRaw.getTime() < nowMs).length;
+  const aVencer = params.records.filter(
+    r => r.validadeRaw && r.validadeRaw.getTime() >= nowMs && r.validadeRaw.getTime() <= in90DaysMs
+  ).length;
+
+  const byMeasureMap = new Map<string, number>();
+  const byTypeMap = new Map<string, number>();
+  const byUnitMap = new Map<string, number>();
+  for (const r of params.records) {
+    const um = r.unidadeMedida || 'un';
+    byMeasureMap.set(um, (byMeasureMap.get(um) || 0) + r.quantidade);
+    const tipoKey = [r.tipo, r.subtipo].filter(Boolean).join(' / ');
+    byTypeMap.set(tipoKey, (byTypeMap.get(tipoKey) || 0) + 1);
+    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + 1);
+  }
+
+  const medidasResumo = Array.from(byMeasureMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([um, qty]) => `${formatDecimalBr(qty)} ${um}`)
+    .join('  |  ');
+
+  const tiposResumo = Array.from(byTypeMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join('  |  ');
+
+  const unidadesResumo =
+    byUnitMap.size > 1
+      ? Array.from(byUnitMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => `${k}: ${v} item(ns)`)
+          .join('  |  ')
+      : '';
+
+  const fixedColsWidth = 20 + 50 + 128 + 104 + 56 + 76 + 96 + 78;
+  const columns = [
+    { key: 'idx', label: '#', width: 20 },
+    { key: 'unidade', label: 'UNIDADE', width: 50 },
+    { key: 'nomeTipo', label: 'EXPLOSIVO / TIPO / SUBTIPO', width: 128 },
+    { key: 'fabLote', label: 'FABRICANTE / LOTE', width: 104 },
+    { key: 'qtd', label: 'QTD / UN.', width: 56 },
+    { key: 'datas', label: 'FABR. / VALIDADE', width: 76 },
+    { key: 'riscoStatus', label: 'CLASSE RISCO / STATUS', width: 96 },
+    { key: 'local', label: 'PAIOL / COFRE', width: 78 },
+    { key: 'obs', label: 'OBSERVACOES / SERIAIS', width: contentWidth - fixedColsWidth }
+  ];
+
+  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 70,
+      width: pageWidth,
+      height: 70,
+      color: rgb(0.06, 0.1, 0.17)
+    });
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 73,
+      width: pageWidth,
+      height: 3,
+      color: rgb(0.85, 0.65, 0.13)
+    });
+
+    let titleStartX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(46, 46);
+      page.drawImage(logoImage, {
+        x: marginX,
+        y: pageHeight - 58 + (46 - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      titleStartX = marginX + 56;
+    }
+
+    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
+      x: titleStartX,
+      y: pageHeight - 24,
+      size: 8.5,
+      font: fontBold,
+      color: rgb(0.96, 0.78, 0.25)
+    });
+
+    page.drawText(
+      fitTextToWidth(`RELACAO DE EXPLOSIVOS POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
+      {
+        x: titleStartX,
+        y: pageHeight - 44,
+        size: 13.5,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      }
+    );
+
+    page.drawText(
+      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
+      {
+        x: titleStartX,
+        y: pageHeight - 60,
+        size: 8,
+        font: fontRegular,
+        color: rgb(0.82, 0.86, 0.92)
+      }
+    );
+
+    let y = pageHeight - 86;
+
+    if (isFirstPage) {
+      const cardHeight = unidadesResumo ? 72 : 58;
+      page.drawRectangle({
+        x: marginX,
+        y: y - cardHeight,
+        width: contentWidth,
+        height: cardHeight,
+        color: rgb(0.95, 0.96, 0.98),
+        borderColor: rgb(0.82, 0.85, 0.9),
+        borderWidth: 0.75
+      });
+
+      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
+      const metaLine2 = `Total de Itens/Lotes: ${totalItens}   |   Operacionais: ${operacionais}   |   Outros Status: ${outrosStatus}   |   Vencidos: ${vencidos}   |   A vencer (90d): ${aVencer}`;
+      const metaLine3 = `Quantitativos: ${medidasResumo || '-'}   |   Por Tipo: ${tiposResumo || '-'}`;
+
+      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 14,
+        size: 8.2,
+        font: fontRegular,
+        color: rgb(0.15, 0.2, 0.28)
+      });
+      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.6, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 29,
+        size: 8.6,
+        font: fontBold,
+        color: rgb(0.06, 0.25, 0.2)
+      });
+      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 44,
+        size: 7.8,
+        font: fontRegular,
+        color: rgb(0.2, 0.25, 0.34)
+      });
+      if (unidadesResumo) {
+        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
+          x: marginX + 8,
+          y: y - 59,
+          size: 7.8,
+          font: fontBold,
+          color: rgb(0.12, 0.18, 0.32)
+        });
+      }
+      y -= cardHeight + 10;
+    }
+
+    const headerRowHeight = 20;
+    page.drawRectangle({
+      x: marginX,
+      y: y - headerRowHeight,
+      width: contentWidth,
+      height: headerRowHeight,
+      color: rgb(0.11, 0.17, 0.27)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      page.drawText(col.label, {
+        x: colX + 4,
+        y: y - 13.5,
+        size: 7.2,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      });
+      colX += col.width;
+    }
+
+    return y - headerRowHeight;
+  };
+
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let cursorY = drawPageHeader(page, true);
+  const fontSize = 7.3;
+  const lineHeight = 9.6;
+
+  params.records.forEach((rec, index) => {
+    const tipoFull = [rec.tipo, rec.subtipo].filter(Boolean).join(' / ');
+    const nomeTipoText = tipoFull ? `${rec.nome} (${tipoFull})` : rec.nome;
+    const fabLoteText = `Fab: ${rec.fabricante} | Lote: ${rec.lote}`;
+    const qtdText = `${formatDecimalBr(rec.quantidade)} ${rec.unidadeMedida}`;
+
+    let valTag = '';
+    if (rec.validadeRaw) {
+      if (rec.validadeRaw.getTime() < nowMs) valTag = ' [VENCIDO]';
+      else if (rec.validadeRaw.getTime() <= in90DaysMs) valTag = ' [A VENCER]';
+    }
+    const datasText = `Fab: ${rec.dataFabricacao} | Val: ${rec.dataValidade}${valTag}`;
+    const riscoStatusText = `${rec.classeRisco} | Status: ${rec.status}`;
+    const localParts = [
+      rec.localArmazenamento,
+      rec.cofreCodigo ? `Cofre ${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}` : ''
+    ].filter(Boolean);
+
+    const rawValues: Record<string, string> = {
+      idx: String(index + 1),
+      unidade: rec.unidadeNome,
+      nomeTipo: nomeTipoText,
+      fabLote: fabLoteText,
+      qtd: qtdText,
+      datas: datasText,
+      riscoStatus: riscoStatusText,
+      local: localParts.join(' | ') || '-',
+      obs: rec.observacoes || '-'
+    };
+
+    const wrappedByCol: Record<string, string[]> = {};
+    let maxLineCount = 1;
+    for (const col of columns) {
+      const f = col.key === 'qtd' ? fontBold : fontRegular;
+      const maxL = col.key === 'obs' ? 12 : 6;
+      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, maxL);
+      wrappedByCol[col.key] = lines;
+      if (lines.length > maxLineCount) maxLineCount = lines.length;
+    }
+
+    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
+    if (cursorY - rowHeight < footerHeight + 12) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawPageHeader(page, false);
+    }
+
+    const rowBottomY = cursorY - rowHeight;
+    if (index % 2 === 1) {
+      page.drawRectangle({
+        x: marginX,
+        y: rowBottomY,
+        width: contentWidth,
+        height: rowHeight,
+        color: rgb(0.97, 0.98, 0.99)
+      });
+    }
+    page.drawLine({
+      start: { x: marginX, y: rowBottomY },
+      end: { x: marginX + contentWidth, y: rowBottomY },
+      thickness: 0.4,
+      color: rgb(0.86, 0.89, 0.93)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      const lines = wrappedByCol[col.key] || ['-'];
+      const f = col.key === 'qtd' ? fontBold : fontRegular;
+      lines.forEach((line, lineIdx) => {
+        page.drawText(line, {
+          x: colX + 4,
+          y: cursorY - 10.5 - lineIdx * lineHeight,
+          size: fontSize,
+          font: f,
+          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
+        });
+      });
+      colX += col.width;
+    }
+
+    cursorY = rowBottomY;
+  });
+
+  if (cursorY - 22 < footerHeight + 10) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawPageHeader(page, false);
+  }
+  const totalBarY = cursorY - 20;
+  page.drawRectangle({
+    x: marginX,
+    y: totalBarY,
+    width: contentWidth,
+    height: 20,
+    color: rgb(0.9, 0.94, 0.97),
+    borderColor: rgb(0.75, 0.8, 0.86),
+    borderWidth: 0.6
+  });
+  page.drawText(
+    fitTextToWidth(
+      `TOTAL GERAL DE EXPLOSIVOS (${params.unidadeLabel.toUpperCase()}): ${totalItens} ITEM(NS) | ${medidasResumo || '-'}`,
+      fontBold,
+      8.2,
+      contentWidth - 16
+    ),
+    {
+      x: marginX + 8,
+      y: totalBarY + 6,
+      size: 8.2,
+      font: fontBold,
+      color: rgb(0.06, 0.16, 0.26)
+    }
+  );
+
+  const pages = doc.getPages();
+  const totalPages = pages.length;
+  pages.forEach((p, idx) => {
+    p.drawLine({
+      start: { x: marginX, y: 26 },
+      end: { x: pageWidth - marginX, y: 26 },
+      thickness: 0.6,
+      color: rgb(0.78, 0.82, 0.87)
+    });
+    p.drawText(
+      `Sistema Arsenal PCMG - Relatorio de Explosivos (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
+      {
+        x: marginX,
+        y: 13,
+        size: 7.5,
+        font: fontRegular,
+        color: rgb(0.42, 0.47, 0.54)
+      }
+    );
+    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
+    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
+    p.drawText(pageLabel, {
+      x: pageWidth - marginX - labelW,
+      y: 13,
+      size: 7.5,
+      font: fontBold,
+      color: rgb(0.3, 0.35, 0.42)
+    });
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
+
+async function generateMateriaisPdfBuffer(params: {
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp: string;
+  telefoneUsuario: string;
+  logoDataUri: string | null;
+  records: MaterialReportRecord[];
+}): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Relação de Materiais - ${params.unidadeLabel}`);
+  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
+  doc.setCreator('API Arsenal Make.com / WhatsApp');
+
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
+
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2;
+  const footerHeight = 32;
+
+  const totalItens = params.records.length;
+  const totalQtd = params.records.reduce((s, r) => s + r.quantidadeTotal, 0);
+  const dispQtd = params.records.reduce((s, r) => s + r.quantidadeDisponivel, 0);
+  const emUsoQtd = params.records.reduce((s, r) => s + r.quantidadeEmUso, 0);
+  const consQtd = params.records.reduce((s, r) => s + r.quantidadeConsumida, 0);
+
+  const byTypeMap = new Map<string, number>();
+  const byUnitMap = new Map<string, number>();
+  for (const r of params.records) {
+    const tipoKey = r.categoria ? `${r.tipoNome} (${r.categoria})` : r.tipoNome;
+    byTypeMap.set(tipoKey, (byTypeMap.get(tipoKey) || 0) + r.quantidadeTotal);
+    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + r.quantidadeTotal);
+  }
+
+  const tiposResumo = Array.from(byTypeMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
+    .join('  |  ');
+
+  const unidadesResumo =
+    byUnitMap.size > 1
+      ? Array.from(byUnitMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => `${k}: ${formatIntBr(v)} un.`)
+          .join('  |  ')
+      : '';
+
+  const fixedColsWidth = 20 + 58 + 146 + 98 + 94 + 58 + 106;
+  const columns = [
+    { key: 'idx', label: '#', width: 20 },
+    { key: 'unidade', label: 'UNIDADE', width: 58 },
+    { key: 'material', label: 'MATERIAL / TIPO / CATEGORIA', width: 146 },
+    { key: 'serie', label: 'N. SERIE', width: 98 },
+    { key: 'qtd', label: 'QTD (TOT/DISP/USO/CONS)', width: 94 },
+    { key: 'validade', label: 'VALIDADE', width: 58 },
+    { key: 'local', label: 'LOCAL / COFRE', width: 106 },
+    { key: 'obs', label: 'OBSERVACOES / ATUALIZACAO', width: contentWidth - fixedColsWidth }
+  ];
+
+  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 70,
+      width: pageWidth,
+      height: 70,
+      color: rgb(0.06, 0.1, 0.17)
+    });
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 73,
+      width: pageWidth,
+      height: 3,
+      color: rgb(0.85, 0.65, 0.13)
+    });
+
+    let titleStartX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(46, 46);
+      page.drawImage(logoImage, {
+        x: marginX,
+        y: pageHeight - 58 + (46 - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      titleStartX = marginX + 56;
+    }
+
+    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
+      x: titleStartX,
+      y: pageHeight - 24,
+      size: 8.5,
+      font: fontBold,
+      color: rgb(0.96, 0.78, 0.25)
+    });
+
+    page.drawText(
+      fitTextToWidth(`RELACAO DE MATERIAIS POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
+      {
+        x: titleStartX,
+        y: pageHeight - 44,
+        size: 13.5,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      }
+    );
+
+    page.drawText(
+      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
+      {
+        x: titleStartX,
+        y: pageHeight - 60,
+        size: 8,
+        font: fontRegular,
+        color: rgb(0.82, 0.86, 0.92)
+      }
+    );
+
+    let y = pageHeight - 86;
+
+    if (isFirstPage) {
+      const cardHeight = unidadesResumo ? 72 : 58;
+      page.drawRectangle({
+        x: marginX,
+        y: y - cardHeight,
+        width: contentWidth,
+        height: cardHeight,
+        color: rgb(0.95, 0.96, 0.98),
+        borderColor: rgb(0.82, 0.85, 0.9),
+        borderWidth: 0.75
+      });
+
+      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
+      const metaLine2 = `Registros: ${totalItens}   |   Qtd Total: ${formatIntBr(totalQtd)}   |   Disponivel: ${formatIntBr(dispQtd)}   |   Em Uso/Acautelado: ${formatIntBr(emUsoQtd)}   |   Consumido: ${formatIntBr(consQtd)}`;
+      const metaLine3 = `Subtotais por Tipo: ${tiposResumo || '-'}`;
+
+      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 14,
+        size: 8.2,
+        font: fontRegular,
+        color: rgb(0.15, 0.2, 0.28)
+      });
+      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.6, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 29,
+        size: 8.6,
+        font: fontBold,
+        color: rgb(0.06, 0.25, 0.2)
+      });
+      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 44,
+        size: 7.8,
+        font: fontRegular,
+        color: rgb(0.2, 0.25, 0.34)
+      });
+      if (unidadesResumo) {
+        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
+          x: marginX + 8,
+          y: y - 59,
+          size: 7.8,
+          font: fontBold,
+          color: rgb(0.12, 0.18, 0.32)
+        });
+      }
+      y -= cardHeight + 10;
+    }
+
+    const headerRowHeight = 20;
+    page.drawRectangle({
+      x: marginX,
+      y: y - headerRowHeight,
+      width: contentWidth,
+      height: headerRowHeight,
+      color: rgb(0.11, 0.17, 0.27)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      page.drawText(col.label, {
+        x: colX + 4,
+        y: y - 13.5,
+        size: 7.2,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      });
+      colX += col.width;
+    }
+
+    return y - headerRowHeight;
+  };
+
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let cursorY = drawPageHeader(page, true);
+  const fontSize = 7.4;
+  const lineHeight = 9.8;
+  const nowMs = Date.now();
+
+  params.records.forEach((rec, index) => {
+    const tipoMeta = [rec.tipoNome, rec.categoria, rec.consumivel ? 'Consumivel' : 'Permanente']
+      .filter(Boolean)
+      .join(' - ');
+    const materialText = `${rec.nome} (${tipoMeta})`;
+    const qtdText = `Tot:${formatIntBr(rec.quantidadeTotal)} | Disp:${formatIntBr(rec.quantidadeDisponivel)} | Uso:${formatIntBr(rec.quantidadeEmUso)} | Cons:${formatIntBr(rec.quantidadeConsumida)}`;
+    const validadeText =
+      rec.validadeRaw && rec.validadeRaw.getTime() < nowMs
+        ? `${rec.validade} [VENC.]`
+        : rec.validade;
+    const localParts = [
+      rec.localGuarda,
+      rec.cofreCodigo ? `Cofre ${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}` : ''
+    ].filter(Boolean);
+    const obsText = [
+      rec.observacoes,
+      rec.atualizadoEm ? `Atualizado: ${rec.atualizadoEm}` : ''
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const rawValues: Record<string, string> = {
+      idx: String(index + 1),
+      unidade: rec.unidadeNome,
+      material: materialText,
+      serie: rec.numeroSerie,
+      qtd: qtdText,
+      validade: validadeText,
+      local: localParts.join(' | ') || '-',
+      obs: obsText || '-'
+    };
+
+    const wrappedByCol: Record<string, string[]> = {};
+    let maxLineCount = 1;
+    for (const col of columns) {
+      const f = col.key === 'serie' ? fontBold : fontRegular;
+      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 8);
+      wrappedByCol[col.key] = lines;
+      if (lines.length > maxLineCount) maxLineCount = lines.length;
+    }
+
+    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
+    if (cursorY - rowHeight < footerHeight + 12) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawPageHeader(page, false);
+    }
+
+    const rowBottomY = cursorY - rowHeight;
+    if (index % 2 === 1) {
+      page.drawRectangle({
+        x: marginX,
+        y: rowBottomY,
+        width: contentWidth,
+        height: rowHeight,
+        color: rgb(0.97, 0.98, 0.99)
+      });
+    }
+    page.drawLine({
+      start: { x: marginX, y: rowBottomY },
+      end: { x: marginX + contentWidth, y: rowBottomY },
+      thickness: 0.4,
+      color: rgb(0.86, 0.89, 0.93)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      const lines = wrappedByCol[col.key] || ['-'];
+      const f = col.key === 'serie' ? fontBold : fontRegular;
+      lines.forEach((line, lineIdx) => {
+        page.drawText(line, {
+          x: colX + 4,
+          y: cursorY - 10.5 - lineIdx * lineHeight,
+          size: fontSize,
+          font: f,
+          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
+        });
+      });
+      colX += col.width;
+    }
+
+    cursorY = rowBottomY;
+  });
+
+  if (cursorY - 22 < footerHeight + 10) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawPageHeader(page, false);
+  }
+  const totalBarY = cursorY - 20;
+  page.drawRectangle({
+    x: marginX,
+    y: totalBarY,
+    width: contentWidth,
+    height: 20,
+    color: rgb(0.9, 0.94, 0.97),
+    borderColor: rgb(0.75, 0.8, 0.86),
+    borderWidth: 0.6
+  });
+  page.drawText(
+    fitTextToWidth(
+      `TOTAL GERAL DE MATERIAIS (${params.unidadeLabel.toUpperCase()}): ${totalItens} REGISTRO(S) | TOTAL: ${formatIntBr(totalQtd)} | DISP: ${formatIntBr(dispQtd)} | EM USO: ${formatIntBr(emUsoQtd)}`,
+      fontBold,
+      8.2,
+      contentWidth - 16
+    ),
+    {
+      x: marginX + 8,
+      y: totalBarY + 6,
+      size: 8.2,
+      font: fontBold,
+      color: rgb(0.06, 0.16, 0.26)
+    }
+  );
+
+  const pages = doc.getPages();
+  const totalPages = pages.length;
+  pages.forEach((p, idx) => {
+    p.drawLine({
+      start: { x: marginX, y: 26 },
+      end: { x: pageWidth - marginX, y: 26 },
+      thickness: 0.6,
+      color: rgb(0.78, 0.82, 0.87)
+    });
+    p.drawText(
+      `Sistema Arsenal PCMG - Relatorio de Materiais (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
       {
         x: marginX,
         y: 13,
