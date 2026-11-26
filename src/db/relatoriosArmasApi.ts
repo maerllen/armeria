@@ -1257,9 +1257,14 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
   );
 
   // ============================================================================
-  // ENDPOINTS DE MUNIÇÕES POR CALIBRE (Make.com / Chatbot WhatsApp)
+  // ENDPOINTS DE MUNIÇÕES — RELAÇÃO POR CALIBRE E RELAÇÃO POR UNIDADE (Make.com)
   // ============================================================================
-  const handleMunicoesReportRequest = async (req: Request, res: Response, routeCalibreParam?: string) => {
+  const handleMunicoesReportRequest = async (
+    req: Request,
+    res: Response,
+    routeCalibreParam?: string,
+    forcedMode?: 'por_unidade'
+  ) => {
     const pool = getPool();
     const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
 
@@ -1280,6 +1285,9 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const rawModeInput = normalizeKey(
+        String(body.modo_relatorio || body.modo || body.tipo_relatorio || body.tipo_consulta || '')
+      ).replace(/[^A-Z0-9]/g, '');
       const rawCalibreInput = String(
         routeCalibreParam ||
           body.calibre ||
@@ -1289,13 +1297,36 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           ''
       ).trim();
 
-      const calibreSpec = resolveMunicaoCalibreSpec(rawCalibreInput);
+      const explicitUnitMode =
+        forcedMode === 'por_unidade' ||
+        rawModeInput === 'UNIDADE' ||
+        rawModeInput === 'PORUNIDADE' ||
+        rawModeInput === 'RELACAOPORUNIDADE' ||
+        ['unidade', 'porunidade', 'relacaoporunidade'].includes(compactCalibreCode(rawCalibreInput));
+
+      const calibreSpec: MunicaoCalibreSpec =
+        explicitUnitMode || !rawCalibreInput
+          ? {
+              key: 'unidade',
+              displayLabel: 'Todos os Calibres',
+              fileSlug: 'UNIDADE',
+              isTodos: true,
+              matcher: () => true
+            }
+          : resolveMunicaoCalibreSpec(rawCalibreInput)!;
+
+      const modoRelatorio: 'por_calibre' | 'por_unidade' =
+        explicitUnitMode || !rawCalibreInput ? 'por_unidade' : 'por_calibre';
+
       const idRegistro = `rel-mun-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
       const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
       const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
       const rawPhoneForLog = normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
       const rawSolicitacaoForLog = String(body.solicitacao_id || '').trim() || `make-${Date.now()}`;
-      const tipoRelatorioDb = calibreSpec ? `MUN_${calibreSpec.fileSlug.toUpperCase()}`.slice(0, 32) : 'MUNICOES';
+      const tipoRelatorioDb =
+        modoRelatorio === 'por_unidade'
+          ? 'MUN_POR_UNIDADE'
+          : `MUN_${calibreSpec.fileSlug.toUpperCase()}`.slice(0, 32);
 
       // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
       const tokenCheck = await verifyRelatoriosApiToken(pool, req);
@@ -1318,28 +1349,6 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           status: 'erro',
           codigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
           mensagem: tokenCheck.error || 'Não autorizado.'
-        });
-      }
-
-      if (!calibreSpec) {
-        await logSolicitacaoDb(pool, {
-          idRegistro,
-          solicitacaoId: rawSolicitacaoForLog,
-          tipoRelatorio: 'MUNICOES',
-          unidadeSolicitada: rawUnidadeForLog,
-          unidadeCodigo: rawCodigoForLog,
-          telefoneUsuario: rawPhoneForLog,
-          status: 'erro',
-          dataSolicitacao: new Date(),
-          erroCodigo: 'CALIBRE_OBRIGATORIO',
-          erroMensagem: 'Campo calibre ausente na requisição.',
-          ipOrigem: clientIp
-        });
-        return res.status(400).json({
-          sucesso: false,
-          status: 'erro',
-          codigo: 'CALIBRE_OBRIGATORIO',
-          mensagem: 'Informe o campo "calibre" (ex: "9x19mm", "5,56x45mm", "7,62x51mm", ".308Winchester", ".40S&W", "12Ga" ou "Todos").'
         });
       }
 
@@ -1521,6 +1530,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           sucesso: true,
           status: 'sem_registros',
           tipo_relatorio: 'municoes',
+          modo_relatorio: modoRelatorio,
           calibre: calibreSpec.displayLabel,
           unidade: selection.displayName,
           mensagem: 'Não temos esse tipo de munição na unidade selecionada'
@@ -1532,7 +1542,10 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       // 7. Gerar PDF detalhado e salvar em diretório confinado acessível por HTTPS
       const geradoEm = new Date();
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
-      const arquivoNome = `relacao-municoes-${calibreSpec.fileSlug}-${selection.fileSlug}.pdf`;
+      const arquivoNome =
+        modoRelatorio === 'por_unidade'
+          ? `relacao-municoes-unidade-${selection.fileSlug}.pdf`
+          : `relacao-municoes-${calibreSpec.fileSlug}-${selection.fileSlug}.pdf`;
       const arquivoToken = crypto.randomBytes(16).toString('hex');
       const storedFilename = `${arquivoToken}__${arquivoNome}`;
       const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
@@ -1544,6 +1557,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       try {
         const pdfBuffer = await generateMunicoesPdfBuffer({
           calibreSpec,
+          modoRelatorio,
           unidadeLabel: selection.displayName,
           solicitacaoId,
           geradoEm,
@@ -1605,8 +1619,10 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       await insertAuditLog(
         'WhatsApp / API Relatórios',
-        `Gerar PDF de Munições ${calibreSpec.displayLabel} (Make.com)`,
-        `Solicitação ${solicitacaoId}: ${records.length} lote(s) / ${totalMunicoes} munições (${calibreSpec.displayLabel}) da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
+        modoRelatorio === 'por_unidade'
+          ? 'Gerar PDF de Munições por Unidade (Make.com)'
+          : `Gerar PDF de Munições ${calibreSpec.displayLabel} (Make.com)`,
+        `Solicitação ${solicitacaoId}: ${records.length} lote(s) / ${totalMunicoes} munições (${modoRelatorio === 'por_unidade' ? 'Relação por Unidade' : calibreSpec.displayLabel}) da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
         { id: user.id, name: user.name, masp: user.masp, role: user.role },
         clientIp
       );
@@ -1615,6 +1631,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         sucesso: true,
         status: 'concluido',
         tipo_relatorio: 'municoes',
+        modo_relatorio: modoRelatorio,
         calibre: calibreSpec.displayLabel,
         unidade: selection.displayName,
         unidade_codigo: selection.fileSlug,
@@ -1637,9 +1654,14 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
     }
   };
 
-  // Endpoint principal de munições (calibre enviado no corpo JSON)
+  // Endpoint principal de munições (aceita calibre para "Relação por calibre" ou sem calibre para "Relação por unidade")
   apiRouter.post('/relatorios/municoes', (req: Request, res: Response) =>
     handleMunicoesReportRequest(req, res)
+  );
+
+  // Endpoints dedicados para "Relação por unidade" (todos os calibres da unidade selecionada)
+  apiRouter.post(['/relatorios/municoes/unidade', '/relatorios/municoes/por-unidade'], (req: Request, res: Response) =>
+    handleMunicoesReportRequest(req, res, undefined, 'por_unidade')
   );
 
   // Endpoints dedicados por calibre na URL (ex: /api/relatorios/municoes/9x19mm, /5-56x45mm, /7-62x51mm, /308winchester, /40sw, /12ga, /todos)
@@ -1886,6 +1908,7 @@ function formatIntBr(n: number): string {
 
 async function generateMunicoesPdfBuffer(params: {
   calibreSpec: MunicaoCalibreSpec;
+  modoRelatorio: 'por_calibre' | 'por_unidade';
   unidadeLabel: string;
   solicitacaoId: string;
   geradoEm: Date;
@@ -1895,8 +1918,13 @@ async function generateMunicoesPdfBuffer(params: {
   logoDataUri: string | null;
   records: MunicaoStockRecord[];
 }): Promise<Buffer> {
+  const isPorUnidade = params.modoRelatorio === 'por_unidade';
   const doc = await PDFDocument.create();
-  doc.setTitle(`Relação de Munições (${params.calibreSpec.displayLabel}) - ${params.unidadeLabel}`);
+  doc.setTitle(
+    isPorUnidade
+      ? `Relação de Munições por Unidade - ${params.unidadeLabel}`
+      : `Relação de Munições (${params.calibreSpec.displayLabel}) - ${params.unidadeLabel}`
+  );
   doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
   doc.setCreator('API Arsenal Make.com / WhatsApp');
 
@@ -1920,13 +1948,20 @@ async function generateMunicoesPdfBuffer(params: {
     .reduce((s, r) => s + r.quantidade, 0);
   const outrosQtd = Math.max(0, totalQtd - operacionalQtd - treinamentoQtd);
 
+  const byCalibreMap = new Map<string, number>();
   const byTypeMap = new Map<string, number>();
   const byUnitMap = new Map<string, number>();
   for (const r of params.records) {
+    byCalibreMap.set(r.calibreNome, (byCalibreMap.get(r.calibreNome) || 0) + r.quantidade);
     const typeKey = [r.calibreNome, r.tipo && r.tipo !== '—' ? r.tipo : '', r.peso].filter(Boolean).join(' ');
     byTypeMap.set(typeKey, (byTypeMap.get(typeKey) || 0) + r.quantidade);
     byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + r.quantidade);
   }
+
+  const calibresResumo = Array.from(byCalibreMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
+    .join('  |  ');
 
   const tiposResumo = Array.from(byTypeMap.entries())
     .sort((a, b) => b[1] - a[1])
@@ -1991,7 +2026,9 @@ async function generateMunicoesPdfBuffer(params: {
       color: rgb(0.96, 0.78, 0.25)
     });
 
-    const headerTitle = `RELACAO DE MUNICOES (${params.calibreSpec.displayLabel.toUpperCase()}) - ${params.unidadeLabel.toUpperCase()}`;
+    const headerTitle = isPorUnidade
+      ? `RELACAO DE MUNICOES POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`
+      : `RELACAO DE MUNICOES (${params.calibreSpec.displayLabel.toUpperCase()}) - ${params.unidadeLabel.toUpperCase()}`;
     page.drawText(
       fitTextToWidth(headerTitle, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
       {
@@ -2030,7 +2067,10 @@ async function generateMunicoesPdfBuffer(params: {
 
       const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
       const metaLine2 = `Total em Estoque: ${formatIntBr(totalQtd)} municoes (${totalLotes} lote(s))   |   Operacional: ${formatIntBr(operacionalQtd)}   |   Treinamento: ${formatIntBr(treinamentoQtd)}   |   Reserva/Outros: ${formatIntBr(outrosQtd)}`;
-      const metaLine3 = `Subtotais por Tipo: ${tiposResumo || '-'}`;
+      const metaLine3 =
+        isPorUnidade || params.calibreSpec.isTodos
+          ? `Subtotais por Calibre: ${calibresResumo || '-'}`
+          : `Subtotais por Tipo: ${tiposResumo || '-'}`;
 
       page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
         x: marginX + 8,
@@ -2191,7 +2231,9 @@ async function generateMunicoesPdfBuffer(params: {
     borderWidth: 0.6
   });
   page.drawText(
-    `TOTAL GERAL (${params.calibreSpec.displayLabel.toUpperCase()} - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`,
+    isPorUnidade
+      ? `TOTAL GERAL (POR UNIDADE - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`
+      : `TOTAL GERAL (${params.calibreSpec.displayLabel.toUpperCase()} - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`,
     {
       x: marginX + 8,
       y: totalBarY + 6,

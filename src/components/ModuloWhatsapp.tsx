@@ -375,6 +375,10 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     return `${computedBasePublicUrl}/api/relatorios/municoes`;
   }, [computedBasePublicUrl]);
 
+  const computedRelatorioMunicoesUnidadeUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/municoes/unidade`;
+  }, [computedBasePublicUrl]);
+
   const computedTermsUrl = useMemo(() => {
     return `${computedBasePublicUrl}/termos-de-servico`;
   }, [computedBasePublicUrl]);
@@ -1750,7 +1754,8 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     { key: 'mkRelFuzis', method: 'POST', label: 'Gerar PDF de Fuzis por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioFuzisUrl },
                     { key: 'mkRelSub', method: 'POST', label: 'Gerar PDF de Submetralhadoras por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioSubmetralhadorasUrl },
                     { key: 'mkRelEsp', method: 'POST', label: 'Gerar PDF de Espingardas por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioEspingardasUrl },
-                    { key: 'mkRelMun', method: 'POST', label: 'Gerar PDF de Munições por Calibre e Unidade (JSON: {"calibre":"5,56x45mm","unidade":"COE",...})', url: computedRelatorioMunicoesUrl },
+                    { key: 'mkRelMun', method: 'POST', label: 'Munições — Relação por Calibre (JSON: {"calibre":"5,56x45mm","unidade":"COE",...})', url: computedRelatorioMunicoesUrl },
+                    { key: 'mkRelMunUni', method: 'POST', label: 'Munições — Relação por Unidade (todos os calibres da unidade; JSON: {"unidade":"COE",...})', url: computedRelatorioMunicoesUnidadeUrl },
                     { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
                     { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
                     { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }
