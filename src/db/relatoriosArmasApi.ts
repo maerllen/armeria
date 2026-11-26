@@ -269,7 +269,7 @@ async function verifyRelatoriosApiToken(
 
   const authHeader = String(req.headers['authorization'] || '').trim();
   const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7).trim() : '';
-  const altHeaderToken = String(req.headers['x-make-api-key'] || '').trim();
+  const altHeaderToken = String(req.headers['x-make-api-key'] || req.headers['x-api-key'] || '').trim();
   const provided = bearerToken || altHeaderToken;
 
   if (!provided || !validTokens.some(expected => timingSafeEqualString(provided, expected))) {
@@ -308,14 +308,18 @@ interface ResolvedUnitSelection {
   logoDataUri: string | null;
 }
 
+function stripInteractiveUnitPrefix(raw: string): string {
+  return normalizeKey(raw).replace(/^(?:FUZIS?|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i, '').trim();
+}
+
 async function resolveUnitSelectionForUser(
   pool: any,
   user: ResolvedWhatsappUser,
   unidadeRaw: string,
   unidadeCodigoRaw: string
 ): Promise<{ ok: true; selection: ResolvedUnitSelection } | { ok: false; status: number; codigo: string; mensagem: string }> {
-  const candidate = normalizeKey(unidadeCodigoRaw || unidadeRaw);
-  const candidateAlt = normalizeKey(unidadeRaw || unidadeCodigoRaw);
+  const candidate = stripInteractiveUnitPrefix(unidadeCodigoRaw || unidadeRaw);
+  const candidateAlt = stripInteractiveUnitPrefix(unidadeRaw || unidadeCodigoRaw);
 
   const isTodos =
     candidate === 'TODOS' ||
@@ -840,9 +844,28 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         });
       }
 
-      // 2. Validar token de autenticação (Bearer ou X-Make-Api-Key)
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const idRegistro = `rel-fuz-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
+      const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
+      const rawPhoneForLog = normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
+      const rawSolicitacaoForLog = String(body.solicitacao_id || '').trim() || `make-${Date.now()}`;
+
+      // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
       const tokenCheck = await verifyRelatoriosApiToken(pool, req);
       if (!tokenCheck.ok) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          erroMensagem: tokenCheck.error || 'Token ausente ou inválido.',
+          ipOrigem: clientIp
+        });
         return res.status(tokenCheck.status || 401).json({
           sucesso: false,
           status: 'erro',
@@ -851,17 +874,28 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         });
       }
 
-      // 3. Validar corpo da requisição
-      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      // 3. Validar corpo da requisição (com tolerância a variações comuns do Make.com)
       const unidade = String(body.unidade || '').trim();
       const unidadeCodigo = String(body.unidade_codigo || unidade || '').trim();
-      const telefoneRaw = String(body.telefone_usuario || '').trim();
+      const telefoneRaw = String(body.telefone_usuario || body.telefone || body.phone || body.from || '').trim();
       const telefoneDigits = normalizePhoneDigits(telefoneRaw);
-      const solicitacaoId = String(body.solicitacao_id || '').trim();
-      const formato = String(body.formato || 'pdf').trim().toLowerCase();
+      const solicitacaoId = String(body.solicitacao_id || '').trim().slice(0, 128) || `make-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const formato = String(body.formato || 'pdf').trim().toLowerCase() || 'pdf';
       const dataHoraRaw = body.data_hora_solicitacao ? String(body.data_hora_solicitacao).trim() : '';
 
       if (!unidade && !unidadeCodigo) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          unidadeSolicitada: 'NAO_INFORMADA',
+          unidadeCodigo: 'NAO_INFORMADA',
+          telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          erroMensagem: 'Campo unidade/unidade_codigo ausente na requisição.',
+          ipOrigem: clientIp
+        });
         return res.status(400).json({
           sucesso: false,
           status: 'erro',
@@ -871,6 +905,18 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       if (telefoneDigits.length < 10 || telefoneDigits.length > 15) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits || 'INVALIDO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'TELEFONE_INVALIDO',
+          erroMensagem: 'Campo telefone_usuario ausente ou fora do padrão (10-15 dígitos).',
+          ipOrigem: clientIp
+        });
         return res.status(400).json({
           sucesso: false,
           status: 'erro',
@@ -879,16 +925,19 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         });
       }
 
-      if (!solicitacaoId || solicitacaoId.length > 128) {
-        return res.status(400).json({
-          sucesso: false,
-          status: 'erro',
-          codigo: 'SOLICITACAO_ID_INVALIDO',
-          mensagem: 'Informe um identificador único em "solicitacao_id" (até 128 caracteres).'
-        });
-      }
-
       if (formato !== 'pdf') {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'FORMATO_NAO_SUPORTADO',
+          erroMensagem: `Formato não suportado: ${formato}`,
+          ipOrigem: clientIp
+        });
         return res.status(400).json({
           sucesso: false,
           status: 'erro',
@@ -900,15 +949,9 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       let dataSolicitacao = new Date();
       if (dataHoraRaw) {
         const parsedDate = new Date(dataHoraRaw);
-        if (Number.isNaN(parsedDate.getTime())) {
-          return res.status(400).json({
-            sucesso: false,
-            status: 'erro',
-            codigo: 'DATA_HORA_INVALIDA',
-            mensagem: 'Campo "data_hora_solicitacao" inválido. Use o padrão ISO 8601 (ex: 2026-11-26T12:00:00Z).'
-          });
+        if (!Number.isNaN(parsedDate.getTime())) {
+          dataSolicitacao = parsedDate;
         }
-        dataSolicitacao = parsedDate;
       }
 
       // Limite de requisições por telefone
@@ -922,8 +965,6 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
           mensagem: `Limite de solicitações por usuário atingido. Tente novamente em ${phoneLimit.retryAfterSec} segundos.`
         });
       }
-
-      const idRegistro = `rel-fuz-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 
       // 4. Identificar usuário no sistema Arsenal pelo telefone (ignorando formatação e +55)
       const user = await resolveWhatsappUserContext(pool, telefoneDigits);
