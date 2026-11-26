@@ -357,7 +357,10 @@ function resolveWeaponReportSpec(raw?: string | null): WeaponReportSpec | null {
 
 function stripInteractiveUnitPrefix(raw: string): string {
   return normalizeKey(raw)
-    .replace(/^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i, '')
+    .replace(
+      /^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|MUNICOES?|MUNICAO|MUN|CALIBRE|CAL|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i,
+      ''
+    )
     .trim();
 }
 
@@ -366,7 +369,7 @@ async function resolveUnitSelectionForUser(
   user: ResolvedWhatsappUser,
   unidadeRaw: string,
   unidadeCodigoRaw: string,
-  weaponSpec: WeaponReportSpec
+  acessoNegadoAlvo: string
 ): Promise<{ ok: true; selection: ResolvedUnitSelection } | { ok: false; status: number; codigo: string; mensagem: string }> {
   const candidate = stripInteractiveUnitPrefix(unidadeCodigoRaw || unidadeRaw);
   const candidateAlt = stripInteractiveUnitPrefix(unidadeRaw || unidadeCodigoRaw);
@@ -450,7 +453,7 @@ async function resolveUnitSelectionForUser(
       ok: false,
       status: 403,
       codigo: 'ACESSO_NEGADO_UNIDADE',
-      mensagem: `Usuário sem permissão para consultar ${weaponSpec.acessoNegadoAlvo} da unidade ${matchedName}.`
+      mensagem: `Usuário sem permissão para consultar ${acessoNegadoAlvo} da unidade ${matchedName}.`
     };
   }
 
@@ -1068,7 +1071,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       // 5. Validar unidade recebida e permissão de acesso por unidade
-      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo, weaponSpec);
+      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo, weaponSpec.acessoNegadoAlvo);
       if ('codigo' in unitResolution) {
         await logSolicitacaoDb(pool, {
           idRegistro,
@@ -1252,6 +1255,985 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
   apiRouter.post('/relatorios/armas', (req: Request, res: Response) =>
     handleWeaponReportRequest(req, res)
   );
+
+  // ============================================================================
+  // ENDPOINTS DE MUNIÇÕES POR CALIBRE (Make.com / Chatbot WhatsApp)
+  // ============================================================================
+  const handleMunicoesReportRequest = async (req: Request, res: Response, routeCalibreParam?: string) => {
+    const pool = getPool();
+    const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
+
+    try {
+      await ensureRelatoriosApiSchema(pool);
+      void cleanupExpiredPdfFiles(pool);
+
+      // 1. Limite de requisições por IP
+      const ipLimit = checkRateLimit(ipRateBuckets, clientIp, RATE_LIMIT_MAX_PER_IP);
+      if (!ipLimit.allowed) {
+        res.setHeader('Retry-After', String(ipLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de requisições atingido. Tente novamente em ${ipLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const rawCalibreInput = String(
+        routeCalibreParam ||
+          body.calibre ||
+          body.calibre_codigo ||
+          body.tipo_municao ||
+          body.tipo ||
+          ''
+      ).trim();
+
+      const calibreSpec = resolveMunicaoCalibreSpec(rawCalibreInput);
+      const idRegistro = `rel-mun-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
+      const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
+      const rawPhoneForLog = normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
+      const rawSolicitacaoForLog = String(body.solicitacao_id || '').trim() || `make-${Date.now()}`;
+      const tipoRelatorioDb = calibreSpec ? `MUN_${calibreSpec.fileSlug.toUpperCase()}`.slice(0, 32) : 'MUNICOES';
+
+      // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
+      const tokenCheck = await verifyRelatoriosApiToken(pool, req);
+      if (!tokenCheck.ok) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          erroMensagem: tokenCheck.error || 'Token ausente ou inválido.',
+          ipOrigem: clientIp
+        });
+        return res.status(tokenCheck.status || 401).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          mensagem: tokenCheck.error || 'Não autorizado.'
+        });
+      }
+
+      if (!calibreSpec) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: 'MUNICOES',
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CALIBRE_OBRIGATORIO',
+          erroMensagem: 'Campo calibre ausente na requisição.',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'CALIBRE_OBRIGATORIO',
+          mensagem: 'Informe o campo "calibre" (ex: "9x19mm", "5,56x45mm", "7,62x51mm", ".308Winchester", ".40S&W", "12Ga" ou "Todos").'
+        });
+      }
+
+      // 3. Validar corpo da requisição
+      const unidade = String(body.unidade || '').trim();
+      const unidadeCodigo = String(body.unidade_codigo || unidade || '').trim();
+      const telefoneRaw = String(body.telefone_usuario || body.telefone || body.phone || body.from || '').trim();
+      const telefoneDigits = normalizePhoneDigits(telefoneRaw);
+      const solicitacaoId = String(body.solicitacao_id || '').trim().slice(0, 128) || `make-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const formato = String(body.formato || 'pdf').trim().toLowerCase() || 'pdf';
+      const dataHoraRaw = body.data_hora_solicitacao ? String(body.data_hora_solicitacao).trim() : '';
+      const incluirZerados = Boolean(body.incluir_zerados);
+
+      if (!unidade && !unidadeCodigo) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: 'NAO_INFORMADA',
+          unidadeCodigo: 'NAO_INFORMADA',
+          telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          erroMensagem: 'Campo unidade/unidade_codigo ausente na requisição.',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          mensagem: 'Informe o campo obrigatório "unidade" ou "unidade_codigo".'
+        });
+      }
+
+      if (telefoneDigits.length < 10 || telefoneDigits.length > 15) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits || 'INVALIDO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'TELEFONE_INVALIDO',
+          erroMensagem: 'Campo telefone_usuario ausente ou fora do padrão (10-15 dígitos).',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'TELEFONE_INVALIDO',
+          mensagem: 'Informe "telefone_usuario" válido com DDD (ex: 5531999999999).'
+        });
+      }
+
+      if (formato !== 'pdf') {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'FORMATO_NAO_SUPORTADO',
+          erroMensagem: `Formato não suportado: ${formato}`,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'FORMATO_NAO_SUPORTADO',
+          mensagem: 'Formato não suportado. Utilize formato "pdf".'
+        });
+      }
+
+      let dataSolicitacao = new Date();
+      if (dataHoraRaw) {
+        const parsedDate = new Date(dataHoraRaw);
+        if (!Number.isNaN(parsedDate.getTime())) {
+          dataSolicitacao = parsedDate;
+        }
+      }
+
+      // Limite de requisições por telefone
+      const phoneLimit = checkRateLimit(phoneRateBuckets, telefoneDigits, RATE_LIMIT_MAX_PER_PHONE);
+      if (!phoneLimit.allowed) {
+        res.setHeader('Retry-After', String(phoneLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de solicitações por usuário atingido. Tente novamente em ${phoneLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      // 4. Identificar usuário ativo pelo telefone
+      const user = await resolveWhatsappUserContext(pool, telefoneDigits);
+      if (!user) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: 'USUARIO_NAO_AUTORIZADO',
+          erroMensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.',
+          ipOrigem: clientIp
+        });
+        return res.status(403).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'USUARIO_NAO_AUTORIZADO',
+          mensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.'
+        });
+      }
+
+      // 5. Validar unidade e permissão de acesso
+      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo, 'as munições');
+      if ('codigo' in unitResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: unitResolution.codigo,
+          erroMensagem: unitResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(unitResolution.status).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: unitResolution.codigo,
+          mensagem: unitResolution.mensagem
+        });
+      }
+
+      const { selection } = unitResolution;
+
+      // 6. Buscar registros de munições no estoque
+      const records = await queryMunicoesByCalibreAndUnit(pool, calibreSpec, selection.unitIds, incluirZerados);
+
+      if (records.length === 0) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'sem_registros',
+          totalRegistros: 0,
+          dataSolicitacao,
+          ipOrigem: clientIp
+        });
+
+        await insertAuditLog(
+          'WhatsApp / API Relatórios',
+          `Relatório de Munições ${calibreSpec.displayLabel} (Sem Registros)`,
+          `Solicitação ${solicitacaoId} via Make.com para unidade ${selection.displayName} — sem munição ${calibreSpec.displayLabel} em estoque.`,
+          { id: user.id, name: user.name, masp: user.masp, role: user.role },
+          clientIp
+        );
+
+        return res.status(200).json({
+          sucesso: true,
+          status: 'sem_registros',
+          tipo_relatorio: 'municoes',
+          calibre: calibreSpec.displayLabel,
+          unidade: selection.displayName,
+          mensagem: 'Não temos esse tipo de munição na unidade selecionada'
+        });
+      }
+
+      const totalMunicoes = records.reduce((acc, r) => acc + Math.max(0, Number(r.quantidade || 0)), 0);
+
+      // 7. Gerar PDF detalhado e salvar em diretório confinado acessível por HTTPS
+      const geradoEm = new Date();
+      const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
+      const arquivoNome = `relacao-municoes-${calibreSpec.fileSlug}-${selection.fileSlug}.pdf`;
+      const arquivoToken = crypto.randomBytes(16).toString('hex');
+      const storedFilename = `${arquivoToken}__${arquivoNome}`;
+      const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
+
+      if (!targetPath.startsWith(PDF_STORAGE_DIR + path.sep)) {
+        throw new Error('Caminho de armazenamento inválido.');
+      }
+
+      try {
+        const pdfBuffer = await generateMunicoesPdfBuffer({
+          calibreSpec,
+          unidadeLabel: selection.displayName,
+          solicitacaoId,
+          geradoEm,
+          solicitanteNome: user.name,
+          solicitanteMasp: user.masp,
+          telefoneUsuario: telefoneDigits,
+          logoDataUri: selection.logoDataUri,
+          records
+        });
+        fs.mkdirSync(PDF_STORAGE_DIR, { recursive: true });
+        fs.writeFileSync(targetPath, pdfBuffer);
+      } catch (pdfErr: any) {
+        console.error(`[Relatorios API] Erro ao gerar/salvar PDF de munições (${calibreSpec.displayLabel}):`, pdfErr?.message);
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          totalRegistros: records.length,
+          dataSolicitacao,
+          erroCodigo: 'ERRO_GERACAO_PDF',
+          erroMensagem: pdfErr?.message || 'Falha ao gerar PDF.',
+          ipOrigem: clientIp
+        });
+        return res.status(500).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'ERRO_GERACAO_PDF',
+          mensagem: 'Não foi possível gerar o relatório.'
+        });
+      }
+
+      const baseUrl = resolvePublicHttpsBaseUrl(req, tokenCheck.callbackUrlPublica);
+      const arquivoUrl = `${baseUrl}/arquivos/${arquivoToken}/${encodeURIComponent(arquivoNome)}`;
+
+      await logSolicitacaoDb(pool, {
+        idRegistro,
+        solicitacaoId,
+        tipoRelatorio: tipoRelatorioDb,
+        unidadeSolicitada: selection.displayName,
+        unidadeCodigo: selection.fileSlug,
+        unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+        telefoneUsuario: telefoneDigits,
+        usuario: user,
+        status: 'concluido',
+        arquivoNome,
+        arquivoToken,
+        arquivoCaminho: storedFilename,
+        totalRegistros: records.length,
+        expiraEm,
+        dataSolicitacao,
+        ipOrigem: clientIp
+      });
+
+      await insertAuditLog(
+        'WhatsApp / API Relatórios',
+        `Gerar PDF de Munições ${calibreSpec.displayLabel} (Make.com)`,
+        `Solicitação ${solicitacaoId}: ${records.length} lote(s) / ${totalMunicoes} munições (${calibreSpec.displayLabel}) da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
+        { id: user.id, name: user.name, masp: user.masp, role: user.role },
+        clientIp
+      );
+
+      return res.status(200).json({
+        sucesso: true,
+        status: 'concluido',
+        tipo_relatorio: 'municoes',
+        calibre: calibreSpec.displayLabel,
+        unidade: selection.displayName,
+        unidade_codigo: selection.fileSlug,
+        solicitacao_id: solicitacaoId,
+        total_registros: records.length,
+        total_municoes: totalMunicoes,
+        arquivo_nome: arquivoNome,
+        arquivo_url: arquivoUrl,
+        gerado_em: geradoEm.toISOString(),
+        expira_em: expiraEm.toISOString()
+      });
+    } catch (err: any) {
+      console.error('[Relatorios API] Erro inesperado em POST /api/relatorios/municoes:', err?.message);
+      return res.status(500).json({
+        sucesso: false,
+        status: 'erro',
+        codigo: 'ERRO_GERACAO_PDF',
+        mensagem: 'Não foi possível gerar o relatório.'
+      });
+    }
+  };
+
+  // Endpoint principal de munições (calibre enviado no corpo JSON)
+  apiRouter.post('/relatorios/municoes', (req: Request, res: Response) =>
+    handleMunicoesReportRequest(req, res)
+  );
+
+  // Endpoints dedicados por calibre na URL (ex: /api/relatorios/municoes/9x19mm, /5-56x45mm, /7-62x51mm, /308winchester, /40sw, /12ga, /todos)
+  apiRouter.post('/relatorios/municoes/:calibre', (req: Request, res: Response) =>
+    handleMunicoesReportRequest(req, res, String(req.params.calibre || ''))
+  );
+}
+
+// ============================================================================
+// AUXILIARES E GERADOR DE PDF DETALHADO DE MUNIÇÕES
+// ============================================================================
+interface MunicaoCalibreSpec {
+  key: string;
+  displayLabel: string;
+  fileSlug: string;
+  isTodos: boolean;
+  matcher: (normalizedDbCalibre: string) => boolean;
+}
+
+interface MunicaoStockRecord {
+  id: string;
+  unidadeId: string;
+  unidadeNome: string;
+  calibreNome: string;
+  fabricante: string;
+  tipo: string;
+  peso: string;
+  lote: string;
+  anoFabricacao: string;
+  destinacao: string;
+  cofreCodigo: string;
+  cofreDescricao: string;
+  quantidade: number;
+  atualizadoEm: string;
+  observacao: string;
+}
+
+function compactCalibreCode(val?: string | null): string {
+  return String(val || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/^(?:municoes?|municao|mun|calibre|cal|relatorio)[_\-\s:]+/i, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function resolveMunicaoCalibreSpec(raw?: string | null): MunicaoCalibreSpec | null {
+  const cleanRaw = String(raw || '').trim();
+  const compact = compactCalibreCode(cleanRaw);
+  if (!compact) return null;
+
+  if (compact === 'todos' || compact === 'todas' || compact === 'geral' || compact === 'all') {
+    return {
+      key: 'todos',
+      displayLabel: 'Todos os Calibres',
+      fileSlug: 'TODOS',
+      isTodos: true,
+      matcher: () => true
+    };
+  }
+
+  if (compact === '9x19mm' || compact === '9x19' || compact === '9mm' || compact === '9') {
+    return {
+      key: '9x19mm',
+      displayLabel: '9x19mm',
+      fileSlug: '9x19mm',
+      isTodos: false,
+      matcher: db => db.includes('9x19') || db === '9mm'
+    };
+  }
+
+  if (compact === '556x45mm' || compact === '556x45' || compact === '556mm' || compact === '556') {
+    return {
+      key: '5,56x45mm',
+      displayLabel: '5,56x45mm',
+      fileSlug: '5-56x45mm',
+      isTodos: false,
+      matcher: db => db.includes('556')
+    };
+  }
+
+  if (compact === '762x51mm' || compact === '762x51' || compact === '762mm' || compact === '762') {
+    return {
+      key: '7,62x51mm',
+      displayLabel: '7,62x51mm',
+      fileSlug: '7-62x51mm',
+      isTodos: false,
+      matcher: db => db.includes('762')
+    };
+  }
+
+  if (compact === '308winchester' || compact === '308win' || compact === '308') {
+    return {
+      key: '.308Winchester',
+      displayLabel: '.308 Winchester',
+      fileSlug: '308Winchester',
+      isTodos: false,
+      matcher: db => db.includes('308')
+    };
+  }
+
+  if (compact === '40sw' || compact === '40' || compact === '40mm') {
+    return {
+      key: '.40S&W',
+      displayLabel: '.40 S&W',
+      fileSlug: '40SW',
+      isTodos: false,
+      matcher: db => db.startsWith('40') || db.includes('40sw')
+    };
+  }
+
+  if (compact === '12ga' || compact === '12' || compact === '12gauge') {
+    return {
+      key: '12Ga',
+      displayLabel: '12 Ga',
+      fileSlug: '12Ga',
+      isTodos: false,
+      matcher: db => db === '12' || db.startsWith('12ga')
+    };
+  }
+
+  return {
+    key: cleanRaw,
+    displayLabel: cleanRaw,
+    fileSlug: sanitizeFileSlug(cleanRaw),
+    isTodos: false,
+    matcher: db => db === compact || db.includes(compact)
+  };
+}
+
+async function queryMunicoesByCalibreAndUnit(
+  pool: any,
+  calibreSpec: MunicaoCalibreSpec,
+  unitIds: string[],
+  incluirZerados = false
+): Promise<MunicaoStockRecord[]> {
+  let sql = `
+    SELECT
+      e.ID_ESTOQUE_MUNICOES,
+      e.UNIDADE_ID_ESTOQUE_MUNICOES,
+      e.QUANTIDADE_ESTOQUE_MUNICOES,
+      e.LOTE_MUNICAO,
+      e.ANO_FABRICACAO_MUNICAO,
+      e.DESTINACAO_MUNICAO,
+      e.OBSERVACAO_ESTOQUE_MUNICAO,
+      e.DATA_ATUALIZACAO_ESTOQUE_MUNICOES,
+      COALESCE(NULLIF(TRIM(e.FABRICANTE_MUNICAO), ''), c.FABRICANTE_CALIBRES, '') AS FABRICANTE_FINAL,
+      COALESCE(NULLIF(TRIM(e.TIPO_MUNICAO), ''), c.TIPO_CALIBRES, '') AS TIPO_FINAL,
+      COALESCE(NULLIF(TRIM(e.PESO_MUNICAO), ''), c.PESO_CALIBRES, '') AS PESO_FINAL,
+      c.NOME_CALIBRES,
+      u.NOME_UNIDADES,
+      cf.CODIGO_COFRES,
+      cf.DESCRICAO_CURTA_COFRES
+    FROM ESTOQUE_MUNICOES e
+    INNER JOIN CALIBRES c ON c.ID_CALIBRES = e.CALIBRE_ID_ESTOQUE_MUNICOES
+    LEFT JOIN UNIDADES u ON u.ID_UNIDADES = e.UNIDADE_ID_ESTOQUE_MUNICOES
+    LEFT JOIN COFRES cf ON cf.ID_COFRES = e.COFRE_ID_ESTOQUE_MUNICOES
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (!incluirZerados) {
+    sql += ' AND e.QUANTIDADE_ESTOQUE_MUNICOES > 0';
+  }
+
+  if (unitIds.length > 0) {
+    const placeholders = unitIds.map(() => '?').join(', ');
+    sql += ` AND e.UNIDADE_ID_ESTOQUE_MUNICOES IN (${placeholders})`;
+    params.push(...unitIds);
+  }
+
+  sql += ' ORDER BY u.NOME_UNIDADES ASC, c.NOME_CALIBRES ASC, e.DESTINACAO_MUNICAO ASC, TIPO_FINAL ASC, e.ANO_FABRICACAO_MUNICAO ASC, e.LOTE_MUNICAO ASC';
+
+  const [rows]: any = await pool.query(sql, params);
+  const mapped: MunicaoStockRecord[] = (rows || []).map((r: any) => ({
+    id: String(r.ID_ESTOQUE_MUNICOES || ''),
+    unidadeId: String(r.UNIDADE_ID_ESTOQUE_MUNICOES || ''),
+    unidadeNome: String(r.NOME_UNIDADES || 'Sem Unidade'),
+    calibreNome: String(r.NOME_CALIBRES || '—'),
+    fabricante: String(r.FABRICANTE_FINAL || '—'),
+    tipo: String(r.TIPO_FINAL || '—'),
+    peso: String(r.PESO_FINAL || ''),
+    lote: String(r.LOTE_MUNICAO || 'Não informado'),
+    anoFabricacao: r.ANO_FABRICACAO_MUNICAO ? String(r.ANO_FABRICACAO_MUNICAO) : '—',
+    destinacao: String(r.DESTINACAO_MUNICAO || 'Não informada'),
+    cofreCodigo: String(r.CODIGO_COFRES || '—'),
+    cofreDescricao: String(r.DESCRICAO_CURTA_COFRES || ''),
+    quantidade: Number(r.QUANTIDADE_ESTOQUE_MUNICOES || 0),
+    atualizadoEm: r.DATA_ATUALIZACAO_ESTOQUE_MUNICOES
+      ? formatDateTimeBr(new Date(r.DATA_ATUALIZACAO_ESTOQUE_MUNICOES)).slice(0, 10)
+      : '',
+    observacao: String(r.OBSERVACAO_ESTOQUE_MUNICAO || '').trim()
+  }));
+
+  if (calibreSpec.isTodos) return mapped;
+  return mapped.filter(item => calibreSpec.matcher(compactCalibreCode(item.calibreNome)));
+}
+
+function wrapCellLines(text: string, font: PDFFont, fontSize: number, maxWidth: number, maxLines = 6): string[] {
+  const clean = sanitizePdfText(text).replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return ['-'];
+  const words = clean.split(' ');
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
+      current = candidate;
+    } else {
+      if (current) lines.push(current);
+      if (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
+        let part = '';
+        for (const ch of word) {
+          if (font.widthOfTextAtSize(part + ch, fontSize) > maxWidth) {
+            if (part) lines.push(part);
+            part = ch;
+          } else {
+            part += ch;
+          }
+        }
+        current = part;
+      } else {
+        current = word;
+      }
+    }
+  }
+  if (current) lines.push(current);
+
+  if (lines.length <= maxLines) return lines;
+  const trimmed = lines.slice(0, maxLines);
+  trimmed[maxLines - 1] = fitTextToWidth(`${trimmed[maxLines - 1]}...`, font, fontSize, maxWidth);
+  return trimmed;
+}
+
+function formatIntBr(n: number): string {
+  try {
+    return new Intl.NumberFormat('pt-BR').format(Math.round(n));
+  } catch {
+    return String(Math.round(n));
+  }
+}
+
+async function generateMunicoesPdfBuffer(params: {
+  calibreSpec: MunicaoCalibreSpec;
+  unidadeLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp: string;
+  telefoneUsuario: string;
+  logoDataUri: string | null;
+  records: MunicaoStockRecord[];
+}): Promise<Buffer> {
+  const doc = await PDFDocument.create();
+  doc.setTitle(`Relação de Munições (${params.calibreSpec.displayLabel}) - ${params.unidadeLabel}`);
+  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
+  doc.setCreator('API Arsenal Make.com / WhatsApp');
+
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
+
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2;
+  const footerHeight = 32;
+
+  const totalLotes = params.records.length;
+  const totalQtd = params.records.reduce((s, r) => s + r.quantidade, 0);
+  const operacionalQtd = params.records
+    .filter(r => normalizeKey(r.destinacao).includes('OPERAC'))
+    .reduce((s, r) => s + r.quantidade, 0);
+  const treinamentoQtd = params.records
+    .filter(r => normalizeKey(r.destinacao).includes('TREIN'))
+    .reduce((s, r) => s + r.quantidade, 0);
+  const outrosQtd = Math.max(0, totalQtd - operacionalQtd - treinamentoQtd);
+
+  const byTypeMap = new Map<string, number>();
+  const byUnitMap = new Map<string, number>();
+  for (const r of params.records) {
+    const typeKey = [r.calibreNome, r.tipo && r.tipo !== '—' ? r.tipo : '', r.peso].filter(Boolean).join(' ');
+    byTypeMap.set(typeKey, (byTypeMap.get(typeKey) || 0) + r.quantidade);
+    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + r.quantidade);
+  }
+
+  const tiposResumo = Array.from(byTypeMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
+    .join('  |  ');
+
+  const unidadesResumo =
+    byUnitMap.size > 1
+      ? Array.from(byUnitMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
+          .join('  |  ')
+      : '';
+
+  const fixedColsWidth = 22 + 56 + 106 + 44 + 132 + 74 + 92 + 52;
+  const columns = [
+    { key: 'idx', label: '#', width: 22 },
+    { key: 'unidade', label: 'UNIDADE', width: 56 },
+    { key: 'calibreTipo', label: 'CALIBRE / TIPO / PESO', width: 106 },
+    { key: 'fab', label: 'FAB.', width: 44 },
+    { key: 'loteAno', label: 'LOTE / ANO FAB.', width: 132 },
+    { key: 'destinacao', label: 'DESTINACAO', width: 74 },
+    { key: 'cofre', label: 'COFRE / LOCAL', width: 92 },
+    { key: 'qtd', label: 'QTD', width: 52 },
+    { key: 'obs', label: 'OBSERVACOES / ATUALIZACAO', width: contentWidth - fixedColsWidth }
+  ];
+
+  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 70,
+      width: pageWidth,
+      height: 70,
+      color: rgb(0.06, 0.1, 0.17)
+    });
+    page.drawRectangle({
+      x: 0,
+      y: pageHeight - 73,
+      width: pageWidth,
+      height: 3,
+      color: rgb(0.85, 0.65, 0.13)
+    });
+
+    let titleStartX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(46, 46);
+      page.drawImage(logoImage, {
+        x: marginX,
+        y: pageHeight - 58 + (46 - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      titleStartX = marginX + 56;
+    }
+
+    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
+      x: titleStartX,
+      y: pageHeight - 24,
+      size: 8.5,
+      font: fontBold,
+      color: rgb(0.96, 0.78, 0.25)
+    });
+
+    const headerTitle = `RELACAO DE MUNICOES (${params.calibreSpec.displayLabel.toUpperCase()}) - ${params.unidadeLabel.toUpperCase()}`;
+    page.drawText(
+      fitTextToWidth(headerTitle, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
+      {
+        x: titleStartX,
+        y: pageHeight - 44,
+        size: 13.5,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      }
+    );
+
+    page.drawText(
+      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
+      {
+        x: titleStartX,
+        y: pageHeight - 60,
+        size: 8,
+        font: fontRegular,
+        color: rgb(0.82, 0.86, 0.92)
+      }
+    );
+
+    let y = pageHeight - 86;
+
+    if (isFirstPage) {
+      const cardHeight = unidadesResumo ? 72 : 58;
+      page.drawRectangle({
+        x: marginX,
+        y: y - cardHeight,
+        width: contentWidth,
+        height: cardHeight,
+        color: rgb(0.95, 0.96, 0.98),
+        borderColor: rgb(0.82, 0.85, 0.9),
+        borderWidth: 0.75
+      });
+
+      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
+      const metaLine2 = `Total em Estoque: ${formatIntBr(totalQtd)} municoes (${totalLotes} lote(s))   |   Operacional: ${formatIntBr(operacionalQtd)}   |   Treinamento: ${formatIntBr(treinamentoQtd)}   |   Reserva/Outros: ${formatIntBr(outrosQtd)}`;
+      const metaLine3 = `Subtotais por Tipo: ${tiposResumo || '-'}`;
+
+      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 14,
+        size: 8.2,
+        font: fontRegular,
+        color: rgb(0.15, 0.2, 0.28)
+      });
+      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.8, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 29,
+        size: 8.8,
+        font: fontBold,
+        color: rgb(0.06, 0.25, 0.2)
+      });
+      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
+        x: marginX + 8,
+        y: y - 44,
+        size: 7.8,
+        font: fontRegular,
+        color: rgb(0.2, 0.25, 0.34)
+      });
+      if (unidadesResumo) {
+        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
+          x: marginX + 8,
+          y: y - 59,
+          size: 7.8,
+          font: fontBold,
+          color: rgb(0.12, 0.18, 0.32)
+        });
+      }
+      y -= cardHeight + 10;
+    }
+
+    const headerRowHeight = 20;
+    page.drawRectangle({
+      x: marginX,
+      y: y - headerRowHeight,
+      width: contentWidth,
+      height: headerRowHeight,
+      color: rgb(0.11, 0.17, 0.27)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      page.drawText(col.label, {
+        x: colX + 4,
+        y: y - 13.5,
+        size: 7.3,
+        font: fontBold,
+        color: rgb(1, 1, 1)
+      });
+      colX += col.width;
+    }
+
+    return y - headerRowHeight;
+  };
+
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let cursorY = drawPageHeader(page, true);
+  const fontSize = 7.4;
+  const lineHeight = 9.8;
+
+  params.records.forEach((rec, index) => {
+    const calibreTipoText = [rec.calibreNome, rec.tipo && rec.tipo !== '—' ? rec.tipo : '', rec.peso]
+      .filter(Boolean)
+      .join(' - ');
+    const loteAnoText =
+      rec.anoFabricacao && rec.anoFabricacao !== '—'
+        ? `${rec.lote} (Ano: ${rec.anoFabricacao})`
+        : rec.lote;
+    const cofreText = rec.cofreDescricao
+      ? `${rec.cofreCodigo} (${rec.cofreDescricao})`
+      : rec.cofreCodigo;
+    const obsText = [
+      rec.observacao,
+      rec.atualizadoEm ? `Atualizado: ${rec.atualizadoEm}` : ''
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    const rawValues: Record<string, string> = {
+      idx: String(index + 1),
+      unidade: rec.unidadeNome,
+      calibreTipo: calibreTipoText || '-',
+      fab: rec.fabricante,
+      loteAno: loteAnoText,
+      destinacao: rec.destinacao,
+      cofre: cofreText,
+      qtd: formatIntBr(rec.quantidade),
+      obs: obsText || '-'
+    };
+
+    const wrappedByCol: Record<string, string[]> = {};
+    let maxLineCount = 1;
+    for (const col of columns) {
+      const f = col.key === 'qtd' ? fontBold : fontRegular;
+      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 6);
+      wrappedByCol[col.key] = lines;
+      if (lines.length > maxLineCount) maxLineCount = lines.length;
+    }
+
+    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
+    if (cursorY - rowHeight < footerHeight + 12) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawPageHeader(page, false);
+    }
+
+    const rowBottomY = cursorY - rowHeight;
+    if (index % 2 === 1) {
+      page.drawRectangle({
+        x: marginX,
+        y: rowBottomY,
+        width: contentWidth,
+        height: rowHeight,
+        color: rgb(0.97, 0.98, 0.99)
+      });
+    }
+    page.drawLine({
+      start: { x: marginX, y: rowBottomY },
+      end: { x: marginX + contentWidth, y: rowBottomY },
+      thickness: 0.4,
+      color: rgb(0.86, 0.89, 0.93)
+    });
+
+    let colX = marginX;
+    for (const col of columns) {
+      const lines = wrappedByCol[col.key] || ['-'];
+      const f = col.key === 'qtd' ? fontBold : fontRegular;
+      lines.forEach((line, lineIdx) => {
+        page.drawText(line, {
+          x: colX + 4,
+          y: cursorY - 10.5 - lineIdx * lineHeight,
+          size: fontSize,
+          font: f,
+          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
+        });
+      });
+      colX += col.width;
+    }
+
+    cursorY = rowBottomY;
+  });
+
+  // Linha de total geral ao final da tabela
+  if (cursorY - 22 < footerHeight + 10) {
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawPageHeader(page, false);
+  }
+  const totalBarY = cursorY - 20;
+  page.drawRectangle({
+    x: marginX,
+    y: totalBarY,
+    width: contentWidth,
+    height: 20,
+    color: rgb(0.9, 0.94, 0.97),
+    borderColor: rgb(0.75, 0.8, 0.86),
+    borderWidth: 0.6
+  });
+  page.drawText(
+    `TOTAL GERAL (${params.calibreSpec.displayLabel.toUpperCase()} - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`,
+    {
+      x: marginX + 8,
+      y: totalBarY + 6,
+      size: 8.3,
+      font: fontBold,
+      color: rgb(0.06, 0.16, 0.26)
+    }
+  );
+
+  // Rodapé institucional em todas as páginas
+  const pages = doc.getPages();
+  const totalPages = pages.length;
+  pages.forEach((p, idx) => {
+    p.drawLine({
+      start: { x: marginX, y: 26 },
+      end: { x: pageWidth - marginX, y: 26 },
+      thickness: 0.6,
+      color: rgb(0.78, 0.82, 0.87)
+    });
+    p.drawText(
+      `Sistema Arsenal PCMG - Relatorio de Municoes (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
+      {
+        x: marginX,
+        y: 13,
+        size: 7.5,
+        font: fontRegular,
+        color: rgb(0.42, 0.47, 0.54)
+      }
+    );
+    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
+    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
+    p.drawText(pageLabel, {
+      x: pageWidth - marginX - labelW,
+      y: 13,
+      size: 7.5,
+      font: fontBold,
+      color: rgb(0.3, 0.35, 0.42)
+    });
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
 }
 
 // Rota HTTPS pública de entrega do PDF gerado (com token criptográfico de 128 bits e expiração automática)
