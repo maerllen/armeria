@@ -280,15 +280,93 @@ interface ResolvedUnitSelection {
   logoDataUri: string | null;
 }
 
+type WeaponReportKey = 'fuzis' | 'submetralhadoras' | 'espingardas';
+
+interface WeaponReportSpec {
+  key: WeaponReportKey;
+  tipoRelatorioDb: string;
+  idPrefix: string;
+  filePrefix: string;
+  sqlLikePattern: string;
+  tituloPdfUpper: string;
+  tituloDoc: string;
+  pluralLabel: string;
+  pluralLower: string;
+  singularLower: string;
+  semRegistrosMsg: string;
+  acessoNegadoAlvo: string;
+}
+
+const WEAPON_REPORT_SPECS: Record<WeaponReportKey, WeaponReportSpec> = {
+  fuzis: {
+    key: 'fuzis',
+    tipoRelatorioDb: 'FUZIS',
+    idPrefix: 'rel-fuz',
+    filePrefix: 'relacao-fuzis',
+    sqlLikePattern: '%fuzil%',
+    tituloPdfUpper: 'RELACAO DE FUZIS',
+    tituloDoc: 'Relação de Fuzis',
+    pluralLabel: 'Fuzis',
+    pluralLower: 'fuzis',
+    singularLower: 'fuzil(is)',
+    semRegistrosMsg: 'Não foram encontrados fuzis para a unidade selecionada.',
+    acessoNegadoAlvo: 'os fuzis'
+  },
+  submetralhadoras: {
+    key: 'submetralhadoras',
+    tipoRelatorioDb: 'SUBMETRALHADORAS',
+    idPrefix: 'rel-sub',
+    filePrefix: 'relacao-submetralhadoras',
+    sqlLikePattern: '%submetralhadora%',
+    tituloPdfUpper: 'RELACAO DE SUBMETRALHADORAS',
+    tituloDoc: 'Relação de Submetralhadoras',
+    pluralLabel: 'Submetralhadoras',
+    pluralLower: 'submetralhadoras',
+    singularLower: 'submetralhadora(s)',
+    semRegistrosMsg: 'Não foram encontradas submetralhadoras para a unidade selecionada.',
+    acessoNegadoAlvo: 'as submetralhadoras'
+  },
+  espingardas: {
+    key: 'espingardas',
+    tipoRelatorioDb: 'ESPINGARDAS',
+    idPrefix: 'rel-esp',
+    filePrefix: 'relacao-espingardas',
+    sqlLikePattern: '%espingarda%',
+    tituloPdfUpper: 'RELACAO DE ESPINGARDAS',
+    tituloDoc: 'Relação de Espingardas',
+    pluralLabel: 'Espingardas',
+    pluralLower: 'espingardas',
+    singularLower: 'espingarda(s)',
+    semRegistrosMsg: 'Não foram encontradas espingardas para a unidade selecionada.',
+    acessoNegadoAlvo: 'as espingardas'
+  }
+};
+
+function resolveWeaponReportSpec(raw?: string | null): WeaponReportSpec | null {
+  const norm = normalizeKey(raw).replace(/[^A-Z0-9]/g, '');
+  if (!norm) return null;
+  if (norm === 'FUZIS' || norm === 'FUZIL') return WEAPON_REPORT_SPECS.fuzis;
+  if (norm === 'SUBMETRALHADORAS' || norm === 'SUBMETRALHADORA' || norm === 'SUBMET' || norm === 'SMT') {
+    return WEAPON_REPORT_SPECS.submetralhadoras;
+  }
+  if (norm === 'ESPINGARDAS' || norm === 'ESPINGARDA' || norm === 'ESP') {
+    return WEAPON_REPORT_SPECS.espingardas;
+  }
+  return null;
+}
+
 function stripInteractiveUnitPrefix(raw: string): string {
-  return normalizeKey(raw).replace(/^(?:FUZIS?|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i, '').trim();
+  return normalizeKey(raw)
+    .replace(/^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i, '')
+    .trim();
 }
 
 async function resolveUnitSelectionForUser(
   pool: any,
   user: ResolvedWhatsappUser,
   unidadeRaw: string,
-  unidadeCodigoRaw: string
+  unidadeCodigoRaw: string,
+  weaponSpec: WeaponReportSpec
 ): Promise<{ ok: true; selection: ResolvedUnitSelection } | { ok: false; status: number; codigo: string; mensagem: string }> {
   const candidate = stripInteractiveUnitPrefix(unidadeCodigoRaw || unidadeRaw);
   const candidateAlt = stripInteractiveUnitPrefix(unidadeRaw || unidadeCodigoRaw);
@@ -372,7 +450,7 @@ async function resolveUnitSelectionForUser(
       ok: false,
       status: 403,
       codigo: 'ACESSO_NEGADO_UNIDADE',
-      mensagem: `Usuário sem permissão para consultar os fuzis da unidade ${matchedName}.`
+      mensagem: `Usuário sem permissão para consultar ${weaponSpec.acessoNegadoAlvo} da unidade ${matchedName}.`
     };
   }
 
@@ -399,7 +477,11 @@ async function resolveUnitSelectionForUser(
   };
 }
 
-async function queryFuzisByUnit(pool: any, unitIds: string[]): Promise<FuzilRecord[]> {
+async function queryArmasByTypeAndUnit(
+  pool: any,
+  weaponSpec: WeaponReportSpec,
+  unitIds: string[]
+): Promise<FuzilRecord[]> {
   let sql = `
     SELECT
       a.ID_ARMAS,
@@ -420,7 +502,7 @@ async function queryFuzisByUnit(pool: any, unitIds: string[]): Promise<FuzilReco
     LEFT JOIN COFRES c ON c.ID_COFRES = a.COFRE_ID_ARMAS
     WHERE LOWER(TRIM(a.TIPO_ARMAS)) LIKE ?
   `;
-  const params: any[] = ['%fuzil%'];
+  const params: any[] = [weaponSpec.sqlLikePattern];
 
   if (unitIds.length > 0) {
     const placeholders = unitIds.map(() => '?').join(', ');
@@ -474,7 +556,8 @@ function fitTextToWidth(text: string, font: PDFFont, fontSize: number, maxWidth:
   return `${out}...`;
 }
 
-async function generateFuzisPdfBuffer(params: {
+async function generateArmasPdfBuffer(params: {
+  weaponSpec: WeaponReportSpec;
   unidadeLabel: string;
   solicitacaoId: string;
   geradoEm: Date;
@@ -485,7 +568,7 @@ async function generateFuzisPdfBuffer(params: {
   records: FuzilRecord[];
 }): Promise<Buffer> {
   const doc = await PDFDocument.create();
-  doc.setTitle(`Relação de Fuzis - ${params.unidadeLabel}`);
+  doc.setTitle(`${params.weaponSpec.tituloDoc} - ${params.unidadeLabel}`);
   doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
   doc.setCreator('API Arsenal Make.com / WhatsApp');
 
@@ -554,7 +637,7 @@ async function generateFuzisPdfBuffer(params: {
     });
 
     page.drawText(
-      fitTextToWidth(`RELACAO DE FUZIS - ${params.unidadeLabel.toUpperCase()}`, fontBold, 14, contentWidth - (titleStartX - marginX) - 180),
+      fitTextToWidth(`${params.weaponSpec.tituloPdfUpper} - ${params.unidadeLabel.toUpperCase()}`, fontBold, 14, contentWidth - (titleStartX - marginX) - 180),
       {
         x: titleStartX,
         y: pageHeight - 44,
@@ -590,7 +673,7 @@ async function generateFuzisPdfBuffer(params: {
       });
 
       const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
-      const metaLine2 = `Total de Fuzis: ${totalCount}   |   No Cofre: ${noCofreCount}   |   Acautelados: ${acauteladoCount}   |   Outros / Manutencao: ${outrosCount}`;
+      const metaLine2 = `Total de ${params.weaponSpec.pluralLabel}: ${totalCount}   |   No Cofre: ${noCofreCount}   |   Acauteladas: ${acauteladoCount}   |   Outros / Manutencao: ${outrosCount}`;
 
       page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.5, contentWidth - 16), {
         x: marginX + 8,
@@ -740,6 +823,7 @@ async function logSolicitacaoDb(
   entry: {
     idRegistro: string;
     solicitacaoId: string;
+    tipoRelatorio?: string;
     unidadeSolicitada: string;
     unidadeCodigo: string;
     unidadeIdResolvida?: string | null;
@@ -764,10 +848,11 @@ async function logSolicitacaoDb(
         UNIDADE_ID_RESOLVIDA, TELEFONE_USUARIO, USUARIO_ID, USUARIO_NOME, USUARIO_MASP,
         STATUS, ARQUIVO_NOME, ARQUIVO_TOKEN, ARQUIVO_CAMINHO, TOTAL_REGISTROS,
         EXPIRA_EM, DATA_SOLICITACAO, DATA_GERACAO, ERRO_CODIGO, ERRO_MENSAGEM, IP_ORIGEM
-      ) VALUES (?, ?, 'FUZIS', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?)`,
       [
         entry.idRegistro,
         entry.solicitacaoId.slice(0, 128),
+        String(entry.tipoRelatorio || 'FUZIS').slice(0, 32),
         entry.unidadeSolicitada.slice(0, 128),
         entry.unidadeCodigo.slice(0, 64),
         entry.unidadeIdResolvida || null,
@@ -795,8 +880,11 @@ async function logSolicitacaoDb(
 export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: RelatoriosApiDeps): void {
   const { getPool, insertAuditLog } = deps;
 
-  // POST /api/relatorios/fuzis — Integração Make.com / Chatbot WhatsApp
-  apiRouter.post('/relatorios/fuzis', async (req: Request, res: Response) => {
+  const handleWeaponReportRequest = async (
+    req: Request,
+    res: Response,
+    fixedWeaponKey?: WeaponReportKey
+  ) => {
     const pool = getPool();
     const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
 
@@ -817,7 +905,20 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       const body = req.body && typeof req.body === 'object' ? req.body : {};
-      const idRegistro = `rel-fuz-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const weaponSpec = fixedWeaponKey
+        ? WEAPON_REPORT_SPECS[fixedWeaponKey]
+        : resolveWeaponReportSpec(String(body.tipo_arma || body.tipo || body.categoria || ''));
+
+      if (!weaponSpec) {
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'TIPO_ARMA_INVALIDO',
+          mensagem: 'Informe "tipo_arma" válido: "fuzis", "submetralhadoras" ou "espingardas".'
+        });
+      }
+
+      const idRegistro = `${weaponSpec.idPrefix}-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
       const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
       const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
       const rawPhoneForLog = normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
@@ -829,6 +930,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: rawUnidadeForLog,
           unidadeCodigo: rawCodigoForLog,
           telefoneUsuario: rawPhoneForLog,
@@ -859,6 +961,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: 'NAO_INFORMADA',
           unidadeCodigo: 'NAO_INFORMADA',
           telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
@@ -880,6 +983,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: unidade || unidadeCodigo,
           unidadeCodigo,
           telefoneUsuario: telefoneDigits || 'INVALIDO',
@@ -901,6 +1005,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: unidade || unidadeCodigo,
           unidadeCodigo,
           telefoneUsuario: telefoneDigits,
@@ -944,6 +1049,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: unidade || unidadeCodigo,
           unidadeCodigo,
           telefoneUsuario: telefoneDigits,
@@ -962,11 +1068,12 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       // 5. Validar unidade recebida e permissão de acesso por unidade
-      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo);
+      const unitResolution = await resolveUnitSelectionForUser(pool, user, unidade, unidadeCodigo, weaponSpec);
       if ('codigo' in unitResolution) {
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: unidade || unidadeCodigo,
           unidadeCodigo,
           telefoneUsuario: telefoneDigits,
@@ -987,13 +1094,14 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       const { selection } = unitResolution;
 
-      // 6. Buscar registros de fuzis na tabela ARMAS
-      const records = await queryFuzisByUnit(pool, selection.unitIds);
+      // 6. Buscar registros da categoria de arma selecionada na tabela ARMAS
+      const records = await queryArmasByTypeAndUnit(pool, weaponSpec, selection.unitIds);
 
       if (records.length === 0) {
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: selection.displayName,
           unidadeCodigo: selection.fileSlug,
           unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
@@ -1007,8 +1115,8 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
         await insertAuditLog(
           'WhatsApp / API Relatórios',
-          'Relatório de Fuzis (Sem Registros)',
-          `Solicitação ${solicitacaoId} via Make.com para unidade ${selection.displayName} — nenhum fuzil encontrado.`,
+          `Relatório de ${weaponSpec.pluralLabel} (Sem Registros)`,
+          `Solicitação ${solicitacaoId} via Make.com para unidade ${selection.displayName} — nenhum registro de ${weaponSpec.pluralLower} encontrado.`,
           { id: user.id, name: user.name, masp: user.masp, role: user.role },
           clientIp
         );
@@ -1016,15 +1124,16 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         return res.status(200).json({
           sucesso: true,
           status: 'sem_registros',
+          tipo_arma: weaponSpec.key,
           unidade: selection.displayName,
-          mensagem: 'Não foram encontrados fuzis para a unidade selecionada.'
+          mensagem: weaponSpec.semRegistrosMsg
         });
       }
 
       // 7. Gerar PDF e salvar em diretório confinado acessível por HTTPS
       const geradoEm = new Date();
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
-      const arquivoNome = `relacao-fuzis-${selection.fileSlug}.pdf`;
+      const arquivoNome = `${weaponSpec.filePrefix}-${selection.fileSlug}.pdf`;
       const arquivoToken = crypto.randomBytes(16).toString('hex');
       const storedFilename = `${arquivoToken}__${arquivoNome}`;
       const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
@@ -1035,7 +1144,8 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       let pdfBuffer: Buffer;
       try {
-        pdfBuffer = await generateFuzisPdfBuffer({
+        pdfBuffer = await generateArmasPdfBuffer({
+          weaponSpec,
           unidadeLabel: selection.displayName,
           solicitacaoId,
           geradoEm,
@@ -1048,10 +1158,11 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         fs.mkdirSync(PDF_STORAGE_DIR, { recursive: true });
         fs.writeFileSync(targetPath, pdfBuffer);
       } catch (pdfErr: any) {
-        console.error('[Relatorios API] Erro ao gerar/salvar PDF de fuzis:', pdfErr?.message);
+        console.error(`[Relatorios API] Erro ao gerar/salvar PDF de ${weaponSpec.pluralLower}:`, pdfErr?.message);
         await logSolicitacaoDb(pool, {
           idRegistro,
           solicitacaoId,
+          tipoRelatorio: weaponSpec.tipoRelatorioDb,
           unidadeSolicitada: selection.displayName,
           unidadeCodigo: selection.fileSlug,
           unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
@@ -1078,6 +1189,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       await logSolicitacaoDb(pool, {
         idRegistro,
         solicitacaoId,
+        tipoRelatorio: weaponSpec.tipoRelatorioDb,
         unidadeSolicitada: selection.displayName,
         unidadeCodigo: selection.fileSlug,
         unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
@@ -1095,8 +1207,8 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       await insertAuditLog(
         'WhatsApp / API Relatórios',
-        'Gerar PDF de Fuzis (Make.com)',
-        `Solicitação ${solicitacaoId}: ${records.length} fuzil(is) da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
+        `Gerar PDF de ${weaponSpec.pluralLabel} (Make.com)`,
+        `Solicitação ${solicitacaoId}: ${records.length} ${weaponSpec.singularLower} da unidade ${selection.displayName} — arquivo ${arquivoNome}`,
         { id: user.id, name: user.name, masp: user.masp, role: user.role },
         clientIp
       );
@@ -1104,6 +1216,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       return res.status(200).json({
         sucesso: true,
         status: 'concluido',
+        tipo_arma: weaponSpec.key,
         unidade: selection.displayName,
         unidade_codigo: selection.fileSlug,
         solicitacao_id: solicitacaoId,
@@ -1114,7 +1227,7 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         expira_em: expiraEm.toISOString()
       });
     } catch (err: any) {
-      console.error('[Relatorios API] Erro inesperado em POST /api/relatorios/fuzis:', err?.message);
+      console.error('[Relatorios API] Erro inesperado em POST /api/relatorios:', err?.message);
       return res.status(500).json({
         sucesso: false,
         status: 'erro',
@@ -1122,7 +1235,23 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         mensagem: 'Não foi possível gerar o relatório.'
       });
     }
-  });
+  };
+
+  // Endpoints dedicados por tipo de arma (Make.com / Chatbot WhatsApp)
+  apiRouter.post(['/relatorios/fuzis', '/relatorios/fuzil'], (req: Request, res: Response) =>
+    handleWeaponReportRequest(req, res, 'fuzis')
+  );
+  apiRouter.post(['/relatorios/submetralhadoras', '/relatorios/submetralhadora'], (req: Request, res: Response) =>
+    handleWeaponReportRequest(req, res, 'submetralhadoras')
+  );
+  apiRouter.post(['/relatorios/espingardas', '/relatorios/espingarda'], (req: Request, res: Response) =>
+    handleWeaponReportRequest(req, res, 'espingardas')
+  );
+
+  // Endpoint dinâmico opcional (recebe tipo_arma: "fuzis" | "submetralhadoras" | "espingardas")
+  apiRouter.post('/relatorios/armas', (req: Request, res: Response) =>
+    handleWeaponReportRequest(req, res)
+  );
 }
 
 // Rota HTTPS pública de entrega do PDF gerado (com token criptográfico de 128 bits e expiração automática)

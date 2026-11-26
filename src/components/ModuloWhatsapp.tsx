@@ -363,6 +363,14 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     return `${computedBasePublicUrl}/api/relatorios/fuzis`;
   }, [computedBasePublicUrl]);
 
+  const computedRelatorioSubmetralhadorasUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/submetralhadoras`;
+  }, [computedBasePublicUrl]);
+
+  const computedRelatorioEspingardasUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/espingardas`;
+  }, [computedBasePublicUrl]);
+
   const computedTermsUrl = useMemo(() => {
     return `${computedBasePublicUrl}/termos-de-servico`;
   }, [computedBasePublicUrl]);
@@ -1735,7 +1743,9 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
 
                 <div className="space-y-1.5 text-[11px]">
                   {[
-                    { key: 'mkRelFuzis', method: 'POST', label: 'Gerar PDF de Relação de Fuzis por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioFuzisUrl },
+                    { key: 'mkRelFuzis', method: 'POST', label: 'Gerar PDF de Fuzis por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioFuzisUrl },
+                    { key: 'mkRelSub', method: 'POST', label: 'Gerar PDF de Submetralhadoras por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioSubmetralhadorasUrl },
+                    { key: 'mkRelEsp', method: 'POST', label: 'Gerar PDF de Espingardas por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioEspingardasUrl },
                     { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
                     { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
                     { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }
