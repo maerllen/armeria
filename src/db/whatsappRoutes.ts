@@ -64,7 +64,7 @@ function encryptSecret(plain: string): string {
   return `v1:${iv.toString('hex')}:${tag.toString('hex')}:${encrypted.toString('hex')}`;
 }
 
-function decryptSecret(encoded?: string | null): string {
+export function decryptSecret(encoded?: string | null): string {
   const raw = String(encoded || '').trim();
   if (!raw) return '';
   if (!raw.startsWith('v1:')) return raw;

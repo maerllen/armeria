@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, PDFImage } from 'pdf-lib';
 import { resolveWhatsappUserContext, PermittedUnit, ResolvedWhatsappUser } from './whatsappBotEngine';
+import { decryptSecret } from './whatsappRoutes';
 
 interface RelatoriosApiDeps {
   getPool: () => any;
@@ -25,38 +26,9 @@ const RATE_LIMIT_MAX_PER_PHONE = 10;
 
 let schemaReady = false;
 let lastCleanupAt = 0;
-let cachedEncryptionKey: Buffer | null = null;
 
 const ipRateBuckets = new Map<string, number[]>();
 const phoneRateBuckets = new Map<string, number[]>();
-
-function getWhatsappEncryptionKey(): Buffer {
-  if (cachedEncryptionKey) return cachedEncryptionKey;
-  const seed =
-    process.env.WHATSAPP_ENCRYPTION_KEY?.trim() ||
-    process.env.DB_PASSWORD?.trim() ||
-    process.env.DATABASE_URL?.trim() ||
-    'armeria-whatsapp-internal-key';
-  cachedEncryptionKey = crypto.scryptSync(seed, 'pcmg-armeria-whatsapp-v1', 32);
-  return cachedEncryptionKey;
-}
-
-function decryptWhatsappSecret(encoded?: string | null): string {
-  if (!encoded) return '';
-  if (!encoded.startsWith('enc:v1:')) return encoded;
-  try {
-    const parts = encoded.split(':');
-    if (parts.length !== 5) return '';
-    const iv = Buffer.from(parts[2], 'base64');
-    const tag = Buffer.from(parts[3], 'base64');
-    const data = Buffer.from(parts[4], 'base64');
-    const decipher = crypto.createDecipheriv('aes-256-gcm', getWhatsappEncryptionKey(), iv);
-    decipher.setAuthTag(tag);
-    return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
-  } catch {
-    return '';
-  }
-}
 
 function timingSafeEqualString(a: string, b: string): boolean {
   const bufA = Buffer.from(String(a || ''), 'utf8');
@@ -250,7 +222,7 @@ async function verifyRelatoriosApiToken(
       [DEFAULT_WHATSAPP_CONFIG_ID]
     );
     if (rows?.[0]) {
-      makeApiKey = decryptWhatsappSecret(rows[0].MAKE_API_KEY_ENC);
+      makeApiKey = decryptSecret(rows[0].MAKE_API_KEY_ENC);
       callbackUrlPublica = rows[0].CALLBACK_URL_PUBLICA || null;
     }
   } catch {
