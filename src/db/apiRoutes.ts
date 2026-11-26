@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getPool, dbConfig } from './mysql';
 import { registerWhatsappRoutes } from './whatsappRoutes';
 import { registerDesempenhoRoutes } from './desempenhoRoutes';
+import { registerRelatoriosArmasApiRoutes } from './relatoriosArmasApi';
 import crypto from 'crypto';
 
 export const apiRouter = Router();
@@ -24305,6 +24306,9 @@ registerWhatsappRoutes(apiRouter, { getPool, insertAuditLog });
 
 // --- MÓDULO RELATÓRIOS: ÍNDICES DE DESEMPENHO (FÍSICO E TÁTICO) ---
 registerDesempenhoRoutes(apiRouter, { getPool, insertAuditLog });
+
+// --- API DE RELATÓRIOS PDF DE ARMAMENTO (INTEGRAÇÃO MAKE.COM / WHATSAPP) ---
+registerRelatoriosArmasApiRoutes(apiRouter, { getPool, insertAuditLog });
 
 
 

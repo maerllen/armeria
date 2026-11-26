@@ -359,6 +359,10 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     return `${computedBasePublicUrl}/api/whatsapp/make/status`;
   }, [computedBasePublicUrl]);
 
+  const computedRelatorioFuzisUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/fuzis`;
+  }, [computedBasePublicUrl]);
+
   const computedTermsUrl = useMemo(() => {
     return `${computedBasePublicUrl}/termos-de-servico`;
   }, [computedBasePublicUrl]);
@@ -1731,6 +1735,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
 
                 <div className="space-y-1.5 text-[11px]">
                   {[
+                    { key: 'mkRelFuzis', method: 'POST', label: 'Gerar PDF de Relação de Fuzis por Unidade (Authorization: Bearer <API Key>)', url: computedRelatorioFuzisUrl },
                     { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
                     { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
                     { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }

@@ -5,8 +5,9 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { createServer as createViteServer } from 'vite';
-import { testConnection, initializeDatabaseSchema, dbConfig } from './src/db/mysql';
+import { testConnection, initializeDatabaseSchema, dbConfig, getPool } from './src/db/mysql';
 import { apiRouter } from './src/db/apiRoutes';
+import { registerRelatoriosArquivosRoute } from './src/db/relatoriosArmasApi';
 import { renderTermosDeServicoHtml, renderPoliticaDePrivacidadeHtml } from './src/server/legalPages';
 
 async function startServer() {
@@ -28,6 +29,9 @@ async function startServer() {
 
   // Mount MySQL CRUD endpoints
   app.use('/api', apiRouter);
+
+  // Mount HTTPS PDF delivery route for Make.com / WhatsApp reports
+  registerRelatoriosArquivosRoute(app, { getPool });
 
   // API Routes
   app.get('/api/health', (req, res) => {
