@@ -154,6 +154,8 @@ function sanitizePublicBaseUrl(raw?: string | null): string {
   }
 }
 
+const DEFAULT_PRODUCTION_PUBLIC_URL = 'https://maroon-moose-392087.hostingersite.com';
+
 function resolvePublicHttpsBaseUrl(req: Request, cfgCallbackUrl?: string | null): string {
   const fromConfig = sanitizePublicBaseUrl(
     String(cfgCallbackUrl || '').replace(/\/api\/whatsapp\/webhook$/i, '')
@@ -167,12 +169,11 @@ function resolvePublicHttpsBaseUrl(req: Request, cfgCallbackUrl?: string | null)
     return fromEnv.replace(/^http:\/\//i, 'https://');
   }
 
-  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
   const host = String(req.headers['x-forwarded-host'] || req.get('host') || '').split(',')[0].trim();
-  if (!host) return 'https://localhost:3000';
-  const isLocal = /^localhost(?::\d+)?$|^127\.0\.0\.1(?::\d+)?$/i.test(host);
-  const proto = isLocal ? (forwardedProto || req.protocol || 'http') : 'https';
-  return `${proto}://${host}`;
+  if (!host || /^localhost(?::\d+)?$|^127\.0\.0\.1(?::\d+)?$/i.test(host)) {
+    return DEFAULT_PRODUCTION_PUBLIC_URL;
+  }
+  return `https://${host}`;
 }
 
 async function ensureRelatoriosApiSchema(pool: any): Promise<void> {

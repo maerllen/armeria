@@ -339,7 +339,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
   const computedBasePublicUrl = useMemo(() => {
     const raw = formCallbackPublica.trim()
       ? formCallbackPublica.trim().replace(/\/+$/, '').replace(/\/api\/whatsapp\/webhook$/i, '')
-      : window.location.origin;
+      : 'https://maroon-moose-392087.hostingersite.com';
     return raw;
   }, [formCallbackPublica]);
 
