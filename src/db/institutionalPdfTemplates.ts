@@ -4320,8 +4320,10 @@ export interface SystemDesempenhoMarcadorPdf {
   categoria: DesempenhoCategoriaPdf;
   tipoMarca?: string | null;
   unidadeMedida?: string | null;
+  valorReferencia?: number | null;
   usaTempo: boolean;
   tempoAprovacaoSeg?: number | null;
+  tempoAprovacaoModo?: 'MENOR_IGUAL' | 'MAIOR_IGUAL' | null;
   notaMin: number;
   notaMax: number;
   notaAprovacao: number;
@@ -5608,12 +5610,15 @@ export async function generateSystemFichaDesempenhoUnidadePdf(
 
       const tipoCol =
         params.categoria === 'FISICO'
-          ? [m.tipoMarca, m.unidadeMedida].filter(Boolean).join(' / ') || 'Fisico'
+          ? m.valorReferencia != null
+            ? `${m.tipoMarca || 'Fisico'} / ${fmtNumBrPdf(m.valorReferencia)} ${m.unidadeMedida || ''}`.trim()
+            : [m.tipoMarca, m.unidadeMedida].filter(Boolean).join(' / ') || 'Fisico'
           : m.teveTiro
           ? `${m.tipoArma || 'Arma'}${m.quantidadeTiros ? ` (${m.quantidadeTiros} tiros)` : ''}`
           : 'Sem disparo';
+      const tempoCmp = m.tempoAprovacaoModo === 'MAIOR_IGUAL' ? '>=' : '<=';
       const metaCol = `>= ${fmtNumBrPdf(m.notaAprovacao)}/${fmtNumBrPdf(m.notaMax)} pts${
-        m.usaTempo && m.tempoAprovacaoSeg != null ? ` | <= ${fmtSecondsCompactPdf(m.tempoAprovacaoSeg)}` : ''
+        m.usaTempo && m.tempoAprovacaoSeg != null ? ` | ${tempoCmp} ${fmtSecondsCompactPdf(m.tempoAprovacaoSeg)}` : ''
       }`;
       const ty = y - 12;
 

@@ -11,11 +11,18 @@ import {
   DesempenhoMarcador,
   DesempenhoAtividade,
   DesempenhoGrupo,
-  DesempenhoResultado
+  DesempenhoResultado,
+  TempoAprovacaoModo,
+  FatorDistribuicaoNota
 } from '../types';
 import { storage } from '../services/storage';
 import { formatMasp } from '../utils/masks';
 import { getSafeProfilePhotoUrl } from '../utils/profilePhoto';
+import {
+  calculateDistributedScore,
+  evaluateDesempenhoApproval,
+  normalizeTempoAprovacaoModo
+} from '../utils/desempenhoScoring';
 import { TopLayerAlert } from './TopLayerAlert';
 import {
   UsuarioDesempenhoDashboard,
@@ -117,6 +124,11 @@ interface ParticipantAbsenceDraft {
   ausenciaInformada: '' | 'SIM' | 'NAO';
 }
 
+interface DraftDistributionTier {
+  valor: string;
+  pontos: string;
+}
+
 export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidadePanelProps> = ({
   currentUser,
   departments,
@@ -204,13 +216,20 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
   const [mNome, setMNome] = useState('');
   const [mTipoMarca, setMTipoMarca] = useState<TipoMarcaFisica>('Repetição');
   const [mUnidadeMedida, setMUnidadeMedida] = useState('repetições');
+  const [mValorReferencia, setMValorReferencia] = useState('');
   const [mUsaTempo, setMUsaTempo] = useState(true);
   const [mTempoMin, setMTempoMin] = useState('');
   const [mTempoMax, setMTempoMax] = useState('');
   const [mTempoAprov, setMTempoAprov] = useState('');
+  const [mTempoAprovModo, setMTempoAprovModo] = useState<TempoAprovacaoModo>('MENOR_IGUAL');
   const [mNotaMin, setMNotaMin] = useState('0');
   const [mNotaMax, setMNotaMax] = useState('10');
   const [mNotaAprov, setMNotaAprov] = useState('6');
+  const [mUsaDistribuicao, setMUsaDistribuicao] = useState(false);
+  const [mFatorDistribuicao, setMFatorDistribuicao] = useState<FatorDistribuicaoNota>('MARCA');
+  const [mRegrasDistribuicao, setMRegrasDistribuicao] = useState<DraftDistributionTier[]>([
+    { valor: '', pontos: '' }
+  ]);
   const [mDificuldade, setMDificuldade] = useState<DificuldadeDesempenho>('Médio');
   const [mTeveTiro, setMTeveTiro] = useState(false);
   const [mTipoArma, setMTipoArma] = useState<TipoArmaDesempenho>('Pistola');
@@ -343,7 +362,11 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
         const existing = userSavedList.find(r => r.marcadorId === m.id);
         nextDraft[key] = {
           valorMarca:
-            existing?.valorMarca !== undefined && existing?.valorMarca !== null ? String(existing.valorMarca) : '',
+            existing?.valorMarca !== undefined && existing?.valorMarca !== null
+              ? String(existing.valorMarca)
+              : !existing && m.usaDistribuicaoNota && m.fatorDistribuicao === 'TEMPO' && m.valorReferencia != null
+              ? String(m.valorReferencia)
+              : '',
           tempoInput:
             existing?.tempoSegundos !== undefined && existing?.tempoSegundos !== null
               ? secondsToInputString(existing.tempoSegundos)
@@ -373,13 +396,18 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNome('');
     setMTipoMarca('Repetição');
     setMUnidadeMedida(categoria === 'FISICO' ? 'repetições' : 'pontos');
+    setMValorReferencia('');
     setMUsaTempo(true);
     setMTempoMin('');
     setMTempoMax('');
     setMTempoAprov('');
+    setMTempoAprovModo('MENOR_IGUAL');
     setMNotaMin('0');
     setMNotaMax('10');
     setMNotaAprov('6');
+    setMUsaDistribuicao(false);
+    setMFatorDistribuicao('MARCA');
+    setMRegrasDistribuicao([{ valor: '', pontos: '' }]);
     setMDificuldade('Médio');
     setMTeveTiro(false);
     setMTipoArma('Pistola');
@@ -394,19 +422,46 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
     setMNome(m.nome);
     setMTipoMarca((m.tipoMarca as TipoMarcaFisica) || 'Repetição');
     setMUnidadeMedida(m.unidadeMedida || (m.categoria === 'FISICO' ? 'repetições' : 'pontos'));
+    setMValorReferencia(m.valorReferencia != null ? String(m.valorReferencia) : '');
     setMUsaTempo(m.usaTempo);
     setMTempoMin(secondsToInputString(m.tempoMinSegundos));
     setMTempoMax(secondsToInputString(m.tempoMaxSegundos));
     setMTempoAprov(secondsToInputString(m.tempoAprovacaoSegundos));
+    setMTempoAprovModo(normalizeTempoAprovacaoModo(m.tempoAprovacaoModo));
     setMNotaMin(String(m.notaMinima));
     setMNotaMax(String(m.notaMaxima));
     setMNotaAprov(String(m.notaAprovacao));
+    const hasDist = Boolean(m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0);
+    const fator: FatorDistribuicaoNota = m.fatorDistribuicao === 'TEMPO' ? 'TEMPO' : 'MARCA';
+    setMUsaDistribuicao(hasDist);
+    setMFatorDistribuicao(fator);
+    setMRegrasDistribuicao(
+      hasDist && m.regrasDistribuicao
+        ? m.regrasDistribuicao.map(r => ({
+            valor: fator === 'TEMPO' ? secondsToInputString(r.valor) : String(r.valor),
+            pontos: String(r.pontos)
+          }))
+        : [{ valor: '', pontos: '' }]
+    );
     setMDificuldade((m.dificuldade as DificuldadeDesempenho) || 'Médio');
     setMTeveTiro(m.teveTiro);
     setMTipoArma((m.tipoArma as TipoArmaDesempenho) || 'Pistola');
     setMQtdTiros(m.quantidadeTiros != null ? String(m.quantidadeTiros) : '10');
     setMDescricao(m.descricao || '');
     setMarkerModalOpen(true);
+  };
+
+  const handleSetNumDivisions = (countRaw: string) => {
+    const parsed = parseInt(countRaw.replace(/\D/g, ''), 10);
+    if (!Number.isFinite(parsed)) return;
+    const count = Math.max(1, Math.min(30, parsed));
+    setMRegrasDistribuicao(prev => {
+      if (prev.length === count) return prev;
+      if (prev.length > count) return prev.slice(0, count);
+      const next = [...prev];
+      while (next.length < count) next.push({ valor: '', pontos: '' });
+      return next;
+    });
   };
 
   const markerDescLineCount = mDescricao ? mDescricao.split(/\r?\n/).length : 0;
@@ -421,18 +476,68 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
       notify('error', 'A descrição não pode ultrapassar 200 linhas.');
       return;
     }
+
+    const valRefRaw = mValorReferencia.trim().replace(',', '.');
+    const valorReferencia =
+      mCategoria === 'FISICO' && valRefRaw !== '' && Number.isFinite(Number(valRefRaw))
+        ? Number(valRefRaw)
+        : null;
+    if (mCategoria === 'FISICO' && valRefRaw !== '' && (valorReferencia === null || valorReferencia < 0)) {
+      notify('error', 'Informe um valor válido para a unidade de medida (ou deixe em branco).');
+      return;
+    }
+
+    let regrasParsed: Array<{ valor: number; pontos: number }> = [];
+    if (mCategoria === 'FISICO' && mUsaDistribuicao) {
+      if (mFatorDistribuicao === 'TEMPO' && !mUsaTempo) {
+        notify('error', 'Ative o controle de tempo para distribuir pontuação por tempo.');
+        return;
+      }
+      for (let i = 0; i < mRegrasDistribuicao.length; i++) {
+        const row = mRegrasDistribuicao[i];
+        const v =
+          mFatorDistribuicao === 'TEMPO'
+            ? parseTimeInputToSeconds(row.valor)
+            : row.valor.trim() !== '' && Number.isFinite(Number(row.valor.trim().replace(',', '.')))
+            ? Number(row.valor.trim().replace(',', '.'))
+            : null;
+        const pts =
+          row.pontos.trim() !== '' && Number.isFinite(Number(row.pontos.trim().replace(',', '.')))
+            ? Number(row.pontos.trim().replace(',', '.'))
+            : null;
+        if (v === null || v < 0) {
+          notify('error', `Informe um valor válido na divisão #${i + 1} da distribuição de pontuação.`);
+          return;
+        }
+        if (pts === null || pts < 0) {
+          notify('error', `Informe uma pontuação válida na divisão #${i + 1}.`);
+          return;
+        }
+        regrasParsed.push({ valor: v, pontos: pts });
+      }
+      if (regrasParsed.length === 0) {
+        notify('error', 'Adicione ao menos uma divisão para distribuir a pontuação.');
+        return;
+      }
+    }
+
     const payload: Partial<DesempenhoMarcador> = {
       categoria: mCategoria,
       nome: mNome.trim(),
       tipoMarca: mCategoria === 'FISICO' ? mTipoMarca : null,
       unidadeMedida: mUnidadeMedida.trim() || null,
+      valorReferencia,
       usaTempo: mUsaTempo,
       tempoMinSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoMin) : null,
       tempoMaxSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoMax) : null,
       tempoAprovacaoSegundos: mUsaTempo ? parseTimeInputToSeconds(mTempoAprov) : null,
+      tempoAprovacaoModo: mUsaTempo ? mTempoAprovModo : 'MENOR_IGUAL',
       notaMinima: Number(mNotaMin.replace(',', '.')),
       notaMaxima: Number(mNotaMax.replace(',', '.')),
       notaAprovacao: Number(mNotaAprov.replace(',', '.')),
+      usaDistribuicaoNota: mCategoria === 'FISICO' ? mUsaDistribuicao : false,
+      fatorDistribuicao: mCategoria === 'FISICO' && mUsaDistribuicao ? mFatorDistribuicao : null,
+      regrasDistribuicao: mCategoria === 'FISICO' && mUsaDistribuicao ? regrasParsed : [],
       dificuldade: mDificuldade,
       teveTiro: mCategoria === 'TATICO' ? mTeveTiro : false,
       tipoArma: mCategoria === 'TATICO' && mTeveTiro ? mTipoArma : null,
@@ -653,13 +758,28 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
         const key = `${p.usuarioId}__${m.id}`;
         const cell = draftCells[key];
         if (!cell) continue;
-        const notaRaw = cell.notaObtida.trim().replace(',', '.');
-        if (notaRaw === '') continue;
-        const notaNum = Number(notaRaw);
-        if (!Number.isFinite(notaNum)) continue;
         const valRaw = cell.valorMarca.trim().replace(',', '.');
         const valorMarca = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
         const tempoSegundos = m.usaTempo ? parseTimeInputToSeconds(cell.tempoInput) : null;
+
+        let notaNum: number | null = null;
+        const hasAutoDist = Boolean(
+          m.usaDistribuicaoNota && m.fatorDistribuicao && m.regrasDistribuicao && m.regrasDistribuicao.length > 0
+        );
+        if (hasAutoDist) {
+          const dist = calculateDistributedScore(m, valorMarca, tempoSegundos);
+          if (dist.hasInput && dist.nota !== null) {
+            notaNum = dist.nota;
+          }
+        }
+        if (notaNum === null) {
+          const notaRaw = cell.notaObtida.trim().replace(',', '.');
+          if (notaRaw === '') continue;
+          const parsed = Number(notaRaw);
+          if (!Number.isFinite(parsed)) continue;
+          notaNum = parsed;
+        }
+
         const tirosRaw = cell.tirosEfetuados.trim();
         const tirosEfetuados = m.teveTiro && tirosRaw !== '' && Number.isFinite(Number(tirosRaw)) ? Math.round(Number(tirosRaw)) : null;
         payload.push({
@@ -1418,23 +1538,59 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                 tirosEfetuados: '',
                                 observacoes: ''
                               };
-                              const notaNum = Number(cell.notaObtida.replace(',', '.'));
+                              const valRaw = cell.valorMarca.trim().replace(',', '.');
+                              const valorMarcaNum = valRaw !== '' && Number.isFinite(Number(valRaw)) ? Number(valRaw) : null;
                               const timeSec = m.usaTempo ? parseTimeInputToSeconds(cell.tempoInput) : null;
-                              const hasNota = cell.notaObtida.trim() !== '' && Number.isFinite(notaNum);
+                              const tempoModo = normalizeTempoAprovacaoModo(m.tempoAprovacaoModo);
+                              const tempoOp = tempoModo === 'MAIOR_IGUAL' ? '≥' : '≤';
+
+                              const hasAutoDist = Boolean(
+                                m.usaDistribuicaoNota &&
+                                  m.fatorDistribuicao &&
+                                  m.regrasDistribuicao &&
+                                  m.regrasDistribuicao.length > 0
+                              );
+                              const distResult = hasAutoDist
+                                ? calculateDistributedScore(m, valorMarcaNum, timeSec)
+                                : { hasInput: false, nota: null, matchedTier: null, belowMinimumTier: false };
+
+                              const manualNotaNum = Number(cell.notaObtida.replace(',', '.'));
+                              const effectiveNota =
+                                hasAutoDist && distResult.hasInput && distResult.nota !== null
+                                  ? distResult.nota
+                                  : cell.notaObtida.trim() !== '' && Number.isFinite(manualNotaNum)
+                                  ? manualNotaNum
+                                  : null;
+
+                              const hasNota = effectiveNota !== null;
                               const isAprovPreview =
-                                hasNota &&
-                                notaNum >= m.notaAprovacao &&
-                                (!m.usaTempo ||
-                                  m.tempoAprovacaoSegundos == null ||
-                                  timeSec == null ||
-                                  timeSec <= m.tempoAprovacaoSegundos);
+                                hasNota && evaluateDesempenhoApproval(m, effectiveNota!, timeSec);
 
                               const updateCell = (patch: Partial<DraftResultCell>) => {
-                                setDraftCells(prev => ({
-                                  ...prev,
-                                  [key]: { ...cell, ...patch }
-                                }));
+                                setDraftCells(prev => {
+                                  const nextCell: DraftResultCell = { ...cell, ...patch };
+                                  if (hasAutoDist) {
+                                    const nextValRaw = nextCell.valorMarca.trim().replace(',', '.');
+                                    const nextValNum =
+                                      nextValRaw !== '' && Number.isFinite(Number(nextValRaw))
+                                        ? Number(nextValRaw)
+                                        : null;
+                                    const nextTimeSec = m.usaTempo
+                                      ? parseTimeInputToSeconds(nextCell.tempoInput)
+                                      : null;
+                                    const nextDist = calculateDistributedScore(m, nextValNum, nextTimeSec);
+                                    nextCell.notaObtida =
+                                      nextDist.hasInput && nextDist.nota !== null ? String(nextDist.nota) : '';
+                                  }
+                                  return {
+                                    ...prev,
+                                    [key]: nextCell
+                                  };
+                                });
                               };
+
+                              const isMarcaDriver = hasAutoDist && m.fatorDistribuicao === 'MARCA';
+                              const isTempoDriver = hasAutoDist && m.fatorDistribuicao === 'TEMPO';
 
                               return (
                                 <div
@@ -1447,10 +1603,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                     <div>
                                       <span className="text-xs font-extrabold text-amber-300">{m.nome}</span>
                                       <span className="text-[11px] text-slate-400 ml-2">
+                                        {m.valorReferencia != null
+                                          ? `Ref.: ${formatNumberBr(m.valorReferencia)} ${m.unidadeMedida || ''} • `
+                                          : ''}
                                         Nota: {formatNumberBr(m.notaMinima)} a {formatNumberBr(m.notaMaxima)} (aprovação ≥{' '}
                                         {formatNumberBr(m.notaAprovacao)})
                                         {m.usaTempo && m.tempoAprovacaoSegundos != null
-                                          ? ` • Tempo alvo ≤ ${formatSecondsCompact(m.tempoAprovacaoSegundos)}`
+                                          ? ` • Tempo alvo ${tempoOp} ${formatSecondsCompact(m.tempoAprovacaoSegundos)}`
                                           : ''}
                                       </span>
                                     </div>
@@ -1476,10 +1635,32 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                     ) : null}
                                   </div>
 
+                                  {hasAutoDist && m.regrasDistribuicao && (
+                                    <div className="text-[10px] text-sky-200/90 bg-sky-500/10 border border-sky-500/25 rounded-lg px-2.5 py-1.5 flex flex-wrap items-center gap-x-2 gap-y-1">
+                                      <span className="font-extrabold text-sky-300 uppercase">
+                                        Cálculo automático ({m.fatorDistribuicao === 'TEMPO' ? 'por Tempo' : `por ${m.unidadeMedida || m.tipoMarca}`}):
+                                      </span>
+                                      {m.regrasDistribuicao.map((r, rIdx) => (
+                                        <span key={rIdx} className="text-slate-200">
+                                          {m.fatorDistribuicao === 'TEMPO'
+                                            ? `${tempoOp} ${formatSecondsCompact(r.valor)}`
+                                            : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
+                                          = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                                          {rIdx < (m.regrasDistribuicao?.length || 0) - 1 ? ' •' : ''}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
                                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
                                     <div>
-                                      <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                        Marca ({m.unidadeMedida || m.tipoMarca || 'valor'})
+                                      <label
+                                        className={`block text-[10px] font-bold uppercase mb-1 ${
+                                          isMarcaDriver ? 'text-sky-300' : 'text-slate-400'
+                                        }`}
+                                      >
+                                        {isMarcaDriver ? 'Índice Atingido' : 'Marca'} ({m.unidadeMedida || m.tipoMarca || 'valor'})
+                                        {isMarcaDriver && !isParticipantAbsent ? ' *' : ''}
                                       </label>
                                       <input
                                         type="text"
@@ -1487,15 +1668,29 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                         disabled={isParticipantAbsent}
                                         value={isParticipantAbsent ? '' : cell.valorMarca}
                                         onChange={e => updateCell({ valorMarca: e.target.value })}
-                                        placeholder={isParticipantAbsent ? 'Ausente' : m.tipoMarca === 'Distância' ? 'Ex: 2400' : 'Ex: 35'}
-                                        className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                        placeholder={
+                                          isParticipantAbsent
+                                            ? 'Ausente'
+                                            : m.valorReferencia != null
+                                            ? `Ex: ${m.valorReferencia}`
+                                            : m.tipoMarca === 'Distância'
+                                            ? 'Ex: 650'
+                                            : 'Ex: 35'
+                                        }
+                                        className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 ${
+                                          isMarcaDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
+                                        }`}
                                       />
                                     </div>
 
                                     {m.usaTempo && (
                                       <div>
-                                        <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                          Tempo (MM:SS)
+                                        <label
+                                          className={`block text-[10px] font-bold uppercase mb-1 ${
+                                            isTempoDriver ? 'text-sky-300' : 'text-slate-400'
+                                          }`}
+                                        >
+                                          Tempo (MM:SS){isTempoDriver && !isParticipantAbsent ? ' *' : ''}
                                         </label>
                                         <input
                                           type="text"
@@ -1504,28 +1699,58 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                                           value={isParticipantAbsent ? '' : cell.tempoInput}
                                           onChange={e => updateCell({ tempoInput: maskTimeMMSS(e.target.value) })}
                                           placeholder={isParticipantAbsent ? 'Ausente' : '00:00'}
-                                          className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500"
+                                          className={`w-full bg-slate-950 border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-mono text-white focus:outline-none focus:border-amber-500 ${
+                                            isTempoDriver ? 'border-sky-500/60 font-bold' : 'border-slate-700'
+                                          }`}
                                         />
                                       </div>
                                     )}
 
                                     <div>
                                       <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
-                                        Pontuação / Nota {isParticipantAbsent ? '' : '*'}
+                                        {hasAutoDist ? 'Nota Calculada (auto)' : `Pontuação / Nota ${isParticipantAbsent ? '' : '*'}`}
                                       </label>
                                       <input
                                         type="text"
                                         inputMode="decimal"
                                         disabled={isParticipantAbsent}
-                                        value={isParticipantAbsent ? '' : cell.notaObtida}
-                                        onChange={e => updateCell({ notaObtida: e.target.value })}
+                                        readOnly={hasAutoDist}
+                                        value={
+                                          isParticipantAbsent
+                                            ? ''
+                                            : hasAutoDist
+                                            ? distResult.hasInput && distResult.nota !== null
+                                              ? String(distResult.nota)
+                                              : ''
+                                            : cell.notaObtida
+                                        }
+                                        onChange={e => {
+                                          if (!hasAutoDist) updateCell({ notaObtida: e.target.value });
+                                        }}
                                         placeholder={
                                           isParticipantAbsent
                                             ? 'Ausente'
+                                            : hasAutoDist
+                                            ? isTempoDriver
+                                              ? 'Informe o tempo'
+                                              : `Informe ${m.unidadeMedida || 'o índice'}`
                                             : `${formatNumberBr(m.notaMinima)} - ${formatNumberBr(m.notaMaxima)}`
                                         }
-                                        className="w-full bg-slate-950 border border-slate-700 disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-bold text-amber-300 focus:outline-none focus:border-amber-500"
+                                        className={`w-full border disabled:opacity-40 rounded-lg px-2.5 py-1.5 text-xs font-bold focus:outline-none ${
+                                          hasAutoDist
+                                            ? 'bg-slate-900/90 border-emerald-500/40 text-emerald-300 cursor-not-allowed'
+                                            : 'bg-slate-950 border-slate-700 text-amber-300 focus:border-amber-500'
+                                        }`}
                                       />
+                                      {hasAutoDist && !isParticipantAbsent && distResult.hasInput && (
+                                        <div className="text-[10px] text-emerald-300/90 mt-0.5">
+                                          {distResult.matchedTier
+                                            ? m.fatorDistribuicao === 'TEMPO'
+                                              ? `Faixa ${tempoOp} ${formatSecondsCompact(distResult.matchedTier.valor)} → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                              : `Faixa ≥ ${formatNumberBr(distResult.matchedTier.valor)} ${m.unidadeMedida || ''} → ${formatNumberBr(distResult.nota ?? 0)} pts`
+                                            : `Abaixo da 1ª faixa → Nota mín. (${formatNumberBr(m.notaMinima)})`}
+                                        </div>
+                                      )}
                                     </div>
 
                                     {m.teveTiro && (
@@ -1640,12 +1865,20 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         </span>
                         {m.tipoMarca && (
                           <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-bold text-slate-300">
-                            {m.tipoMarca} ({m.unidadeMedida || 'un.'})
+                            {m.tipoMarca}
+                            {m.valorReferencia != null
+                              ? `: ${formatNumberBr(m.valorReferencia)} ${m.unidadeMedida || ''}`
+                              : ` (${m.unidadeMedida || 'un.'})`}
                           </span>
                         )}
                         <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] font-bold text-amber-300">
                           {m.dificuldade}
                         </span>
+                        {m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0 && (
+                          <span className="px-2 py-0.5 rounded bg-sky-500/15 border border-sky-500/30 text-[10px] font-bold text-sky-300">
+                            Pontuação Distribuída ({m.regrasDistribuicao.length} faixas)
+                          </span>
+                        )}
                       </div>
                       <h4 className="font-extrabold text-sm text-white">{m.nome}</h4>
                     </div>
@@ -1706,10 +1939,32 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                       <span className="text-slate-500 block">Controle de Tempo</span>
                       <strong className="text-slate-200">
                         {m.usaTempo
-                          ? `${formatSecondsCompact(m.tempoMinSegundos)} / ${formatSecondsCompact(m.tempoMaxSegundos)} (alvo ${formatSecondsCompact(m.tempoAprovacaoSegundos)})`
+                          ? `${formatSecondsCompact(m.tempoMinSegundos)} / ${formatSecondsCompact(m.tempoMaxSegundos)} (alvo ${
+                              normalizeTempoAprovacaoModo(m.tempoAprovacaoModo) === 'MAIOR_IGUAL' ? '≥' : '≤'
+                            } ${formatSecondsCompact(m.tempoAprovacaoSegundos)})`
                           : 'Sem exigência de tempo'}
                       </strong>
                     </div>
+                    {m.usaDistribuicaoNota && m.regrasDistribuicao && m.regrasDistribuicao.length > 0 && (
+                      <div className="col-span-2 sm:col-span-3 pt-1.5 border-t border-slate-800">
+                        <span className="text-sky-300 font-bold block mb-1">
+                          Distribuição de Pontos ({m.fatorDistribuicao === 'TEMPO' ? 'por Tempo' : `por ${m.tipoMarca || 'Marca'} — ${m.unidadeMedida || ''}`}):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {m.regrasDistribuicao.map((r, rIdx) => (
+                            <span
+                              key={rIdx}
+                              className="px-2 py-0.5 rounded bg-slate-950 border border-slate-700 text-[10px] text-slate-200"
+                            >
+                              {m.fatorDistribuicao === 'TEMPO'
+                                ? `${normalizeTempoAprovacaoModo(m.tempoAprovacaoModo) === 'MAIOR_IGUAL' ? '≥' : '≤'} ${formatSecondsCompact(r.valor)}`
+                                : `${formatNumberBr(r.valor)} ${m.unidadeMedida || ''}`}{' '}
+                              = <strong className="text-amber-300">{formatNumberBr(r.pontos)} pts</strong>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     {m.categoria === 'TATICO' && (
                       <div className="col-span-2 sm:col-span-3 pt-1 border-t border-slate-800">
                         <span className="text-slate-500">Disparo de Arma de Fogo: </span>
@@ -1810,10 +2065,37 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                         maxLength={60}
                         value={mUnidadeMedida}
                         onChange={e => setMUnidadeMedida(e.target.value)}
-                        placeholder="Ex: flexões, metros, execuções"
+                        placeholder="Ex: metros, flexões, repetições, execuções"
                         className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white focus:outline-none focus:border-amber-500"
                       />
                     </div>
+                    {mUnidadeMedida.trim().length > 0 && (
+                      <div className="sm:col-span-2 bg-sky-950/25 border border-sky-500/30 rounded-xl p-3">
+                        <label className="block font-bold text-sky-300 mb-1">
+                          Valor de Referência em {mUnidadeMedida.trim()} (opcional)
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            value={mValorReferencia}
+                            onChange={e => setMValorReferencia(e.target.value)}
+                            placeholder={
+                              mTipoMarca === 'Distância'
+                                ? 'Ex: 1000 (para 1.000 metros)'
+                                : 'Deixe em branco se não houver valor fixo'
+                            }
+                            className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
+                          />
+                          <span className="px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sky-300 font-bold shrink-0">
+                            {mUnidadeMedida.trim()}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-1">
+                          Ex.: em Corrida com unidade &quot;metros&quot;, digite <strong>1000</strong>. Em Repetição ou Execução, pode deixar em branco e usar apenas as faixas de distribuição abaixo.
+                        </p>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -1880,7 +2162,13 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
                 <input
                   type="checkbox"
                   checked={mUsaTempo}
-                  onChange={e => setMUsaTempo(e.target.checked)}
+                  onChange={e => {
+                    const checked = e.target.checked;
+                    setMUsaTempo(checked);
+                    if (!checked && mFatorDistribuicao === 'TEMPO') {
+                      setMFatorDistribuicao('MARCA');
+                    }
+                  }}
                   className="rounded border-slate-600 text-amber-500 focus:ring-amber-500"
                 />
                 <div>
@@ -1894,40 +2182,242 @@ export const RelatorioDesempenhoUnidadePanel: React.FC<RelatorioDesempenhoUnidad
               </label>
 
               {mUsaTempo && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
-                  <div>
-                    <label className="block font-bold text-slate-300 mb-1">Tempo Mínimo (MM:SS)</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={mTempoMin}
-                      onChange={e => setMTempoMin(maskTimeMMSS(e.target.value))}
-                      placeholder="00:00"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
-                    />
+                <div className="space-y-3 bg-slate-950/50 border border-slate-800 rounded-xl p-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block font-bold text-slate-300 mb-1">Tempo Mínimo (MM:SS)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={mTempoMin}
+                        onChange={e => setMTempoMin(maskTimeMMSS(e.target.value))}
+                        placeholder="00:00"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-300 mb-1">Tempo Máximo (MM:SS)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={mTempoMax}
+                        onChange={e => setMTempoMax(maskTimeMMSS(e.target.value))}
+                        placeholder="00:00"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-amber-300 mb-1">
+                        Tempo de Aprovação (MM:SS) ({mTempoAprovModo === 'MAIOR_IGUAL' ? '≥' : '≤'})
+                      </label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={mTempoAprov}
+                        onChange={e => setMTempoAprov(maskTimeMMSS(e.target.value))}
+                        placeholder="03:00"
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
+                      />
+                    </div>
                   </div>
+
                   <div>
-                    <label className="block font-bold text-slate-300 mb-1">Tempo Máximo (MM:SS)</label>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={mTempoMax}
-                      onChange={e => setMTempoMax(maskTimeMMSS(e.target.value))}
-                      placeholder="00:00"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
-                    />
+                    <label className="block font-bold text-amber-300 mb-1">
+                      Critério do Tempo de Aprovação (Inverter tempo aceitável)
+                    </label>
+                    <select
+                      value={mTempoAprovModo}
+                      onChange={e => setMTempoAprovModo(e.target.value as TempoAprovacaoModo)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="MENOR_IGUAL">
+                        Invertido (Tempo ≤ Aprovação) — Menor ou igual ao tempo alvo é aprovado (ex.: Corrida em até 03:00; 03:01 reprova)
+                      </option>
+                      <option value="MAIOR_IGUAL">
+                        Normal (Tempo ≥ Aprovação) — Maior ou igual ao tempo alvo é aprovado (ex.: Prancha / Permanência mínima)
+                      </option>
+                    </select>
+                    {mTempoAprov && (
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        {mTempoAprovModo === 'MENOR_IGUAL'
+                          ? `Com tempo de aprovação ${mTempoAprov}: tempos iguais ou abaixo de ${mTempoAprov} são aprovados; acima de ${mTempoAprov} reprova.`
+                          : `Com tempo de aprovação ${mTempoAprov}: tempos iguais ou acima de ${mTempoAprov} são aprovados; abaixo de ${mTempoAprov} reprova.`}
+                      </p>
+                    )}
                   </div>
-                  <div>
-                    <label className="block font-bold text-amber-300 mb-1">Tempo de Aprovação (MM:SS)</label>
+                </div>
+              )}
+
+              {/* DISTRIBUIR PONTUAÇÃO (Marcador Físico) */}
+              {mCategoria === 'FISICO' && (
+                <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-3">
+                  <label className="flex items-center space-x-2.5 cursor-pointer">
                     <input
-                      type="text"
-                      inputMode="numeric"
-                      value={mTempoAprov}
-                      onChange={e => setMTempoAprov(maskTimeMMSS(e.target.value))}
-                      placeholder="00:00"
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 font-mono text-white focus:outline-none focus:border-amber-500"
+                      type="checkbox"
+                      checked={mUsaDistribuicao}
+                      onChange={e => {
+                        const checked = e.target.checked;
+                        setMUsaDistribuicao(checked);
+                        if (checked && mRegrasDistribuicao.length === 0) {
+                          setMRegrasDistribuicao([{ valor: '', pontos: '' }]);
+                        }
+                      }}
+                      className="rounded border-slate-600 text-sky-500 focus:ring-sky-500"
                     />
-                  </div>
+                    <div>
+                      <div className="font-bold text-sky-300">
+                        Distribuir pontuação por faixas / divisões (cálculo automático da nota)
+                      </div>
+                      <div className="text-[11px] text-slate-400">
+                        Defina quantos pontos vale cada fração de {mTipoMarca.toLowerCase()} ou tempo. Ao lançar o índice atingido, o sistema calcula a nota automaticamente.
+                      </div>
+                    </div>
+                  </label>
+
+                  {mUsaDistribuicao && (
+                    <div className="space-y-3 pt-2 border-t border-slate-800">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <div className="sm:col-span-2">
+                          <label className="block font-bold text-slate-300 mb-1">
+                            Fator de Distribuição dos Pontos *
+                          </label>
+                          <select
+                            value={mFatorDistribuicao}
+                            onChange={e => {
+                              const nextFator = e.target.value as FatorDistribuicaoNota;
+                              setMFatorDistribuicao(nextFator);
+                              if (nextFator === 'TEMPO' && !mUsaTempo) {
+                                setMUsaTempo(true);
+                              }
+                              setMRegrasDistribuicao(prev => prev.map(r => ({ valor: '', pontos: r.pontos })));
+                            }}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
+                          >
+                            <option value="MARCA">
+                              {mTipoMarca} ({mUnidadeMedida.trim() || mTipoMarca})
+                            </option>
+                            <option value="TEMPO">Tempo (MM:SS)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block font-bold text-slate-300 mb-1">
+                            Nº de Divisões
+                          </label>
+                          <input
+                            type="number"
+                            min={1}
+                            max={30}
+                            value={mRegrasDistribuicao.length}
+                            onChange={e => handleSetNumDivisions(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-400"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-slate-300">
+                            Tabela de Divisões ({mFatorDistribuicao === 'TEMPO' ? 'Tempo → Pontos' : `${mUnidadeMedida.trim() || mTipoMarca} → Pontos`})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setMRegrasDistribuicao(prev =>
+                                prev.length < 30 ? [...prev, { valor: '', pontos: '' }] : prev
+                              )
+                            }
+                            className="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/40 text-sky-300 text-[11px] font-bold flex items-center space-x-1"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>Adicionar divisão</span>
+                          </button>
+                        </div>
+
+                        <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1">
+                          {mRegrasDistribuicao.map((tier, idx) => (
+                            <div
+                              key={idx}
+                              className="grid grid-cols-12 gap-2 items-center bg-slate-900/70 border border-slate-800 rounded-xl p-2"
+                            >
+                              <span className="col-span-1 text-[11px] font-extrabold text-slate-500 text-center">
+                                #{idx + 1}
+                              </span>
+                              <div className="col-span-5 flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  inputMode={mFatorDistribuicao === 'TEMPO' ? 'numeric' : 'decimal'}
+                                  value={tier.valor}
+                                  onChange={e => {
+                                    const nextVal =
+                                      mFatorDistribuicao === 'TEMPO'
+                                        ? maskTimeMMSS(e.target.value)
+                                        : e.target.value;
+                                    setMRegrasDistribuicao(prev =>
+                                      prev.map((item, i) => (i === idx ? { ...item, valor: nextVal } : item))
+                                    );
+                                  }}
+                                  placeholder={
+                                    mFatorDistribuicao === 'TEMPO'
+                                      ? '03:00'
+                                      : mTipoMarca === 'Distância'
+                                      ? 'Ex: 200'
+                                      : 'Ex: 3'
+                                  }
+                                  className={`w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-white focus:outline-none focus:border-sky-400 ${
+                                    mFatorDistribuicao === 'TEMPO' ? 'font-mono' : ''
+                                  }`}
+                                />
+                                <span className="text-[10px] text-slate-400 shrink-0">
+                                  {mFatorDistribuicao === 'TEMPO' ? 'mm:ss' : mUnidadeMedida.trim() || 'un.'}
+                                </span>
+                              </div>
+                              <span className="col-span-1 text-[10px] font-bold text-slate-400 text-center">
+                                vale
+                              </span>
+                              <div className="col-span-4 flex items-center gap-1.5">
+                                <input
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={tier.pontos}
+                                  onChange={e => {
+                                    const nextPts = e.target.value;
+                                    setMRegrasDistribuicao(prev =>
+                                      prev.map((item, i) => (i === idx ? { ...item, pontos: nextPts } : item))
+                                    );
+                                  }}
+                                  placeholder="Ex: 2"
+                                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-amber-300 font-bold focus:outline-none focus:border-amber-500"
+                                />
+                                <span className="text-[10px] text-slate-400 shrink-0">pts</span>
+                              </div>
+                              <div className="col-span-1 flex justify-end">
+                                <button
+                                  type="button"
+                                  disabled={mRegrasDistribuicao.length <= 1}
+                                  onClick={() =>
+                                    setMRegrasDistribuicao(prev => prev.filter((_, i) => i !== idx))
+                                  }
+                                  className="p-1 rounded-lg text-slate-500 hover:text-rose-400 disabled:opacity-30"
+                                  title="Remover divisão"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+
+                        <p className="text-[11px] text-slate-400 bg-slate-900/60 border border-slate-800 rounded-lg px-2.5 py-2">
+                          {mFatorDistribuicao === 'TEMPO'
+                            ? mTempoAprovModo === 'MENOR_IGUAL'
+                              ? 'Regra (tempo invertido): quanto menor o tempo, melhor a nota. Ex.: se 03:00 = 6 pts e 02:30 = 8 pts, 02:45 vale 6 pts e 02:30 ou menos vale 8 pts.'
+                              : 'Regra (tempo normal): quanto maior o tempo, melhor a nota. Ex.: se 01:00 = 5 pts e 02:00 = 8 pts, 01:59 vale 5 pts e 02:00 ou mais vale 8 pts.'
+                            : `Regra de degrau: o sistema usa o valor exato ou o último degrau atingido antes do próximo valor (ex.: se 100 ${mUnidadeMedida.trim() || 'un.'} = 3 pts e 200 = 4 pts, 199 continua valendo 3 pts e 201 vale 4 pts). Abaixo da 1ª faixa vale a nota mínima.`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

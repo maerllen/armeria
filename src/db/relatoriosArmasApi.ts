@@ -5230,26 +5230,49 @@ async function queryDesempenhoUnidadeResumoYear(
   // 3. Marcadores da categoria (ativos na unidade ou globais + usados no ano)
   let marcadores: SystemDesempenhoMarcadorPdf[] = [];
   try {
-    const [mRows]: any = await pool.query(
-      `SELECT ID_MARCADOR as id, NOME as nome, CATEGORIA as categoria, TIPO_MARCA as tipoMarca,
-              UNIDADE_MEDIDA as unidadeMedida, USA_TEMPO as usaTempo, TEMPO_APROVACAO_SEG as tempoAprovacaoSeg,
-              NOTA_MIN as notaMin, NOTA_MAX as notaMax, NOTA_APROVACAO as notaAprovacao,
-              DIFICULDADE as dificuldade, TEVE_TIRO as teveTiro, TIPO_ARMA as tipoArma,
-              QUANTIDADE_TIROS as quantidadeTiros, DESCRICAO as descricao
-       FROM DESEMPENHO_MARCADORES
-       WHERE CATEGORIA = ? AND ATIVO = 1 AND (UNIDADE_ID = ? OR UNIDADE_ID IS NULL OR UNIDADE_ID = '')
-       ORDER BY NOME ASC`,
-      [categoria, unitId]
-    );
-    marcadores = (mRows || []).map((m: any) => ({
+    let mRows: any[] = [];
+    try {
+      const [rows]: any = await pool.query(
+        `SELECT ID_MARCADOR as id, NOME as nome, CATEGORIA as categoria, TIPO_MARCA as tipoMarca,
+                UNIDADE_MEDIDA as unidadeMedida, VALOR_REFERENCIA as valorReferencia,
+                USA_TEMPO as usaTempo, TEMPO_APROVACAO_SEG as tempoAprovacaoSeg,
+                TEMPO_APROVACAO_MODO as tempoAprovacaoModo,
+                NOTA_MIN as notaMin, NOTA_MAX as notaMax, NOTA_APROVACAO as notaAprovacao,
+                DIFICULDADE as dificuldade, TEVE_TIRO as teveTiro, TIPO_ARMA as tipoArma,
+                QUANTIDADE_TIROS as quantidadeTiros, DESCRICAO as descricao
+         FROM DESEMPENHO_MARCADORES
+         WHERE CATEGORIA = ? AND ATIVO = 1 AND (UNIDADE_ID = ? OR UNIDADE_ID IS NULL OR UNIDADE_ID = '')
+         ORDER BY NOME ASC`,
+        [categoria, unitId]
+      );
+      mRows = rows || [];
+    } catch {
+      const [rows]: any = await pool.query(
+        `SELECT ID_MARCADOR as id, NOME as nome, CATEGORIA as categoria, TIPO_MARCA as tipoMarca,
+                UNIDADE_MEDIDA as unidadeMedida, USA_TEMPO as usaTempo, TEMPO_APROVACAO_SEG as tempoAprovacaoSeg,
+                NOTA_MIN as notaMin, NOTA_MAX as notaMax, NOTA_APROVACAO as notaAprovacao,
+                DIFICULDADE as dificuldade, TEVE_TIRO as teveTiro, TIPO_ARMA as tipoArma,
+                QUANTIDADE_TIROS as quantidadeTiros, DESCRICAO as descricao
+         FROM DESEMPENHO_MARCADORES
+         WHERE CATEGORIA = ? AND ATIVO = 1 AND (UNIDADE_ID = ? OR UNIDADE_ID IS NULL OR UNIDADE_ID = '')
+         ORDER BY NOME ASC`,
+        [categoria, unitId]
+      );
+      mRows = rows || [];
+    }
+    marcadores = mRows.map((m: any) => ({
       id: String(m.id),
       nome: String(m.nome || ''),
       categoria,
       tipoMarca: m.tipoMarca || null,
       unidadeMedida: m.unidadeMedida || null,
+      valorReferencia:
+        m.valorReferencia !== null && m.valorReferencia !== undefined ? Number(m.valorReferencia) : null,
       usaTempo: Boolean(m.usaTempo),
       tempoAprovacaoSeg:
         m.tempoAprovacaoSeg !== null && m.tempoAprovacaoSeg !== undefined ? Number(m.tempoAprovacaoSeg) : null,
+      tempoAprovacaoModo:
+        String(m.tempoAprovacaoModo || '').toUpperCase() === 'MAIOR_IGUAL' ? 'MAIOR_IGUAL' : 'MENOR_IGUAL',
       notaMin: Number(m.notaMin || 0),
       notaMax: Number(m.notaMax || 10),
       notaAprovacao: Number(m.notaAprovacao || 6),

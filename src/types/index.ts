@@ -2392,6 +2392,13 @@ export type DificuldadeDesempenho = 'Fácil' | 'Médio' | 'Difícil' | 'Muito Di
 export type TipoArmaDesempenho = 'Fuzil' | 'Pistola' | 'Espingarda' | 'Submetralhadora';
 export type ModoLancamentoDesempenho = 'INDIVIDUAL' | 'COLETIVO';
 export type StatusGrupoDesempenho = 'ABERTO' | 'ENCERRADO';
+export type TempoAprovacaoModo = 'MENOR_IGUAL' | 'MAIOR_IGUAL';
+export type FatorDistribuicaoNota = 'MARCA' | 'TEMPO';
+
+export interface DesempenhoDistribuicaoFaixa {
+  valor: number; // Se fator === 'MARCA': valor na unidade de medida; se fator === 'TEMPO': segundos
+  pontos: number; // Pontuação/nota correspondente à faixa
+}
 
 export interface DesempenhoMarcador {
   id: string;
@@ -2399,13 +2406,18 @@ export interface DesempenhoMarcador {
   nome: string;
   tipoMarca?: TipoMarcaFisica | null; // Obrigatório para FISICO: Execução, Repetição, Distância
   unidadeMedida?: string | null; // Ex: flexões, metros, execuções, pontos
+  valorReferencia?: number | null; // Ex: 1000 (metros) — opcional
   usaTempo: boolean; // Para FISICO pode ser false (sem tempo min/max/aprovação)
   tempoMinSegundos?: number | null;
   tempoMaxSegundos?: number | null;
   tempoAprovacaoSegundos?: number | null;
+  tempoAprovacaoModo?: TempoAprovacaoModo; // 'MENOR_IGUAL' (invertido: <= alvo) ou 'MAIOR_IGUAL' (normal: >= alvo)
   notaMinima: number;
   notaMaxima: number;
   notaAprovacao: number;
+  usaDistribuicaoNota?: boolean; // Habilita cálculo automático de nota por faixas/divisões
+  fatorDistribuicao?: FatorDistribuicaoNota | null; // 'MARCA' ou 'TEMPO'
+  regrasDistribuicao?: DesempenhoDistribuicaoFaixa[];
   dificuldade: DificuldadeDesempenho | string;
   teveTiro: boolean; // Para TATICO
   tipoArma?: TipoArmaDesempenho | null;
@@ -2473,6 +2485,7 @@ export interface DesempenhoResultado {
   notaMinRef?: number;
   notaAprovacaoRef: number;
   tempoAprovacaoRef?: number | null;
+  tempoAprovacaoModoRef?: TempoAprovacaoModo | null;
   aprovado: boolean;
   ausente?: boolean;
   ausenciaInformada?: boolean | null;

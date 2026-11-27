@@ -801,7 +801,9 @@ export const UsuarioDesempenhoDashboard: React.FC<UsuarioDesempenhoDashboardProp
                       </div>
                       <div className="text-[11px] text-slate-400">
                         Aprovação: ≥ {formatNumberBr(m.latest.notaAprovacaoRef)} pts
-                        {m.latest.tempoAprovacaoRef != null ? ` • Tempo alvo: ≤ ${formatSecondsCompact(m.latest.tempoAprovacaoRef)}` : ''}
+                        {m.latest.tempoAprovacaoRef != null
+                          ? ` • Tempo alvo: ${m.latest.tempoAprovacaoModoRef === 'MAIOR_IGUAL' ? '≥' : '≤'} ${formatSecondsCompact(m.latest.tempoAprovacaoRef)}`
+                          : ''}
                         {m.attempts > 1 ? ` • Melhor: ${formatResultadoResumo(m.best)}` : ''}
                       </div>
                     </div>
