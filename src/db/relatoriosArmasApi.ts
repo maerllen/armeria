@@ -2725,6 +2725,43 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       const botaoLabel = temK9 ? `Gráfico ${nomesVirgula}` : '';
       const trunc = (txt: string, maxLen: number) =>
         txt.length <= maxLen ? txt : `${txt.slice(0, Math.max(1, maxLen - 1)).trimEnd()}…`;
+      const slugifyK9 = (txt: string) =>
+        String(txt || '')
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '');
+
+      const usedRowIds = new Set<string>();
+      const animaisWhatsappRows = linkedDogs.map((d, idx) => {
+        const cleanNome = String(d.nome || '').trim();
+        const baseSlug = slugifyK9(cleanNome) || slugifyK9(d.id) || `k9_${idx + 1}`;
+        let rowId = `condutor_${baseSlug}`.slice(0, 190);
+        if (usedRowIds.has(rowId)) {
+          let suffix = 2;
+          while (usedRowIds.has(`${rowId}_${suffix}`)) suffix += 1;
+          rowId = `${rowId}_${suffix}`.slice(0, 200);
+        }
+        usedRowIds.add(rowId);
+
+        const baiaLabel = formatK9BaiaLabel(d.canilFisicoNome, d.canilFisicoIdentificacao);
+        const racaLabel = String(d.raca || '').trim();
+        const statusLabel = String(d.status || '').trim();
+        const descParts = [
+          racaLabel,
+          baiaLabel && baiaLabel !== 'Não alocada' ? baiaLabel : '',
+          statusLabel
+        ].filter(Boolean);
+        const description = trunc(descParts.join(' — ') || 'K9 vinculado', 72);
+
+        return {
+          id: rowId,
+          title: trunc(cleanNome || `K9 ${idx + 1}`, 24),
+          description
+        };
+      });
 
       return res.status(200).json({
         sucesso: true,
@@ -2736,19 +2773,13 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
         },
         tem_k9_vinculado: temK9,
         exibir_opcao_condutor: temK9,
-        quantidade_k9: nomes.length,
+        quantidade_k9: animaisWhatsappRows.length,
         nomes_k9: nomes,
         nomes_k9_virgula: nomesVirgula,
         botao_condutor_label: botaoLabel,
         botao_condutor_whatsapp_btn: temK9 ? trunc(botaoLabel, 20) : '',
         botao_condutor_whatsapp_lista: temK9 ? trunc(botaoLabel, 24) : '',
-        animais: linkedDogs.map(d => ({
-          id: d.id,
-          nome: d.nome,
-          raca: d.raca,
-          baia: formatK9BaiaLabel(d.canilFisicoNome, d.canilFisicoIdentificacao),
-          status: d.status
-        }))
+        animais: animaisWhatsappRows
       });
     } catch (err: any) {
       console.error('[Relatorios API] Erro ao consultar K9 vinculados do condutor:', err?.message);
@@ -3431,10 +3462,65 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       const unitId = selection.unitIds[0] || '';
-      const rawDogs =
+      const nomeAnimalFiltro = String(
+        body.nome_animal || body.animal_nome || body.k9_nome || ''
+      ).trim();
+      const animalIdFiltro = String(
+        body.animal_id || body.k9_id || body.row_id || ''
+      ).trim();
+
+      let rawDogs =
         mode === 'condutor'
           ? await queryK9AnimalsRaw(pool, { condutorUserId: user.id })
           : await queryK9AnimalsRaw(pool, { unitId });
+
+      let selectedDogSlug = '';
+      if (mode === 'condutor' && (nomeAnimalFiltro || animalIdFiltro)) {
+        const normTxt = (v: string) =>
+          String(v || '')
+            .trim()
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '');
+        const slugTxt = (v: string) =>
+          normTxt(v)
+            .replace(/[^a-z0-9]+/g, '_')
+            .replace(/^_+|_+$/g, '');
+
+        const targetNameNorm = normTxt(nomeAnimalFiltro);
+        const targetNamePrefix = targetNameNorm.endsWith('…')
+          ? targetNameNorm.slice(0, -1).trim()
+          : '';
+        const targetIdRaw = animalIdFiltro.trim();
+        const targetIdSlug = slugTxt(targetIdRaw.replace(/^condutor_/i, ''));
+
+        const matched = rawDogs.filter(d => {
+          const dogNameNorm = normTxt(d.nome);
+          const dogSlug = slugTxt(d.nome);
+          if (targetNameNorm) {
+            if (dogNameNorm === targetNameNorm) return true;
+            if (targetNamePrefix && dogNameNorm.startsWith(targetNamePrefix)) return true;
+          }
+          if (targetIdRaw) {
+            if (String(d.id) === targetIdRaw) return true;
+            if (targetIdSlug && dogSlug && dogSlug === targetIdSlug) return true;
+          }
+          return false;
+        });
+
+        if (matched.length === 0) {
+          return res.status(404).json({
+            sucesso: false,
+            status: 'erro',
+            codigo: 'ANIMAL_K9_NAO_ENCONTRADO',
+            mensagem: 'O animal K9 informado não está vinculado ao seu usuário.'
+          });
+        }
+        rawDogs = matched;
+        if (matched.length === 1) {
+          selectedDogSlug = slugTxt(matched[0].nome).replace(/_/g, '-').slice(0, 40);
+        }
+      }
 
       const animaisDossier =
         rawDogs.length > 0 ? await buildK9AnimalDossiersYear(pool, rawDogs, anoReferencia) : [];
@@ -3443,7 +3529,9 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
       const arquivoNome =
         mode === 'condutor'
-          ? `ficha-k9-condutor-${anoReferencia}.pdf`
+          ? selectedDogSlug
+            ? `ficha-k9-condutor-${selectedDogSlug}-${anoReferencia}.pdf`
+            : `ficha-k9-condutor-${anoReferencia}.pdf`
           : `ficha-k9-unidade-${selection.fileSlug}-${anoReferencia}.pdf`;
       const arquivoToken = crypto.randomBytes(16).toString('hex');
       const storedFilename = `${arquivoToken}__${arquivoNome}`;
