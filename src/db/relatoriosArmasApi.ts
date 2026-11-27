@@ -11,13 +11,16 @@ import {
   generateSystemExplosivosPdf,
   generateSystemMateriaisPdf,
   generateSystemSinopseOperacionalPdf,
+  generateSystemSinopseTreinamentoPdf,
   SystemArmaPdfRecord,
   SystemMunicaoPdfRecord,
   SystemExplosivoPdfRecord,
   SystemMaterialPdfRecord,
   SystemCatOpPdfRecord,
   SystemPolicialOpPdfRecord,
-  SystemCanilOpPdfRecord
+  SystemCanilOpPdfRecord,
+  SystemPolicialTreinPdfRecord,
+  SystemCanilTreinPdfRecord
 } from './institutionalPdfTemplates';
 
 interface RelatoriosApiDeps {
@@ -2171,6 +2174,427 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
     ],
     (req: Request, res: Response) => handleSinopseOperacionalRequest(req, res)
   );
+
+  // ============================================================================
+  // HANDLER: RELATÓRIOS -> SINOPSE TREINAMENTO (Make.com -> Arsenal)
+  // ============================================================================
+  const handleSinopseTreinamentoRequest = async (req: Request, res: Response) => {
+    const pool = getPool();
+    const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
+    const tipoRelatorioDb = 'SINOPSE_TREINAMENTO';
+
+    try {
+      await ensureRelatoriosApiSchema(pool);
+      void cleanupExpiredPdfFiles(pool);
+
+      // 1. Limite de requisições por IP
+      const ipLimit = checkRateLimit(ipRateBuckets, clientIp, RATE_LIMIT_MAX_PER_IP);
+      if (!ipLimit.allowed) {
+        res.setHeader('Retry-After', String(ipLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de requisições atingido. Tente novamente em ${ipLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const idRegistro = `rel-sintr-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const rawUnidadeForLog =
+        String(body.unidade || body.unidade_codigo || body.codigoUnidade || '').trim() || 'NAO_INFORMADA';
+      const rawCodigoForLog =
+        String(body.unidade_codigo || body.codigoUnidade || body.unidade || '').trim() || 'NAO_INFORMADA';
+      const rawPhoneForLog =
+        normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
+      const rawSolicitacaoForLog =
+        String(body.solicitacao_id || body.identificadorSolicitacao || body.identificador_solicitacao || '').trim() ||
+        `make-${Date.now()}`;
+
+      // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
+      const tokenCheck = await verifyRelatoriosApiToken(pool, req);
+      if (!tokenCheck.ok) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          erroMensagem: tokenCheck.error || 'Token ausente ou inválido.',
+          ipOrigem: clientIp
+        });
+        return res.status(tokenCheck.status || 401).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          mensagem: tokenCheck.error || 'Não autorizado.'
+        });
+      }
+
+      // 3. Validar corpo da requisição (aceita snake_case e camelCase)
+      const unidade = String(body.unidade || '').trim();
+      const unidadeCodigo = String(body.unidade_codigo || body.codigoUnidade || unidade || '').trim();
+      const telefoneRaw = String(body.telefone_usuario || body.telefone || body.phone || body.from || '').trim();
+      const telefoneDigits = normalizePhoneDigits(telefoneRaw);
+      const solicitacaoId =
+        String(body.solicitacao_id || body.identificadorSolicitacao || body.identificador_solicitacao || '')
+          .trim()
+          .slice(0, 128) || `make-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const formato = String(body.formato || 'pdf').trim().toLowerCase() || 'pdf';
+      const dataHoraRaw = String(body.data_hora_solicitacao || body.dataHoraSolicitacao || '').trim();
+
+      if (!unidade && !unidadeCodigo) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: 'NAO_INFORMADA',
+          unidadeCodigo: 'NAO_INFORMADA',
+          telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          erroMensagem: 'Campo unidade/unidade_codigo ausente na requisição.',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          mensagem: 'Informe o campo obrigatório "unidade" ou "unidade_codigo".'
+        });
+      }
+
+      if (telefoneDigits.length < 10 || telefoneDigits.length > 15) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits || 'INVALIDO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'TELEFONE_INVALIDO',
+          erroMensagem: 'Campo telefone_usuario ausente ou fora do padrão (10-15 dígitos).',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'TELEFONE_INVALIDO',
+          mensagem: 'Informe "telefone_usuario" válido com DDD (ex: 5531999999999).'
+        });
+      }
+
+      if (formato !== 'pdf') {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'FORMATO_NAO_SUPORTADO',
+          erroMensagem: `Formato não suportado: ${formato}`,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'FORMATO_NAO_SUPORTADO',
+          mensagem: 'Formato não suportado. Utilize formato "pdf".'
+        });
+      }
+
+      let dataSolicitacao = new Date();
+      if (dataHoraRaw) {
+        const parsedDate = parseRequestDateTime(dataHoraRaw);
+        if (parsedDate) {
+          dataSolicitacao = parsedDate;
+        }
+      }
+
+      // Normaliza aliases camelCase de data_inicio/data_fim antes de resolver o período
+      const normalizedPeriodBody = {
+        ...body,
+        data_inicio: body.data_inicio || body.dataInicio || body.data_inicial || body.inicio || body.start_date,
+        data_fim: body.data_fim || body.dataFim || body.data_final || body.fim || body.end_date
+      };
+
+      const periodResolution = resolveOperationalPeriodFilter(normalizedPeriodBody, dataSolicitacao);
+      if ('codigo' in periodResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: periodResolution.codigo,
+          erroMensagem: periodResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: periodResolution.codigo,
+          mensagem: periodResolution.mensagem
+        });
+      }
+
+      const periodFilter = periodResolution.filter;
+
+      // Limite de requisições por telefone
+      const phoneLimit = checkRateLimit(phoneRateBuckets, telefoneDigits, RATE_LIMIT_MAX_PER_PHONE);
+      if (!phoneLimit.allowed) {
+        res.setHeader('Retry-After', String(phoneLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de solicitações por usuário atingido. Tente novamente em ${phoneLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      // 4. Identificar usuário no sistema Arsenal pelo telefone
+      const user = await resolveWhatsappUserContext(pool, telefoneDigits);
+      if (!user) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: 'USUARIO_NAO_AUTORIZADO',
+          erroMensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.',
+          ipOrigem: clientIp
+        });
+        return res.status(403).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'USUARIO_NAO_AUTORIZADO',
+          mensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.'
+        });
+      }
+
+      // 5. Validar unidade recebida e permissão de acesso
+      const unitResolution = await resolveUnitSelectionForUser(
+        pool,
+        user,
+        unidade,
+        unidadeCodigo,
+        'os relatórios de treinamento'
+      );
+      if ('codigo' in unitResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: unitResolution.codigo,
+          erroMensagem: unitResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(unitResolution.status).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: unitResolution.codigo,
+          mensagem: unitResolution.mensagem
+        });
+      }
+
+      const { selection } = unitResolution;
+
+      // 6. Consultar relatórios de treinamento da(s) unidade(s) no período
+      const { polTrains, canilTrains } = await querySinopseTreinamentoByUnitAndPeriod(
+        pool,
+        selection.unitIds,
+        periodFilter
+      );
+      const totalRegistros = polTrains.length + canilTrains.length;
+
+      if (totalRegistros === 0) {
+        const emptyMsg = 'Não existem registros de relatórios com os filtros selecionados.';
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'sem_registros',
+          totalRegistros: 0,
+          dataSolicitacao,
+          ipOrigem: clientIp
+        });
+
+        await insertAuditLog(
+          'WhatsApp / API Relatórios',
+          'Sinopse Treinamento (Sem Registros)',
+          `Solicitação ${solicitacaoId} via Make.com — unidade ${selection.displayName} (${periodFilter.label}) — nenhum relatório de treinamento encontrado.`,
+          { id: user.id, name: user.name, masp: user.masp, role: user.role },
+          clientIp
+        );
+
+        return res.status(200).json({
+          sucesso: true,
+          status: 'sem_registros',
+          tipo_relatorio: 'sinopse_treinamento',
+          unidade: selection.displayName,
+          unidade_codigo: selection.fileSlug,
+          periodo: periodFilter.key,
+          periodo_descricao: periodFilter.label,
+          data_inicio: periodFilter.startDateBr,
+          data_fim: periodFilter.endDateBr,
+          total_registros: 0,
+          mensagem: emptyMsg
+        });
+      }
+
+      // 7. Gerar PDF institucional idêntico ao "Imprimir Histórico" (Treinamento) e salvar em diretório confinado
+      const geradoEm = new Date();
+      const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
+      const arquivoNome = `sinopse-treinamento-${selection.fileSlug}-${periodFilter.fileSlug}.pdf`;
+      const arquivoToken = crypto.randomBytes(16).toString('hex');
+      const storedFilename = `${arquivoToken}__${arquivoNome}`;
+      const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
+
+      if (!targetPath.startsWith(PDF_STORAGE_DIR + path.sep)) {
+        throw new Error('Caminho de armazenamento inválido.');
+      }
+
+      let pdfBuffer: Buffer;
+      try {
+        pdfBuffer = await generateSystemSinopseTreinamentoPdf({
+          departamentoLabel: selection.departmentName,
+          unidadeLabel: selection.displayName,
+          isTodosUnidades: selection.isTodos,
+          periodoLabel: periodFilter.label,
+          solicitacaoId,
+          geradoEm,
+          solicitanteNome: user.name,
+          solicitanteMasp: user.masp,
+          logoDataUri: selection.logoDataUri,
+          polTrains,
+          canilTrains
+        });
+        fs.mkdirSync(PDF_STORAGE_DIR, { recursive: true });
+        fs.writeFileSync(targetPath, pdfBuffer);
+      } catch (pdfErr: any) {
+        console.error('[Relatorios API] Erro ao gerar/salvar PDF de Sinopse Treinamento:', pdfErr?.message);
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          totalRegistros,
+          dataSolicitacao,
+          erroCodigo: 'ERRO_GERACAO_PDF',
+          erroMensagem: pdfErr?.message || 'Falha ao gerar PDF.',
+          ipOrigem: clientIp
+        });
+        return res.status(500).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'ERRO_GERACAO_PDF',
+          mensagem: 'Não foi possível gerar o relatório.'
+        });
+      }
+
+      const baseUrl = resolvePublicHttpsBaseUrl(req, tokenCheck.callbackUrlPublica);
+      const arquivoUrl = `${baseUrl}/arquivos/${arquivoToken}/${encodeURIComponent(arquivoNome)}`;
+
+      await logSolicitacaoDb(pool, {
+        idRegistro,
+        solicitacaoId,
+        tipoRelatorio: tipoRelatorioDb,
+        unidadeSolicitada: selection.displayName,
+        unidadeCodigo: selection.fileSlug,
+        unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+        telefoneUsuario: telefoneDigits,
+        usuario: user,
+        status: 'concluido',
+        arquivoNome,
+        arquivoToken,
+        arquivoCaminho: storedFilename,
+        totalRegistros,
+        expiraEm,
+        dataSolicitacao,
+        ipOrigem: clientIp
+      });
+
+      await insertAuditLog(
+        'WhatsApp / API Relatórios',
+        'Gerar PDF Sinopse Treinamento (Make.com)',
+        `Solicitação ${solicitacaoId}: ${totalRegistros} relatório(s) de treinamento da unidade ${selection.displayName} (${periodFilter.label}) — arquivo ${arquivoNome}`,
+        { id: user.id, name: user.name, masp: user.masp, role: user.role },
+        clientIp
+      );
+
+      return res.status(200).json({
+        sucesso: true,
+        status: 'concluido',
+        tipo_relatorio: 'sinopse_treinamento',
+        unidade: selection.displayName,
+        unidade_codigo: selection.fileSlug,
+        periodo: periodFilter.key,
+        periodo_descricao: periodFilter.label,
+        data_inicio: periodFilter.startDateBr,
+        data_fim: periodFilter.endDateBr,
+        solicitacao_id: solicitacaoId,
+        total_registros: totalRegistros,
+        total_treinamentos_policial: polTrains.length,
+        total_treinamentos_canil: canilTrains.length,
+        arquivo_nome: arquivoNome,
+        arquivo_url: arquivoUrl,
+        gerado_em: geradoEm.toISOString(),
+        expira_em: expiraEm.toISOString()
+      });
+    } catch (err: any) {
+      console.error('[Relatorios API] Erro inesperado em Sinopse Treinamento:', err?.message);
+      return res.status(500).json({
+        sucesso: false,
+        status: 'erro',
+        codigo: 'ERRO_GERACAO_PDF',
+        mensagem: 'Não foi possível gerar o relatório.'
+      });
+    }
+  };
+
+  // Endpoints de Sinopse Treinamento (Relatórios -> Sinopse treinamento)
+  apiRouter.post(
+    [
+      '/relatorios/sinopse-treinamento',
+      '/relatorios/sinopse/treinamento',
+      '/relatorios/treinamentos',
+      '/relatorios/relatorios-treinamento'
+    ],
+    (req: Request, res: Response) => handleSinopseTreinamentoRequest(req, res)
+  );
 }
 
 // ============================================================================
@@ -3406,6 +3830,230 @@ async function querySinopseOperacionalByUnitAndPeriod(
   }
 
   return { catOps, polOps, canilOps };
+}
+
+function formatDisparosReaisPdfSummary(disparoRealFlag: any, disparosJsonRaw: any): string {
+  if (!Boolean(Number(disparoRealFlag || 0))) return '';
+  const items = safeParseJsonArray(disparosJsonRaw).filter(
+    (item: any) => item && item.tipoArma && Number(item.quantidadeTiros) > 0
+  );
+  if (items.length === 0) return 'Sim';
+  const parts = items.map((item: any) => {
+    const qty = Math.trunc(Number(item.quantidadeTiros));
+    return `${String(item.tipoArma)}: ${qty} ${qty === 1 ? 'tiro' : 'tiros'}`;
+  });
+  const total = items.reduce((acc: number, item: any) => acc + Math.trunc(Number(item.quantidadeTiros)), 0);
+  return parts.length > 1 ? `${parts.join(' - ')} (Total: ${total} tiros)` : parts[0];
+}
+
+function matchesTrainingPeriodRecord(
+  dataTreinamento: string,
+  horaTreinamento: string | null,
+  dataCriacao: any,
+  period: ResolvedOperationalPeriodFilter
+): boolean {
+  const isoDay = String(dataTreinamento || '').trim().slice(0, 10);
+  if (period.mode === 'date_range') {
+    return isoDay >= period.startIsoDate && isoDay <= period.endIsoDate;
+  }
+
+  // Modo window_24h (Última permanência: 19h do dia anterior até a hora da solicitação)
+  if (horaTreinamento && /^\d{1,2}:\d{2}/.test(horaTreinamento.trim())) {
+    const wall = `${isoDay} ${normalizeHHMM(horaTreinamento)}:00`;
+    if (isoDay.length === 10 && wall >= period.startWallClock && wall <= period.endWallClock) {
+      return true;
+    }
+  }
+
+  if (dataCriacao) {
+    const createdDate = new Date(dataCriacao);
+    if (!Number.isNaN(createdDate.getTime())) {
+      const createdBr = getBrasiliaDateParts(createdDate).wallClock;
+      if (createdBr >= period.startWallClock && createdBr <= period.endWallClock) {
+        return true;
+      }
+    }
+  }
+
+  // Para registros sem hora (ex: RELATORIOS_TREINAMENTO_POLICIAL), inclui treinamentos datados no dia corrente da solicitação
+  if (!horaTreinamento && isoDay === period.endIsoDate) {
+    return true;
+  }
+
+  return false;
+}
+
+async function querySinopseTreinamentoByUnitAndPeriod(
+  pool: any,
+  unitIds: string[],
+  period: ResolvedOperationalPeriodFilter
+): Promise<{
+  polTrains: SystemPolicialTreinPdfRecord[];
+  canilTrains: SystemCanilTreinPdfRecord[];
+}> {
+  const unitClauseSql =
+    unitIds.length > 0 ? ` AND r.UNIDADE_ID IN (${unitIds.map(() => '?').join(', ')})` : '';
+  const windowStartUtc = new Date(`${period.startIsoDate}T19:00:00-03:00`);
+
+  const buildDateFilter = (): { sql: string; params: any[] } => {
+    if (period.mode === 'date_range') {
+      return {
+        sql: ' AND r.DATA_TREINAMENTO >= ? AND r.DATA_TREINAMENTO <= ?',
+        params: [period.startIsoDate, period.endIsoDate]
+      };
+    }
+    return {
+      sql: ' AND ((r.DATA_TREINAMENTO >= ? AND r.DATA_TREINAMENTO <= ?) OR r.DATA_CRIACAO >= ?)',
+      params: [period.startIsoDate, period.endIsoDate, windowStartUtc]
+    };
+  };
+
+  const df = buildDateFilter();
+
+  // 1. RELATORIOS_TREINAMENTO_POLICIAL (COE, CORE, CAT, CAP, etc.)
+  let polTrains: SystemPolicialTreinPdfRecord[] = [];
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT
+        r.ID_REL_TREIN_POL,
+        r.DATA_TREINAMENTO,
+        r.OPERADOR_NOME,
+        r.OPERADOR_MASP,
+        r.MODALIDADE_LOCAL,
+        r.TITULO_TREINAMENTO,
+        r.MODALIDADE_PARTICIPACAO,
+        r.OUTRAS_UNIDADES_JSON,
+        r.PARTICIPANTES_JSON,
+        r.DISPARO_REAL,
+        r.DISPAROS_REAIS_JSON,
+        r.DESCRICAO,
+        r.DATA_CRIACAO,
+        COALESCE(u.NOME_UNIDADES, r.UNIDADE_NOME, 'Sem Unidade') AS UNIDADE_FINAL
+      FROM RELATORIOS_TREINAMENTO_POLICIAL r
+      LEFT JOIN UNIDADES u ON u.ID_UNIDADES = r.UNIDADE_ID
+      WHERE 1=1${unitClauseSql}${df.sql}
+      ORDER BY r.DATA_TREINAMENTO DESC, r.DATA_CRIACAO DESC`,
+      [...unitIds, ...df.params]
+    );
+
+    polTrains = (rows || [])
+      .filter((r: any) =>
+        matchesTrainingPeriodRecord(r.DATA_TREINAMENTO, null, r.DATA_CRIACAO, period)
+      )
+      .map((r: any) => ({
+        id: String(r.ID_REL_TREIN_POL || ''),
+        unidadeNome: String(r.UNIDADE_FINAL || 'Sem Unidade'),
+        dataTreinamento: String(r.DATA_TREINAMENTO || ''),
+        tituloTreinamento: String(r.TITULO_TREINAMENTO || 'Operacional'),
+        modalidadeLocal: String(r.MODALIDADE_LOCAL || 'Interno'),
+        modalidadeParticipacao: String(r.MODALIDADE_PARTICIPACAO || 'Sozinho'),
+        operadorNome: String(r.OPERADOR_NOME || ''),
+        operadorMasp: String(r.OPERADOR_MASP || ''),
+        participantes: safeParseJsonArray(r.PARTICIPANTES_JSON)
+          .map((p: any) => ({
+            name: String(p?.name || p?.nome || ''),
+            unitName: String(p?.unitName || p?.unidadeNome || '')
+          }))
+          .filter((p: any) => Boolean(p.name)),
+        outrasUnidades: safeParseJsonArray(r.OUTRAS_UNIDADES_JSON)
+          .map((u: any) => String(typeof u === 'string' ? u : u?.name || u?.nome || ''))
+          .filter(Boolean),
+        disparoRealResumo: formatDisparosReaisPdfSummary(r.DISPARO_REAL, r.DISPAROS_REAIS_JSON),
+        descricao: String(r.DESCRICAO || '')
+      }));
+  } catch (err: any) {
+    console.warn('[Relatorios API] Aviso ao consultar RELATORIOS_TREINAMENTO_POLICIAL:', err?.message);
+  }
+
+  // 2. RELATORIOS_TREINAMENTO_CANIL (COC / Canil K9)
+  let canilTrains: SystemCanilTreinPdfRecord[] = [];
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT
+        r.ID_REL_TREINAMENTO,
+        r.DATA_TREINAMENTO,
+        r.HORA_TREINAMENTO,
+        r.CONDUTOR_NOME,
+        r.CONDUTOR_MASP,
+        r.CACHORRO_NOME,
+        r.CACHORRO_RACA,
+        r.CACHORROS_JSON,
+        r.MODALIDADE_LOCAL,
+        r.MODALIDADE_PARTICIPACAO,
+        r.DESCRICAO,
+        r.PARTICIPANTES_JSON,
+        r.TOPICOS_TREINAMENTO_JSON,
+        r.DISPARO_REAL,
+        r.DISPAROS_REAIS_JSON,
+        r.DATA_CRIACAO,
+        COALESCE(u.NOME_UNIDADES, 'COC') AS UNIDADE_FINAL
+      FROM RELATORIOS_TREINAMENTO_CANIL r
+      LEFT JOIN UNIDADES u ON u.ID_UNIDADES = r.UNIDADE_ID
+      WHERE 1=1${unitClauseSql}${df.sql}
+      ORDER BY r.DATA_TREINAMENTO DESC, r.HORA_TREINAMENTO DESC, r.DATA_CRIACAO DESC`,
+      [...unitIds, ...df.params]
+    );
+
+    canilTrains = (rows || [])
+      .filter((r: any) =>
+        matchesTrainingPeriodRecord(
+          r.DATA_TREINAMENTO,
+          r.HORA_TREINAMENTO ? String(r.HORA_TREINAMENTO) : null,
+          r.DATA_CRIACAO,
+          period
+        )
+      )
+      .map((r: any) => {
+        const parsedDogs = safeParseJsonArray(r.CACHORROS_JSON)
+          .map((c: any) => ({
+            nome: String(c?.nome || c?.name || ''),
+            raca: String(c?.raca || '')
+          }))
+          .filter((c: any) => Boolean(c.nome));
+
+        const condutorCachorros =
+          parsedDogs.length > 0
+            ? parsedDogs
+            : r.CACHORRO_NOME
+              ? [{ nome: String(r.CACHORRO_NOME), raca: String(r.CACHORRO_RACA || '') }]
+              : [];
+
+        return {
+          id: String(r.ID_REL_TREINAMENTO || ''),
+          unidadeNome: String(r.UNIDADE_FINAL || 'COC'),
+          dataTreinamento: String(r.DATA_TREINAMENTO || ''),
+          horaTreinamento: String(r.HORA_TREINAMENTO || '').slice(0, 5),
+          condutorNome: String(r.CONDUTOR_NOME || ''),
+          condutorMasp: String(r.CONDUTOR_MASP || ''),
+          condutorCachorros,
+          modalidadeLocal: String(r.MODALIDADE_LOCAL || 'Interno'),
+          modalidadeParticipacao: String(r.MODALIDADE_PARTICIPACAO || 'Sozinho'),
+          participantes: safeParseJsonArray(r.PARTICIPANTES_JSON)
+            .map((p: any) => ({
+              name: String(p?.name || p?.nome || ''),
+              cachorros: safeParseJsonArray(p?.cachorros)
+                .map((c: any) => String(typeof c === 'string' ? c : c?.nome || c?.name || ''))
+                .filter(Boolean)
+            }))
+            .filter((p: any) => Boolean(p.name)),
+          topicos: safeParseJsonArray(r.TOPICOS_TREINAMENTO_JSON)
+            .map((t: any) => ({
+              topico: String(t?.topico || ''),
+              aplicarTodosK9: Boolean(t?.aplicarTodosK9),
+              cachorros: safeParseJsonArray(t?.cachorros)
+                .map((c: any) => String(typeof c === 'string' ? c : c?.nome || c?.name || ''))
+                .filter(Boolean)
+            }))
+            .filter((t: any) => Boolean(t.topico)),
+          disparoRealResumo: formatDisparosReaisPdfSummary(r.DISPARO_REAL, r.DISPAROS_REAIS_JSON),
+          descricao: String(r.DESCRICAO || '')
+        };
+      });
+  } catch (err: any) {
+    console.warn('[Relatorios API] Aviso ao consultar RELATORIOS_TREINAMENTO_CANIL:', err?.message);
+  }
+
+  return { polTrains, canilTrains };
 }
 
 // Rota HTTPS pública de entrega do PDF gerado (com token criptográfico de 128 bits e expiração automática)

@@ -3716,3 +3716,557 @@ export async function generateSystemSinopseOperacionalPdf(params: {
   return Buffer.from(pdfBytes);
 }
 
+// ============================================================================
+// 6. SINOPSE DE TREINAMENTO — IDÊNTICO AO "MÓDULO RELATÓRIOS -> IMPRIMIR HISTÓRICO"
+//    (Relatório da Unidade — Histórico de Relatórios de Treinamento)
+// ============================================================================
+export interface SystemPolicialTreinPdfRecord {
+  id: string;
+  unidadeNome: string;
+  dataTreinamento: string;
+  tituloTreinamento: string;
+  modalidadeLocal: string;
+  modalidadeParticipacao: string;
+  operadorNome: string;
+  operadorMasp: string;
+  participantes: Array<{ name: string; unitName?: string }>;
+  outrasUnidades: string[];
+  disparoRealResumo: string;
+  descricao: string;
+}
+
+export interface SystemCanilTreinPdfRecord {
+  id: string;
+  unidadeNome: string;
+  dataTreinamento: string;
+  horaTreinamento: string;
+  condutorNome: string;
+  condutorMasp: string;
+  condutorCachorros: Array<{ nome: string; raca?: string }>;
+  modalidadeLocal: string;
+  modalidadeParticipacao: string;
+  participantes: Array<{ name: string; cachorros: string[] }>;
+  topicos: Array<{ topico: string; aplicarTodosK9: boolean; cachorros: string[] }>;
+  disparoRealResumo: string;
+  descricao: string;
+}
+
+export async function generateSystemSinopseTreinamentoPdf(params: {
+  departamentoLabel: string;
+  unidadeLabel: string;
+  isTodosUnidades: boolean;
+  periodoLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp: string;
+  logoDataUri: string | null;
+  polTrains: SystemPolicialTreinPdfRecord[];
+  canilTrains: SystemCanilTreinPdfRecord[];
+}): Promise<Buffer> {
+  const totalCount = params.polTrains.length + params.canilTrains.length;
+  const isCocOnly =
+    !params.isTodosUnidades &&
+    params.canilTrains.length > 0 &&
+    params.polTrains.length === 0;
+
+  const doc = await PDFDocument.create();
+  doc.setTitle(
+    isCocOnly
+      ? `Histórico de Treinamentos da Unidade — Canil K9 (COC)`
+      : `Histórico de Treinamentos da Unidade — ${params.unidadeLabel}`
+  );
+  doc.setAuthor('Sistema ARMARIA - Polícia Civil de Minas Gerais');
+  doc.setCreator('Sistema ARMARIA PCMG');
+
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontMono = await doc.embedFont(StandardFonts.Courier);
+  const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
+  const logoImage = await tryEmbedSystemLogo(doc, params.logoDataUri);
+
+  // A4 Paisagem (idêntico ao @page { size: A4 landscape; margin: 12mm; } do Imprimir Histórico)
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2; // 785.89pt
+  const footerSafeY = 54;
+
+  const docCode = generateUniqueDocControlCode();
+  const emissaoBr = formatDateTimeBr(params.geradoEm);
+
+  // Distribuição por unidade quando selecionado "Todos"
+  const unitCounts = new Map<string, number>();
+  for (const r of [...params.polTrains, ...params.canilTrains]) {
+    const uName = r.unidadeNome || 'Sem Unidade';
+    unitCounts.set(uName, (unitCounts.get(uName) || 0) + 1);
+  }
+  const unitBreakdownText =
+    params.isTodosUnidades && unitCounts.size > 0
+      ? '   |   Por unidade: ' +
+        Array.from(unitCounts.entries())
+          .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+          .map(([u, c]) => `${u}: ${c}`)
+          .join(' - ')
+      : '';
+
+  const filtersSummaryText = `Tipo: Treinamento - Unidade: ${params.unidadeLabel} - Periodo: ${params.periodoLabel}`;
+
+  const drawPageTopHeader = (page: PDFPage, isFirstPage: boolean): number => {
+    let y = drawTopUniqueCodeBar(
+      page,
+      pageWidth,
+      pageHeight,
+      marginX,
+      fontMono,
+      fontMonoBold,
+      docCode,
+      emissaoBr
+    );
+
+    const headerTopY = y;
+    let textX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(42, 42);
+      page.drawImage(logoImage, {
+        x: marginX,
+        y: headerTopY - 42 + (42 - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      textX = marginX + dims.width + 10;
+    }
+
+    const rightBlockW = 240;
+    const titleMaxW = contentWidth - (textX - marginX) - rightBlockW - 10;
+    const mainTitle = isCocOnly
+      ? 'POLICIA CIVIL DE MINAS GERAIS - HISTORICO DE TREINAMENTOS DA UNIDADE (COC / CANIL K9)'
+      : 'POLICIA CIVIL DE MINAS GERAIS - HISTORICO DE TREINAMENTOS DA UNIDADE';
+
+    page.drawText(fitTextToWidth(mainTitle, fontBold, 10.6, titleMaxW), {
+      x: textX,
+      y: headerTopY - 14,
+      size: 10.6,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    page.drawText(
+      fitTextToWidth(
+        `${params.departamentoLabel} - Unidade: ${params.unidadeLabel}`,
+        fontRegular,
+        8.6,
+        titleMaxW
+      ),
+      {
+        x: textX,
+        y: headerTopY - 29,
+        size: 8.6,
+        font: fontRegular,
+        color: PCMG_COLORS.slate600
+      }
+    );
+
+    const emitLine = fitTextToWidth(
+      `Emitido por: ${params.solicitanteNome}${
+        params.solicitanteMasp ? ` (MASP ${formatMaspBr(params.solicitanteMasp)})` : ''
+      }`,
+      fontBold,
+      7.9,
+      rightBlockW
+    );
+    const dateLine = `Emissao: ${emissaoBr}`;
+    page.drawText(emitLine, {
+      x: pageWidth - marginX - fontBold.widthOfTextAtSize(emitLine, 7.9),
+      y: headerTopY - 15,
+      size: 7.9,
+      font: fontBold,
+      color: PCMG_COLORS.slate700
+    });
+    page.drawText(dateLine, {
+      x: pageWidth - marginX - fontRegular.widthOfTextAtSize(dateLine, 7.8),
+      y: headerTopY - 28,
+      size: 7.8,
+      font: fontRegular,
+      color: PCMG_COLORS.slate700
+    });
+
+    y = headerTopY - 46;
+    page.drawLine({
+      start: { x: marginX, y },
+      end: { x: pageWidth - marginX, y },
+      thickness: 1.8,
+      color: PCMG_COLORS.ink
+    });
+    y -= 9;
+
+    if (isFirstPage) {
+      const filterLines = wrapCellLines(
+        `FILTROS APLICADOS: ${filtersSummaryText}`,
+        fontRegular,
+        7.8,
+        contentWidth - 16,
+        3
+      );
+      const filterBoxH = Math.max(20, filterLines.length * 10 + 9);
+      page.drawRectangle({
+        x: marginX,
+        y: y - filterBoxH,
+        width: contentWidth,
+        height: filterBoxH,
+        color: PCMG_COLORS.slate50,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.75
+      });
+      filterLines.forEach((ln, idx) => {
+        page.drawText(ln, {
+          x: marginX + 8,
+          y: y - 12 - idx * 10,
+          size: 7.8,
+          font: idx === 0 ? fontBold : fontRegular,
+          color: PCMG_COLORS.ink
+        });
+      });
+      y -= filterBoxH + 8;
+
+      const summaryParts = [
+        `Total de registros: ${totalCount}`,
+        `Treinamentos: ${totalCount}`,
+        params.polTrains.length > 0 && params.canilTrains.length > 0
+          ? `Unidades Policiais: ${params.polTrains.length}   |   Canil K9: ${params.canilTrains.length}`
+          : ''
+      ].filter(Boolean);
+      const summaryText = summaryParts.join('   |   ') + unitBreakdownText;
+      const summaryLines = wrapCellLines(summaryText, fontBold, 8, contentWidth, 2);
+      summaryLines.forEach((ln, idx) => {
+        page.drawText(ln, {
+          x: marginX,
+          y: y - 8 - idx * 10,
+          size: 8,
+          font: fontBold,
+          color: PCMG_COLORS.slate700
+        });
+      });
+      y -= summaryLines.length * 10 + 6;
+    }
+
+    return y;
+  };
+
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let cursorY = drawPageTopHeader(page, true);
+
+  interface TableColSpec {
+    key: string;
+    label: string;
+    width: number;
+    mono?: boolean;
+    boldFirstLine?: boolean;
+  }
+
+  const drawColsHeader = (cols: TableColSpec[]): void => {
+    const thH = 18;
+    page.drawRectangle({
+      x: marginX,
+      y: cursorY - thH,
+      width: contentWidth,
+      height: thH,
+      color: PCMG_COLORS.slate200,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.7
+    });
+    let colX = marginX;
+    for (const col of cols) {
+      page.drawRectangle({
+        x: colX,
+        y: cursorY - thH,
+        width: col.width,
+        height: thH,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.55
+      });
+      const lbl = fitTextToWidth(col.label, fontBold, 7.1, col.width - 8);
+      page.drawText(lbl, {
+        x: colX + 4,
+        y: cursorY - 11.8,
+        size: 7.1,
+        font: fontBold,
+        color: PCMG_COLORS.slate800
+      });
+      colX += col.width;
+    }
+    cursorY -= thH;
+  };
+
+  const drawSectionHeaderAndTableHead = (sectionTitle: string, cols: TableColSpec[]): void => {
+    const neededH = 18 + 18 + 22;
+    if (cursorY - neededH < footerSafeY) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawPageTopHeader(page, false);
+    }
+
+    page.drawText(fitTextToWidth(sectionTitle.toUpperCase(), fontBold, 8.8, contentWidth), {
+      x: marginX,
+      y: cursorY - 10,
+      size: 8.8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    page.drawLine({
+      start: { x: marginX, y: cursorY - 14 },
+      end: { x: pageWidth - marginX, y: cursorY - 14 },
+      thickness: 0.85,
+      color: PCMG_COLORS.slate300
+    });
+    cursorY -= 18;
+
+    drawColsHeader(cols);
+  };
+
+  const drawTableRows = (
+    sectionTitle: string,
+    cols: TableColSpec[],
+    rows: Array<Record<string, string>>
+  ): void => {
+    drawSectionHeaderAndTableHead(sectionTitle, cols);
+
+    const fontSize = 7.4;
+    const lineH = 9.6;
+
+    rows.forEach((rowMap, rowIdx) => {
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+
+      for (const col of cols) {
+        const useFont = col.mono ? fontMono : fontRegular;
+        const lines = wrapCellLines(rowMap[col.key] || '-', useFont, fontSize, col.width - 8, 30);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const maxUsableHeight = pageHeight - 135 - footerSafeY;
+      const rawRowH = Math.max(20, maxLines * lineH + 8);
+      const rowH = Math.min(rawRowH, maxUsableHeight);
+
+      if (cursorY - rowH < footerSafeY) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawPageTopHeader(page, false);
+        drawColsHeader(cols);
+      }
+
+      const rowBottomY = cursorY - rowH;
+      if (rowIdx % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.grayRow
+        });
+      }
+
+      const maxRenderableLines = Math.max(1, Math.floor((rowH - 6) / lineH));
+      let colX = marginX;
+      for (const col of cols) {
+        page.drawRectangle({
+          x: colX,
+          y: rowBottomY,
+          width: col.width,
+          height: rowH,
+          borderColor: PCMG_COLORS.slate300,
+          borderWidth: 0.5
+        });
+
+        const lines = (wrapped[col.key] || ['-']).slice(0, maxRenderableLines);
+        lines.forEach((line, lIdx) => {
+          const isFirst = lIdx === 0;
+          const useFont = col.mono
+            ? isFirst
+              ? fontMonoBold
+              : fontMono
+            : col.boldFirstLine && isFirst
+              ? fontBold
+              : fontRegular;
+          const useSize = col.mono && !isFirst ? 6.9 : fontSize;
+          const useColor = col.mono && !isFirst ? PCMG_COLORS.slate600 : PCMG_COLORS.ink;
+
+          page.drawText(line, {
+            x: colX + 4,
+            y: cursorY - 10.5 - lIdx * lineH,
+            size: useSize,
+            font: useFont,
+            color: useColor
+          });
+        });
+
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+
+    cursorY -= 10;
+  };
+
+  // --- SEÇÃO 1: RELATÓRIOS DE TREINAMENTO DA UNIDADE (COE, CORE, CAT, CAP, etc.) ---
+  if (params.polTrains.length > 0) {
+    const wData = Math.round(contentWidth * 0.09);
+    const wTit = Math.round(contentWidth * 0.12);
+    const wOps = Math.round(contentWidth * 0.22);
+    const wOut = Math.round(contentWidth * 0.15);
+    const wDesc = contentWidth - (wData + wTit + wOps + wOut);
+
+    const polCols: TableColSpec[] = [
+      { key: 'data', label: 'DATA', width: wData, mono: true },
+      { key: 'tit', label: 'TITULO / MODALIDADE', width: wTit, boldFirstLine: true },
+      { key: 'ops', label: 'OPERADOR DIGITADOR E PARTICIPANTES', width: wOps, boldFirstLine: true },
+      { key: 'out', label: 'OUTRAS UNIDADES', width: wOut },
+      { key: 'desc', label: 'DESCRICAO', width: wDesc }
+    ];
+
+    const polRows = params.polTrains.map(rel => {
+      const dateLines = [formatIsoDateOnlyBr(rel.dataTreinamento)];
+      if (params.isTodosUnidades && rel.unidadeNome) {
+        dateLines.push(rel.unidadeNome);
+      }
+
+      const titLines = [
+        rel.tituloTreinamento || 'Operacional',
+        `${rel.modalidadeLocal || 'Interno'} - ${rel.modalidadeParticipacao || 'Sozinho'}`
+      ];
+
+      const opsLines = [rel.operadorNome || '-'];
+      if (rel.operadorMasp) {
+        opsLines.push(`MASP: ${formatMaspBr(rel.operadorMasp)}`);
+      }
+      if (rel.participantes.length > 0) {
+        opsLines.push(
+          rel.participantes
+            .map(p => `${p.name}${p.unitName ? ` (${p.unitName})` : ''}`)
+            .join('; ')
+        );
+      }
+
+      const outStr = rel.outrasUnidades.length > 0 ? rel.outrasUnidades.join(', ') : '-';
+
+      const descLines: string[] = [];
+      if (rel.disparoRealResumo) {
+        descLines.push(`Disparo Real: ${rel.disparoRealResumo}`);
+      }
+      descLines.push(rel.descricao || '-');
+
+      return {
+        data: dateLines.join('\n'),
+        tit: titLines.join('\n'),
+        ops: opsLines.join('\n'),
+        out: outStr,
+        desc: descLines.join('\n')
+      };
+    });
+
+    drawTableRows(
+      `Relatorios de Treinamento da Unidade (${params.polTrains.length})`,
+      polCols,
+      polRows
+    );
+  }
+
+  // --- SEÇÃO 2: RELATÓRIOS DE TREINAMENTO K9 / COC (CANIL) ---
+  if (params.canilTrains.length > 0) {
+    const wData = Math.round(contentWidth * 0.09);
+    const wCond = Math.round(contentWidth * 0.18);
+    const wK9 = Math.round(contentWidth * 0.16);
+    const wLoc = Math.round(contentWidth * 0.09);
+    const wPart = Math.round(contentWidth * 0.12);
+    const wDesc = contentWidth - (wData + wCond + wK9 + wLoc + wPart);
+
+    const canilCols: TableColSpec[] = [
+      { key: 'data', label: 'DATA', width: wData, mono: true },
+      { key: 'cond', label: 'CONDUTOR', width: wCond, boldFirstLine: true },
+      { key: 'k9', label: 'ANIMAL(IS) K9', width: wK9, boldFirstLine: true },
+      { key: 'loc', label: 'LOCAL', width: wLoc },
+      { key: 'part', label: 'PARTICIPACAO', width: wPart },
+      { key: 'desc', label: 'DESCRICAO DO TREINAMENTO', width: wDesc }
+    ];
+
+    const canilRows = params.canilTrains.map(rel => {
+      const dateLines = [formatIsoDateOnlyBr(rel.dataTreinamento)];
+      if (rel.horaTreinamento) {
+        dateLines.push(rel.horaTreinamento);
+      }
+      if (params.isTodosUnidades && rel.unidadeNome) {
+        dateLines.push(rel.unidadeNome);
+      }
+
+      const condLines = [rel.condutorNome || '-'];
+      if (rel.condutorMasp) {
+        condLines.push(`MASP: ${formatMaspBr(rel.condutorMasp)}`);
+      }
+
+      const k9Lines =
+        rel.condutorCachorros.length > 0
+          ? rel.condutorCachorros.map(c => `${c.nome}${c.raca ? ` (${c.raca})` : ''}`)
+          : ['Sem animal'];
+      if (rel.modalidadeParticipacao === 'Coletivo' && rel.participantes.length > 0) {
+        k9Lines.push(
+          rel.participantes
+            .map(
+              p => `${p.name} (${p.cachorros.length > 0 ? p.cachorros.join(', ') : 'Sem animal'})`
+            )
+            .join('; ')
+        );
+      }
+
+      const partLines = [rel.modalidadeParticipacao || 'Sozinho'];
+      if (rel.modalidadeParticipacao === 'Coletivo' && rel.participantes.length > 0) {
+        partLines.push(`+${rel.participantes.length} policial(is)`);
+      }
+
+      const descLines: string[] = [];
+      if (rel.topicos.length > 0) {
+        const topicosTxt = rel.topicos
+          .map(
+            t =>
+              `${t.topico} (${
+                t.aplicarTodosK9 ? 'Todos os K9' : t.cachorros.join(', ') || 'Sem K9'
+              })`
+          )
+          .join(' - ');
+        descLines.push(`Topicos: ${topicosTxt}`);
+      }
+      if (rel.disparoRealResumo) {
+        descLines.push(`Disparo Real: ${rel.disparoRealResumo}`);
+      }
+      descLines.push(rel.descricao || '-');
+
+      return {
+        data: dateLines.join('\n'),
+        cond: condLines.join('\n'),
+        k9: k9Lines.join('\n'),
+        loc: rel.modalidadeLocal || 'Interno',
+        part: partLines.join('\n'),
+        desc: descLines.join('\n')
+      };
+    });
+
+    const canilTitle = isCocOnly
+      ? `Relatorios de Treinamento K9 (${params.canilTrains.length})`
+      : `Relatorios de Treinamento K9 / COC (${params.canilTrains.length})`;
+    drawTableRows(canilTitle, canilCols, canilRows);
+  }
+
+  drawInstitutionalFooters({
+    doc,
+    marginX,
+    pageWidth,
+    fontMono,
+    fontMonoBold,
+    docCode,
+    emissaoBr,
+    footerLeftText: `Sistema ARMARIA - Policia Civil de Minas Gerais | Historico de treinamentos da unidade ${params.unidadeLabel}`
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
+
+
