@@ -2,9 +2,19 @@ import { Express, Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, PDFImage } from 'pdf-lib';
 import { resolveWhatsappUserContext, PermittedUnit, ResolvedWhatsappUser } from './whatsappBotEngine';
 import { decryptSecret } from './whatsappRoutes';
+import {
+  formatDateTimeBr,
+  generateSystemArmasPdf,
+  generateSystemMunicoesPdf,
+  generateSystemExplosivosPdf,
+  generateSystemMateriaisPdf,
+  SystemArmaPdfRecord,
+  SystemMunicaoPdfRecord,
+  SystemExplosivoPdfRecord,
+  SystemMaterialPdfRecord
+} from './institutionalPdfTemplates';
 
 interface RelatoriosApiDeps {
   getPool: () => any;
@@ -59,35 +69,6 @@ function sanitizeFileSlug(val: string): string {
     .replace(/-+/g, '-')
     .replace(/^-|-$/g, '');
   return (clean || 'UNIDADE').slice(0, 48);
-}
-
-function sanitizePdfText(input?: string | null): string {
-  const s = String(input ?? '')
-    .replace(/\r\n/g, '\n')
-    .replace(/\r/g, '\n')
-    .replace(/\t/g, ' ')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/[–—]/g, '-')
-    .replace(/…/g, '...')
-    .replace(/[^\x20-\x7E\xA0-\xFF\n]/g, ' ');
-  return s.trim();
-}
-
-function formatDateTimeBr(date: Date): string {
-  try {
-    return new Intl.DateTimeFormat('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit'
-    }).format(date);
-  } catch {
-    return date.toISOString().replace('T', ' ').slice(0, 19);
-  }
 }
 
 function checkRateLimit(bucketMap: Map<string, number[]>, key: string, maxRequests: number): { allowed: boolean; retryAfterSec: number } {
@@ -256,25 +237,10 @@ async function verifyRelatoriosApiToken(
   return { ok: true, callbackUrlPublica };
 }
 
-interface FuzilRecord {
-  id: string;
-  numeroSerie: string;
-  fabricante: string;
-  modelo: string;
-  calibre: string;
-  status: string;
-  unidadeId: string;
-  unidadeNome: string;
-  cofreCodigo: string;
-  policialAcautelado: string;
-  carregadores: number;
-  tirosDisparados: number;
-  observacao: string;
-}
-
 interface ResolvedUnitSelection {
   isTodos: boolean;
   displayName: string;
+  departmentName: string;
   fileSlug: string;
   unitIds: string[];
   logoDataUri: string | null;
@@ -394,13 +360,15 @@ async function resolveUnitSelectionForUser(
     }
 
     let deptLogo: string | null = null;
+    let deptName = 'POLÍCIA CIVIL DE MINAS GERAIS';
     if (user.departmentId) {
       try {
         const [dRows]: any = await pool.query(
-          'SELECT LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
+          'SELECT NOME_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
           [user.departmentId]
         );
         deptLogo = dRows?.[0]?.LOGO_URL_DEPARTAMENTOS || null;
+        if (dRows?.[0]?.NOME_DEPARTAMENTOS) deptName = String(dRows[0].NOME_DEPARTAMENTOS);
       } catch {}
     }
 
@@ -409,6 +377,7 @@ async function resolveUnitSelectionForUser(
       selection: {
         isTodos: true,
         displayName: user.isGlobal ? 'Todas as Unidades' : 'Todas as Unidades Permitidas',
+        departmentName: deptName,
         fileSlug: 'TODOS',
         unitIds: user.isGlobal ? [] : user.permittedUnits.map(u => u.id),
         logoDataUri: deptLogo
@@ -458,13 +427,17 @@ async function resolveUnitSelectionForUser(
   }
 
   let logoDataUri: string | null = matchUnit.LOGO_URL_UNIDADES || null;
-  if (!logoDataUri && matchUnit.DEPARTAMENTO_ID_UNIDADES) {
+  let departmentName = 'POLÍCIA CIVIL DE MINAS GERAIS';
+  if (matchUnit.DEPARTAMENTO_ID_UNIDADES) {
     try {
       const [dRows]: any = await pool.query(
-        'SELECT LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
+        'SELECT NOME_DEPARTAMENTOS, LOGO_URL_DEPARTAMENTOS FROM DEPARTAMENTOS WHERE ID_DEPARTAMENTOS = ? LIMIT 1',
         [matchUnit.DEPARTAMENTO_ID_UNIDADES]
       );
-      logoDataUri = dRows?.[0]?.LOGO_URL_DEPARTAMENTOS || null;
+      if (dRows?.[0]?.NOME_DEPARTAMENTOS) departmentName = String(dRows[0].NOME_DEPARTAMENTOS);
+      if (!logoDataUri && dRows?.[0]?.LOGO_URL_DEPARTAMENTOS) {
+        logoDataUri = dRows[0].LOGO_URL_DEPARTAMENTOS;
+      }
     } catch {}
   }
 
@@ -473,6 +446,7 @@ async function resolveUnitSelectionForUser(
     selection: {
       isTodos: false,
       displayName: matchedName,
+      departmentName,
       fileSlug: sanitizeFileSlug(unidadeCodigoRaw || matchedName),
       unitIds: [matchedId],
       logoDataUri
@@ -484,10 +458,11 @@ async function queryArmasByTypeAndUnit(
   pool: any,
   weaponSpec: WeaponReportSpec,
   unitIds: string[]
-): Promise<FuzilRecord[]> {
+): Promise<SystemArmaPdfRecord[]> {
   let sql = `
     SELECT
       a.ID_ARMAS,
+      a.TIPO_ARMAS,
       a.NUMERO_SERIE_ARMAS,
       a.FABRICANTE_ARMAS,
       a.MODELO_ARMAS,
@@ -497,9 +472,12 @@ async function queryArmasByTypeAndUnit(
       a.POLICIAL_ACAUTELADO_ARMAS,
       a.QUANTIDADE_CARREGADORES_ARMAS,
       a.TIROS_DISPARADOS_ARMAS,
+      a.DATA_ULTIMA_MANUTENCAO_ARMAS,
+      a.RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS,
       a.OBSERVACAO_LOCALIZACAO_ARMAS,
       u.NOME_UNIDADES,
-      c.CODIGO_COFRES
+      c.CODIGO_COFRES,
+      c.TIPO_COFRES
     FROM ARMAS a
     LEFT JOIN UNIDADES u ON u.ID_UNIDADES = a.UNIDADE_ID_ARMAS
     LEFT JOIN COFRES c ON c.ID_COFRES = a.COFRE_ID_ARMAS
@@ -516,309 +494,27 @@ async function queryArmasByTypeAndUnit(
   sql += ' ORDER BY u.NOME_UNIDADES ASC, a.MODELO_ARMAS ASC, a.NUMERO_SERIE_ARMAS ASC';
 
   const [rows]: any = await pool.query(sql, params);
-  return (rows || []).map((r: any) => ({
-    id: String(r.ID_ARMAS || ''),
-    numeroSerie: String(r.NUMERO_SERIE_ARMAS || '—'),
-    fabricante: String(r.FABRICANTE_ARMAS || ''),
-    modelo: String(r.MODELO_ARMAS || '—'),
-    calibre: String(r.CALIBRE_ARMAS || '—'),
-    status: String(r.STATUS_ARMAS || 'No Cofre'),
-    unidadeId: String(r.UNIDADE_ID_ARMAS || ''),
-    unidadeNome: String(r.NOME_UNIDADES || 'Sem Unidade'),
-    cofreCodigo: String(r.CODIGO_COFRES || ''),
-    policialAcautelado: String(r.POLICIAL_ACAUTELADO_ARMAS || ''),
-    carregadores: Number(r.QUANTIDADE_CARREGADORES_ARMAS || 0),
-    tirosDisparados: Number(r.TIROS_DISPARADOS_ARMAS || 0),
-    observacao: String(r.OBSERVACAO_LOCALIZACAO_ARMAS || '')
-  }));
-}
-
-async function tryEmbedLogoImage(doc: PDFDocument, dataUri?: string | null): Promise<PDFImage | null> {
-  if (!dataUri || typeof dataUri !== 'string') return null;
-  const match = dataUri.trim().match(/^data:image\/(png|jpeg|jpg);base64,([A-Za-z0-9+/=\s]+)$/i);
-  if (!match) return null;
-  try {
-    const kind = match[1].toLowerCase();
-    const bytes = Buffer.from(match[2].replace(/\s+/g, ''), 'base64');
-    if (bytes.length === 0 || bytes.length > 2 * 1024 * 1024) return null;
-    if (kind === 'png') return await doc.embedPng(bytes);
-    return await doc.embedJpg(bytes);
-  } catch {
-    return null;
-  }
-}
-
-function fitTextToWidth(text: string, font: PDFFont, fontSize: number, maxWidth: number): string {
-  const clean = sanitizePdfText(text).replace(/\n/g, ' ');
-  if (!clean) return '-';
-  if (font.widthOfTextAtSize(clean, fontSize) <= maxWidth) return clean;
-  let out = clean;
-  while (out.length > 1 && font.widthOfTextAtSize(`${out}...`, fontSize) > maxWidth) {
-    out = out.slice(0, -1);
-  }
-  return `${out}...`;
-}
-
-async function generateArmasPdfBuffer(params: {
-  weaponSpec: WeaponReportSpec;
-  unidadeLabel: string;
-  solicitacaoId: string;
-  geradoEm: Date;
-  solicitanteNome: string;
-  solicitanteMasp: string;
-  telefoneUsuario: string;
-  logoDataUri: string | null;
-  records: FuzilRecord[];
-}): Promise<Buffer> {
-  const doc = await PDFDocument.create();
-  doc.setTitle(`${params.weaponSpec.tituloDoc} - ${params.unidadeLabel}`);
-  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
-  doc.setCreator('API Arsenal Make.com / WhatsApp');
-
-  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
-
-  // Paisagem A4 para excelente legibilidade das colunas da tabela de armamento
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
-  const marginX = 34;
-  const contentWidth = pageWidth - marginX * 2;
-  const footerHeight = 32;
-
-  const totalCount = params.records.length;
-  const noCofreCount = params.records.filter(r => r.status.toLowerCase().includes('cofre')).length;
-  const acauteladoCount = params.records.filter(r => r.status.toLowerCase().includes('acautel')).length;
-  const outrosCount = Math.max(0, totalCount - noCofreCount - acauteladoCount);
-
-  const columns = [
-    { key: 'idx', label: '#', width: 26 },
-    { key: 'unidade', label: 'UNIDADE', width: 72 },
-    { key: 'serie', label: 'N. SERIE', width: 102 },
-    { key: 'modelo', label: 'FABRICANTE / MODELO', width: 168 },
-    { key: 'calibre', label: 'CALIBRE', width: 74 },
-    { key: 'situacao', label: 'SITUACAO', width: 88 },
-    { key: 'posse', label: 'COFRE / POSSE', width: 126 },
-    { key: 'obs', label: 'OBSERVACOES', width: contentWidth - (26 + 72 + 102 + 168 + 74 + 88 + 126) }
-  ];
-
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
-    // Cabeçalho institucional escuro + filete dourado
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 70,
-      width: pageWidth,
-      height: 70,
-      color: rgb(0.06, 0.1, 0.17)
-    });
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 73,
-      width: pageWidth,
-      height: 3,
-      color: rgb(0.85, 0.65, 0.13)
-    });
-
-    let titleStartX = marginX;
-    if (logoImage) {
-      const dims = logoImage.scaleToFit(46, 46);
-      page.drawImage(logoImage, {
-        x: marginX,
-        y: pageHeight - 58 + (46 - dims.height) / 2,
-        width: dims.width,
-        height: dims.height
-      });
-      titleStartX = marginX + 56;
-    }
-
-    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
-      x: titleStartX,
-      y: pageHeight - 24,
-      size: 8.5,
-      font: fontBold,
-      color: rgb(0.96, 0.78, 0.25)
-    });
-
-    page.drawText(
-      fitTextToWidth(`${params.weaponSpec.tituloPdfUpper} - ${params.unidadeLabel.toUpperCase()}`, fontBold, 14, contentWidth - (titleStartX - marginX) - 180),
-      {
-        x: titleStartX,
-        y: pageHeight - 44,
-        size: 14,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      }
-    );
-
-    page.drawText(
-      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 40)}`,
-      {
-        x: titleStartX,
-        y: pageHeight - 60,
-        size: 8,
-        font: fontRegular,
-        color: rgb(0.82, 0.86, 0.92)
-      }
-    );
-
-    let y = pageHeight - 88;
-
-    if (isFirstPage) {
-      // Cartão de metadados da solicitação + resumo quantitativo
-      page.drawRectangle({
-        x: marginX,
-        y: y - 42,
-        width: contentWidth,
-        height: 44,
-        color: rgb(0.95, 0.96, 0.98),
-        borderColor: rgb(0.82, 0.85, 0.9),
-        borderWidth: 0.75
-      });
-
-      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
-      const metaLine2 = `Total de ${params.weaponSpec.pluralLabel}: ${totalCount}   |   No Cofre: ${noCofreCount}   |   Acauteladas: ${acauteladoCount}   |   Outros / Manutencao: ${outrosCount}`;
-
-      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.5, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 15,
-        size: 8.5,
-        font: fontRegular,
-        color: rgb(0.15, 0.2, 0.28)
-      });
-      page.drawText(fitTextToWidth(metaLine2, fontBold, 9, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 32,
-        size: 9,
-        font: fontBold,
-        color: rgb(0.06, 0.25, 0.2)
-      });
-      y -= 54;
-    }
-
-    // Cabeçalho da tabela
-    const headerRowHeight = 20;
-    page.drawRectangle({
-      x: marginX,
-      y: y - headerRowHeight,
-      width: contentWidth,
-      height: headerRowHeight,
-      color: rgb(0.11, 0.17, 0.27)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawText(col.label, {
-        x: colX + 4,
-        y: y - 13.5,
-        size: 7.5,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      });
-      colX += col.width;
-    }
-
-    return y - headerRowHeight;
-  };
-
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
-  const rowHeight = 18;
-
-  params.records.forEach((rec, index) => {
-    if (cursorY - rowHeight < footerHeight + 12) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowHeight;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowHeight,
-        color: rgb(0.97, 0.98, 0.99)
-      });
-    }
-    page.drawLine({
-      start: { x: marginX, y: rowBottomY },
-      end: { x: marginX + contentWidth, y: rowBottomY },
-      thickness: 0.4,
-      color: rgb(0.86, 0.89, 0.93)
-    });
-
-    const fabricanteModelo = [rec.fabricante, rec.modelo].filter(Boolean).join(' - ') || '-';
-    const posseInfo = rec.policialAcautelado
-      ? `Acaut.: ${rec.policialAcautelado}`
-      : rec.cofreCodigo
-        ? `Cofre ${rec.cofreCodigo}`
-        : '-';
-    const obsParts = [
-      rec.observacao,
-      rec.carregadores > 0 ? `Carr: ${rec.carregadores}` : '',
-      rec.tirosDisparados > 0 ? `Tiros: ${rec.tirosDisparados}` : ''
-    ].filter(Boolean);
-
-    const values: Record<string, string> = {
-      idx: String(index + 1),
-      unidade: rec.unidadeNome,
-      serie: rec.numeroSerie,
-      modelo: fabricanteModelo,
-      calibre: rec.calibre,
-      situacao: rec.status,
-      posse: posseInfo,
-      obs: obsParts.join(' | ') || '-'
+  return (rows || []).map((r: any) => {
+    const manut = formatDateOnlyBr(r.DATA_ULTIMA_MANUTENCAO_ARMAS);
+    return {
+      id: String(r.ID_ARMAS || ''),
+      tipo: String(r.TIPO_ARMAS || weaponSpec.pluralLabel),
+      numeroSerie: String(r.NUMERO_SERIE_ARMAS || '—'),
+      fabricante: String(r.FABRICANTE_ARMAS || ''),
+      modelo: String(r.MODELO_ARMAS || '—'),
+      calibre: String(r.CALIBRE_ARMAS || '—'),
+      status: String(r.STATUS_ARMAS || 'No Cofre'),
+      unidadeNome: String(r.NOME_UNIDADES || 'Sem Unidade'),
+      cofreCodigo: String(r.CODIGO_COFRES || ''),
+      cofreTipo: String(r.TIPO_COFRES || ''),
+      policialAcautelado: String(r.POLICIAL_ACAUTELADO_ARMAS || ''),
+      carregadores: Number(r.QUANTIDADE_CARREGADORES_ARMAS || 0),
+      tirosDisparados: Number(r.TIROS_DISPARADOS_ARMAS || 0),
+      ultimaManutencaoData: manut.formatted === '—' ? '' : manut.formatted,
+      ultimaManutencaoResp: String(r.RESPONSAVEL_ULTIMA_MANUTENCAO_ARMAS || ''),
+      observacao: String(r.OBSERVACAO_LOCALIZACAO_ARMAS || '')
     };
-
-    let colX = marginX;
-    for (const col of columns) {
-      const cellText = fitTextToWidth(values[col.key] || '-', fontRegular, 7.8, col.width - 8);
-      page.drawText(cellText, {
-        x: colX + 4,
-        y: rowBottomY + 5.5,
-        size: 7.8,
-        font: col.key === 'serie' ? fontBold : fontRegular,
-        color: rgb(0.1, 0.13, 0.18)
-      });
-      colX += col.width;
-    }
-
-    cursorY = rowBottomY;
   });
-
-  // Rodapé institucional com paginação em todas as páginas
-  const pages = doc.getPages();
-  const totalPages = pages.length;
-  pages.forEach((p, idx) => {
-    p.drawLine({
-      start: { x: marginX, y: 26 },
-      end: { x: pageWidth - marginX, y: 26 },
-      thickness: 0.6,
-      color: rgb(0.78, 0.82, 0.87)
-    });
-    p.drawText(
-      `Sistema Arsenal PCMG - Documento de uso restrito institucional | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
-      {
-        x: marginX,
-        y: 13,
-        size: 7.5,
-        font: fontRegular,
-        color: rgb(0.42, 0.47, 0.54)
-      }
-    );
-    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
-    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
-    p.drawText(pageLabel, {
-      x: pageWidth - marginX - labelW,
-      y: 13,
-      size: 7.5,
-      font: fontBold,
-      color: rgb(0.3, 0.35, 0.42)
-    });
-  });
-
-  const pdfBytes = await doc.save();
-  return Buffer.from(pdfBytes);
 }
 
 async function logSolicitacaoDb(
@@ -1147,14 +843,16 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       let pdfBuffer: Buffer;
       try {
-        pdfBuffer = await generateArmasPdfBuffer({
-          weaponSpec,
+        pdfBuffer = await generateSystemArmasPdf({
+          tituloDoc: weaponSpec.tituloDoc,
+          filtroTipoLabel: weaponSpec.pluralLabel,
+          departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
           solicitacaoId,
           geradoEm,
           solicitanteNome: user.name,
           solicitanteMasp: user.masp,
-          telefoneUsuario: telefoneDigits,
+          solicitanteRole: user.role,
           logoDataUri: selection.logoDataUri,
           records
         });
@@ -1555,15 +1253,16 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
       }
 
       try {
-        const pdfBuffer = await generateMunicoesPdfBuffer({
-          calibreSpec,
+        const pdfBuffer = await generateSystemMunicoesPdf({
+          calibreDisplayLabel: calibreSpec.displayLabel,
+          isTodosCalibres: calibreSpec.isTodos,
           modoRelatorio,
+          departamentoLabel: selection.departmentName,
           unidadeLabel: selection.displayName,
           solicitacaoId,
           geradoEm,
           solicitanteNome: user.name,
           solicitanteMasp: user.masp,
-          telefoneUsuario: telefoneDigits,
           logoDataUri: selection.logoDataUri,
           records
         });
@@ -1933,23 +1632,23 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
 
       try {
         const pdfBuffer = isExplosivos
-          ? await generateExplosivosPdfBuffer({
+          ? await generateSystemExplosivosPdf({
+              departamentoLabel: selection.departmentName,
               unidadeLabel: selection.displayName,
               solicitacaoId,
               geradoEm,
               solicitanteNome: user.name,
               solicitanteMasp: user.masp,
-              telefoneUsuario: telefoneDigits,
               logoDataUri: selection.logoDataUri,
               records: explosivosRecords
             })
-          : await generateMateriaisPdfBuffer({
+          : await generateSystemMateriaisPdf({
+              departamentoLabel: selection.departmentName,
               unidadeLabel: selection.displayName,
               solicitacaoId,
               geradoEm,
               solicitanteNome: user.name,
               solicitanteMasp: user.masp,
-              telefoneUsuario: telefoneDigits,
               logoDataUri: selection.logoDataUri,
               records: materiaisRecords
             });
@@ -2068,23 +1767,7 @@ interface MunicaoCalibreSpec {
   matcher: (normalizedDbCalibre: string) => boolean;
 }
 
-interface MunicaoStockRecord {
-  id: string;
-  unidadeId: string;
-  unidadeNome: string;
-  calibreNome: string;
-  fabricante: string;
-  tipo: string;
-  peso: string;
-  lote: string;
-  anoFabricacao: string;
-  destinacao: string;
-  cofreCodigo: string;
-  cofreDescricao: string;
-  quantidade: number;
-  atualizadoEm: string;
-  observacao: string;
-}
+type MunicaoStockRecord = SystemMunicaoPdfRecord;
 
 function compactCalibreCode(val?: string | null): string {
   return String(val || '')
@@ -2225,8 +1908,6 @@ async function queryMunicoesByCalibreAndUnit(
 
   const [rows]: any = await pool.query(sql, params);
   const mapped: MunicaoStockRecord[] = (rows || []).map((r: any) => ({
-    id: String(r.ID_ESTOQUE_MUNICOES || ''),
-    unidadeId: String(r.UNIDADE_ID_ESTOQUE_MUNICOES || ''),
     unidadeNome: String(r.NOME_UNIDADES || 'Sem Unidade'),
     calibreNome: String(r.NOME_CALIBRES || '—'),
     fabricante: String(r.FABRICANTE_FINAL || '—'),
@@ -2248,468 +1929,9 @@ async function queryMunicoesByCalibreAndUnit(
   return mapped.filter(item => calibreSpec.matcher(compactCalibreCode(item.calibreNome)));
 }
 
-function wrapCellLines(text: string, font: PDFFont, fontSize: number, maxWidth: number, maxLines = 6): string[] {
-  const clean = sanitizePdfText(text).replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!clean) return ['-'];
-  const words = clean.split(' ');
-  const lines: string[] = [];
-  let current = '';
-
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
-    if (font.widthOfTextAtSize(candidate, fontSize) <= maxWidth) {
-      current = candidate;
-    } else {
-      if (current) lines.push(current);
-      if (font.widthOfTextAtSize(word, fontSize) > maxWidth) {
-        let part = '';
-        for (const ch of word) {
-          if (font.widthOfTextAtSize(part + ch, fontSize) > maxWidth) {
-            if (part) lines.push(part);
-            part = ch;
-          } else {
-            part += ch;
-          }
-        }
-        current = part;
-      } else {
-        current = word;
-      }
-    }
-  }
-  if (current) lines.push(current);
-
-  if (lines.length <= maxLines) return lines;
-  const trimmed = lines.slice(0, maxLines);
-  trimmed[maxLines - 1] = fitTextToWidth(`${trimmed[maxLines - 1]}...`, font, fontSize, maxWidth);
-  return trimmed;
-}
-
-function formatIntBr(n: number): string {
-  try {
-    return new Intl.NumberFormat('pt-BR').format(Math.round(n));
-  } catch {
-    return String(Math.round(n));
-  }
-}
-
-async function generateMunicoesPdfBuffer(params: {
-  calibreSpec: MunicaoCalibreSpec;
-  modoRelatorio: 'por_calibre' | 'por_unidade';
-  unidadeLabel: string;
-  solicitacaoId: string;
-  geradoEm: Date;
-  solicitanteNome: string;
-  solicitanteMasp: string;
-  telefoneUsuario: string;
-  logoDataUri: string | null;
-  records: MunicaoStockRecord[];
-}): Promise<Buffer> {
-  const isPorUnidade = params.modoRelatorio === 'por_unidade';
-  const doc = await PDFDocument.create();
-  doc.setTitle(
-    isPorUnidade
-      ? `Relação de Munições por Unidade - ${params.unidadeLabel}`
-      : `Relação de Munições (${params.calibreSpec.displayLabel}) - ${params.unidadeLabel}`
-  );
-  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
-  doc.setCreator('API Arsenal Make.com / WhatsApp');
-
-  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
-
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
-  const marginX = 28;
-  const contentWidth = pageWidth - marginX * 2;
-  const footerHeight = 32;
-
-  const totalLotes = params.records.length;
-  const totalQtd = params.records.reduce((s, r) => s + r.quantidade, 0);
-  const operacionalQtd = params.records
-    .filter(r => normalizeKey(r.destinacao).includes('OPERAC'))
-    .reduce((s, r) => s + r.quantidade, 0);
-  const treinamentoQtd = params.records
-    .filter(r => normalizeKey(r.destinacao).includes('TREIN'))
-    .reduce((s, r) => s + r.quantidade, 0);
-  const outrosQtd = Math.max(0, totalQtd - operacionalQtd - treinamentoQtd);
-
-  const byCalibreMap = new Map<string, number>();
-  const byTypeMap = new Map<string, number>();
-  const byUnitMap = new Map<string, number>();
-  for (const r of params.records) {
-    byCalibreMap.set(r.calibreNome, (byCalibreMap.get(r.calibreNome) || 0) + r.quantidade);
-    const typeKey = [r.calibreNome, r.tipo && r.tipo !== '—' ? r.tipo : '', r.peso].filter(Boolean).join(' ');
-    byTypeMap.set(typeKey, (byTypeMap.get(typeKey) || 0) + r.quantidade);
-    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + r.quantidade);
-  }
-
-  const calibresResumo = Array.from(byCalibreMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
-    .join('  |  ');
-
-  const tiposResumo = Array.from(byTypeMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
-    .join('  |  ');
-
-  const unidadesResumo =
-    byUnitMap.size > 1
-      ? Array.from(byUnitMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
-          .join('  |  ')
-      : '';
-
-  const fixedColsWidth = 22 + 56 + 106 + 44 + 132 + 74 + 92 + 52;
-  const columns = [
-    { key: 'idx', label: '#', width: 22 },
-    { key: 'unidade', label: 'UNIDADE', width: 56 },
-    { key: 'calibreTipo', label: 'CALIBRE / TIPO / PESO', width: 106 },
-    { key: 'fab', label: 'FAB.', width: 44 },
-    { key: 'loteAno', label: 'LOTE / ANO FAB.', width: 132 },
-    { key: 'destinacao', label: 'DESTINACAO', width: 74 },
-    { key: 'cofre', label: 'COFRE / LOCAL', width: 92 },
-    { key: 'qtd', label: 'QTD', width: 52 },
-    { key: 'obs', label: 'OBSERVACOES / ATUALIZACAO', width: contentWidth - fixedColsWidth }
-  ];
-
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 70,
-      width: pageWidth,
-      height: 70,
-      color: rgb(0.06, 0.1, 0.17)
-    });
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 73,
-      width: pageWidth,
-      height: 3,
-      color: rgb(0.85, 0.65, 0.13)
-    });
-
-    let titleStartX = marginX;
-    if (logoImage) {
-      const dims = logoImage.scaleToFit(46, 46);
-      page.drawImage(logoImage, {
-        x: marginX,
-        y: pageHeight - 58 + (46 - dims.height) / 2,
-        width: dims.width,
-        height: dims.height
-      });
-      titleStartX = marginX + 56;
-    }
-
-    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
-      x: titleStartX,
-      y: pageHeight - 24,
-      size: 8.5,
-      font: fontBold,
-      color: rgb(0.96, 0.78, 0.25)
-    });
-
-    const headerTitle = isPorUnidade
-      ? `RELACAO DE MUNICOES POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`
-      : `RELACAO DE MUNICOES (${params.calibreSpec.displayLabel.toUpperCase()}) - ${params.unidadeLabel.toUpperCase()}`;
-    page.drawText(
-      fitTextToWidth(headerTitle, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
-      {
-        x: titleStartX,
-        y: pageHeight - 44,
-        size: 13.5,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      }
-    );
-
-    page.drawText(
-      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
-      {
-        x: titleStartX,
-        y: pageHeight - 60,
-        size: 8,
-        font: fontRegular,
-        color: rgb(0.82, 0.86, 0.92)
-      }
-    );
-
-    let y = pageHeight - 86;
-
-    if (isFirstPage) {
-      const cardHeight = unidadesResumo ? 72 : 58;
-      page.drawRectangle({
-        x: marginX,
-        y: y - cardHeight,
-        width: contentWidth,
-        height: cardHeight,
-        color: rgb(0.95, 0.96, 0.98),
-        borderColor: rgb(0.82, 0.85, 0.9),
-        borderWidth: 0.75
-      });
-
-      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
-      const metaLine2 = `Total em Estoque: ${formatIntBr(totalQtd)} municoes (${totalLotes} lote(s))   |   Operacional: ${formatIntBr(operacionalQtd)}   |   Treinamento: ${formatIntBr(treinamentoQtd)}   |   Reserva/Outros: ${formatIntBr(outrosQtd)}`;
-      const metaLine3 =
-        isPorUnidade || params.calibreSpec.isTodos
-          ? `Subtotais por Calibre: ${calibresResumo || '-'}`
-          : `Subtotais por Tipo: ${tiposResumo || '-'}`;
-
-      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 14,
-        size: 8.2,
-        font: fontRegular,
-        color: rgb(0.15, 0.2, 0.28)
-      });
-      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.8, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 29,
-        size: 8.8,
-        font: fontBold,
-        color: rgb(0.06, 0.25, 0.2)
-      });
-      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 44,
-        size: 7.8,
-        font: fontRegular,
-        color: rgb(0.2, 0.25, 0.34)
-      });
-      if (unidadesResumo) {
-        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
-          x: marginX + 8,
-          y: y - 59,
-          size: 7.8,
-          font: fontBold,
-          color: rgb(0.12, 0.18, 0.32)
-        });
-      }
-      y -= cardHeight + 10;
-    }
-
-    const headerRowHeight = 20;
-    page.drawRectangle({
-      x: marginX,
-      y: y - headerRowHeight,
-      width: contentWidth,
-      height: headerRowHeight,
-      color: rgb(0.11, 0.17, 0.27)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawText(col.label, {
-        x: colX + 4,
-        y: y - 13.5,
-        size: 7.3,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      });
-      colX += col.width;
-    }
-
-    return y - headerRowHeight;
-  };
-
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
-  const fontSize = 7.4;
-  const lineHeight = 9.8;
-
-  params.records.forEach((rec, index) => {
-    const calibreTipoText = [rec.calibreNome, rec.tipo && rec.tipo !== '—' ? rec.tipo : '', rec.peso]
-      .filter(Boolean)
-      .join(' - ');
-    const loteAnoText =
-      rec.anoFabricacao && rec.anoFabricacao !== '—'
-        ? `${rec.lote} (Ano: ${rec.anoFabricacao})`
-        : rec.lote;
-    const cofreText = rec.cofreDescricao
-      ? `${rec.cofreCodigo} (${rec.cofreDescricao})`
-      : rec.cofreCodigo;
-    const obsText = [
-      rec.observacao,
-      rec.atualizadoEm ? `Atualizado: ${rec.atualizadoEm}` : ''
-    ]
-      .filter(Boolean)
-      .join(' | ');
-
-    const rawValues: Record<string, string> = {
-      idx: String(index + 1),
-      unidade: rec.unidadeNome,
-      calibreTipo: calibreTipoText || '-',
-      fab: rec.fabricante,
-      loteAno: loteAnoText,
-      destinacao: rec.destinacao,
-      cofre: cofreText,
-      qtd: formatIntBr(rec.quantidade),
-      obs: obsText || '-'
-    };
-
-    const wrappedByCol: Record<string, string[]> = {};
-    let maxLineCount = 1;
-    for (const col of columns) {
-      const f = col.key === 'qtd' ? fontBold : fontRegular;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 6);
-      wrappedByCol[col.key] = lines;
-      if (lines.length > maxLineCount) maxLineCount = lines.length;
-    }
-
-    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
-    if (cursorY - rowHeight < footerHeight + 12) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowHeight;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowHeight,
-        color: rgb(0.97, 0.98, 0.99)
-      });
-    }
-    page.drawLine({
-      start: { x: marginX, y: rowBottomY },
-      end: { x: marginX + contentWidth, y: rowBottomY },
-      thickness: 0.4,
-      color: rgb(0.86, 0.89, 0.93)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      const lines = wrappedByCol[col.key] || ['-'];
-      const f = col.key === 'qtd' ? fontBold : fontRegular;
-      lines.forEach((line, lineIdx) => {
-        page.drawText(line, {
-          x: colX + 4,
-          y: cursorY - 10.5 - lineIdx * lineHeight,
-          size: fontSize,
-          font: f,
-          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
-        });
-      });
-      colX += col.width;
-    }
-
-    cursorY = rowBottomY;
-  });
-
-  // Linha de total geral ao final da tabela
-  if (cursorY - 22 < footerHeight + 10) {
-    page = doc.addPage([pageWidth, pageHeight]);
-    cursorY = drawPageHeader(page, false);
-  }
-  const totalBarY = cursorY - 20;
-  page.drawRectangle({
-    x: marginX,
-    y: totalBarY,
-    width: contentWidth,
-    height: 20,
-    color: rgb(0.9, 0.94, 0.97),
-    borderColor: rgb(0.75, 0.8, 0.86),
-    borderWidth: 0.6
-  });
-  page.drawText(
-    isPorUnidade
-      ? `TOTAL GERAL (POR UNIDADE - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`
-      : `TOTAL GERAL (${params.calibreSpec.displayLabel.toUpperCase()} - ${params.unidadeLabel.toUpperCase()}): ${formatIntBr(totalQtd)} MUNICOES EM ${totalLotes} LOTE(S)`,
-    {
-      x: marginX + 8,
-      y: totalBarY + 6,
-      size: 8.3,
-      font: fontBold,
-      color: rgb(0.06, 0.16, 0.26)
-    }
-  );
-
-  // Rodapé institucional em todas as páginas
-  const pages = doc.getPages();
-  const totalPages = pages.length;
-  pages.forEach((p, idx) => {
-    p.drawLine({
-      start: { x: marginX, y: 26 },
-      end: { x: pageWidth - marginX, y: 26 },
-      thickness: 0.6,
-      color: rgb(0.78, 0.82, 0.87)
-    });
-    p.drawText(
-      `Sistema Arsenal PCMG - Relatorio de Municoes (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
-      {
-        x: marginX,
-        y: 13,
-        size: 7.5,
-        font: fontRegular,
-        color: rgb(0.42, 0.47, 0.54)
-      }
-    );
-    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
-    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
-    p.drawText(pageLabel, {
-      x: pageWidth - marginX - labelW,
-      y: 13,
-      size: 7.5,
-      font: fontBold,
-      color: rgb(0.3, 0.35, 0.42)
-    });
-  });
-
-  const pdfBytes = await doc.save();
-  return Buffer.from(pdfBytes);
-}
-
 // ============================================================================
-// AUXILIARES E GERADORES DE PDF DETALHADO — EXPLOSIVOS E MATERIAIS POR UNIDADE
+// CONSULTAS DE EXPLOSIVOS E MATERIAIS POR UNIDADE
 // ============================================================================
-interface ExplosivoReportRecord {
-  id: string;
-  nome: string;
-  tipo: string;
-  subtipo: string;
-  quantidade: number;
-  unidadeMedida: string;
-  lote: string;
-  fabricante: string;
-  dataFabricacao: string;
-  dataValidade: string;
-  validadeRaw: Date | null;
-  classeRisco: string;
-  localArmazenamento: string;
-  cofreCodigo: string;
-  cofreDescricao: string;
-  status: string;
-  unidadeNome: string;
-  observacoes: string;
-}
-
-interface MaterialReportRecord {
-  id: string;
-  nome: string;
-  tipoNome: string;
-  categoria: string;
-  consumivel: boolean;
-  numeroSerie: string;
-  quantidadeTotal: number;
-  quantidadeDisponivel: number;
-  quantidadeEmUso: number;
-  quantidadeConsumida: number;
-  validade: string;
-  validadeRaw: Date | null;
-  localGuarda: string;
-  cofreCodigo: string;
-  cofreDescricao: string;
-  unidadeNome: string;
-  observacoes: string;
-  atualizadoEm: string;
-}
-
 function formatDateOnlyBr(val?: any): { formatted: string; dateObj: Date | null } {
   if (!val) return { formatted: '—', dateObj: null };
   const d = new Date(val);
@@ -2727,20 +1949,7 @@ function formatDateOnlyBr(val?: any): { formatted: string; dateObj: Date | null 
   }
 }
 
-function formatDecimalBr(n: number): string {
-  const num = Number(n || 0);
-  if (!Number.isFinite(num)) return '0';
-  try {
-    return new Intl.NumberFormat('pt-BR', {
-      minimumFractionDigits: Number.isInteger(num) ? 0 : 1,
-      maximumFractionDigits: 3
-    }).format(num);
-  } catch {
-    return String(num);
-  }
-}
-
-async function queryExplosivosByUnit(pool: any, unitIds: string[]): Promise<ExplosivoReportRecord[]> {
+async function queryExplosivosByUnit(pool: any, unitIds: string[]): Promise<SystemExplosivoPdfRecord[]> {
   let sql = `
     SELECT
       e.ID_EXPLOSIVOS,
@@ -2780,7 +1989,6 @@ async function queryExplosivosByUnit(pool: any, unitIds: string[]): Promise<Expl
     const fab = formatDateOnlyBr(r.DATA_FABRICACAO_EXPLOSIVOS);
     const val = formatDateOnlyBr(r.DATA_VALIDADE_EXPLOSIVOS);
     return {
-      id: String(r.ID_EXPLOSIVOS || ''),
       nome: String(r.NOME_EXPLOSIVOS || '—'),
       tipo: String(r.TIPO_EXPLOSIVOS || '—'),
       subtipo: String(r.SUBTIPO_EXPLOSIVOS || ''),
@@ -2802,7 +2010,7 @@ async function queryExplosivosByUnit(pool: any, unitIds: string[]): Promise<Expl
   });
 }
 
-async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<MaterialReportRecord[]> {
+async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<SystemMaterialPdfRecord[]> {
   let sql = `
     SELECT
       m.ID_MATERIAIS,
@@ -2815,17 +2023,22 @@ async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<Mater
       m.QUANTIDADE_DISPONIVEL_MATERIAIS,
       m.QUANTIDADE_EM_USO_MATERIAIS,
       m.QUANTIDADE_CONSUMIDA_MATERIAIS,
+      m.PASSIVO_DEPOSITO_POLICIAIS,
       m.VALIDADE_MATERIAIS,
       m.LOCAL_GUARDA_MATERIAIS,
       m.OBSERVACOES_MATERIAIS,
+      m.DEPARTAMENTO_NOME_MATERIAIS,
+      m.CRIADO_POR_NOME_MATERIAIS,
       m.DATA_ATUALIZACAO_MATERIAIS,
       m.DATA_CRIACAO_MATERIAIS,
       COALESCE(u.NOME_UNIDADES, m.UNIDADE_NOME_MATERIAIS, 'Sem Unidade') AS UNIDADE_FINAL,
+      COALESCE(d.NOME_DEPARTAMENTOS, m.DEPARTAMENTO_NOME_MATERIAIS, '') AS DEPTO_FINAL,
       cf.CODIGO_COFRES,
       cf.DESCRICAO_CURTA_COFRES
     FROM MATERIAIS m
     LEFT JOIN TIPOS_MATERIAIS tm ON tm.ID_TIPOS_MATERIAIS = m.TIPO_MATERIAL_ID_MATERIAIS
     LEFT JOIN UNIDADES u ON u.ID_UNIDADES = m.UNIDADE_ID_MATERIAIS
+    LEFT JOIN DEPARTAMENTOS d ON d.ID_DEPARTAMENTOS = u.DEPARTAMENTO_ID_UNIDADES
     LEFT JOIN COFRES cf ON cf.ID_COFRES = m.COFRE_ID_MATERIAIS
     WHERE 1=1
   `;
@@ -2840,11 +2053,84 @@ async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<Mater
   sql += ' ORDER BY UNIDADE_FINAL ASC, TIPO_FINAL ASC, m.NOME_MATERIAIS ASC, m.NUMERO_SERIE_MATERIAIS ASC';
 
   const [rows]: any = await pool.query(sql, params);
-  return (rows || []).map((r: any) => {
+  const materialRows = rows || [];
+
+  // Carrega cautelas ativas para exibir acautelamento exatamente como em ModuloMateriais.tsx
+  const activeCautelasMap = new Map<string, string[]>();
+  if (materialRows.length > 0) {
+    try {
+      const matIds = materialRows.map((r: any) => String(r.ID_MATERIAIS || '')).filter(Boolean);
+      if (matIds.length > 0) {
+        const placeholders = matIds.map(() => '?').join(', ');
+        const [cRows]: any = await pool.query(
+          `SELECT
+            MATERIAL_ID_CAUTELAS_MATERIAIS,
+            PROTOCOLO_CAUTELAS_MATERIAIS,
+            QUANTIDADE_CAUTELAS_MATERIAIS,
+            TIPO_DESTINATARIO_CAUTELAS_MATERIAIS,
+            USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS,
+            USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS,
+            USUARIO_INTERNO_CARGO_CAUTELAS_MATERIAIS,
+            USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS,
+            USUARIO_EXTERNO_DOCUMENTO_CAUTELAS_MATERIAIS,
+            USUARIO_EXTERNO_ORGAO_CAUTELAS_MATERIAIS,
+            DATA_RETIRADA_CAUTELAS_MATERIAIS,
+            STATUS_CAUTELAS_MATERIAIS
+          FROM CAUTELAS_MATERIAIS
+          WHERE MATERIAL_ID_CAUTELAS_MATERIAIS IN (${placeholders})
+            AND LOWER(COALESCE(STATUS_CAUTELAS_MATERIAIS, '')) NOT IN ('devolvida', 'devolvido', 'recusada', 'cancelada', 'consumida', 'concluida')
+          ORDER BY DATA_RETIRADA_CAUTELAS_MATERIAIS DESC`,
+          matIds
+        );
+
+        for (const c of cRows || []) {
+          const mid = String(c.MATERIAL_ID_CAUTELAS_MATERIAIS || '');
+          if (!mid) continue;
+          const isExternal = String(c.TIPO_DESTINATARIO_CAUTELAS_MATERIAIS || '').toLowerCase().includes('extern');
+          const nome = isExternal
+            ? String(c.USUARIO_EXTERNO_NOME_CAUTELAS_MATERIAIS || 'Externo')
+            : String(c.USUARIO_INTERNO_NOME_CAUTELAS_MATERIAIS || 'Policial');
+          const detail = isExternal
+            ? [c.USUARIO_EXTERNO_ORGAO_CAUTELAS_MATERIAIS, c.USUARIO_EXTERNO_DOCUMENTO_CAUTELAS_MATERIAIS]
+                .filter(Boolean)
+                .join(' / ')
+            : [
+                c.USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS ? `MASP ${c.USUARIO_INTERNO_MASP_CAUTELAS_MATERIAIS}` : '',
+                c.USUARIO_INTERNO_CARGO_CAUTELAS_MATERIAIS
+              ]
+                .filter(Boolean)
+                .join(' - ');
+          const qtd = Number(c.QUANTIDADE_CAUTELAS_MATERIAIS || 1);
+          const retirada = c.DATA_RETIRADA_CAUTELAS_MATERIAIS
+            ? formatDateOnlyBr(c.DATA_RETIRADA_CAUTELAS_MATERIAIS).formatted
+            : '';
+          const summary = `${nome}${detail ? ` (${detail})` : ''} - Qtd: ${qtd}${retirada && retirada !== '—' ? ` em ${retirada}` : ''}`;
+          const list = activeCautelasMap.get(mid) || [];
+          list.push(summary);
+          activeCautelasMap.set(mid, list);
+        }
+      }
+    } catch {
+      // Prossegue normalmente se CAUTELAS_MATERIAIS estiver vazia ou indisponível
+    }
+  }
+
+  return materialRows.map((r: any) => {
+    const id = String(r.ID_MATERIAIS || '');
     const val = formatDateOnlyBr(r.VALIDADE_MATERIAIS);
-    const upd = r.DATA_ATUALIZACAO_MATERIAIS || r.DATA_CRIACAO_MATERIAIS;
+    const createdRaw = r.DATA_CRIACAO_MATERIAIS || r.DATA_ATUALIZACAO_MATERIAIS;
+    const qtdEmUso = Number(r.QUANTIDADE_EM_USO_MATERIAIS || 0);
+    const activeList = activeCautelasMap.get(id) || [];
+    const isAcautelado = activeList.length > 0 || qtdEmUso > 0;
+    const acautelamentoResumo =
+      activeList.length > 0
+        ? activeList.slice(0, 2).join('; ') + (activeList.length > 2 ? ` (+${activeList.length - 2})` : '')
+        : qtdEmUso > 0
+          ? `${qtdEmUso} un. em uso / acautelado`
+          : '';
+
     return {
-      id: String(r.ID_MATERIAIS || ''),
+      id,
       nome: String(r.NOME_MATERIAIS || '—'),
       tipoNome: String(r.TIPO_FINAL || 'Geral'),
       categoria: String(r.CATEGORIA_FINAL || ''),
@@ -2852,732 +2138,23 @@ async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<Mater
       numeroSerie: String(r.NUMERO_SERIE_MATERIAIS || '—'),
       quantidadeTotal: Number(r.QUANTIDADE_MATERIAIS || 0),
       quantidadeDisponivel: Number(r.QUANTIDADE_DISPONIVEL_MATERIAIS || 0),
-      quantidadeEmUso: Number(r.QUANTIDADE_EM_USO_MATERIAIS || 0),
+      quantidadeEmUso: qtdEmUso,
       quantidadeConsumida: Number(r.QUANTIDADE_CONSUMIDA_MATERIAIS || 0),
+      passivoDepositoPoliciais: Boolean(Number(r.PASSIVO_DEPOSITO_POLICIAIS || 0)),
       validade: val.formatted,
       validadeRaw: val.dateObj,
       localGuarda: String(r.LOCAL_GUARDA_MATERIAIS || ''),
       cofreCodigo: String(r.CODIGO_COFRES || ''),
       cofreDescricao: String(r.DESCRICAO_CURTA_COFRES || ''),
       unidadeNome: String(r.UNIDADE_FINAL || 'Sem Unidade'),
-      observacoes: String(r.OBSERVACOES_MATERIAIS || '').trim(),
-      atualizadoEm: upd ? formatDateTimeBr(new Date(upd)).slice(0, 10) : ''
+      departamentoNome: String(r.DEPTO_FINAL || ''),
+      acautelamentoResumo,
+      isAcautelado,
+      criadoPorNome: String(r.CRIADO_POR_NOME_MATERIAIS || ''),
+      criadoEm: createdRaw ? formatDateTimeBr(new Date(createdRaw)).slice(0, 10) : '',
+      observacoes: String(r.OBSERVACOES_MATERIAIS || '').trim()
     };
   });
-}
-
-async function generateExplosivosPdfBuffer(params: {
-  unidadeLabel: string;
-  solicitacaoId: string;
-  geradoEm: Date;
-  solicitanteNome: string;
-  solicitanteMasp: string;
-  telefoneUsuario: string;
-  logoDataUri: string | null;
-  records: ExplosivoReportRecord[];
-}): Promise<Buffer> {
-  const doc = await PDFDocument.create();
-  doc.setTitle(`Relação de Explosivos - ${params.unidadeLabel}`);
-  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
-  doc.setCreator('API Arsenal Make.com / WhatsApp');
-
-  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
-
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
-  const marginX = 28;
-  const contentWidth = pageWidth - marginX * 2;
-  const footerHeight = 32;
-
-  const nowMs = Date.now();
-  const in90DaysMs = nowMs + 90 * 24 * 60 * 60 * 1000;
-
-  const totalItens = params.records.length;
-  const operacionais = params.records.filter(r => normalizeKey(r.status).includes('OPERAC')).length;
-  const outrosStatus = Math.max(0, totalItens - operacionais);
-  const vencidos = params.records.filter(r => r.validadeRaw && r.validadeRaw.getTime() < nowMs).length;
-  const aVencer = params.records.filter(
-    r => r.validadeRaw && r.validadeRaw.getTime() >= nowMs && r.validadeRaw.getTime() <= in90DaysMs
-  ).length;
-
-  const byMeasureMap = new Map<string, number>();
-  const byTypeMap = new Map<string, number>();
-  const byUnitMap = new Map<string, number>();
-  for (const r of params.records) {
-    const um = r.unidadeMedida || 'un';
-    byMeasureMap.set(um, (byMeasureMap.get(um) || 0) + r.quantidade);
-    const tipoKey = [r.tipo, r.subtipo].filter(Boolean).join(' / ');
-    byTypeMap.set(tipoKey, (byTypeMap.get(tipoKey) || 0) + 1);
-    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + 1);
-  }
-
-  const medidasResumo = Array.from(byMeasureMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([um, qty]) => `${formatDecimalBr(qty)} ${um}`)
-    .join('  |  ');
-
-  const tiposResumo = Array.from(byTypeMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([k, v]) => `${k}: ${v}`)
-    .join('  |  ');
-
-  const unidadesResumo =
-    byUnitMap.size > 1
-      ? Array.from(byUnitMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `${k}: ${v} item(ns)`)
-          .join('  |  ')
-      : '';
-
-  const fixedColsWidth = 20 + 50 + 128 + 104 + 56 + 76 + 96 + 78;
-  const columns = [
-    { key: 'idx', label: '#', width: 20 },
-    { key: 'unidade', label: 'UNIDADE', width: 50 },
-    { key: 'nomeTipo', label: 'EXPLOSIVO / TIPO / SUBTIPO', width: 128 },
-    { key: 'fabLote', label: 'FABRICANTE / LOTE', width: 104 },
-    { key: 'qtd', label: 'QTD / UN.', width: 56 },
-    { key: 'datas', label: 'FABR. / VALIDADE', width: 76 },
-    { key: 'riscoStatus', label: 'CLASSE RISCO / STATUS', width: 96 },
-    { key: 'local', label: 'PAIOL / COFRE', width: 78 },
-    { key: 'obs', label: 'OBSERVACOES / SERIAIS', width: contentWidth - fixedColsWidth }
-  ];
-
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 70,
-      width: pageWidth,
-      height: 70,
-      color: rgb(0.06, 0.1, 0.17)
-    });
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 73,
-      width: pageWidth,
-      height: 3,
-      color: rgb(0.85, 0.65, 0.13)
-    });
-
-    let titleStartX = marginX;
-    if (logoImage) {
-      const dims = logoImage.scaleToFit(46, 46);
-      page.drawImage(logoImage, {
-        x: marginX,
-        y: pageHeight - 58 + (46 - dims.height) / 2,
-        width: dims.width,
-        height: dims.height
-      });
-      titleStartX = marginX + 56;
-    }
-
-    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
-      x: titleStartX,
-      y: pageHeight - 24,
-      size: 8.5,
-      font: fontBold,
-      color: rgb(0.96, 0.78, 0.25)
-    });
-
-    page.drawText(
-      fitTextToWidth(`RELACAO DE EXPLOSIVOS POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
-      {
-        x: titleStartX,
-        y: pageHeight - 44,
-        size: 13.5,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      }
-    );
-
-    page.drawText(
-      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
-      {
-        x: titleStartX,
-        y: pageHeight - 60,
-        size: 8,
-        font: fontRegular,
-        color: rgb(0.82, 0.86, 0.92)
-      }
-    );
-
-    let y = pageHeight - 86;
-
-    if (isFirstPage) {
-      const cardHeight = unidadesResumo ? 72 : 58;
-      page.drawRectangle({
-        x: marginX,
-        y: y - cardHeight,
-        width: contentWidth,
-        height: cardHeight,
-        color: rgb(0.95, 0.96, 0.98),
-        borderColor: rgb(0.82, 0.85, 0.9),
-        borderWidth: 0.75
-      });
-
-      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
-      const metaLine2 = `Total de Itens/Lotes: ${totalItens}   |   Operacionais: ${operacionais}   |   Outros Status: ${outrosStatus}   |   Vencidos: ${vencidos}   |   A vencer (90d): ${aVencer}`;
-      const metaLine3 = `Quantitativos: ${medidasResumo || '-'}   |   Por Tipo: ${tiposResumo || '-'}`;
-
-      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 14,
-        size: 8.2,
-        font: fontRegular,
-        color: rgb(0.15, 0.2, 0.28)
-      });
-      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.6, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 29,
-        size: 8.6,
-        font: fontBold,
-        color: rgb(0.06, 0.25, 0.2)
-      });
-      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 44,
-        size: 7.8,
-        font: fontRegular,
-        color: rgb(0.2, 0.25, 0.34)
-      });
-      if (unidadesResumo) {
-        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
-          x: marginX + 8,
-          y: y - 59,
-          size: 7.8,
-          font: fontBold,
-          color: rgb(0.12, 0.18, 0.32)
-        });
-      }
-      y -= cardHeight + 10;
-    }
-
-    const headerRowHeight = 20;
-    page.drawRectangle({
-      x: marginX,
-      y: y - headerRowHeight,
-      width: contentWidth,
-      height: headerRowHeight,
-      color: rgb(0.11, 0.17, 0.27)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawText(col.label, {
-        x: colX + 4,
-        y: y - 13.5,
-        size: 7.2,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      });
-      colX += col.width;
-    }
-
-    return y - headerRowHeight;
-  };
-
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
-  const fontSize = 7.3;
-  const lineHeight = 9.6;
-
-  params.records.forEach((rec, index) => {
-    const tipoFull = [rec.tipo, rec.subtipo].filter(Boolean).join(' / ');
-    const nomeTipoText = tipoFull ? `${rec.nome} (${tipoFull})` : rec.nome;
-    const fabLoteText = `Fab: ${rec.fabricante} | Lote: ${rec.lote}`;
-    const qtdText = `${formatDecimalBr(rec.quantidade)} ${rec.unidadeMedida}`;
-
-    let valTag = '';
-    if (rec.validadeRaw) {
-      if (rec.validadeRaw.getTime() < nowMs) valTag = ' [VENCIDO]';
-      else if (rec.validadeRaw.getTime() <= in90DaysMs) valTag = ' [A VENCER]';
-    }
-    const datasText = `Fab: ${rec.dataFabricacao} | Val: ${rec.dataValidade}${valTag}`;
-    const riscoStatusText = `${rec.classeRisco} | Status: ${rec.status}`;
-    const localParts = [
-      rec.localArmazenamento,
-      rec.cofreCodigo ? `Cofre ${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}` : ''
-    ].filter(Boolean);
-
-    const rawValues: Record<string, string> = {
-      idx: String(index + 1),
-      unidade: rec.unidadeNome,
-      nomeTipo: nomeTipoText,
-      fabLote: fabLoteText,
-      qtd: qtdText,
-      datas: datasText,
-      riscoStatus: riscoStatusText,
-      local: localParts.join(' | ') || '-',
-      obs: rec.observacoes || '-'
-    };
-
-    const wrappedByCol: Record<string, string[]> = {};
-    let maxLineCount = 1;
-    for (const col of columns) {
-      const f = col.key === 'qtd' ? fontBold : fontRegular;
-      const maxL = col.key === 'obs' ? 12 : 6;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, maxL);
-      wrappedByCol[col.key] = lines;
-      if (lines.length > maxLineCount) maxLineCount = lines.length;
-    }
-
-    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
-    if (cursorY - rowHeight < footerHeight + 12) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowHeight;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowHeight,
-        color: rgb(0.97, 0.98, 0.99)
-      });
-    }
-    page.drawLine({
-      start: { x: marginX, y: rowBottomY },
-      end: { x: marginX + contentWidth, y: rowBottomY },
-      thickness: 0.4,
-      color: rgb(0.86, 0.89, 0.93)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      const lines = wrappedByCol[col.key] || ['-'];
-      const f = col.key === 'qtd' ? fontBold : fontRegular;
-      lines.forEach((line, lineIdx) => {
-        page.drawText(line, {
-          x: colX + 4,
-          y: cursorY - 10.5 - lineIdx * lineHeight,
-          size: fontSize,
-          font: f,
-          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
-        });
-      });
-      colX += col.width;
-    }
-
-    cursorY = rowBottomY;
-  });
-
-  if (cursorY - 22 < footerHeight + 10) {
-    page = doc.addPage([pageWidth, pageHeight]);
-    cursorY = drawPageHeader(page, false);
-  }
-  const totalBarY = cursorY - 20;
-  page.drawRectangle({
-    x: marginX,
-    y: totalBarY,
-    width: contentWidth,
-    height: 20,
-    color: rgb(0.9, 0.94, 0.97),
-    borderColor: rgb(0.75, 0.8, 0.86),
-    borderWidth: 0.6
-  });
-  page.drawText(
-    fitTextToWidth(
-      `TOTAL GERAL DE EXPLOSIVOS (${params.unidadeLabel.toUpperCase()}): ${totalItens} ITEM(NS) | ${medidasResumo || '-'}`,
-      fontBold,
-      8.2,
-      contentWidth - 16
-    ),
-    {
-      x: marginX + 8,
-      y: totalBarY + 6,
-      size: 8.2,
-      font: fontBold,
-      color: rgb(0.06, 0.16, 0.26)
-    }
-  );
-
-  const pages = doc.getPages();
-  const totalPages = pages.length;
-  pages.forEach((p, idx) => {
-    p.drawLine({
-      start: { x: marginX, y: 26 },
-      end: { x: pageWidth - marginX, y: 26 },
-      thickness: 0.6,
-      color: rgb(0.78, 0.82, 0.87)
-    });
-    p.drawText(
-      `Sistema Arsenal PCMG - Relatorio de Explosivos (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
-      {
-        x: marginX,
-        y: 13,
-        size: 7.5,
-        font: fontRegular,
-        color: rgb(0.42, 0.47, 0.54)
-      }
-    );
-    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
-    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
-    p.drawText(pageLabel, {
-      x: pageWidth - marginX - labelW,
-      y: 13,
-      size: 7.5,
-      font: fontBold,
-      color: rgb(0.3, 0.35, 0.42)
-    });
-  });
-
-  const pdfBytes = await doc.save();
-  return Buffer.from(pdfBytes);
-}
-
-async function generateMateriaisPdfBuffer(params: {
-  unidadeLabel: string;
-  solicitacaoId: string;
-  geradoEm: Date;
-  solicitanteNome: string;
-  solicitanteMasp: string;
-  telefoneUsuario: string;
-  logoDataUri: string | null;
-  records: MaterialReportRecord[];
-}): Promise<Buffer> {
-  const doc = await PDFDocument.create();
-  doc.setTitle(`Relação de Materiais - ${params.unidadeLabel}`);
-  doc.setAuthor('Sistema Arsenal - Polícia Civil de Minas Gerais');
-  doc.setCreator('API Arsenal Make.com / WhatsApp');
-
-  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
-  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const logoImage = await tryEmbedLogoImage(doc, params.logoDataUri);
-
-  const pageWidth = 841.89;
-  const pageHeight = 595.28;
-  const marginX = 28;
-  const contentWidth = pageWidth - marginX * 2;
-  const footerHeight = 32;
-
-  const totalItens = params.records.length;
-  const totalQtd = params.records.reduce((s, r) => s + r.quantidadeTotal, 0);
-  const dispQtd = params.records.reduce((s, r) => s + r.quantidadeDisponivel, 0);
-  const emUsoQtd = params.records.reduce((s, r) => s + r.quantidadeEmUso, 0);
-  const consQtd = params.records.reduce((s, r) => s + r.quantidadeConsumida, 0);
-
-  const byTypeMap = new Map<string, number>();
-  const byUnitMap = new Map<string, number>();
-  for (const r of params.records) {
-    const tipoKey = r.categoria ? `${r.tipoNome} (${r.categoria})` : r.tipoNome;
-    byTypeMap.set(tipoKey, (byTypeMap.get(tipoKey) || 0) + r.quantidadeTotal);
-    byUnitMap.set(r.unidadeNome, (byUnitMap.get(r.unidadeNome) || 0) + r.quantidadeTotal);
-  }
-
-  const tiposResumo = Array.from(byTypeMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 6)
-    .map(([k, v]) => `${k}: ${formatIntBr(v)}`)
-    .join('  |  ');
-
-  const unidadesResumo =
-    byUnitMap.size > 1
-      ? Array.from(byUnitMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `${k}: ${formatIntBr(v)} un.`)
-          .join('  |  ')
-      : '';
-
-  const fixedColsWidth = 20 + 58 + 146 + 98 + 94 + 58 + 106;
-  const columns = [
-    { key: 'idx', label: '#', width: 20 },
-    { key: 'unidade', label: 'UNIDADE', width: 58 },
-    { key: 'material', label: 'MATERIAL / TIPO / CATEGORIA', width: 146 },
-    { key: 'serie', label: 'N. SERIE', width: 98 },
-    { key: 'qtd', label: 'QTD (TOT/DISP/USO/CONS)', width: 94 },
-    { key: 'validade', label: 'VALIDADE', width: 58 },
-    { key: 'local', label: 'LOCAL / COFRE', width: 106 },
-    { key: 'obs', label: 'OBSERVACOES / ATUALIZACAO', width: contentWidth - fixedColsWidth }
-  ];
-
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 70,
-      width: pageWidth,
-      height: 70,
-      color: rgb(0.06, 0.1, 0.17)
-    });
-    page.drawRectangle({
-      x: 0,
-      y: pageHeight - 73,
-      width: pageWidth,
-      height: 3,
-      color: rgb(0.85, 0.65, 0.13)
-    });
-
-    let titleStartX = marginX;
-    if (logoImage) {
-      const dims = logoImage.scaleToFit(46, 46);
-      page.drawImage(logoImage, {
-        x: marginX,
-        y: pageHeight - 58 + (46 - dims.height) / 2,
-        width: dims.width,
-        height: dims.height
-      });
-      titleStartX = marginX + 56;
-    }
-
-    page.drawText('POLICIA CIVIL DE MINAS GERAIS - SISTEMA ARSENAL / ARMARIA', {
-      x: titleStartX,
-      y: pageHeight - 24,
-      size: 8.5,
-      font: fontBold,
-      color: rgb(0.96, 0.78, 0.25)
-    });
-
-    page.drawText(
-      fitTextToWidth(`RELACAO DE MATERIAIS POR UNIDADE - ${params.unidadeLabel.toUpperCase()}`, fontBold, 13.5, contentWidth - (titleStartX - marginX) - 20),
-      {
-        x: titleStartX,
-        y: pageHeight - 44,
-        size: 13.5,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      }
-    );
-
-    page.drawText(
-      `Emitido em: ${formatDateTimeBr(params.geradoEm)} | Protocolo: ${sanitizePdfText(params.solicitacaoId).slice(0, 44)}`,
-      {
-        x: titleStartX,
-        y: pageHeight - 60,
-        size: 8,
-        font: fontRegular,
-        color: rgb(0.82, 0.86, 0.92)
-      }
-    );
-
-    let y = pageHeight - 86;
-
-    if (isFirstPage) {
-      const cardHeight = unidadesResumo ? 72 : 58;
-      page.drawRectangle({
-        x: marginX,
-        y: y - cardHeight,
-        width: contentWidth,
-        height: cardHeight,
-        color: rgb(0.95, 0.96, 0.98),
-        borderColor: rgb(0.82, 0.85, 0.9),
-        borderWidth: 0.75
-      });
-
-      const metaLine1 = `Solicitante: ${sanitizePdfText(params.solicitanteNome)} (MASP: ${sanitizePdfText(params.solicitanteMasp || '-')})  |  WhatsApp: ${sanitizePdfText(params.telefoneUsuario)}`;
-      const metaLine2 = `Registros: ${totalItens}   |   Qtd Total: ${formatIntBr(totalQtd)}   |   Disponivel: ${formatIntBr(dispQtd)}   |   Em Uso/Acautelado: ${formatIntBr(emUsoQtd)}   |   Consumido: ${formatIntBr(consQtd)}`;
-      const metaLine3 = `Subtotais por Tipo: ${tiposResumo || '-'}`;
-
-      page.drawText(fitTextToWidth(metaLine1, fontRegular, 8.2, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 14,
-        size: 8.2,
-        font: fontRegular,
-        color: rgb(0.15, 0.2, 0.28)
-      });
-      page.drawText(fitTextToWidth(metaLine2, fontBold, 8.6, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 29,
-        size: 8.6,
-        font: fontBold,
-        color: rgb(0.06, 0.25, 0.2)
-      });
-      page.drawText(fitTextToWidth(metaLine3, fontRegular, 7.8, contentWidth - 16), {
-        x: marginX + 8,
-        y: y - 44,
-        size: 7.8,
-        font: fontRegular,
-        color: rgb(0.2, 0.25, 0.34)
-      });
-      if (unidadesResumo) {
-        page.drawText(fitTextToWidth(`Por Unidade: ${unidadesResumo}`, fontBold, 7.8, contentWidth - 16), {
-          x: marginX + 8,
-          y: y - 59,
-          size: 7.8,
-          font: fontBold,
-          color: rgb(0.12, 0.18, 0.32)
-        });
-      }
-      y -= cardHeight + 10;
-    }
-
-    const headerRowHeight = 20;
-    page.drawRectangle({
-      x: marginX,
-      y: y - headerRowHeight,
-      width: contentWidth,
-      height: headerRowHeight,
-      color: rgb(0.11, 0.17, 0.27)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawText(col.label, {
-        x: colX + 4,
-        y: y - 13.5,
-        size: 7.2,
-        font: fontBold,
-        color: rgb(1, 1, 1)
-      });
-      colX += col.width;
-    }
-
-    return y - headerRowHeight;
-  };
-
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
-  const fontSize = 7.4;
-  const lineHeight = 9.8;
-  const nowMs = Date.now();
-
-  params.records.forEach((rec, index) => {
-    const tipoMeta = [rec.tipoNome, rec.categoria, rec.consumivel ? 'Consumivel' : 'Permanente']
-      .filter(Boolean)
-      .join(' - ');
-    const materialText = `${rec.nome} (${tipoMeta})`;
-    const qtdText = `Tot:${formatIntBr(rec.quantidadeTotal)} | Disp:${formatIntBr(rec.quantidadeDisponivel)} | Uso:${formatIntBr(rec.quantidadeEmUso)} | Cons:${formatIntBr(rec.quantidadeConsumida)}`;
-    const validadeText =
-      rec.validadeRaw && rec.validadeRaw.getTime() < nowMs
-        ? `${rec.validade} [VENC.]`
-        : rec.validade;
-    const localParts = [
-      rec.localGuarda,
-      rec.cofreCodigo ? `Cofre ${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}` : ''
-    ].filter(Boolean);
-    const obsText = [
-      rec.observacoes,
-      rec.atualizadoEm ? `Atualizado: ${rec.atualizadoEm}` : ''
-    ]
-      .filter(Boolean)
-      .join(' | ');
-
-    const rawValues: Record<string, string> = {
-      idx: String(index + 1),
-      unidade: rec.unidadeNome,
-      material: materialText,
-      serie: rec.numeroSerie,
-      qtd: qtdText,
-      validade: validadeText,
-      local: localParts.join(' | ') || '-',
-      obs: obsText || '-'
-    };
-
-    const wrappedByCol: Record<string, string[]> = {};
-    let maxLineCount = 1;
-    for (const col of columns) {
-      const f = col.key === 'serie' ? fontBold : fontRegular;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 8);
-      wrappedByCol[col.key] = lines;
-      if (lines.length > maxLineCount) maxLineCount = lines.length;
-    }
-
-    const rowHeight = Math.max(18, maxLineCount * lineHeight + 7);
-    if (cursorY - rowHeight < footerHeight + 12) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowHeight;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowHeight,
-        color: rgb(0.97, 0.98, 0.99)
-      });
-    }
-    page.drawLine({
-      start: { x: marginX, y: rowBottomY },
-      end: { x: marginX + contentWidth, y: rowBottomY },
-      thickness: 0.4,
-      color: rgb(0.86, 0.89, 0.93)
-    });
-
-    let colX = marginX;
-    for (const col of columns) {
-      const lines = wrappedByCol[col.key] || ['-'];
-      const f = col.key === 'serie' ? fontBold : fontRegular;
-      lines.forEach((line, lineIdx) => {
-        page.drawText(line, {
-          x: colX + 4,
-          y: cursorY - 10.5 - lineIdx * lineHeight,
-          size: fontSize,
-          font: f,
-          color: col.key === 'qtd' ? rgb(0.06, 0.3, 0.22) : rgb(0.1, 0.13, 0.18)
-        });
-      });
-      colX += col.width;
-    }
-
-    cursorY = rowBottomY;
-  });
-
-  if (cursorY - 22 < footerHeight + 10) {
-    page = doc.addPage([pageWidth, pageHeight]);
-    cursorY = drawPageHeader(page, false);
-  }
-  const totalBarY = cursorY - 20;
-  page.drawRectangle({
-    x: marginX,
-    y: totalBarY,
-    width: contentWidth,
-    height: 20,
-    color: rgb(0.9, 0.94, 0.97),
-    borderColor: rgb(0.75, 0.8, 0.86),
-    borderWidth: 0.6
-  });
-  page.drawText(
-    fitTextToWidth(
-      `TOTAL GERAL DE MATERIAIS (${params.unidadeLabel.toUpperCase()}): ${totalItens} REGISTRO(S) | TOTAL: ${formatIntBr(totalQtd)} | DISP: ${formatIntBr(dispQtd)} | EM USO: ${formatIntBr(emUsoQtd)}`,
-      fontBold,
-      8.2,
-      contentWidth - 16
-    ),
-    {
-      x: marginX + 8,
-      y: totalBarY + 6,
-      size: 8.2,
-      font: fontBold,
-      color: rgb(0.06, 0.16, 0.26)
-    }
-  );
-
-  const pages = doc.getPages();
-  const totalPages = pages.length;
-  pages.forEach((p, idx) => {
-    p.drawLine({
-      start: { x: marginX, y: 26 },
-      end: { x: pageWidth - marginX, y: 26 },
-      thickness: 0.6,
-      color: rgb(0.78, 0.82, 0.87)
-    });
-    p.drawText(
-      `Sistema Arsenal PCMG - Relatorio de Materiais (Uso Restrito) | Solicitacao: ${sanitizePdfText(params.solicitacaoId).slice(0, 36)}`,
-      {
-        x: marginX,
-        y: 13,
-        size: 7.5,
-        font: fontRegular,
-        color: rgb(0.42, 0.47, 0.54)
-      }
-    );
-    const pageLabel = `Pagina ${idx + 1} de ${totalPages}`;
-    const labelW = fontBold.widthOfTextAtSize(pageLabel, 7.5);
-    p.drawText(pageLabel, {
-      x: pageWidth - marginX - labelW,
-      y: 13,
-      size: 7.5,
-      font: fontBold,
-      color: rgb(0.3, 0.35, 0.42)
-    });
-  });
-
-  const pdfBytes = await doc.save();
-  return Buffer.from(pdfBytes);
 }
 
 // Rota HTTPS pública de entrega do PDF gerado (com token criptográfico de 128 bits e expiração automática)

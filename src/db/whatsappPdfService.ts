@@ -1,4 +1,12 @@
-import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, PDFFont, PDFPage, PDFImage } from 'pdf-lib';
+import {
+  PCMG_COLORS,
+  tryEmbedSystemLogo,
+  generateUniqueDocControlCode,
+  drawTopUniqueCodeBar,
+  drawInstitutionalFooters,
+  fitTextToWidth
+} from './institutionalPdfTemplates';
 
 export type OperacaoOrigem = 'CANIL' | 'POLICIAL' | 'CAT';
 export type TreinamentoOrigem = 'CANIL' | 'POLICIAL';
@@ -1063,12 +1071,17 @@ class PdfReportBuilder {
   private doc: PDFDocument;
   private fontRegular!: PDFFont;
   private fontBold!: PDFFont;
+  private fontMono!: PDFFont;
+  private fontMonoBold!: PDFFont;
+  private logoImage: PDFImage | null = null;
+  private docCode = '';
+  private emissaoBr = '';
   private page!: PDFPage;
   private cursorY = 0;
   private readonly pageWidth = 595.28;
   private readonly pageHeight = 841.89;
-  private readonly marginX = 44;
-  private readonly contentWidth = 595.28 - 88;
+  private readonly marginX = 34;
+  private readonly contentWidth = 595.28 - 68;
   private titleHeader: string;
   private subtitleHeader: string;
 
@@ -1081,51 +1094,118 @@ class PdfReportBuilder {
   async init() {
     this.fontRegular = await this.doc.embedFont(StandardFonts.Helvetica);
     this.fontBold = await this.doc.embedFont(StandardFonts.HelveticaBold);
+    this.fontMono = await this.doc.embedFont(StandardFonts.Courier);
+    this.fontMonoBold = await this.doc.embedFont(StandardFonts.CourierBold);
+    this.logoImage = await tryEmbedSystemLogo(this.doc, null);
+    this.docCode = generateUniqueDocControlCode();
+    this.emissaoBr = formatIsoDateTimeBr(new Date());
     this.addPage();
   }
 
   addPage() {
     this.page = this.doc.addPage([this.pageWidth, this.pageHeight]);
-    this.page.drawRectangle({
-      x: 0,
-      y: this.pageHeight - 76,
-      width: this.pageWidth,
-      height: 76,
-      color: rgb(0.06, 0.1, 0.17)
-    });
-    this.page.drawRectangle({
-      x: 0,
-      y: this.pageHeight - 79,
-      width: this.pageWidth,
-      height: 3,
-      color: rgb(0.85, 0.65, 0.13)
-    });
-    this.page.drawText('POLICIA CIVIL DE MINAS GERAIS — SISTEMA OPERACIONAL E ARMARIA', {
-      x: this.marginX,
-      y: this.pageHeight - 28,
-      size: 9,
-      font: this.fontBold,
-      color: rgb(0.96, 0.78, 0.25)
-    });
-    this.page.drawText(this.titleHeader.slice(0, 74), {
-      x: this.marginX,
-      y: this.pageHeight - 48,
-      size: 13.5,
-      font: this.fontBold,
-      color: rgb(1, 1, 1)
-    });
-    this.page.drawText(this.subtitleHeader.slice(0, 98), {
-      x: this.marginX,
-      y: this.pageHeight - 65,
+    const afterTopBarY = drawTopUniqueCodeBar(
+      this.page,
+      this.pageWidth,
+      this.pageHeight,
+      this.marginX,
+      this.fontMono,
+      this.fontMonoBold,
+      this.docCode,
+      this.emissaoBr
+    );
+
+    const headerTopY = afterTopBarY - 6;
+    const headerHeight = 56;
+    const headerBottomY = headerTopY - headerHeight;
+
+    let textStartX = this.marginX;
+    if (this.logoImage) {
+      const dims = this.logoImage.scaleToFit(44, 44);
+      this.page.drawImage(this.logoImage, {
+        x: this.marginX,
+        y: headerBottomY + (headerHeight - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      textStartX = this.marginX + 54;
+    }
+
+    const rightBoxW = 148;
+    const titleMaxW = this.contentWidth - (textStartX - this.marginX) - rightBoxW - 10;
+
+    this.page.drawText('POLICIA CIVIL DE MINAS GERAIS', {
+      x: textStartX,
+      y: headerTopY - 12,
       size: 8.5,
-      font: this.fontRegular,
-      color: rgb(0.82, 0.86, 0.92)
+      font: this.fontBold,
+      color: PCMG_COLORS.slate700
     });
-    this.cursorY = this.pageHeight - 98;
+
+    this.page.drawText(fitTextToWidth(this.titleHeader, this.fontBold, 11.5, titleMaxW), {
+      x: textStartX,
+      y: headerTopY - 28,
+      size: 11.5,
+      font: this.fontBold,
+      color: PCMG_COLORS.ink
+    });
+
+    this.page.drawText(fitTextToWidth(this.subtitleHeader, this.fontRegular, 8, titleMaxW), {
+      x: textStartX,
+      y: headerTopY - 42,
+      size: 8,
+      font: this.fontRegular,
+      color: PCMG_COLORS.slate600
+    });
+
+    // Meta pill direita (padrao do sistema)
+    const pillX = this.pageWidth - this.marginX - rightBoxW;
+    const pillY = headerBottomY + 8;
+    const pillH = 38;
+    this.page.drawRectangle({
+      x: pillX,
+      y: pillY,
+      width: rightBoxW,
+      height: pillH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.75
+    });
+    this.page.drawText('SISTEMA ARMARIA / PCMG', {
+      x: pillX + 7,
+      y: pillY + 25,
+      size: 7.2,
+      font: this.fontMonoBold,
+      color: PCMG_COLORS.ink
+    });
+    this.page.drawText(fitTextToWidth(`EMISSAO: ${this.emissaoBr}`, this.fontMono, 6.8, rightBoxW - 14), {
+      x: pillX + 7,
+      y: pillY + 15,
+      size: 6.8,
+      font: this.fontMono,
+      color: PCMG_COLORS.slate600
+    });
+    this.page.drawText('DOCUMENTO OFICIAL', {
+      x: pillX + 7,
+      y: pillY + 6,
+      size: 6.8,
+      font: this.fontMonoBold,
+      color: PCMG_COLORS.amber700
+    });
+
+    // Linha divisoria 2px solid #0f172a (padrao institucional PCMG)
+    this.page.drawLine({
+      start: { x: this.marginX, y: headerBottomY },
+      end: { x: this.pageWidth - this.marginX, y: headerBottomY },
+      thickness: 2,
+      color: PCMG_COLORS.ink
+    });
+
+    this.cursorY = headerBottomY - 16;
   }
 
   ensureSpace(neededHeight: number) {
-    if (this.cursorY - neededHeight < 52) {
+    if (this.cursorY - neededHeight < 60) {
       this.addPage();
     }
   }
@@ -1138,23 +1218,23 @@ class PdfReportBuilder {
       y: this.cursorY - 4,
       width: this.contentWidth,
       height: 18,
-      color: rgb(0.93, 0.95, 0.98)
+      color: PCMG_COLORS.ink
     });
     this.page.drawRectangle({
       x: this.marginX,
       y: this.cursorY - 4,
-      width: 3,
+      width: 3.5,
       height: 18,
-      color: rgb(0.06, 0.48, 0.36)
+      color: PCMG_COLORS.amber600
     });
-    this.page.drawText(sanitizePdfText(title).toUpperCase().slice(0, 90), {
+    this.page.drawText(fitTextToWidth(sanitizePdfText(title).toUpperCase(), this.fontBold, 8.8, this.contentWidth - 18), {
       x: this.marginX + 9,
-      y: this.cursorY + 1,
-      size: 9.5,
+      y: this.cursorY + 1.5,
+      size: 8.8,
       font: this.fontBold,
-      color: rgb(0.08, 0.14, 0.22)
+      color: PCMG_COLORS.white
     });
-    this.cursorY -= 16;
+    this.cursorY -= 17;
   }
 
   drawKeyValue(label: string, value: string) {
@@ -1344,31 +1424,15 @@ class PdfReportBuilder {
   }
 
   async finalize(): Promise<Buffer> {
-    const pages = this.doc.getPages();
-    const generatedAt = formatIsoDateTimeBr(new Date());
-    pages.forEach((p, i) => {
-      p.drawLine({
-        start: { x: this.marginX, y: 36 },
-        end: { x: this.pageWidth - this.marginX, y: 36 },
-        thickness: 0.5,
-        color: rgb(0.8, 0.84, 0.88)
-      });
-      p.drawText(sanitizePdfText(`Emitido via WhatsApp Oficial PCMG em ${generatedAt}`), {
-        x: this.marginX,
-        y: 22,
-        size: 8,
-        font: this.fontRegular,
-        color: rgb(0.45, 0.5, 0.58)
-      });
-      const pageNum = `Pagina ${i + 1} de ${pages.length}`;
-      const numW = this.fontRegular.widthOfTextAtSize(pageNum, 8);
-      p.drawText(pageNum, {
-        x: this.pageWidth - this.marginX - numW,
-        y: 22,
-        size: 8,
-        font: this.fontRegular,
-        color: rgb(0.45, 0.5, 0.58)
-      });
+    drawInstitutionalFooters({
+      doc: this.doc,
+      marginX: this.marginX,
+      pageWidth: this.pageWidth,
+      fontMono: this.fontMono,
+      fontMonoBold: this.fontMonoBold,
+      docCode: this.docCode,
+      emissaoBr: this.emissaoBr,
+      footerLeftText: 'Sistema ARMARIA PCMG - Documento Oficial Emitido via WhatsApp'
     });
 
     const bytes = await this.doc.save();
