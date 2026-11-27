@@ -365,6 +365,360 @@ export function drawInstitutionalFooters(params: {
 }
 
 // ============================================================================
+// AUXILIARES DE AGRUPAMENTO POR UNIDADE E TABELA RESUMO (1ª PÁGINA POR UNIDADE)
+// ============================================================================
+function groupRecordsByUnit<T extends { unidadeNome: string }>(
+  records: T[]
+): Array<{ unitName: string; records: T[] }> {
+  const map = new Map<string, T[]>();
+  for (const r of records) {
+    const unitName = String(r.unidadeNome || 'Sem Unidade').trim() || 'Sem Unidade';
+    const list = map.get(unitName) || [];
+    list.push(r);
+    map.set(unitName, list);
+  }
+  return Array.from(map.entries())
+    .sort((a, b) => a[0].localeCompare(b[0], 'pt-BR'))
+    .map(([unitName, list]) => ({ unitName, records: list }));
+}
+
+function cleanSummaryVal(val?: string | null): string {
+  const s = String(val || '').trim();
+  if (!s || s === '-' || s === '—' || s.toUpperCase() === 'N/A') return '';
+  return s;
+}
+
+function formatUnitsLabel(qty: number, capitalized = false): string {
+  const unitWord =
+    qty === 1
+      ? capitalized
+        ? 'Unidade'
+        : 'unidade'
+      : capitalized
+        ? 'Unidades'
+        : 'unidades';
+  return `${formatIntBr(qty)} ${unitWord}`;
+}
+
+interface SummaryColSpec {
+  key: string;
+  label: string;
+  width: number;
+  align: 'left' | 'center' | 'right';
+  bold?: boolean;
+  mono?: boolean;
+}
+
+function drawSummaryTableWithPagination(params: {
+  page: PDFPage;
+  cursorY: number;
+  marginX: number;
+  pageWidth: number;
+  contentWidth: number;
+  footerSafeY: number;
+  fontRegular: PDFFont;
+  fontBold: PDFFont;
+  fontMono: PDFFont;
+  fontMonoBold: PDFFont;
+  sectionTitle: string;
+  headerVariant: 'dark' | 'light-bar' | 'light-underline' | 'slate800-amber';
+  columns: SummaryColSpec[];
+  rows: Array<Record<string, string>>;
+  totalLabel: string;
+  totalValue: string;
+  onNewPage: () => { page: PDFPage; cursorY: number };
+}): { page: PDFPage; cursorY: number } {
+  let { page, cursorY } = params;
+  const { marginX, pageWidth, contentWidth, footerSafeY, fontRegular, fontBold, fontMono, fontMonoBold, columns } = params;
+
+  const drawTitleAndHeader = (isContinuation: boolean) => {
+    const titleStr = isContinuation ? `${params.sectionTitle} (CONTINUACAO)` : params.sectionTitle;
+
+    if (params.headerVariant === 'light-bar') {
+      const secH = 19;
+      page.drawRectangle({
+        x: marginX,
+        y: cursorY - secH,
+        width: contentWidth,
+        height: secH,
+        color: PCMG_COLORS.ink
+      });
+      page.drawText(fitTextToWidth(titleStr, fontBold, 8.4, contentWidth - 16), {
+        x: marginX + 8,
+        y: cursorY - 12.8,
+        size: 8.4,
+        font: fontBold,
+        color: PCMG_COLORS.white
+      });
+      cursorY -= secH;
+
+      const thH = 20;
+      page.drawRectangle({
+        x: marginX,
+        y: cursorY - thH,
+        width: contentWidth,
+        height: thH,
+        color: PCMG_COLORS.slate100,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.7
+      });
+      let colX = marginX;
+      for (const col of columns) {
+        page.drawRectangle({
+          x: colX,
+          y: cursorY - thH,
+          width: col.width,
+          height: thH,
+          borderColor: PCMG_COLORS.slate300,
+          borderWidth: 0.5
+        });
+        const lbl = fitTextToWidth(col.label, fontBold, 7.6, col.width - 10);
+        const tx =
+          col.align === 'right'
+            ? colX + col.width - 6 - fontBold.widthOfTextAtSize(lbl, 7.6)
+            : col.align === 'center'
+              ? colX + (col.width - fontBold.widthOfTextAtSize(lbl, 7.6)) / 2
+              : colX + 6;
+        page.drawText(lbl, { x: tx, y: cursorY - 13, size: 7.6, font: fontBold, color: PCMG_COLORS.ink });
+        colX += col.width;
+      }
+      cursorY -= thH;
+      return;
+    }
+
+    if (params.headerVariant === 'slate800-amber') {
+      page.drawRectangle({
+        x: marginX,
+        y: cursorY - 13,
+        width: 3.5,
+        height: 13,
+        color: PCMG_COLORS.amber600
+      });
+      page.drawText(fitTextToWidth(titleStr, fontBold, 8.8, contentWidth - 14), {
+        x: marginX + 8,
+        y: cursorY - 10,
+        size: 8.8,
+        font: fontBold,
+        color: PCMG_COLORS.slate900
+      });
+      cursorY -= 17;
+
+      const thH = 21;
+      page.drawRectangle({
+        x: marginX,
+        y: cursorY - thH,
+        width: contentWidth,
+        height: thH,
+        color: PCMG_COLORS.slate800
+      });
+      let colX = marginX;
+      for (const col of columns) {
+        page.drawRectangle({
+          x: colX,
+          y: cursorY - thH,
+          width: col.width,
+          height: thH,
+          borderColor: PCMG_COLORS.slate700,
+          borderWidth: 0.5
+        });
+        const lbl = fitTextToWidth(col.label, fontBold, 7.6, col.width - 10);
+        const tx =
+          col.align === 'right'
+            ? colX + col.width - 6 - fontBold.widthOfTextAtSize(lbl, 7.6)
+            : col.align === 'center'
+              ? colX + (col.width - fontBold.widthOfTextAtSize(lbl, 7.6)) / 2
+              : colX + 6;
+        page.drawText(lbl, { x: tx, y: cursorY - 13.5, size: 7.6, font: fontBold, color: PCMG_COLORS.white });
+        colX += col.width;
+      }
+      cursorY -= thH;
+      return;
+    }
+
+    if (params.headerVariant === 'light-underline') {
+      page.drawText(fitTextToWidth(titleStr, fontBold, 9.0, contentWidth), {
+        x: marginX,
+        y: cursorY - 10,
+        size: 9.0,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      });
+      cursorY -= 16;
+
+      const thH = 21;
+      page.drawRectangle({
+        x: marginX,
+        y: cursorY - thH,
+        width: contentWidth,
+        height: thH,
+        color: PCMG_COLORS.slate100
+      });
+      page.drawLine({
+        start: { x: marginX, y: cursorY - thH },
+        end: { x: pageWidth - marginX, y: cursorY - thH },
+        thickness: 1.5,
+        color: PCMG_COLORS.slate400
+      });
+      let colX = marginX;
+      for (const col of columns) {
+        const lbl = fitTextToWidth(col.label, fontBold, 7.8, col.width - 10);
+        const tx =
+          col.align === 'right'
+            ? colX + col.width - 6 - fontBold.widthOfTextAtSize(lbl, 7.8)
+            : col.align === 'center'
+              ? colX + (col.width - fontBold.widthOfTextAtSize(lbl, 7.8)) / 2
+              : colX + 6;
+        page.drawText(lbl, { x: tx, y: cursorY - 13.5, size: 7.8, font: fontBold, color: PCMG_COLORS.ink });
+        colX += col.width;
+      }
+      cursorY -= thH;
+      return;
+    }
+
+    // Default: 'dark' (Armas)
+    page.drawText(fitTextToWidth(titleStr, fontBold, 8.8, contentWidth), {
+      x: marginX,
+      y: cursorY - 10,
+      size: 8.8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    cursorY -= 15;
+
+    const thH = 20;
+    page.drawRectangle({
+      x: marginX,
+      y: cursorY - thH,
+      width: contentWidth,
+      height: thH,
+      color: PCMG_COLORS.ink
+    });
+    let colX = marginX;
+    for (const col of columns) {
+      const lbl = fitTextToWidth(col.label, fontBold, 7.6, col.width - 10);
+      const tx =
+        col.align === 'right'
+          ? colX + col.width - 6 - fontBold.widthOfTextAtSize(lbl, 7.6)
+          : col.align === 'center'
+            ? colX + (col.width - fontBold.widthOfTextAtSize(lbl, 7.6)) / 2
+            : colX + 6;
+      page.drawText(lbl, { x: tx, y: cursorY - 13, size: 7.6, font: fontBold, color: PCMG_COLORS.white });
+      colX += col.width;
+    }
+    cursorY -= thH;
+  };
+
+  drawTitleAndHeader(false);
+
+  const fontSize = 8.4;
+  const lineH = 10.8;
+
+  params.rows.forEach((rowMap, idx) => {
+    const wrapped: Record<string, string[]> = {};
+    let maxLines = 1;
+    for (const col of columns) {
+      const f = col.mono ? (col.bold ? fontMonoBold : fontMono) : col.bold ? fontBold : fontRegular;
+      const lines = wrapCellLines(rowMap[col.key] || '-', f, fontSize, col.width - 12, 4);
+      wrapped[col.key] = lines;
+      if (lines.length > maxLines) maxLines = lines.length;
+    }
+
+    const rowH = Math.max(22, maxLines * lineH + 8);
+    if (cursorY - rowH < footerSafeY + 26) {
+      const next = params.onNewPage();
+      page = next.page;
+      cursorY = next.cursorY;
+      drawTitleAndHeader(true);
+    }
+
+    const rowBottomY = cursorY - rowH;
+    if (idx % 2 === 1) {
+      page.drawRectangle({
+        x: marginX,
+        y: rowBottomY,
+        width: contentWidth,
+        height: rowH,
+        color: PCMG_COLORS.slate50
+      });
+    }
+
+    let colX = marginX;
+    for (const col of columns) {
+      page.drawRectangle({
+        x: colX,
+        y: rowBottomY,
+        width: col.width,
+        height: rowH,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.5
+      });
+
+      const f = col.mono ? (col.bold ? fontMonoBold : fontMono) : col.bold ? fontBold : fontRegular;
+      const lines = wrapped[col.key] || ['-'];
+      lines.forEach((line, lIdx) => {
+        const tx =
+          col.align === 'right'
+            ? colX + col.width - 6 - f.widthOfTextAtSize(line, fontSize)
+            : col.align === 'center'
+              ? colX + (col.width - f.widthOfTextAtSize(line, fontSize)) / 2
+              : colX + 6;
+        page.drawText(line, {
+          x: tx,
+          y: cursorY - 13.2 - lIdx * lineH,
+          size: fontSize,
+          font: f,
+          color: col.bold ? PCMG_COLORS.black : PCMG_COLORS.ink
+        });
+      });
+
+      colX += col.width;
+    }
+
+    cursorY = rowBottomY;
+  });
+
+  // Linha de total geral da unidade
+  const totalH = 24;
+  if (cursorY - totalH < footerSafeY + 6) {
+    const next = params.onNewPage();
+    page = next.page;
+    cursorY = next.cursorY;
+  }
+  const totalBottomY = cursorY - totalH;
+  page.drawRectangle({
+    x: marginX,
+    y: totalBottomY,
+    width: contentWidth,
+    height: totalH,
+    color: PCMG_COLORS.slate100,
+    borderColor: PCMG_COLORS.slate400,
+    borderWidth: 0.8
+  });
+
+  const lastCol = columns[columns.length - 1];
+  const valFit = fitTextToWidth(params.totalValue, fontMonoBold, 9.0, Math.max(lastCol.width + 120, contentWidth * 0.45));
+  const valW = fontMonoBold.widthOfTextAtSize(valFit, 9.0);
+  const lblFit = fitTextToWidth(params.totalLabel, fontBold, 8.2, contentWidth - valW - 24);
+  page.drawText(lblFit, {
+    x: marginX + 8,
+    y: totalBottomY + 8,
+    size: 8.2,
+    font: fontBold,
+    color: PCMG_COLORS.ink
+  });
+  page.drawText(valFit, {
+    x: pageWidth - marginX - 8 - valW,
+    y: totalBottomY + 7.5,
+    size: 9.0,
+    font: fontMonoBold,
+    color: PCMG_COLORS.black
+  });
+  cursorY = totalBottomY;
+
+  return { page, cursorY };
+}
+
+// ============================================================================
 // 1. PDF DE ARMAS — LAYOUT IDÊNTICO AO ModalImprimirArsenal.tsx (A4 Retrato)
 // ============================================================================
 export interface SystemArmaPdfRecord {
@@ -421,25 +775,6 @@ export async function generateSystemArmasPdf(params: {
   const emissaoBr = formatDateTimeBr(params.geradoEm);
   const authCode = `PCMG-ARS-${params.geradoEm.getFullYear()}${String(params.geradoEm.getMonth() + 1).padStart(2, '0')}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
 
-  // Estatísticas idênticas ao ModalImprimirArsenal.tsx
-  const typeCountMap = new Map<string, number>();
-  const caliberCountMap = new Map<string, number>();
-  let totalCarregadores = 0;
-  for (const r of params.records) {
-    const tKey = r.tipo || 'Outros';
-    const cKey = r.calibre || 'N/A';
-    typeCountMap.set(tKey, (typeCountMap.get(tKey) || 0) + 1);
-    caliberCountMap.set(cKey, (caliberCountMap.get(cKey) || 0) + 1);
-    totalCarregadores += Number(r.carregadores || 0);
-  }
-  const typeSummaryLine = Array.from(typeCountMap.entries())
-    .map(([t, c]) => `${t}: ${c} un.`)
-    .join('   ');
-  const caliberSummaryLine =
-    Array.from(caliberCountMap.entries())
-      .map(([c, cnt]) => `${c}: ${cnt} un.`)
-      .join('   ') + `   |   Total de Carregadores da Carga: ${totalCarregadores} un.`;
-
   const columns = [
     { key: 'idx', label: '#', width: 20, align: 'center' as const },
     { key: 'tipo', label: 'TIPO', width: 55, align: 'left' as const },
@@ -453,7 +788,17 @@ export async function generateSystemArmasPdf(params: {
     { key: 'manut', label: 'ULT. MANUT.', width: contentWidth - (20 + 55 + 52 + 58 + 48 + 65 + 95 + 28 + 64), align: 'left' as const }
   ];
 
-  const drawTableHeader = (page: PDFPage, y: number): number => {
+  const drawTableHeader = (page: PDFPage, y: number, sectionBanner?: string): number => {
+    if (sectionBanner) {
+      page.drawText(fitTextToWidth(sectionBanner, fontBold, 8.6, contentWidth), {
+        x: marginX,
+        y: y - 9,
+        size: 8.6,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      });
+      y -= 14;
+    }
     const h = 18;
     page.drawRectangle({
       x: marginX,
@@ -481,10 +826,14 @@ export async function generateSystemArmasPdf(params: {
     return y - h;
   };
 
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+  const drawUnitPageHeader = (
+    page: PDFPage,
+    unitDisplayLabel: string,
+    unitRecords: SystemArmaPdfRecord[],
+    options: { showInfoPanel: boolean; showTableHeader: boolean; sectionBanner?: string }
+  ): number => {
     let y = drawTopUniqueCodeBar(page, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
 
-    // Header branco institucional + borda inferior 2px #0f172a
     const headerTopY = y;
     let textX = marginX;
     if (logoImage) {
@@ -526,7 +875,6 @@ export async function generateSystemArmasPdf(params: {
       }
     );
 
-    // .meta-pill à direita (#f1f5f9, border #cbd5e1)
     const pillX = pageWidth - marginX - pillW;
     const pillH = 34;
     page.drawRectangle({
@@ -566,8 +914,25 @@ export async function generateSystemArmasPdf(params: {
     });
     y -= 10;
 
-    if (isFirstPage) {
-      // .info-panel (#f8fafc, border #cbd5e1, 2 colunas: 2fr 1fr)
+    if (options.showInfoPanel) {
+      const typeCountMap = new Map<string, number>();
+      const caliberCountMap = new Map<string, number>();
+      let totalCarregadores = 0;
+      for (const r of unitRecords) {
+        const tKey = r.tipo || 'Outros';
+        const cKey = r.calibre || 'N/A';
+        typeCountMap.set(tKey, (typeCountMap.get(tKey) || 0) + 1);
+        caliberCountMap.set(cKey, (caliberCountMap.get(cKey) || 0) + 1);
+        totalCarregadores += Number(r.carregadores || 0);
+      }
+      const typeSummaryLine = Array.from(typeCountMap.entries())
+        .map(([t, c]) => `${t}: ${c} un.`)
+        .join('   ');
+      const caliberSummaryLine =
+        Array.from(caliberCountMap.entries())
+          .map(([c, cnt]) => `${c}: ${cnt} un.`)
+          .join('   ') + `   |   Total de Carregadores da Carga: ${totalCarregadores} un.`;
+
       const infoH = 62;
       page.drawRectangle({
         x: marginX,
@@ -591,7 +956,7 @@ export async function generateSystemArmasPdf(params: {
         font: fontBold,
         color: PCMG_COLORS.slate500
       });
-      page.drawText(fitTextToWidth(params.unidadeLabel.toUpperCase(), fontBold, 9.8, leftMaxW), {
+      page.drawText(fitTextToWidth(unitDisplayLabel.toUpperCase(), fontBold, 9.8, leftMaxW), {
         x: leftColX,
         y: y - 24,
         size: 9.8,
@@ -640,14 +1005,14 @@ export async function generateSystemArmasPdf(params: {
         font: fontRegular,
         color: PCMG_COLORS.slate500
       });
-      page.drawText('TOTAL DE ARMAS NA RELACAO', {
+      page.drawText('TOTAL DE ARMAS DA UNIDADE', {
         x: rightColX,
         y: y - 43,
         size: 6.5,
         font: fontBold,
         color: PCMG_COLORS.slate500
       });
-      page.drawText(`${params.records.length} arma(s) cadastrada(s)`, {
+      page.drawText(`${unitRecords.length} arma(s) cadastrada(s)`, {
         x: rightColX,
         y: y - 55,
         size: 10,
@@ -657,7 +1022,6 @@ export async function generateSystemArmasPdf(params: {
 
       y -= infoH + 8;
 
-      // .stats-panel (#f1f5f9, border #e2e8f0)
       const statsH = 40;
       page.drawRectangle({
         x: marginX,
@@ -693,116 +1057,131 @@ export async function generateSystemArmasPdf(params: {
       y -= statsH + 10;
     }
 
-    return drawTableHeader(page, y);
+    if (options.showTableHeader) {
+      return drawTableHeader(page, y, options.sectionBanner);
+    }
+    return y;
   };
 
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
+  const unitGroups = groupRecordsByUnit(params.records);
+  const isMultiUnit = unitGroups.length > 1;
   const fontSize = 6.9;
   const lineH = 9.0;
 
-  params.records.forEach((rec, index) => {
-    const locationLine2 = rec.cofreCodigo
-      ? `Cofre: ${rec.cofreCodigo}${rec.cofreTipo ? ` (${rec.cofreTipo})` : ''}`
-      : rec.policialAcautelado
-        ? `Acaut.: ${rec.policialAcautelado}`
-        : rec.status === 'Em Trânsito'
-          ? 'Em Cautela / Transito'
-          : 'Armazem / Nao Alocada';
+  let page!: PDFPage;
+  let cursorY = 0;
 
-    const manutText = rec.ultimaManutencaoData
-      ? `${rec.ultimaManutencaoData}${rec.ultimaManutencaoResp ? ` (${rec.ultimaManutencaoResp})` : ''}`
-      : 'Sem reg.';
+  for (const unitGroup of unitGroups) {
+    const unitDisplayLabel = isMultiUnit ? unitGroup.unitName : params.unidadeLabel;
 
-    const cellValues: Record<string, string> = {
-      idx: String(index + 1).padStart(2, '0'),
-      tipo: (rec.tipo || 'ARMA DE FOGO').toUpperCase(),
-      fab: rec.fabricante || '-',
-      modelo: rec.modelo || '-',
-      calibre: rec.calibre || '-',
-      serie: rec.numeroSerie || '-',
-      local: `${rec.unidadeNome}\n${locationLine2}`,
-      carreg: String(rec.carregadores || 0),
-      situacao: rec.status || 'No Cofre',
-      manut: manutText
-    };
-
-    const wrapped: Record<string, string[]> = {};
-    let maxLines = 1;
-    for (const col of columns) {
-      const f =
-        col.key === 'serie' || col.key === 'idx' || col.key === 'carreg'
-          ? fontMonoBold
-          : col.key === 'calibre' || col.key === 'manut'
-            ? fontMono
-            : col.key === 'tipo' || col.key === 'modelo'
-              ? fontBold
-              : fontRegular;
-      const lines = wrapCellLines(cellValues[col.key] || '-', f, fontSize, col.width - 6, 4);
-      wrapped[col.key] = lines;
-      if (lines.length > maxLines) maxLines = lines.length;
-    }
-
-    const rowH = Math.max(18, maxLines * lineH + 6);
-    if (cursorY - rowH < footerSafeY + 6) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowH;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowH,
-        color: PCMG_COLORS.grayRow
-      });
-    }
-
-    // Grade de célula (#e2e8f0)
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawRectangle({
-        x: colX,
-        y: rowBottomY,
-        width: col.width,
-        height: rowH,
-        borderColor: PCMG_COLORS.slate200,
-        borderWidth: 0.45
-      });
-
-      const lines = wrapped[col.key] || ['-'];
-
-      if (col.key === 'situacao') {
-        const stNorm = normalizeUpperAscii(rec.status);
-        const badgeStyle = stNorm.includes('COFRE')
-          ? { bg: PCMG_COLORS.emeraldBg, border: PCMG_COLORS.emeraldBorder, text: PCMG_COLORS.emeraldText }
-          : stNorm.includes('TRANSIT') || stNorm.includes('ACAUTEL')
-            ? { bg: PCMG_COLORS.amberBg, border: PCMG_COLORS.amberBorder, text: PCMG_COLORS.amberText }
-            : { bg: PCMG_COLORS.redBg, border: PCMG_COLORS.redBorder, text: PCMG_COLORS.redText };
-
-        const badgeLabel = fitTextToWidth((rec.status || 'NO COFRE').toUpperCase(), fontMonoBold, 5.9, col.width - 10);
-        const badgeW = Math.min(col.width - 5, fontMonoBold.widthOfTextAtSize(badgeLabel, 5.9) + 6);
-        const badgeH = 11.5;
-        const badgeY = rowBottomY + (rowH - badgeH) / 2;
-        page.drawRectangle({
-          x: colX + 2.5,
-          y: badgeY,
-          width: badgeW,
-          height: badgeH,
-          color: badgeStyle.bg,
-          borderColor: badgeStyle.border,
-          borderWidth: 0.6
-        });
-        page.drawText(badgeLabel, {
-          x: colX + 5.5,
-          y: badgeY + 3.5,
-          size: 5.9,
-          font: fontMonoBold,
-          color: badgeStyle.text
-        });
+    // 1. PÁGINA DE RESUMO DE ESTOQUE DA UNIDADE (Calibre | Tipo | Modelo | Quantidade em Estoque)
+    const groupedSummary = new Map<string, { calibre: string; tipo: string; modelo: string; qtd: number }>();
+    for (const r of unitGroup.records) {
+      const cal = cleanSummaryVal(r.calibre) || '-';
+      const tip = cleanSummaryVal(r.tipo) || 'Arma de Fogo';
+      const mod = cleanSummaryVal(r.modelo) || '-';
+      const key = `${normalizeUpperAscii(cal)}||${normalizeUpperAscii(tip)}||${normalizeUpperAscii(mod)}`;
+      const existing = groupedSummary.get(key);
+      if (existing) {
+        existing.qtd += 1;
       } else {
+        groupedSummary.set(key, { calibre: cal, tipo: tip, modelo: mod, qtd: 1 });
+      }
+    }
+    const summaryRows = Array.from(groupedSummary.values())
+      .sort((a, b) => {
+        const tc = a.tipo.localeCompare(b.tipo, 'pt-BR');
+        if (tc !== 0) return tc;
+        const cc = a.calibre.localeCompare(b.calibre, 'pt-BR');
+        if (cc !== 0) return cc;
+        return a.modelo.localeCompare(b.modelo, 'pt-BR');
+      })
+      .map(item => ({
+        calibre: item.calibre,
+        tipo: item.tipo,
+        modelo: item.modelo,
+        qtd: formatUnitsLabel(item.qtd, false)
+      }));
+
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showInfoPanel: true,
+      showTableHeader: false
+    });
+
+    const summaryCols: SummaryColSpec[] = [
+      { key: 'calibre', label: 'CALIBRE', width: 115, align: 'left', mono: true, bold: true },
+      { key: 'tipo', label: 'TIPO DE ARMA', width: 135, align: 'left', bold: true },
+      { key: 'modelo', label: 'MODELO', width: contentWidth - (115 + 135 + 125), align: 'left', bold: false },
+      { key: 'qtd', label: 'QUANTIDADE EM ESTOQUE', width: 125, align: 'right', mono: true, bold: true }
+    ];
+
+    const summaryRes = drawSummaryTableWithPagination({
+      page,
+      cursorY,
+      marginX,
+      pageWidth,
+      contentWidth,
+      footerSafeY,
+      fontRegular,
+      fontBold,
+      fontMono,
+      fontMonoBold,
+      sectionTitle: `RESUMO DO ESTOQUE DE ARMAMENTO POR TIPO E MODELO - ${unitDisplayLabel.toUpperCase()}`,
+      headerVariant: 'dark',
+      columns: summaryCols,
+      rows: summaryRows,
+      totalLabel: `TOTAL EM ESTOQUE (${unitDisplayLabel.toUpperCase()})`,
+      totalValue: formatUnitsLabel(unitGroup.records.length, false),
+      onNewPage: () => {
+        const nextPage = doc.addPage([pageWidth, pageHeight]);
+        const nextY = drawUnitPageHeader(nextPage, unitDisplayLabel, unitGroup.records, {
+          showInfoPanel: false,
+          showTableHeader: false
+        });
+        return { page: nextPage, cursorY: nextY };
+      }
+    });
+    page = summaryRes.page;
+    cursorY = summaryRes.cursorY;
+
+    // 2. RELAÇÃO COMPLETA DA UNIDADE (INICIA EM NOVA PÁGINA)
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showInfoPanel: false,
+      showTableHeader: true,
+      sectionBanner: `RELACAO COMPLETA DE ARMAMENTO - ${unitDisplayLabel.toUpperCase()} (${unitGroup.records.length} registro(s))`
+    });
+
+    unitGroup.records.forEach((rec, index) => {
+      const locationLine2 = rec.cofreCodigo
+        ? `Cofre: ${rec.cofreCodigo}${rec.cofreTipo ? ` (${rec.cofreTipo})` : ''}`
+        : rec.policialAcautelado
+          ? `Acaut.: ${rec.policialAcautelado}`
+          : rec.status === 'Em Trânsito'
+            ? 'Em Cautela / Transito'
+            : 'Armazem / Nao Alocada';
+
+      const manutText = rec.ultimaManutencaoData
+        ? `${rec.ultimaManutencaoData}${rec.ultimaManutencaoResp ? ` (${rec.ultimaManutencaoResp})` : ''}`
+        : 'Sem reg.';
+
+      const cellValues: Record<string, string> = {
+        idx: String(index + 1).padStart(2, '0'),
+        tipo: (rec.tipo || 'ARMA DE FOGO').toUpperCase(),
+        fab: rec.fabricante || '-',
+        modelo: rec.modelo || '-',
+        calibre: rec.calibre || '-',
+        serie: rec.numeroSerie || '-',
+        local: `${rec.unidadeNome}\n${locationLine2}`,
+        carreg: String(rec.carregadores || 0),
+        situacao: rec.status || 'No Cofre',
+        manut: manutText
+      };
+
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+      for (const col of columns) {
         const f =
           col.key === 'serie' || col.key === 'idx' || col.key === 'carreg'
             ? fontMonoBold
@@ -811,30 +1190,107 @@ export async function generateSystemArmasPdf(params: {
               : col.key === 'tipo' || col.key === 'modelo'
                 ? fontBold
                 : fontRegular;
-        lines.forEach((line, lIdx) => {
-          const isLocalSub = col.key === 'local' && lIdx > 0;
-          const useFont = col.key === 'local' && lIdx === 0 ? fontBold : isLocalSub ? fontMono : f;
-          const useSize = isLocalSub ? 6.2 : col.key === 'manut' ? 6.2 : fontSize;
-          const useColor = isLocalSub || col.key === 'manut' ? PCMG_COLORS.slate600 : col.key === 'serie' ? PCMG_COLORS.black : PCMG_COLORS.ink;
-          const tx =
-            col.align === 'center'
-              ? colX + (col.width - useFont.widthOfTextAtSize(line, useSize)) / 2
-              : colX + 3;
-          page.drawText(line, {
-            x: tx,
-            y: cursorY - 9.5 - lIdx * lineH,
-            size: useSize,
-            font: useFont,
-            color: useColor
-          });
+        const lines = wrapCellLines(cellValues[col.key] || '-', f, fontSize, col.width - 6, 4);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const rowH = Math.max(18, maxLines * lineH + 6);
+      if (cursorY - rowH < footerSafeY + 6) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+          showInfoPanel: false,
+          showTableHeader: true,
+          sectionBanner: `RELACAO COMPLETA DE ARMAMENTO - ${unitDisplayLabel.toUpperCase()} (CONTINUACAO)`
         });
       }
 
-      colX += col.width;
-    }
+      const rowBottomY = cursorY - rowH;
+      if (index % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.grayRow
+        });
+      }
 
-    cursorY = rowBottomY;
-  });
+      let colX = marginX;
+      for (const col of columns) {
+        page.drawRectangle({
+          x: colX,
+          y: rowBottomY,
+          width: col.width,
+          height: rowH,
+          borderColor: PCMG_COLORS.slate200,
+          borderWidth: 0.45
+        });
+
+        const lines = wrapped[col.key] || ['-'];
+
+        if (col.key === 'situacao') {
+          const stNorm = normalizeUpperAscii(rec.status);
+          const badgeStyle = stNorm.includes('COFRE')
+            ? { bg: PCMG_COLORS.emeraldBg, border: PCMG_COLORS.emeraldBorder, text: PCMG_COLORS.emeraldText }
+            : stNorm.includes('TRANSIT') || stNorm.includes('ACAUTEL')
+              ? { bg: PCMG_COLORS.amberBg, border: PCMG_COLORS.amberBorder, text: PCMG_COLORS.amberText }
+              : { bg: PCMG_COLORS.redBg, border: PCMG_COLORS.redBorder, text: PCMG_COLORS.redText };
+
+          const badgeLabel = fitTextToWidth((rec.status || 'NO COFRE').toUpperCase(), fontMonoBold, 5.9, col.width - 10);
+          const badgeW = Math.min(col.width - 5, fontMonoBold.widthOfTextAtSize(badgeLabel, 5.9) + 6);
+          const badgeH = 11.5;
+          const badgeY = rowBottomY + (rowH - badgeH) / 2;
+          page.drawRectangle({
+            x: colX + 2.5,
+            y: badgeY,
+            width: badgeW,
+            height: badgeH,
+            color: badgeStyle.bg,
+            borderColor: badgeStyle.border,
+            borderWidth: 0.6
+          });
+          page.drawText(badgeLabel, {
+            x: colX + 5.5,
+            y: badgeY + 3.5,
+            size: 5.9,
+            font: fontMonoBold,
+            color: badgeStyle.text
+          });
+        } else {
+          const f =
+            col.key === 'serie' || col.key === 'idx' || col.key === 'carreg'
+              ? fontMonoBold
+              : col.key === 'calibre' || col.key === 'manut'
+                ? fontMono
+                : col.key === 'tipo' || col.key === 'modelo'
+                  ? fontBold
+                  : fontRegular;
+          lines.forEach((line, lIdx) => {
+            const isLocalSub = col.key === 'local' && lIdx > 0;
+            const useFont = col.key === 'local' && lIdx === 0 ? fontBold : isLocalSub ? fontMono : f;
+            const useSize = isLocalSub ? 6.2 : col.key === 'manut' ? 6.2 : fontSize;
+            const useColor = isLocalSub || col.key === 'manut' ? PCMG_COLORS.slate600 : col.key === 'serie' ? PCMG_COLORS.black : PCMG_COLORS.ink;
+            const tx =
+              col.align === 'center'
+                ? colX + (col.width - useFont.widthOfTextAtSize(line, useSize)) / 2
+                : colX + 3;
+            page.drawText(line, {
+              x: tx,
+              y: cursorY - 9.5 - lIdx * lineH,
+              size: useSize,
+              font: useFont,
+              color: useColor
+            });
+          });
+        }
+
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+  }
 
   // Declaração de Conferência Física e Sistêmica + Assinaturas (exatamente como ModalImprimirArsenal.tsx)
   const closingBlockH = 120;
@@ -987,37 +1443,6 @@ export async function generateSystemMunicoesPdf(params: {
   const docCode = generateUniqueDocControlCode();
   const emissaoBr = formatDateTimeBr(params.geradoEm);
 
-  const totalLotes = params.records.length;
-  const totalQtd = params.records.reduce((s, r) => s + r.quantidade, 0);
-  const operacionalQtd = params.records
-    .filter(r => normalizeUpperAscii(r.destinacao).includes('OPERAC'))
-    .reduce((s, r) => s + r.quantidade, 0);
-  const treinamentoQtd = params.records
-    .filter(r => normalizeUpperAscii(r.destinacao).includes('TREIN'))
-    .reduce((s, r) => s + r.quantidade, 0);
-  const outrosQtd = Math.max(0, totalQtd - operacionalQtd - treinamentoQtd);
-
-  const byCalibreMap = new Map<string, number>();
-  const byTypeMap = new Map<string, number>();
-  for (const r of params.records) {
-    byCalibreMap.set(r.calibreNome, (byCalibreMap.get(r.calibreNome) || 0) + r.quantidade);
-    const tk = [r.calibreNome, r.tipo && r.tipo !== '—' ? r.tipo : '', r.peso].filter(Boolean).join(' ');
-    byTypeMap.set(tk, (byTypeMap.get(tk) || 0) + r.quantidade);
-  }
-  const subtotaisLine =
-    isPorUnidade || params.isTodosCalibres
-      ? 'Subtotais por Calibre: ' +
-        Array.from(byCalibreMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([k, v]) => `${k}: ${formatIntBr(v)} un`)
-          .join('  |  ')
-      : 'Subtotais por Tipo: ' +
-        Array.from(byTypeMap.entries())
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 6)
-          .map(([k, v]) => `${k}: ${formatIntBr(v)} un`)
-          .join('  |  ');
-
   const columns = [
     { key: 'calibre', label: 'CALIBRE', width: 64, align: 'left' as const },
     { key: 'fabLote', label: 'FABRICANTE / LOTE', width: 92, align: 'left' as const },
@@ -1028,8 +1453,7 @@ export async function generateSystemMunicoesPdf(params: {
     { key: 'qtd', label: 'QTD (UN)', width: 48, align: 'right' as const }
   ];
 
-  const drawTableHeader = (page: PDFPage, y: number): number => {
-    // Barra escura .section-title (#0f172a) idêntica ao ModuloMunicao.tsx
+  const drawTableHeader = (page: PDFPage, y: number, sectionTitle: string): number => {
     const secH = 18;
     page.drawRectangle({
       x: marginX,
@@ -1038,21 +1462,15 @@ export async function generateSystemMunicoesPdf(params: {
       height: secH,
       color: PCMG_COLORS.ink
     });
-    page.drawText(
-      isPorUnidade
-        ? 'DETALHAMENTO DO ESTOQUE DE MUNICOES POR UNIDADE'
-        : `DETALHAMENTO DO ESTOQUE DE MUNICOES (${params.calibreDisplayLabel.toUpperCase()})`,
-      {
-        x: marginX + 8,
-        y: y - 12.2,
-        size: 8.2,
-        font: fontBold,
-        color: PCMG_COLORS.white
-      }
-    );
+    page.drawText(fitTextToWidth(sectionTitle, fontBold, 8.2, contentWidth - 16), {
+      x: marginX + 8,
+      y: y - 12.2,
+      size: 8.2,
+      font: fontBold,
+      color: PCMG_COLORS.white
+    });
     y -= secH;
 
-    // Cabeçalho da tabela (#f1f5f9 com texto escuro #0f172a e borda #cbd5e1) — idêntico ao ModuloMunicao.tsx!
     const thH = 18;
     page.drawRectangle({
       x: marginX,
@@ -1092,10 +1510,14 @@ export async function generateSystemMunicoesPdf(params: {
     return y - thH;
   };
 
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+  const drawUnitPageHeader = (
+    page: PDFPage,
+    unitDisplayLabel: string,
+    unitRecords: SystemMunicaoPdfRecord[],
+    options: { showMetaAndKpis: boolean; showTableHeader: boolean; detailSectionTitle?: string }
+  ): number => {
     let y = drawTopUniqueCodeBar(page, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
 
-    // Header branco institucional + borda 2px #000 (ModuloMunicao.tsx)
     const headerTopY = y;
     let textX = marginX;
     if (logoImage) {
@@ -1126,7 +1548,7 @@ export async function generateSystemMunicoesPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.slate700
     });
-    page.drawText(fitTextToWidth(params.unidadeLabel, fontRegular, 8, titleMaxW), {
+    page.drawText(fitTextToWidth(unitDisplayLabel, fontRegular, 8, titleMaxW), {
       x: textX,
       y: headerTopY - 36,
       size: 8,
@@ -1134,7 +1556,6 @@ export async function generateSystemMunicoesPdf(params: {
       color: PCMG_COLORS.slate600
     });
 
-    // .badge à direita (#f1f5f9, border #cbd5e1)
     const badgeX = pageWidth - marginX - badgeW;
     const badgeH = 34;
     page.drawRectangle({
@@ -1148,7 +1569,7 @@ export async function generateSystemMunicoesPdf(params: {
     });
     const b1 = 'INVENTARIO DE MUNICOES';
     const b2 = fitTextToWidth(
-      isPorUnidade ? `UNIDADE: ${params.unidadeLabel.toUpperCase()}` : `CALIBRE: ${params.calibreDisplayLabel.toUpperCase()}`,
+      isPorUnidade ? `UNIDADE: ${unitDisplayLabel.toUpperCase()}` : `CALIBRE: ${params.calibreDisplayLabel.toUpperCase()}`,
       fontMonoBold,
       7.4,
       badgeW - 10
@@ -1177,8 +1598,17 @@ export async function generateSystemMunicoesPdf(params: {
     });
     y -= 10;
 
-    if (isFirstPage) {
-      // .meta-box 2x2 (#f8fafc, border #cbd5e1)
+    if (options.showMetaAndKpis) {
+      const uLotes = unitRecords.length;
+      const uQtd = unitRecords.reduce((s, r) => s + r.quantidade, 0);
+      const uOper = unitRecords
+        .filter(r => normalizeUpperAscii(r.destinacao).includes('OPERAC'))
+        .reduce((s, r) => s + r.quantidade, 0);
+      const uTrein = unitRecords
+        .filter(r => normalizeUpperAscii(r.destinacao).includes('TREIN'))
+        .reduce((s, r) => s + r.quantidade, 0);
+      const uOutros = Math.max(0, uQtd - uOper - uTrein);
+
       const metaH = 54;
       page.drawRectangle({
         x: marginX,
@@ -1203,7 +1633,7 @@ export async function generateSystemMunicoesPdf(params: {
       page.drawText(emissaoBr, { x: col1X, y: y - 46, size: 8.2, font: fontBold, color: PCMG_COLORS.ink });
 
       page.drawText('UNIDADE POLICIAL', { x: col2X, y: y - 11, size: 6.7, font: fontBold, color: PCMG_COLORS.slate500 });
-      page.drawText(fitTextToWidth(params.unidadeLabel, fontBold, 8.4, halfW), { x: col2X, y: y - 22, size: 8.4, font: fontBold, color: PCMG_COLORS.ink });
+      page.drawText(fitTextToWidth(unitDisplayLabel, fontBold, 8.4, halfW), { x: col2X, y: y - 22, size: 8.4, font: fontBold, color: PCMG_COLORS.ink });
       page.drawText('ARMEIRO / SOLICITANTE EMITENTE', { x: col2X, y: y - 35, size: 6.7, font: fontBold, color: PCMG_COLORS.slate500 });
       page.drawText(
         fitTextToWidth(`${params.solicitanteNome} (MASP: ${formatMaspBr(params.solicitanteMasp)})`, fontBold, 8.1, halfW),
@@ -1212,13 +1642,12 @@ export async function generateSystemMunicoesPdf(params: {
 
       y -= metaH + 8;
 
-      // 5 KPI cards (#fff / #f8fafc, border #cbd5e1)
       const kpis = [
-        { label: 'TOTAL EM ESTOQUE', val: `${formatIntBr(totalQtd)} un`, color: PCMG_COLORS.ink },
-        { label: 'LOTES EM ESTOQUE', val: String(totalLotes), color: PCMG_COLORS.ink },
-        { label: 'OPERACIONAL', val: `${formatIntBr(operacionalQtd)} un`, color: PCMG_COLORS.emerald700 },
-        { label: 'TREINAMENTO', val: `${formatIntBr(treinamentoQtd)} un`, color: PCMG_COLORS.amber700 },
-        { label: 'RESERVA / OUTROS', val: `${formatIntBr(outrosQtd)} un`, color: PCMG_COLORS.slate700 }
+        { label: 'TOTAL EM ESTOQUE', val: `${formatIntBr(uQtd)} un`, color: PCMG_COLORS.ink },
+        { label: 'LOTES EM ESTOQUE', val: String(uLotes), color: PCMG_COLORS.ink },
+        { label: 'OPERACIONAL', val: `${formatIntBr(uOper)} un`, color: PCMG_COLORS.emerald700 },
+        { label: 'TREINAMENTO', val: `${formatIntBr(uTrein)} un`, color: PCMG_COLORS.amber700 },
+        { label: 'RESERVA / OUTROS', val: `${formatIntBr(uOutros)} un`, color: PCMG_COLORS.slate700 }
       ];
       const gap = 6;
       const kpiW = (contentWidth - gap * (kpis.length - 1)) / kpis.length;
@@ -1252,151 +1681,236 @@ export async function generateSystemMunicoesPdf(params: {
         });
       });
 
-      y -= kpiH + 6;
-
-      // Faixa de subtotais por calibre / tipo
-      const subH = 17;
-      page.drawRectangle({
-        x: marginX,
-        y: y - subH,
-        width: contentWidth,
-        height: subH,
-        color: PCMG_COLORS.slate100,
-        borderColor: PCMG_COLORS.slate200,
-        borderWidth: 0.6
-      });
-      page.drawText(fitTextToWidth(subtotaisLine, fontMono, 6.8, contentWidth - 14), {
-        x: marginX + 7,
-        y: y - 11.5,
-        size: 6.8,
-        font: fontMono,
-        color: PCMG_COLORS.slate700
-      });
-
-      y -= subH + 8;
+      y -= kpiH + 10;
     }
 
-    return drawTableHeader(page, y);
+    if (options.showTableHeader) {
+      return drawTableHeader(
+        page,
+        y,
+        options.detailSectionTitle ||
+          (isPorUnidade
+            ? `DETALHAMENTO DO ESTOQUE DE MUNICOES - ${unitDisplayLabel.toUpperCase()}`
+            : `DETALHAMENTO DO ESTOQUE DE MUNICOES (${params.calibreDisplayLabel.toUpperCase()}) - ${unitDisplayLabel.toUpperCase()}`)
+      );
+    }
+    return y;
   };
 
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
+  const unitGroups = groupRecordsByUnit(params.records);
+  const isMultiUnit = unitGroups.length > 1;
   const fontSize = 7.1;
   const lineH = 9.4;
 
-  params.records.forEach((rec, index) => {
-    const tipoPeso = rec.peso ? `${rec.tipo} (${rec.peso})` : rec.tipo;
-    const fabLote = `${rec.fabricante || '-'} / ${rec.lote || 'S/L'}`;
-    const anoDest = `${rec.anoFabricacao || '-'} / ${rec.destinacao || 'Operacional'}`;
-    const cofreUni = `${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}\n${rec.unidadeNome}`;
-    const obsText = [rec.observacao, rec.atualizadoEm ? `Atu: ${rec.atualizadoEm}` : ''].filter(Boolean).join(' | ') || '-';
+  let page!: PDFPage;
+  let cursorY = 0;
 
-    const rawValues: Record<string, string> = {
-      calibre: rec.calibreNome,
-      fabLote,
-      tipoPeso,
-      anoDest,
-      cofreUni,
-      obs: obsText,
-      qtd: formatIntBr(rec.quantidade)
-    };
+  for (const unitGroup of unitGroups) {
+    const unitDisplayLabel = isMultiUnit ? unitGroup.unitName : params.unidadeLabel;
+    const unitTotalQtd = unitGroup.records.reduce((s, r) => s + r.quantidade, 0);
 
-    const wrapped: Record<string, string[]> = {};
-    let maxLines = 1;
-    for (const col of columns) {
-      const f = col.key === 'calibre' ? fontBold : col.key === 'qtd' ? fontMonoBold : fontRegular;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 5);
-      wrapped[col.key] = lines;
-      if (lines.length > maxLines) maxLines = lines.length;
+    // 1. PÁGINA DE RESUMO DE ESTOQUE DA UNIDADE (Calibre | Tipo / Peso | Quantidade em Estoque)
+    const groupedSummary = new Map<string, { calibre: string; tipoPeso: string; qtd: number }>();
+    for (const r of unitGroup.records) {
+      const cal = cleanSummaryVal(r.calibreNome) || '-';
+      const tip = cleanSummaryVal(r.tipo);
+      const pes = cleanSummaryVal(r.peso);
+      const tipoPeso = [tip, pes].filter(Boolean).join(' ') || '-';
+      const key = `${normalizeUpperAscii(cal)}||${normalizeUpperAscii(tipoPeso)}`;
+      const existing = groupedSummary.get(key);
+      if (existing) {
+        existing.qtd += Number(r.quantidade || 0);
+      } else {
+        groupedSummary.set(key, { calibre: cal, tipoPeso, qtd: Number(r.quantidade || 0) });
+      }
     }
+    const summaryRows = Array.from(groupedSummary.values())
+      .sort((a, b) => {
+        const cc = a.calibre.localeCompare(b.calibre, 'pt-BR');
+        if (cc !== 0) return cc;
+        return a.tipoPeso.localeCompare(b.tipoPeso, 'pt-BR');
+      })
+      .map(item => ({
+        calibre: item.calibre,
+        tipoPeso: item.tipoPeso,
+        qtd: formatUnitsLabel(item.qtd, false)
+      }));
 
-    const rowH = Math.max(18, maxLines * lineH + 6);
-    if (cursorY - rowH < footerSafeY + 6) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
-
-    const rowBottomY = cursorY - rowH;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowH,
-        color: PCMG_COLORS.slate50
-      });
-    }
-
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawRectangle({
-        x: colX,
-        y: rowBottomY,
-        width: col.width,
-        height: rowH,
-        borderColor: PCMG_COLORS.slate200,
-        borderWidth: 0.5
-      });
-      const lines = wrapped[col.key] || ['-'];
-      const f = col.key === 'calibre' ? fontBold : col.key === 'qtd' ? fontMonoBold : fontRegular;
-      const color = col.key === 'obs' ? PCMG_COLORS.slate700 : PCMG_COLORS.ink;
-
-      lines.forEach((line, lIdx) => {
-        const useSize = col.key === 'obs' ? 6.5 : fontSize;
-        const tx =
-          col.align === 'right'
-            ? colX + col.width - 4 - f.widthOfTextAtSize(line, useSize)
-            : colX + 4;
-        page.drawText(line, {
-          x: tx,
-          y: cursorY - 9.8 - lIdx * lineH,
-          size: useSize,
-          font: f,
-          color
-        });
-      });
-
-      colX += col.width;
-    }
-
-    cursorY = rowBottomY;
-  });
-
-  // tfoot row (#f8fafc, bold) — idêntico ao ModuloMunicao.tsx
-  const tfootH = 20;
-  if (cursorY - tfootH < footerSafeY + 6) {
     page = doc.addPage([pageWidth, pageHeight]);
-    cursorY = drawPageHeader(page, false);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showMetaAndKpis: true,
+      showTableHeader: false
+    });
+
+    const summaryCols: SummaryColSpec[] = [
+      { key: 'calibre', label: 'CALIBRE', width: 135, align: 'left', bold: true },
+      { key: 'tipoPeso', label: 'TIPO / PESO', width: contentWidth - (135 + 145), align: 'left', bold: false },
+      { key: 'qtd', label: 'QUANTIDADE EM ESTOQUE', width: 145, align: 'right', mono: true, bold: true }
+    ];
+
+    const summaryRes = drawSummaryTableWithPagination({
+      page,
+      cursorY,
+      marginX,
+      pageWidth,
+      contentWidth,
+      footerSafeY,
+      fontRegular,
+      fontBold,
+      fontMono,
+      fontMonoBold,
+      sectionTitle: `RESUMO DE ESTOQUE DE MUNICOES POR CALIBRE E TIPO - ${unitDisplayLabel.toUpperCase()}`,
+      headerVariant: 'light-bar',
+      columns: summaryCols,
+      rows: summaryRows,
+      totalLabel: `TOTAL DE MUNICOES EM ESTOQUE (${unitDisplayLabel.toUpperCase()})`,
+      totalValue: formatUnitsLabel(unitTotalQtd, false),
+      onNewPage: () => {
+        const nextPage = doc.addPage([pageWidth, pageHeight]);
+        const nextY = drawUnitPageHeader(nextPage, unitDisplayLabel, unitGroup.records, {
+          showMetaAndKpis: false,
+          showTableHeader: false
+        });
+        return { page: nextPage, cursorY: nextY };
+      }
+    });
+    page = summaryRes.page;
+    cursorY = summaryRes.cursorY;
+
+    // 2. RELAÇÃO COMPLETA DE LOTES DA UNIDADE (INICIA EM NOVA PÁGINA)
+    const detailTitle = isPorUnidade
+      ? `RELACAO COMPLETA DO ESTOQUE DE MUNICOES - ${unitDisplayLabel.toUpperCase()}`
+      : `RELACAO COMPLETA DO ESTOQUE DE MUNICOES (${params.calibreDisplayLabel.toUpperCase()}) - ${unitDisplayLabel.toUpperCase()}`;
+
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showMetaAndKpis: false,
+      showTableHeader: true,
+      detailSectionTitle: detailTitle
+    });
+
+    unitGroup.records.forEach((rec, index) => {
+      const tipoPeso = rec.peso ? `${rec.tipo} (${rec.peso})` : rec.tipo;
+      const fabLote = `${rec.fabricante || '-'} / ${rec.lote || 'S/L'}`;
+      const anoDest = `${rec.anoFabricacao || '-'} / ${rec.destinacao || 'Operacional'}`;
+      const cofreUni = `${rec.cofreCodigo}${rec.cofreDescricao ? ` (${rec.cofreDescricao})` : ''}\n${rec.unidadeNome}`;
+      const obsText = [rec.observacao, rec.atualizadoEm ? `Atu: ${rec.atualizadoEm}` : ''].filter(Boolean).join(' | ') || '-';
+
+      const rawValues: Record<string, string> = {
+        calibre: rec.calibreNome,
+        fabLote,
+        tipoPeso,
+        anoDest,
+        cofreUni,
+        obs: obsText,
+        qtd: formatIntBr(rec.quantidade)
+      };
+
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+      for (const col of columns) {
+        const f = col.key === 'calibre' ? fontBold : col.key === 'qtd' ? fontMonoBold : fontRegular;
+        const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, 5);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const rowH = Math.max(18, maxLines * lineH + 6);
+      if (cursorY - rowH < footerSafeY + 6) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+          showMetaAndKpis: false,
+          showTableHeader: true,
+          detailSectionTitle: `${detailTitle} (CONTINUACAO)`
+        });
+      }
+
+      const rowBottomY = cursorY - rowH;
+      if (index % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.slate50
+        });
+      }
+
+      let colX = marginX;
+      for (const col of columns) {
+        page.drawRectangle({
+          x: colX,
+          y: rowBottomY,
+          width: col.width,
+          height: rowH,
+          borderColor: PCMG_COLORS.slate200,
+          borderWidth: 0.5
+        });
+        const lines = wrapped[col.key] || ['-'];
+        const f = col.key === 'calibre' ? fontBold : col.key === 'qtd' ? fontMonoBold : fontRegular;
+        const color = col.key === 'obs' ? PCMG_COLORS.slate700 : PCMG_COLORS.ink;
+
+        lines.forEach((line, lIdx) => {
+          const useSize = col.key === 'obs' ? 6.5 : fontSize;
+          const tx =
+            col.align === 'right'
+              ? colX + col.width - 4 - f.widthOfTextAtSize(line, useSize)
+              : colX + 4;
+          page.drawText(line, {
+            x: tx,
+            y: cursorY - 9.8 - lIdx * lineH,
+            size: useSize,
+            font: f,
+            color
+          });
+        });
+
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+
+    // tfoot row (#f8fafc, bold) para a unidade
+    const tfootH = 20;
+    if (cursorY - tfootH < footerSafeY + 6) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+        showMetaAndKpis: false,
+        showTableHeader: true,
+        detailSectionTitle: detailTitle
+      });
+    }
+    const tfootY = cursorY - tfootH;
+    page.drawRectangle({
+      x: marginX,
+      y: tfootY,
+      width: contentWidth,
+      height: tfootH,
+      color: PCMG_COLORS.slate50,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.75
+    });
+    const totalLbl = `TOTAL DE MUNICOES (${unitDisplayLabel.toUpperCase()}):`;
+    const totalVal = `${formatIntBr(unitTotalQtd)} un`;
+    const valW = fontMonoBold.widthOfTextAtSize(totalVal, 8.8);
+    const lblW = fontBold.widthOfTextAtSize(totalLbl, 7.8);
+    page.drawText(totalLbl, {
+      x: pageWidth - marginX - 66 - lblW,
+      y: tfootY + 6.5,
+      size: 7.8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    page.drawText(totalVal, {
+      x: pageWidth - marginX - 4 - valW,
+      y: tfootY + 6,
+      size: 8.8,
+      font: fontMonoBold,
+      color: PCMG_COLORS.black
+    });
+    cursorY = tfootY;
   }
-  const tfootY = cursorY - tfootH;
-  page.drawRectangle({
-    x: marginX,
-    y: tfootY,
-    width: contentWidth,
-    height: tfootH,
-    color: PCMG_COLORS.slate50,
-    borderColor: PCMG_COLORS.slate300,
-    borderWidth: 0.75
-  });
-  const totalLbl = 'TOTAL DE MUNICOES NA RELACAO:';
-  const totalVal = `${formatIntBr(totalQtd)} un`;
-  const valW = fontMonoBold.widthOfTextAtSize(totalVal, 8.8);
-  const lblW = fontBold.widthOfTextAtSize(totalLbl, 7.8);
-  page.drawText(totalLbl, {
-    x: pageWidth - marginX - 58 - lblW,
-    y: tfootY + 6.5,
-    size: 7.8,
-    font: fontBold,
-    color: PCMG_COLORS.ink
-  });
-  page.drawText(totalVal, {
-    x: pageWidth - marginX - 4 - valW,
-    y: tfootY + 6,
-    size: 8.8,
-    font: fontMonoBold,
-    color: PCMG_COLORS.black
-  });
-  cursorY = tfootY;
 
   // Texto certificador (.info-footer-box) + Assinatura centralizada do Armeiro (idêntico ao ModuloMunicao.tsx)
   const closingH = 104;
@@ -1541,23 +2055,6 @@ export async function generateSystemExplosivosPdf(params: {
   const nowMs = Date.now();
   const in90DaysMs = nowMs + 90 * 24 * 60 * 60 * 1000;
 
-  const totalItens = params.records.length;
-  const operacionais = params.records.filter(r => normalizeUpperAscii(r.status).includes('OPERAC')).length;
-  const vencidos = params.records.filter(r => r.validadeRaw && r.validadeRaw.getTime() < nowMs).length;
-  const aVencer = params.records.filter(
-    r => r.validadeRaw && r.validadeRaw.getTime() >= nowMs && r.validadeRaw.getTime() <= in90DaysMs
-  ).length;
-
-  const byMeasureMap = new Map<string, number>();
-  for (const r of params.records) {
-    const um = r.unidadeMedida || 'un';
-    byMeasureMap.set(um, (byMeasureMap.get(um) || 0) + r.quantidade);
-  }
-  const medidasResumo = Array.from(byMeasureMap.entries())
-    .sort((a, b) => b[1] - a[1])
-    .map(([um, qty]) => `${formatDecimalBr(qty)} ${um}`)
-    .join(' | ') || '-';
-
   const fixedCols = 114 + 84 + 54 + 88 + 64 + 86 + 70 + 68 + 54;
   const columns = [
     { key: 'nome', label: 'NOME DO EXPLOSIVO', width: 114, align: 'left' as const },
@@ -1572,8 +2069,17 @@ export async function generateSystemExplosivosPdf(params: {
     { key: 'obs', label: 'OBSERVACOES / SERIAIS', width: contentWidth - fixedCols, align: 'left' as const }
   ];
 
-  const drawTableHeader = (page: PDFPage, y: number): number => {
-    // Cabeçalho da tabela idêntico ao ModuloExplosivos.tsx (#f1f5f9 + border-bottom 2px #94a3b8)
+  const drawTableHeader = (page: PDFPage, y: number, sectionBanner?: string): number => {
+    if (sectionBanner) {
+      page.drawText(fitTextToWidth(sectionBanner, fontBold, 8.8, contentWidth), {
+        x: marginX,
+        y: y - 9,
+        size: 8.8,
+        font: fontBold,
+        color: PCMG_COLORS.ink
+      });
+      y -= 15;
+    }
     const h = 20;
     page.drawRectangle({
       x: marginX,
@@ -1607,10 +2113,14 @@ export async function generateSystemExplosivosPdf(params: {
     return y - h;
   };
 
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+  const drawUnitPageHeader = (
+    page: PDFPage,
+    unitDisplayLabel: string,
+    unitRecords: SystemExplosivoPdfRecord[],
+    options: { showKpis: boolean; showTableHeader: boolean; sectionBanner?: string }
+  ): number => {
     let y = drawTopUniqueCodeBar(page, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
 
-    // Cabeçalho institucional branco centralizado com brasão à esquerda e borda 2px #0f172a (ModuloExplosivos.tsx)
     const headerTopY = y;
     if (logoImage) {
       const dims = logoImage.scaleToFit(44, 44);
@@ -1624,7 +2134,7 @@ export async function generateSystemExplosivosPdf(params: {
 
     const h1 = 'POLICIA CIVIL DE MINAS GERAIS';
     const h2 = 'RELATORIO DE INVENTARIO DO PAIOL DE EXPLOSIVOS';
-    const h3 = `Departamento: ${params.departamentoLabel}  |  Unidade: ${params.unidadeLabel}  |  Emissao: ${emissaoBr}`;
+    const h3 = `Departamento: ${params.departamentoLabel}  |  Unidade: ${unitDisplayLabel}  |  Emissao: ${emissaoBr}`;
 
     page.drawText(h1, {
       x: (pageWidth - fontBold.widthOfTextAtSize(h1, 13)) / 2,
@@ -1658,13 +2168,30 @@ export async function generateSystemExplosivosPdf(params: {
     });
     y -= 10;
 
-    if (isFirstPage) {
+    if (options.showKpis) {
+      const uTotalItens = unitRecords.length;
+      const uOperacionais = unitRecords.filter(r => normalizeUpperAscii(r.status).includes('OPERAC')).length;
+      const uVencidos = unitRecords.filter(r => r.validadeRaw && r.validadeRaw.getTime() < nowMs).length;
+      const uAVencer = unitRecords.filter(
+        r => r.validadeRaw && r.validadeRaw.getTime() >= nowMs && r.validadeRaw.getTime() <= in90DaysMs
+      ).length;
+      const byMeasureMap = new Map<string, number>();
+      for (const r of unitRecords) {
+        const um = r.unidadeMedida || 'un';
+        byMeasureMap.set(um, (byMeasureMap.get(um) || 0) + r.quantidade);
+      }
+      const medidasResumo =
+        Array.from(byMeasureMap.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([um, qty]) => `${formatDecimalBr(qty)} ${um}`)
+          .join(' | ') || '-';
+
       const kpis = [
-        { label: 'ITENS / LOTES NO PAIOL', val: String(totalItens), color: PCMG_COLORS.ink },
-        { label: 'OPERACIONAIS', val: String(operacionais), color: PCMG_COLORS.emerald700 },
+        { label: 'ITENS / LOTES NO PAIOL', val: String(uTotalItens), color: PCMG_COLORS.ink },
+        { label: 'OPERACIONAIS', val: String(uOperacionais), color: PCMG_COLORS.emerald700 },
         { label: 'QUANTITATIVOS TOTAIS', val: fitTextToWidth(medidasResumo, fontMonoBold, 8.5, 170), color: PCMG_COLORS.ink },
-        { label: 'VENCIDOS', val: String(vencidos), color: vencidos > 0 ? PCMG_COLORS.redText : PCMG_COLORS.ink },
-        { label: 'A VENCER (90 DIAS)', val: String(aVencer), color: aVencer > 0 ? PCMG_COLORS.amber700 : PCMG_COLORS.ink }
+        { label: 'VENCIDOS', val: String(uVencidos), color: uVencidos > 0 ? PCMG_COLORS.redText : PCMG_COLORS.ink },
+        { label: 'A VENCER (90 DIAS)', val: String(uAVencer), color: uAVencer > 0 ? PCMG_COLORS.amber700 : PCMG_COLORS.ink }
       ];
       const gap = 8;
       const kpiW = (contentWidth - gap * (kpis.length - 1)) / kpis.length;
@@ -1698,114 +2225,218 @@ export async function generateSystemExplosivosPdf(params: {
       y -= kpiH + 10;
     }
 
-    return drawTableHeader(page, y);
+    if (options.showTableHeader) {
+      return drawTableHeader(page, y, options.sectionBanner);
+    }
+    return y;
   };
 
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
+  const unitGroups = groupRecordsByUnit(params.records);
+  const isMultiUnit = unitGroups.length > 1;
   const fontSize = 7.2;
   const lineH = 9.4;
 
-  params.records.forEach((rec, index) => {
-    const tipoFull = [rec.tipo, rec.subtipo].filter(Boolean).join(' / ');
-    let valTag = '';
-    if (rec.validadeRaw) {
-      if (rec.validadeRaw.getTime() < nowMs) valTag = ' [VENCIDO]';
-      else if (rec.validadeRaw.getTime() <= in90DaysMs) valTag = ' [A VENCER]';
-    }
-    const localStr = [
-      rec.localArmazenamento,
-      rec.cofreCodigo && rec.cofreCodigo !== rec.localArmazenamento ? `Cofre ${rec.cofreCodigo}` : '',
-      rec.unidadeNome
-    ]
-      .filter(Boolean)
-      .join('\n');
+  let page!: PDFPage;
+  let cursorY = 0;
 
-    const rawValues: Record<string, string> = {
-      nome: rec.nome,
-      tipo: tipoFull || '-',
-      qtd: `${formatDecimalBr(rec.quantidade)} ${rec.unidadeMedida}`,
-      lote: rec.lote || '-',
-      fab: rec.fabricante || '-',
-      risco: rec.classeRisco || '-',
-      datas: `Fab: ${rec.dataFabricacao}\nVal: ${rec.dataValidade}${valTag}`,
-      local: localStr || '-',
-      status: rec.status || 'Operacional',
-      obs: rec.observacoes || '-'
-    };
+  for (const unitGroup of unitGroups) {
+    const unitDisplayLabel = isMultiUnit ? unitGroup.unitName : params.unidadeLabel;
 
-    const wrapped: Record<string, string[]> = {};
-    let maxLines = 1;
-    for (const col of columns) {
-      const f =
-        col.key === 'nome' || col.key === 'local' || col.key === 'status'
-          ? fontBold
-          : col.key === 'qtd'
-            ? fontMonoBold
-            : col.key === 'lote'
-              ? fontMono
-              : fontRegular;
-      const maxL = col.key === 'obs' ? 12 : 5;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, maxL);
-      wrapped[col.key] = lines;
-      if (lines.length > maxLines) maxLines = lines.length;
+    // 1. PÁGINA DE RESUMO DE ESTOQUE DA UNIDADE (Tipo | Subtipo | Quantidade em Estoque)
+    const groupedSummary = new Map<string, { tipo: string; subtipo: string; um: string; qtd: number }>();
+    const byMeasureTotal = new Map<string, number>();
+    for (const r of unitGroup.records) {
+      const tip = cleanSummaryVal(r.tipo) || '-';
+      const sub =
+        cleanSummaryVal(r.subtipo) ||
+        (cleanSummaryVal(r.nome) && normalizeUpperAscii(r.nome) !== normalizeUpperAscii(tip)
+          ? cleanSummaryVal(r.nome)
+          : '-');
+      const um = cleanSummaryVal(r.unidadeMedida) || 'un';
+      const key = `${normalizeUpperAscii(tip)}||${normalizeUpperAscii(sub)}||${normalizeUpperAscii(um)}`;
+      const existing = groupedSummary.get(key);
+      if (existing) {
+        existing.qtd += Number(r.quantidade || 0);
+      } else {
+        groupedSummary.set(key, { tipo: tip, subtipo: sub, um, qtd: Number(r.quantidade || 0) });
+      }
+      byMeasureTotal.set(um, (byMeasureTotal.get(um) || 0) + Number(r.quantidade || 0));
     }
 
-    const rowH = Math.max(20, maxLines * lineH + 7);
-    if (cursorY - rowH < footerSafeY + 6) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
+    const summaryRows = Array.from(groupedSummary.values())
+      .sort((a, b) => {
+        const tc = a.tipo.localeCompare(b.tipo, 'pt-BR');
+        if (tc !== 0) return tc;
+        const sc = a.subtipo.localeCompare(b.subtipo, 'pt-BR');
+        if (sc !== 0) return sc;
+        return a.um.localeCompare(b.um, 'pt-BR');
+      })
+      .map(item => ({
+        tipo: item.tipo,
+        subtipo: item.subtipo,
+        qtd: `${formatDecimalBr(item.qtd)} ${item.um}`
+      }));
 
-    const rowBottomY = cursorY - rowH;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowH,
-        color: PCMG_COLORS.slate50
-      });
-    }
-    page.drawLine({
-      start: { x: marginX, y: rowBottomY },
-      end: { x: pageWidth - marginX, y: rowBottomY },
-      thickness: 0.7,
-      color: PCMG_COLORS.slate300
+    const totalByMeasureStr =
+      Array.from(byMeasureTotal.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([um, qty]) => `${formatDecimalBr(qty)} ${um}`)
+        .join(' | ') || '-';
+
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showKpis: true,
+      showTableHeader: false
     });
 
-    let colX = marginX;
-    for (const col of columns) {
-      const lines = wrapped[col.key] || ['-'];
-      const f =
-        col.key === 'nome' || col.key === 'local' || col.key === 'status'
-          ? fontBold
-          : col.key === 'qtd'
-            ? fontMonoBold
-            : col.key === 'lote'
-              ? fontMono
-              : fontRegular;
-      const color = col.key === 'local' ? PCMG_COLORS.sky700 : PCMG_COLORS.ink;
-      const useSize = col.key === 'risco' || col.key === 'obs' ? 6.7 : fontSize;
+    const summaryCols: SummaryColSpec[] = [
+      { key: 'tipo', label: 'TIPO DE EXPLOSIVO', width: 250, align: 'left', bold: true },
+      { key: 'subtipo', label: 'SUBTIPO', width: contentWidth - (250 + 185), align: 'left', bold: false },
+      { key: 'qtd', label: 'QUANTIDADE EM ESTOQUE', width: 185, align: 'right', mono: true, bold: true }
+    ];
 
-      lines.forEach((line, lIdx) => {
-        const tx =
-          col.align === 'center'
-            ? colX + (col.width - f.widthOfTextAtSize(line, useSize)) / 2
-            : colX + 4;
-        page.drawText(line, {
-          x: tx,
-          y: cursorY - 10 - lIdx * lineH,
-          size: useSize,
-          font: f,
-          color
+    const summaryRes = drawSummaryTableWithPagination({
+      page,
+      cursorY,
+      marginX,
+      pageWidth,
+      contentWidth,
+      footerSafeY,
+      fontRegular,
+      fontBold,
+      fontMono,
+      fontMonoBold,
+      sectionTitle: `RESUMO DO ESTOQUE DE EXPLOSIVOS POR TIPO E SUBTIPO - ${unitDisplayLabel.toUpperCase()}`,
+      headerVariant: 'light-underline',
+      columns: summaryCols,
+      rows: summaryRows,
+      totalLabel: `TOTAIS EM ESTOQUE (${unitDisplayLabel.toUpperCase()})`,
+      totalValue: totalByMeasureStr,
+      onNewPage: () => {
+        const nextPage = doc.addPage([pageWidth, pageHeight]);
+        const nextY = drawUnitPageHeader(nextPage, unitDisplayLabel, unitGroup.records, {
+          showKpis: false,
+          showTableHeader: false
         });
-      });
-      colX += col.width;
-    }
+        return { page: nextPage, cursorY: nextY };
+      }
+    });
+    page = summaryRes.page;
+    cursorY = summaryRes.cursorY;
 
-    cursorY = rowBottomY;
-  });
+    // 2. RELAÇÃO COMPLETA DA UNIDADE (INICIA EM NOVA PÁGINA)
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showKpis: false,
+      showTableHeader: true,
+      sectionBanner: `RELACAO COMPLETA DE EXPLOSIVOS - ${unitDisplayLabel.toUpperCase()} (${unitGroup.records.length} registro(s))`
+    });
+
+    unitGroup.records.forEach((rec, index) => {
+      const tipoFull = [rec.tipo, rec.subtipo].filter(Boolean).join(' / ');
+      let valTag = '';
+      if (rec.validadeRaw) {
+        if (rec.validadeRaw.getTime() < nowMs) valTag = ' [VENCIDO]';
+        else if (rec.validadeRaw.getTime() <= in90DaysMs) valTag = ' [A VENCER]';
+      }
+      const localStr = [
+        rec.localArmazenamento,
+        rec.cofreCodigo && rec.cofreCodigo !== rec.localArmazenamento ? `Cofre ${rec.cofreCodigo}` : '',
+        rec.unidadeNome
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      const rawValues: Record<string, string> = {
+        nome: rec.nome,
+        tipo: tipoFull || '-',
+        qtd: `${formatDecimalBr(rec.quantidade)} ${rec.unidadeMedida}`,
+        lote: rec.lote || '-',
+        fab: rec.fabricante || '-',
+        risco: rec.classeRisco || '-',
+        datas: `Fab: ${rec.dataFabricacao}\nVal: ${rec.dataValidade}${valTag}`,
+        local: localStr || '-',
+        status: rec.status || 'Operacional',
+        obs: rec.observacoes || '-'
+      };
+
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+      for (const col of columns) {
+        const f =
+          col.key === 'nome' || col.key === 'local' || col.key === 'status'
+            ? fontBold
+            : col.key === 'qtd'
+              ? fontMonoBold
+              : col.key === 'lote'
+                ? fontMono
+                : fontRegular;
+        const maxL = col.key === 'obs' ? 12 : 5;
+        const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 7, maxL);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const rowH = Math.max(20, maxLines * lineH + 7);
+      if (cursorY - rowH < footerSafeY + 6) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+          showKpis: false,
+          showTableHeader: true,
+          sectionBanner: `RELACAO COMPLETA DE EXPLOSIVOS - ${unitDisplayLabel.toUpperCase()} (CONTINUACAO)`
+        });
+      }
+
+      const rowBottomY = cursorY - rowH;
+      if (index % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.slate50
+        });
+      }
+      page.drawLine({
+        start: { x: marginX, y: rowBottomY },
+        end: { x: pageWidth - marginX, y: rowBottomY },
+        thickness: 0.7,
+        color: PCMG_COLORS.slate300
+      });
+
+      let colX = marginX;
+      for (const col of columns) {
+        const lines = wrapped[col.key] || ['-'];
+        const f =
+          col.key === 'nome' || col.key === 'local' || col.key === 'status'
+            ? fontBold
+            : col.key === 'qtd'
+              ? fontMonoBold
+              : col.key === 'lote'
+                ? fontMono
+                : fontRegular;
+        const color = col.key === 'local' ? PCMG_COLORS.sky700 : PCMG_COLORS.ink;
+        const useSize = col.key === 'risco' || col.key === 'obs' ? 6.7 : fontSize;
+
+        lines.forEach((line, lIdx) => {
+          const tx =
+            col.align === 'center'
+              ? colX + (col.width - f.widthOfTextAtSize(line, useSize)) / 2
+              : colX + 4;
+          page.drawText(line, {
+            x: tx,
+            y: cursorY - 10 - lIdx * lineH,
+            size: useSize,
+            font: f,
+            color
+          });
+        });
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+  }
 
   // Assinaturas duplas idênticas ao ModuloExplosivos.tsx
   if (cursorY - 68 < footerSafeY) {
@@ -1911,12 +2542,6 @@ export async function generateSystemMateriaisPdf(params: {
   const emissaoBr = formatDateTimeBr(params.geradoEm);
   const nowMs = Date.now();
 
-  const totalItens = params.records.length;
-  const totalQtd = params.records.reduce((s, r) => s + r.quantidadeTotal, 0);
-  const dispQtd = params.records.reduce((s, r) => s + r.quantidadeDisponivel, 0);
-  const emUsoQtd = params.records.reduce((s, r) => s + r.quantidadeEmUso, 0);
-  const consQtd = params.records.reduce((s, r) => s + r.quantidadeConsumida, 0);
-
   const fixedCols = 20 + 96 + 76 + 74 + 68 + 68 + 80 + 96 + 38 + 52;
   const columns = [
     { key: 'idx', label: '#', width: 20, align: 'center' as const },
@@ -1932,8 +2557,25 @@ export async function generateSystemMateriaisPdf(params: {
     { key: 'obs', label: 'OBSERVACOES', width: contentWidth - fixedCols, align: 'left' as const }
   ];
 
-  const drawTableHeader = (page: PDFPage, y: number): number => {
-    // Cabeçalho #1e293b com texto branco e borda #334155 — idêntico ao ModuloMateriais.tsx!
+  const drawTableHeader = (page: PDFPage, y: number, sectionBanner?: string): number => {
+    if (sectionBanner) {
+      page.drawRectangle({
+        x: marginX,
+        y: y - 12,
+        width: 3.5,
+        height: 12,
+        color: PCMG_COLORS.amber600
+      });
+      page.drawText(fitTextToWidth(sectionBanner, fontBold, 8.5, contentWidth - 12), {
+        x: marginX + 8,
+        y: y - 9.5,
+        size: 8.5,
+        font: fontBold,
+        color: PCMG_COLORS.slate900
+      });
+      y -= 16;
+    }
+
     const h = 19;
     page.drawRectangle({
       x: marginX,
@@ -1969,10 +2611,14 @@ export async function generateSystemMateriaisPdf(params: {
     return y - h;
   };
 
-  const drawPageHeader = (page: PDFPage, isFirstPage: boolean): number => {
+  const drawUnitPageHeader = (
+    page: PDFPage,
+    unitDisplayLabel: string,
+    unitRecords: SystemMaterialPdfRecord[],
+    options: { showKpis: boolean; showTableHeader: boolean; sectionBanner?: string }
+  ): number => {
     let y = drawTopUniqueCodeBar(page, pageWidth, pageHeight, marginX, fontMono, fontMonoBold, docCode, emissaoBr);
 
-    // Header branco institucional + subtítulo âmbar (#b45309) + borda inferior 2px #111827 (ModuloMateriais.tsx)
     const headerTopY = y;
     let textX = marginX;
     if (logoImage) {
@@ -1993,7 +2639,7 @@ export async function generateSystemMateriaisPdf(params: {
       font: fontBold,
       color: PCMG_COLORS.slate900
     });
-    page.drawText('SISTEMA DE ARMARIA - RELATORIO DE MATERIAIS POR UNIDADE', {
+    page.drawText(`SISTEMA DE ARMARIA - RELATORIO DE MATERIAIS (${unitDisplayLabel.toUpperCase()})`, {
       x: textX,
       y: headerTopY - 29,
       size: 8.5,
@@ -2027,8 +2673,13 @@ export async function generateSystemMateriaisPdf(params: {
     });
     y -= 9;
 
-    if (isFirstPage) {
-      // .filters-box (#f8fafc, border #cbd5e1)
+    if (options.showKpis) {
+      const uItens = unitRecords.length;
+      const uTotal = unitRecords.reduce((s, r) => s + r.quantidadeTotal, 0);
+      const uDisp = unitRecords.reduce((s, r) => s + r.quantidadeDisponivel, 0);
+      const uUso = unitRecords.reduce((s, r) => s + r.quantidadeEmUso, 0);
+      const uCons = unitRecords.reduce((s, r) => s + r.quantidadeConsumida, 0);
+
       const fH = 20;
       page.drawRectangle({
         x: marginX,
@@ -2041,7 +2692,7 @@ export async function generateSystemMateriaisPdf(params: {
       });
       page.drawText(
         fitTextToWidth(
-          `Filtros Aplicados: Departamento: ${params.departamentoLabel} - Unidade: ${params.unidadeLabel}`,
+          `Filtros Aplicados: Departamento: ${params.departamentoLabel} - Unidade: ${unitDisplayLabel}`,
           fontBold,
           7.6,
           contentWidth - 16
@@ -2056,13 +2707,12 @@ export async function generateSystemMateriaisPdf(params: {
       );
       y -= fH + 8;
 
-      // .kpi-row (5 cards exatamente com as cores do ModuloMateriais.tsx!)
       const kpis = [
-        { label: 'REGISTROS', val: String(totalItens), color: PCMG_COLORS.ink },
-        { label: 'QTD TOTAL', val: `${formatIntBr(totalQtd)} un`, color: PCMG_COLORS.ink },
-        { label: 'DISPONIVEL', val: `${formatIntBr(dispQtd)} un`, color: PCMG_COLORS.emerald700 },
-        { label: 'EM USO', val: `${formatIntBr(emUsoQtd)} un`, color: PCMG_COLORS.amber700 },
-        { label: 'CONSUMIDOS', val: `${formatIntBr(consQtd)} un`, color: PCMG_COLORS.purple700 }
+        { label: 'REGISTROS', val: String(uItens), color: PCMG_COLORS.ink },
+        { label: 'QTD TOTAL', val: `${formatIntBr(uTotal)} un`, color: PCMG_COLORS.ink },
+        { label: 'DISPONIVEL', val: `${formatIntBr(uDisp)} un`, color: PCMG_COLORS.emerald700 },
+        { label: 'EM USO', val: `${formatIntBr(uUso)} un`, color: PCMG_COLORS.amber700 },
+        { label: 'CONSUMIDOS', val: `${formatIntBr(uCons)} un`, color: PCMG_COLORS.purple700 }
       ];
       const gap = 8;
       const kpiW = (contentWidth - gap * 4) / 5;
@@ -2093,146 +2743,219 @@ export async function generateSystemMateriaisPdf(params: {
           color: k.color
         });
       });
-      y -= kpiH + 8;
-
-      // .section-title com barra esquerda âmbar (#d97706) — idêntico ao ModuloMateriais.tsx
-      page.drawRectangle({
-        x: marginX,
-        y: y - 12,
-        width: 3.5,
-        height: 12,
-        color: PCMG_COLORS.amber600
-      });
-      page.drawText('RELACAO DETALHADA DE MATERIAIS DA UNIDADE', {
-        x: marginX + 8,
-        y: y - 9.5,
-        size: 8.5,
-        font: fontBold,
-        color: PCMG_COLORS.slate900
-      });
-      y -= 16;
+      y -= kpiH + 10;
     }
 
-    return drawTableHeader(page, y);
+    if (options.showTableHeader) {
+      return drawTableHeader(page, y, options.sectionBanner);
+    }
+    return y;
   };
 
-  let page = doc.addPage([pageWidth, pageHeight]);
-  let cursorY = drawPageHeader(page, true);
+  const unitGroups = groupRecordsByUnit(params.records);
+  const isMultiUnit = unitGroups.length > 1;
   const fontSize = 6.9;
   const lineH = 9.0;
 
-  params.records.forEach((rec, index) => {
-    const tipoStr = `${rec.tipoNome}\n${rec.categoria || 'Geral'} (${rec.consumivel ? 'Consumivel' : 'Permanente'})`;
-    const cofreStr = `${rec.localGuarda || rec.cofreCodigo || '-'}${rec.cofreDescricao ? `\n${rec.cofreDescricao}` : ''}`;
-    const uniStr = `${rec.unidadeNome}${rec.departamentoNome ? `\n${rec.departamentoNome}` : ''}`;
-    const estoqueStr = `Tot: ${formatIntBr(rec.quantidadeTotal)}\nD:${formatIntBr(rec.quantidadeDisponivel)} | U:${formatIntBr(rec.quantidadeEmUso)} | C:${formatIntBr(rec.quantidadeConsumida)}`;
-    const valStr =
-      rec.validadeRaw && rec.validadeRaw.getTime() < nowMs ? `${rec.validade} [VENC.]` : rec.validade || '-';
+  let page!: PDFPage;
+  let cursorY = 0;
 
-    const rawValues: Record<string, string> = {
-      idx: String(index + 1),
-      nome: rec.nome,
-      tipo: tipoStr,
-      serie: rec.numeroSerie || '-',
-      cofre: cofreStr,
-      unidade: uniStr,
-      estoque: estoqueStr,
-      acaut: rec.acautelamentoResumo || (rec.isAcautelado ? `ACAUTELADO (${rec.quantidadeEmUso} un.)` : 'NO COFRE'),
-      cautelavel: rec.passivoDepositoPoliciais ? 'SIM' : 'NAO',
-      validade: valStr,
-      obs: rec.observacoes || '-'
-    };
+  for (const unitGroup of unitGroups) {
+    const unitDisplayLabel = isMultiUnit ? unitGroup.unitName : params.unidadeLabel;
+    const unitTotalQtd = unitGroup.records.reduce((s, r) => s + r.quantidadeTotal, 0);
 
-    const wrapped: Record<string, string[]> = {};
-    let maxLines = 1;
-    for (const col of columns) {
-      const f =
-        col.key === 'nome' || col.key === 'cautelavel'
-          ? fontBold
-          : col.key === 'idx' || col.key === 'serie' || col.key === 'estoque'
-            ? fontMono
-            : fontRegular;
-      const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 6, 7);
-      wrapped[col.key] = lines;
-      if (lines.length > maxLines) maxLines = lines.length;
+    // 1. PÁGINA DE RESUMO DE ESTOQUE DA UNIDADE (Tipo | Nome do Material | Quantidade em Estoque)
+    const groupedSummary = new Map<string, { tipo: string; nome: string; qtd: number }>();
+    for (const r of unitGroup.records) {
+      const tip = cleanSummaryVal(r.tipoNome) || 'Geral';
+      const nom = cleanSummaryVal(r.nome) || '-';
+      const key = `${normalizeUpperAscii(tip)}||${normalizeUpperAscii(nom)}`;
+      const existing = groupedSummary.get(key);
+      if (existing) {
+        existing.qtd += Number(r.quantidadeTotal || 0);
+      } else {
+        groupedSummary.set(key, { tipo: tip, nome: nom, qtd: Number(r.quantidadeTotal || 0) });
+      }
     }
 
-    const rowH = Math.max(19, maxLines * lineH + 6);
-    if (cursorY - rowH < footerSafeY + 6) {
-      page = doc.addPage([pageWidth, pageHeight]);
-      cursorY = drawPageHeader(page, false);
-    }
+    const summaryRows = Array.from(groupedSummary.values())
+      .sort((a, b) => {
+        const tc = a.tipo.localeCompare(b.tipo, 'pt-BR');
+        if (tc !== 0) return tc;
+        return a.nome.localeCompare(b.nome, 'pt-BR');
+      })
+      .map(item => ({
+        tipo: item.tipo,
+        nome: item.nome,
+        qtd: formatUnitsLabel(item.qtd, true)
+      }));
 
-    const rowBottomY = cursorY - rowH;
-    if (index % 2 === 1) {
-      page.drawRectangle({
-        x: marginX,
-        y: rowBottomY,
-        width: contentWidth,
-        height: rowH,
-        color: PCMG_COLORS.slate50
-      });
-    }
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showKpis: true,
+      showTableHeader: false
+    });
 
-    let colX = marginX;
-    for (const col of columns) {
-      page.drawRectangle({
-        x: colX,
-        y: rowBottomY,
-        width: col.width,
-        height: rowH,
-        borderColor: PCMG_COLORS.slate300,
-        borderWidth: 0.45
-      });
+    const summaryCols: SummaryColSpec[] = [
+      { key: 'tipo', label: 'TIPO DE MATERIAL', width: 220, align: 'left', bold: true },
+      { key: 'nome', label: 'NOME DO MATERIAL', width: contentWidth - (220 + 165), align: 'left', bold: false },
+      { key: 'qtd', label: 'QUANTIDADE EM ESTOQUE', width: 165, align: 'right', mono: true, bold: true }
+    ];
 
-      const lines = wrapped[col.key] || ['-'];
-      lines.forEach((line, lIdx) => {
-        let useFont = fontRegular;
-        let useColor = PCMG_COLORS.slate900;
-        let useSize = fontSize;
-
-        if (col.key === 'nome') {
-          useFont = fontBold;
-        } else if (col.key === 'idx' || col.key === 'serie') {
-          useFont = fontMono;
-        } else if (col.key === 'estoque') {
-          useFont = lIdx === 0 ? fontMonoBold : fontMono;
-          useSize = 6.5;
-        } else if (col.key === 'tipo' || col.key === 'cofre' || col.key === 'unidade') {
-          useFont = lIdx === 0 ? (col.key === 'cofre' ? fontMonoBold : fontBold) : fontRegular;
-          if (lIdx > 0) {
-            useColor = PCMG_COLORS.slate600;
-            useSize = 6.3;
-          }
-        } else if (col.key === 'acaut') {
-          useFont = lIdx === 0 ? fontBold : fontRegular;
-          useColor = rec.isAcautelado
-            ? lIdx === 0
-              ? PCMG_COLORS.amber700
-              : PCMG_COLORS.slate700
-            : PCMG_COLORS.emerald700;
-          useSize = lIdx === 0 ? 6.7 : 6.3;
-        } else if (col.key === 'cautelavel') {
-          useFont = fontBold;
-        }
-
-        const tx =
-          col.align === 'center'
-            ? colX + (col.width - useFont.widthOfTextAtSize(line, useSize)) / 2
-            : colX + 3;
-        page.drawText(line, {
-          x: tx,
-          y: cursorY - 9.5 - lIdx * lineH,
-          size: useSize,
-          font: useFont,
-          color: useColor
+    const summaryRes = drawSummaryTableWithPagination({
+      page,
+      cursorY,
+      marginX,
+      pageWidth,
+      contentWidth,
+      footerSafeY,
+      fontRegular,
+      fontBold,
+      fontMono,
+      fontMonoBold,
+      sectionTitle: `RESUMO DO ESTOQUE DE MATERIAIS POR TIPO E NOME - ${unitDisplayLabel.toUpperCase()}`,
+      headerVariant: 'slate800-amber',
+      columns: summaryCols,
+      rows: summaryRows,
+      totalLabel: `TOTAL EM ESTOQUE (${unitDisplayLabel.toUpperCase()})`,
+      totalValue: formatUnitsLabel(unitTotalQtd, true),
+      onNewPage: () => {
+        const nextPage = doc.addPage([pageWidth, pageHeight]);
+        const nextY = drawUnitPageHeader(nextPage, unitDisplayLabel, unitGroup.records, {
+          showKpis: false,
+          showTableHeader: false
         });
-      });
-      colX += col.width;
-    }
+        return { page: nextPage, cursorY: nextY };
+      }
+    });
+    page = summaryRes.page;
+    cursorY = summaryRes.cursorY;
 
-    cursorY = rowBottomY;
-  });
+    // 2. RELAÇÃO COMPLETA DA UNIDADE (INICIA EM NOVA PÁGINA)
+    page = doc.addPage([pageWidth, pageHeight]);
+    cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+      showKpis: false,
+      showTableHeader: true,
+      sectionBanner: `RELACAO DETALHADA DE MATERIAIS - ${unitDisplayLabel.toUpperCase()} (${unitGroup.records.length} registro(s))`
+    });
+
+    unitGroup.records.forEach((rec, index) => {
+      const tipoStr = `${rec.tipoNome}\n${rec.categoria || 'Geral'} (${rec.consumivel ? 'Consumivel' : 'Permanente'})`;
+      const cofreStr = `${rec.localGuarda || rec.cofreCodigo || '-'}${rec.cofreDescricao ? `\n${rec.cofreDescricao}` : ''}`;
+      const uniStr = `${rec.unidadeNome}${rec.departamentoNome ? `\n${rec.departamentoNome}` : ''}`;
+      const estoqueStr = `Tot: ${formatIntBr(rec.quantidadeTotal)}\nD:${formatIntBr(rec.quantidadeDisponivel)} | U:${formatIntBr(rec.quantidadeEmUso)} | C:${formatIntBr(rec.quantidadeConsumida)}`;
+      const valStr =
+        rec.validadeRaw && rec.validadeRaw.getTime() < nowMs ? `${rec.validade} [VENC.]` : rec.validade || '-';
+
+      const rawValues: Record<string, string> = {
+        idx: String(index + 1),
+        nome: rec.nome,
+        tipo: tipoStr,
+        serie: rec.numeroSerie || '-',
+        cofre: cofreStr,
+        unidade: uniStr,
+        estoque: estoqueStr,
+        acaut: rec.acautelamentoResumo || (rec.isAcautelado ? `ACAUTELADO (${rec.quantidadeEmUso} un.)` : 'NO COFRE'),
+        cautelavel: rec.passivoDepositoPoliciais ? 'SIM' : 'NAO',
+        validade: valStr,
+        obs: rec.observacoes || '-'
+      };
+
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+      for (const col of columns) {
+        const f =
+          col.key === 'nome' || col.key === 'cautelavel'
+            ? fontBold
+            : col.key === 'idx' || col.key === 'serie' || col.key === 'estoque'
+              ? fontMono
+              : fontRegular;
+        const lines = wrapCellLines(rawValues[col.key] || '-', f, fontSize, col.width - 6, 7);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const rowH = Math.max(19, maxLines * lineH + 6);
+      if (cursorY - rowH < footerSafeY + 6) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawUnitPageHeader(page, unitDisplayLabel, unitGroup.records, {
+          showKpis: false,
+          showTableHeader: true,
+          sectionBanner: `RELACAO DETALHADA DE MATERIAIS - ${unitDisplayLabel.toUpperCase()} (CONTINUACAO)`
+        });
+      }
+
+      const rowBottomY = cursorY - rowH;
+      if (index % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.slate50
+        });
+      }
+
+      let colX = marginX;
+      for (const col of columns) {
+        page.drawRectangle({
+          x: colX,
+          y: rowBottomY,
+          width: col.width,
+          height: rowH,
+          borderColor: PCMG_COLORS.slate300,
+          borderWidth: 0.45
+        });
+
+        const lines = wrapped[col.key] || ['-'];
+        lines.forEach((line, lIdx) => {
+          let useFont = fontRegular;
+          let useColor = PCMG_COLORS.slate900;
+          let useSize = fontSize;
+
+          if (col.key === 'nome') {
+            useFont = fontBold;
+          } else if (col.key === 'idx' || col.key === 'serie') {
+            useFont = fontMono;
+          } else if (col.key === 'estoque') {
+            useFont = lIdx === 0 ? fontMonoBold : fontMono;
+            useSize = 6.5;
+          } else if (col.key === 'tipo' || col.key === 'cofre' || col.key === 'unidade') {
+            useFont = lIdx === 0 ? (col.key === 'cofre' ? fontMonoBold : fontBold) : fontRegular;
+            if (lIdx > 0) {
+              useColor = PCMG_COLORS.slate600;
+              useSize = 6.3;
+            }
+          } else if (col.key === 'acaut') {
+            useFont = lIdx === 0 ? fontBold : fontRegular;
+            useColor = rec.isAcautelado
+              ? lIdx === 0
+                ? PCMG_COLORS.amber700
+                : PCMG_COLORS.slate700
+              : PCMG_COLORS.emerald700;
+            useSize = lIdx === 0 ? 6.7 : 6.3;
+          } else if (col.key === 'cautelavel') {
+            useFont = fontBold;
+          }
+
+          const tx =
+            col.align === 'center'
+              ? colX + (col.width - useFont.widthOfTextAtSize(line, useSize)) / 2
+              : colX + 3;
+          page.drawText(line, {
+            x: tx,
+            y: cursorY - 9.5 - lIdx * lineH,
+            size: useSize,
+            font: useFont,
+            color: useColor
+          });
+        });
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+  }
 
   // Assinatura centralizada idêntica ao ModuloMateriais.tsx
   if (cursorY - 60 < footerSafeY) {

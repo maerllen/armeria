@@ -639,16 +639,214 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
     if (selectedUnitFilter && filterUnitObj) activeFiltersDesc.push(`Unidade: ${filterUnitObj.name}`);
     if (selectedPrintIds.length > 0) activeFiltersDesc.push(`Seleção Manual: ${itemsToPrint.length} item(ns)`);
 
-    const totalQtd = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidade || 0), 0);
-    const totalDisp = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidadeDisponivel || 0), 0);
-    const totalUso = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidadeEmUso || 0), 0);
-    const totalCons = itemsToPrint.reduce((acc, m) => acc + Number(m.quantidadeConsumida || 0), 0);
+    const emissionNow = new Date().toLocaleString('pt-BR');
+    const formatQtyUnitsCap = (n: number) => `${n.toLocaleString('pt-BR')} ${n === 1 ? 'Unidade' : 'Unidades'}`;
+
+    // Agrupa os materiais por unidade (ordem alfabética) para exibir:
+    // Página 1 da Unidade = Resumo em Tabela (Tipo de Material | Nome do Material | Quantidade em Estoque)
+    // Próxima página = Relação completa daquela unidade
+    const unitGroupMap = new Map<string, Material[]>();
+    itemsToPrint.forEach(m => {
+      const unitFromList = allUnitsList.find(u => u.id === m.unidadeId) || units.find(u => u.id === m.unidadeId);
+      const uName = (m.unidadeNome || unitFromList?.name || filterUnitObj?.name || 'Unidade Policial').trim();
+      const existing = unitGroupMap.get(uName);
+      if (existing) existing.push(m);
+      else unitGroupMap.set(uName, [m]);
+    });
+
+    const unitGroups = Array.from(unitGroupMap.entries())
+      .map(([unitName, items]) => ({ unitName, items }))
+      .sort((a, b) => a.unitName.localeCompare(b.unitName, 'pt-BR', { sensitivity: 'base' }));
 
     const filteredDocTitle = buildStandardDocumentTitle(
       'Relatório Filtrado de Materiais (Materiais)',
       filterUnitObj?.name || filterDeptObj?.name || 'Acervo Geral',
       currentUser?.name || 'Responsável pela Armaria'
     );
+
+    const unitSectionsHtml = unitGroups.map((group, groupIdx) => {
+      const isLastUnit = groupIdx === unitGroups.length - 1;
+      const unitItems = group.items;
+
+      const uTotalQtd = unitItems.reduce((acc, m) => acc + Number(m.quantidade || 0), 0);
+      const uTotalDisp = unitItems.reduce((acc, m) => acc + Number(m.quantidadeDisponivel || 0), 0);
+      const uTotalUso = unitItems.reduce((acc, m) => acc + Number(m.quantidadeEmUso || 0), 0);
+      const uTotalCons = unitItems.reduce((acc, m) => acc + Number(m.quantidadeConsumida || 0), 0);
+
+      // Consolida por Tipo de Material + Nome do Material
+      const summaryMap = new Map<string, { tipo: string; nome: string; quantidade: number }>();
+      unitItems.forEach(mat => {
+        const tipoObj = tiposMateriais.find(t => t.id === mat.tipoMaterialId);
+        const tipoNome = (mat.tipoMaterialNome || tipoObj?.nome || 'Material').trim();
+        const matNome = (mat.nome || 'Não informado').trim();
+        const qty = Number(mat.quantidade || 0);
+        const key = `${tipoNome.toUpperCase()}|${matNome.toUpperCase()}`;
+        const existing = summaryMap.get(key);
+        if (existing) {
+          existing.quantidade += qty;
+        } else {
+          summaryMap.set(key, { tipo: tipoNome, nome: matNome, quantidade: qty });
+        }
+      });
+
+      const summaryRows = Array.from(summaryMap.values()).sort((a, b) => {
+        const t = a.tipo.localeCompare(b.tipo, 'pt-BR', { sensitivity: 'base' });
+        if (t !== 0) return t;
+        return a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' });
+      });
+
+      const summaryRowsHtml = summaryRows.map(row => `
+        <tr>
+          <td style="font-weight: 700;">${escapeHtml(row.tipo)}</td>
+          <td style="font-weight: 600;">${escapeHtml(row.nome)}</td>
+          <td class="mono" style="text-align: right; font-weight: 800;">${escapeHtml(formatQtyUnitsCap(row.quantidade))}</td>
+        </tr>
+      `).join('');
+
+      const detailRowsHtml = unitItems.map((mat, idx) => {
+        const tipoObj = tiposMateriais.find(t => t.id === mat.tipoMaterialId);
+        const vaultObj = getVaultForMaterial(mat);
+        const activeForMat = activeCautelasByMaterialId.get(mat.id) || [];
+        const isAcautelado = activeForMat.length > 0 || Number(mat.quantidadeEmUso || 0) > 0;
+        const borrowerHtml = activeForMat.length > 0
+          ? activeForMat.map(c => {
+              const nome = c.tipoDestinatario === 'interno'
+                ? (c.usuarioInternoNome || 'Policial')
+                : (c.usuarioExternoNome || 'Externo');
+              const doc = c.tipoDestinatario === 'interno'
+                ? `MASP: ${formatMasp(c.usuarioInternoMasp || '') || 'N/I'}`
+                : `Doc: ${c.usuarioExternoDocumento || 'N/I'}`;
+              const cargo = c.tipoDestinatario === 'interno'
+                ? (c.usuarioInternoCargo || 'Policial Civil')
+                : (c.usuarioExternoOrgao || 'Órgão Externo');
+              const dataStr = c.dataRetirada ? new Date(c.dataRetirada).toLocaleDateString('pt-BR') : '-';
+              return `<div style="margin-bottom:3px;"><strong style="color:#b45309;">ACAUTELADO (${c.quantidade}x)</strong><br/>${escapeHtml(nome)} (${escapeHtml(doc)})<br/><span style="color:#475569;font-size:8px;">${escapeHtml(cargo)} • Prot: ${escapeHtml(c.protocolo || c.id)} • ${dataStr}</span></div>`;
+            }).join('')
+          : (isAcautelado
+              ? `<strong style="color:#b45309;">ACAUTELADO (${mat.quantidadeEmUso} un. em uso)</strong>`
+              : '<span style="color:#047857;font-weight:700;">NO COFRE</span>');
+
+        return `
+          <tr>
+            <td class="mono" style="text-align:center;">${idx + 1}</td>
+            <td><strong>${escapeHtml(mat.nome)}</strong></td>
+            ${printFields.tipoCategoria ? `<td><strong>${escapeHtml(mat.tipoMaterialNome || tipoObj?.nome || '-')}</strong><br/><span style="color:#475569;font-size:8px;">${escapeHtml(tipoObj?.categoria || 'Geral')} (${tipoObj?.ehConsumivel ? 'Consumível' : 'Permanente'})</span></td>` : ''}
+            ${printFields.seriePatrimonio ? `<td class="mono">${escapeHtml(mat.numeroSerie || '-')}</td>` : ''}
+            ${printFields.cofreLocal ? `<td><strong class="mono">${escapeHtml(mat.localGuarda || vaultObj?.code || '-')}</strong>${vaultObj?.descricaoCurta ? `<br/><span style="color:#475569;font-size:8px;">${escapeHtml(vaultObj.descricaoCurta)}</span>` : ''}</td>` : ''}
+            ${printFields.deptUnidade ? `<td>${escapeHtml(mat.unidadeNome || mat.unidadeId)}<br/><span style="color:#475569;font-size:8px;">${escapeHtml(mat.departamentoNome || mat.departamentoId)}</span></td>` : ''}
+            ${printFields.estoqueDetalhado ? `<td class="mono"><strong>Tot: ${mat.quantidade}</strong><br/>D:${mat.quantidadeDisponivel} | U:${mat.quantidadeEmUso} | C:${mat.quantidadeConsumida}</td>` : ''}
+            ${printFields.situacaoAcautelado ? `<td>${borrowerHtml}</td>` : ''}
+            ${printFields.passivoDeposito ? `<td style="text-align:center;font-weight:700;">${mat.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}</td>` : ''}
+            ${printFields.validade ? `<td>${escapeHtml(getValidityText(mat.validade))}</td>` : ''}
+            ${printFields.auditoriaCadastro ? `<td style="font-size:8px;">${escapeHtml(mat.criadoPorNome || 'Sistema')}<br/><span class="mono">${mat.createdAt ? new Date(mat.createdAt).toLocaleDateString('pt-BR') : '-'}</span></td>` : ''}
+            ${printFields.observacoes ? `<td>${escapeHtml(mat.observacoes || '-')}</td>` : ''}
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <!-- PÁGINA RESUMO DA UNIDADE: ${escapeHtml(group.unitName)} -->
+        <div class="report-page page-break">
+          <div class="header">
+            <div class="header-left">
+              <img src="${escapeHtml(logoSrc)}" alt="Brasão PCMG" class="logo" />
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">RESUMO DO ESTOQUE DE MATERIAIS — ${escapeHtml(group.unitName)}</div>
+              </div>
+            </div>
+            <div class="meta">
+              <div>Emissor: <strong>${escapeHtml(currentUser?.name || 'Armeiro')}</strong> (MASP: ${escapeHtml(currentUser?.masp || 'N/I')})</div>
+              <div>Emitido em: ${escapeHtml(emissionNow)}</div>
+            </div>
+          </div>
+
+          <div class="filters-box">
+            <strong>Unidade:</strong> ${escapeHtml(group.unitName)} • <strong>Filtros Aplicados:</strong> ${activeFiltersDesc.length > 0 ? escapeHtml(activeFiltersDesc.join(' • ')) : 'Todos os materiais do escopo permitido'}
+          </div>
+
+          <div class="kpi-row">
+            <div class="kpi"><div class="kpi-label">Registros</div><div class="kpi-val">${unitItems.length}</div></div>
+            <div class="kpi"><div class="kpi-label">Qtd Total</div><div class="kpi-val">${uTotalQtd.toLocaleString('pt-BR')} un</div></div>
+            <div class="kpi"><div class="kpi-label">Disponível</div><div class="kpi-val" style="color:#047857;">${uTotalDisp.toLocaleString('pt-BR')} un</div></div>
+            <div class="kpi"><div class="kpi-label">Em Uso</div><div class="kpi-val" style="color:#b45309;">${uTotalUso.toLocaleString('pt-BR')} un</div></div>
+            <div class="kpi"><div class="kpi-label">Consumidos</div><div class="kpi-val" style="color:#6d28d9;">${uTotalCons.toLocaleString('pt-BR')} un</div></div>
+          </div>
+
+          <div class="summary-banner">QUADRO RESUMO DE ESTOQUE POR TIPO E NOME DO MATERIAL — ${escapeHtml(group.unitName)}</div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 34%;">Tipo de Material</th>
+                <th style="width: 42%;">Nome do Material</th>
+                <th style="width: 24%; text-align: right;">Quantidade em Estoque</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${summaryRowsHtml}
+            </tbody>
+            <tfoot>
+              <tr style="background: #f1f5f9; font-weight: 900;">
+                <td colspan="2" style="text-align: right; text-transform: uppercase;">Total de Materiais em Estoque (${escapeHtml(group.unitName)}):</td>
+                <td class="mono" style="text-align: right; font-size: 10.5px;">${escapeHtml(formatQtyUnitsCap(uTotalQtd))}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- PÁGINA RELAÇÃO COMPLETA DA UNIDADE: ${escapeHtml(group.unitName)} -->
+        <div class="report-page ${!isLastUnit ? 'page-break' : ''}">
+          <div class="header">
+            <div class="header-left">
+              <img src="${escapeHtml(logoSrc)}" alt="Brasão PCMG" class="logo" />
+              <div>
+                <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                <div class="subtitle">RELAÇÃO COMPLETA DE MATERIAIS — ${escapeHtml(group.unitName)}</div>
+              </div>
+            </div>
+            <div class="meta">
+              <div>Emissor: <strong>${escapeHtml(currentUser?.name || 'Armeiro')}</strong> (MASP: ${escapeHtml(currentUser?.masp || 'N/I')})</div>
+              <div>Emitido em: ${escapeHtml(emissionNow)}</div>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Nome do Material</th>
+                ${printFields.tipoCategoria ? '<th>Tipo / Categoria</th>' : ''}
+                ${printFields.seriePatrimonio ? '<th>Nº Série / Patr.</th>' : ''}
+                ${printFields.cofreLocal ? '<th>Cofre / Local</th>' : ''}
+                ${printFields.deptUnidade ? '<th>Depto / Unidade</th>' : ''}
+                ${printFields.estoqueDetalhado ? '<th>Estoque (Tot / Disp / Uso / Cons)</th>' : ''}
+                ${printFields.situacaoAcautelado ? '<th>Acautelamento / Dados do Policial</th>' : ''}
+                ${printFields.passivoDeposito ? '<th>Cautelável</th>' : ''}
+                ${printFields.validade ? '<th>Validade</th>' : ''}
+                ${printFields.auditoriaCadastro ? '<th>Cadastro</th>' : ''}
+                ${printFields.observacoes ? '<th>Observações</th>' : ''}
+              </tr>
+            </thead>
+            <tbody>
+              ${detailRowsHtml}
+            </tbody>
+          </table>
+
+          ${isLastUnit ? `
+            <div class="signatures">
+              <div class="sig-line">
+                ${escapeHtml(currentUser?.name || 'Responsável pela Armaria')}<br/>
+                <span style="font-weight:normal; font-size:9px; color:#475569;">MASP: ${escapeHtml(currentUser?.masp || 'N/I')}</span>
+              </div>
+            </div>
+
+            <div class="footer">
+              Sistema de Armeria PCMG • Relatório gerado em ${escapeHtml(emissionNow)}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
 
     const html = `
       <!DOCTYPE html>
@@ -659,6 +857,9 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
         <style>
           @page { size: A4 landscape; margin: 10mm; }
           body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; margin: 0; padding: 14px; font-size: 10px; line-height: 1.35; background: #fff; }
+          .report-page { width: 100%; }
+          .page-break { page-break-after: always !important; break-after: page !important; }
+          .summary-banner { background: #1e293b; color: #fff; font-weight: 800; font-size: 9.5px; text-transform: uppercase; padding: 6px 8px; border-radius: 4px 4px 0 0; margin-top: 6px; }
           .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111827; padding-bottom: 10px; margin-bottom: 12px; gap: 12px; }
           .header-left { display: flex; align-items: center; gap: 12px; }
           .logo { height: 50px; width: auto; object-fit: contain; }
@@ -675,109 +876,13 @@ export const MaterialModule: React.FC<MaterialModuleProps> = ({
           td { border: 1px solid #cbd5e1; padding: 5px; vertical-align: top; }
           tr:nth-child(even) { background: #f8fafc; }
           .mono { font-family: monospace; }
-          .signatures { display: flex; justify-content: center; margin-top: 26px; }
+          .signatures { display: flex; justify-content: center; margin-top: 26px; page-break-inside: avoid; }
           .sig-line { width: 280px; border-top: 1px solid #111827; padding-top: 6px; text-align: center; font-weight: 700; font-size: 10px; }
           .footer { margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 6px; text-align: center; font-size: 8.5px; color: #64748b; font-family: monospace; }
         </style>
       </head>
       <body>
-        <div class="header">
-          <div class="header-left">
-            <img src="${escapeHtml(logoSrc)}" alt="Brasão PCMG" class="logo" />
-            <div>
-              <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
-              <div class="subtitle">RELATÓRIO PERSONALIZADO DE TODOS OS MATERIAIS</div>
-            </div>
-          </div>
-          <div class="meta">
-            <div>Emissor: <strong>${escapeHtml(currentUser?.name || 'Armeiro')}</strong> (MASP: ${escapeHtml(currentUser?.masp || 'N/I')})</div>
-            <div>Emitido em: ${new Date().toLocaleString('pt-BR')}</div>
-          </div>
-        </div>
-
-        <div class="filters-box">
-          <strong>Filtros Aplicados:</strong> ${activeFiltersDesc.length > 0 ? escapeHtml(activeFiltersDesc.join(' • ')) : 'Todos os materiais do escopo permitido'}
-        </div>
-
-        <div class="kpi-row">
-          <div class="kpi"><div class="kpi-label">Registros</div><div class="kpi-val">${itemsToPrint.length}</div></div>
-          <div class="kpi"><div class="kpi-label">Qtd Total</div><div class="kpi-val">${totalQtd} un</div></div>
-          <div class="kpi"><div class="kpi-label">Disponível</div><div class="kpi-val" style="color:#047857;">${totalDisp} un</div></div>
-          <div class="kpi"><div class="kpi-label">Em Uso</div><div class="kpi-val" style="color:#b45309;">${totalUso} un</div></div>
-          <div class="kpi"><div class="kpi-label">Consumidos</div><div class="kpi-val" style="color:#6d28d9;">${totalCons} un</div></div>
-        </div>
-
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Nome do Material</th>
-              ${printFields.tipoCategoria ? '<th>Tipo / Categoria</th>' : ''}
-              ${printFields.seriePatrimonio ? '<th>Nº Série / Patr.</th>' : ''}
-              ${printFields.cofreLocal ? '<th>Cofre / Local</th>' : ''}
-              ${printFields.deptUnidade ? '<th>Depto / Unidade</th>' : ''}
-              ${printFields.estoqueDetalhado ? '<th>Estoque (Tot / Disp / Uso / Cons)</th>' : ''}
-              ${printFields.situacaoAcautelado ? '<th>Acautelamento / Dados do Policial</th>' : ''}
-              ${printFields.passivoDeposito ? '<th>Cautelável</th>' : ''}
-              ${printFields.validade ? '<th>Validade</th>' : ''}
-              ${printFields.auditoriaCadastro ? '<th>Cadastro</th>' : ''}
-              ${printFields.observacoes ? '<th>Observações</th>' : ''}
-            </tr>
-          </thead>
-          <tbody>
-            ${itemsToPrint.map((mat, idx) => {
-              const tipoObj = tiposMateriais.find(t => t.id === mat.tipoMaterialId);
-              const vaultObj = getVaultForMaterial(mat);
-              const activeForMat = activeCautelasByMaterialId.get(mat.id) || [];
-              const isAcautelado = activeForMat.length > 0 || Number(mat.quantidadeEmUso || 0) > 0;
-              const borrowerHtml = activeForMat.length > 0
-                ? activeForMat.map(c => {
-                    const nome = c.tipoDestinatario === 'interno'
-                      ? (c.usuarioInternoNome || 'Policial')
-                      : (c.usuarioExternoNome || 'Externo');
-                    const doc = c.tipoDestinatario === 'interno'
-                      ? `MASP: ${formatMasp(c.usuarioInternoMasp || '') || 'N/I'}`
-                      : `Doc: ${c.usuarioExternoDocumento || 'N/I'}`;
-                    const cargo = c.tipoDestinatario === 'interno'
-                      ? (c.usuarioInternoCargo || 'Policial Civil')
-                      : (c.usuarioExternoOrgao || 'Órgão Externo');
-                    const dataStr = c.dataRetirada ? new Date(c.dataRetirada).toLocaleDateString('pt-BR') : '-';
-                    return `<div style="margin-bottom:3px;"><strong style="color:#b45309;">ACAUTELADO (${c.quantidade}x)</strong><br/>${escapeHtml(nome)} (${escapeHtml(doc)})<br/><span style="color:#475569;font-size:8px;">${escapeHtml(cargo)} • Prot: ${escapeHtml(c.protocolo || c.id)} • ${dataStr}</span></div>`;
-                  }).join('')
-                : (isAcautelado
-                    ? `<strong style="color:#b45309;">ACAUTELADO (${mat.quantidadeEmUso} un. em uso)</strong>`
-                    : '<span style="color:#047857;font-weight:700;">NO COFRE</span>');
-
-              return `
-                <tr>
-                  <td class="mono" style="text-align:center;">${idx + 1}</td>
-                  <td><strong>${escapeHtml(mat.nome)}</strong></td>
-                  ${printFields.tipoCategoria ? `<td><strong>${escapeHtml(mat.tipoMaterialNome || tipoObj?.nome || '-')}</strong><br/><span style="color:#475569;font-size:8px;">${escapeHtml(tipoObj?.categoria || 'Geral')} (${tipoObj?.ehConsumivel ? 'Consumível' : 'Permanente'})</span></td>` : ''}
-                  ${printFields.seriePatrimonio ? `<td class="mono">${escapeHtml(mat.numeroSerie || '-')}</td>` : ''}
-                  ${printFields.cofreLocal ? `<td><strong class="mono">${escapeHtml(mat.localGuarda || vaultObj?.code || '-')}</strong>${vaultObj?.descricaoCurta ? `<br/><span style="color:#475569;font-size:8px;">${escapeHtml(vaultObj.descricaoCurta)}</span>` : ''}</td>` : ''}
-                  ${printFields.deptUnidade ? `<td>${escapeHtml(mat.unidadeNome || mat.unidadeId)}<br/><span style="color:#475569;font-size:8px;">${escapeHtml(mat.departamentoNome || mat.departamentoId)}</span></td>` : ''}
-                  ${printFields.estoqueDetalhado ? `<td class="mono"><strong>Tot: ${mat.quantidade}</strong><br/>D:${mat.quantidadeDisponivel} | U:${mat.quantidadeEmUso} | C:${mat.quantidadeConsumida}</td>` : ''}
-                  ${printFields.situacaoAcautelado ? `<td>${borrowerHtml}</td>` : ''}
-                  ${printFields.passivoDeposito ? `<td style="text-align:center;font-weight:700;">${mat.passivoDepositoPoliciais !== false ? 'SIM' : 'NÃO'}</td>` : ''}
-                  ${printFields.validade ? `<td>${escapeHtml(getValidityText(mat.validade))}</td>` : ''}
-                  ${printFields.auditoriaCadastro ? `<td style="font-size:8px;">${escapeHtml(mat.criadoPorNome || 'Sistema')}<br/><span class="mono">${mat.createdAt ? new Date(mat.createdAt).toLocaleDateString('pt-BR') : '-'}</span></td>` : ''}
-                  ${printFields.observacoes ? `<td>${escapeHtml(mat.observacoes || '-')}</td>` : ''}
-                </tr>
-              `;
-            }).join('')}
-          </tbody>
-        </table>
-
-        <div class="signatures">
-          <div class="sig-line">
-            ${escapeHtml(currentUser?.name || 'Responsável pela Armaria')}<br/>
-            <span style="font-weight:normal; font-size:9px; color:#475569;">MASP: ${escapeHtml(currentUser?.masp || 'N/I')}</span>
-          </div>
-        </div>
-
-        <div class="footer">
-          Sistema de Armeria PCMG • Relatório gerado em ${new Date().toLocaleString('pt-BR')}
-        </div>
+        ${unitSectionsHtml}
       </body>
       </html>
     `;

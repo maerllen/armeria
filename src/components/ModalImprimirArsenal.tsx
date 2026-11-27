@@ -268,17 +268,6 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
     const emissionDate = formatTimestamp(now.toISOString());
     const authCode = `PCMG-ARS-${now.getFullYear()}${(now.getMonth() + 1).toString().padStart(2, '0')}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
-    // Statistics breakdown
-    const typeCountMap: Record<string, number> = {};
-    const caliberCountMap: Record<string, number> = {};
-    let totalCarregadores = 0;
-
-    sortedWeapons.forEach(w => {
-      typeCountMap[w.type || 'Outros'] = (typeCountMap[w.type || 'Outros'] || 0) + 1;
-      caliberCountMap[w.caliber || 'N/A'] = (caliberCountMap[w.caliber || 'N/A'] || 0) + 1;
-      totalCarregadores += w.magazineQuantity || 0;
-    });
-
     const unitDisplayName = activeUnitObj
       ? activeUnitObj.name
       : (selectedUnitId === 'ALL' ? 'TODAS AS UNIDADES DO DEPARTAMENTO' : 'UNIDADE NÃO ESPECIFICADA');
@@ -295,67 +284,305 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
       mode === 'SELECTED' ? `Seleção Manual: ${sortedWeapons.length} arma(s)` : null
     ].filter(Boolean).join(' • ');
 
-    const tableRowsHtml = sortedWeapons.map((w, index) => {
-      const unit = units.find(u => u.id === w.unitId);
-      const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+    // Agrupa as armas por unidade (em ordem alfabética) para gerar:
+    // Página 1 da Unidade = Resumo em Tabela (Calibre | Tipo | Modelo | Quantidade em Estoque)
+    // Próxima página = Relação Completa daquela Unidade
+    const unitGroupMap = new Map<string, Weapon[]>();
+    sortedWeapons.forEach(w => {
+      const unitObj = units.find(u => u.id === w.unitId);
+      const uName = (unitObj?.name || activeUnitObj?.name || 'Unidade Policial').trim();
+      const list = unitGroupMap.get(uName);
+      if (list) list.push(w);
+      else unitGroupMap.set(uName, [w]);
+    });
 
-      const locationText = vault
-        ? `Cofre: ${vault.code} (${vault.type})`
-        : (w.status === 'Em Trânsito' ? 'Em Cautela / Trânsito' : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Armazém / Não Alocada'));
+    const unitGroups = Array.from(unitGroupMap.entries())
+      .map(([unitName, weapons]) => ({ unitName, weapons }))
+      .sort((a, b) => a.unitName.localeCompare(b.unitName, 'pt-BR', { sensitivity: 'base' }));
 
-      const unitText = unit ? unit.name : 'Unidade Policial';
+    const formatQtyUnits = (n: number) => `${n.toLocaleString('pt-BR')} ${n === 1 ? 'unidade' : 'unidades'}`;
 
-      return `
-        <tr style="border-bottom: 1px solid #d1d5db; ${index % 2 === 1 ? 'background-color: #f9fafb;' : ''}">
-          <td style="padding: 6px 4px; text-align: center; font-family: monospace; font-size: 10px; font-weight: bold;">
-            ${(index + 1).toString().padStart(2, '0')}
+    const unitSectionsHtml = unitGroups.map((group, groupIdx) => {
+      const unitWeapons = group.weapons;
+      const isLastUnit = groupIdx === unitGroups.length - 1;
+
+      const typeCountMap: Record<string, number> = {};
+      const caliberCountMap: Record<string, number> = {};
+      let totalCarregadores = 0;
+
+      const summaryMap = new Map<string, { caliber: string; type: string; model: string; count: number }>();
+
+      unitWeapons.forEach(w => {
+        const typeLabel = (w.type || 'Outros').trim();
+        const caliberLabel = (w.caliber || 'N/I').trim();
+        const modelLabel = (w.model || 'Não informado').trim();
+
+        typeCountMap[typeLabel] = (typeCountMap[typeLabel] || 0) + 1;
+        caliberCountMap[caliberLabel] = (caliberCountMap[caliberLabel] || 0) + 1;
+        totalCarregadores += w.magazineQuantity || 0;
+
+        const key = `${caliberLabel.toUpperCase()}|${typeLabel.toUpperCase()}|${modelLabel.toUpperCase()}`;
+        const existing = summaryMap.get(key);
+        if (existing) {
+          existing.count += 1;
+        } else {
+          summaryMap.set(key, { caliber: caliberLabel, type: typeLabel, model: modelLabel, count: 1 });
+        }
+      });
+
+      const summaryRows = Array.from(summaryMap.values()).sort((a, b) => {
+        const c = a.caliber.localeCompare(b.caliber, 'pt-BR', { sensitivity: 'base' });
+        if (c !== 0) return c;
+        const t = a.type.localeCompare(b.type, 'pt-BR', { sensitivity: 'base' });
+        if (t !== 0) return t;
+        return a.model.localeCompare(b.model, 'pt-BR', { sensitivity: 'base' });
+      });
+
+      const summaryTableRowsHtml = summaryRows.map((row, idx) => `
+        <tr style="border-bottom: 1px solid #d1d5db; ${idx % 2 === 1 ? 'background-color: #f9fafb;' : ''}">
+          <td style="padding: 7px 8px; font-family: monospace; font-size: 11px; font-weight: 700; color: #0f172a;">
+            ${escapeHtmlText(row.caliber)}
           </td>
-          <td style="padding: 6px 4px; font-weight: 700; font-size: 11px; text-transform: uppercase;">
-            ${w.type || 'ARMA DE FOGO'}
+          <td style="padding: 7px 8px; font-size: 11px; font-weight: 700; color: #0f172a;">
+            ${escapeHtmlText(row.type)}
           </td>
-          <td style="padding: 6px 4px; font-size: 11px;">
-            ${w.manufacturer || '-'}
+          <td style="padding: 7px 8px; font-size: 11px; font-weight: 600; color: #1e293b;">
+            ${escapeHtmlText(row.model)}
           </td>
-          <td style="padding: 6px 4px; font-size: 11px; font-weight: 600;">
-            ${w.model || '-'}
-          </td>
-          <td style="padding: 6px 4px; font-family: monospace; font-size: 10.5px; font-weight: bold; color: #1e293b;">
-            ${w.caliber || '-'}
-          </td>
-          <td style="padding: 6px 4px; font-family: monospace; font-size: 11px; font-weight: 900; color: #000; letter-spacing: 0.5px;">
-            ${w.serialNumber}
-          </td>
-          <td style="padding: 6px 4px; font-size: 10px;">
-            <div style="font-weight: 700; color: #0f172a;">${unitText}</div>
-            <div style="font-family: monospace; color: #475569; font-size: 9.5px;">${locationText}</div>
-          </td>
-          <td style="padding: 6px 4px; text-align: center; font-family: monospace; font-size: 10.5px; font-weight: bold;">
-            ${w.magazineQuantity || 0}
-          </td>
-          <td style="padding: 6px 4px; font-size: 9.5px;">
-            <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: monospace; text-transform: uppercase; ${
-              w.status === 'No Cofre'
-                ? 'background-color: #d1fae5; color: #065f46; border: 1px solid #6ee7b7;'
-                : (w.status === 'Em Trânsito'
-                  ? 'background-color: #fef3c7; color: #92400e; border: 1px solid #fcd34d;'
-                  : 'background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;')
-            }">
-              ${w.status}
-            </span>
-          </td>
-          <td style="padding: 6px 4px; font-size: 9px; font-family: monospace; color: #475569;">
-            ${w.lastMaintenanceDate ? `${w.lastMaintenanceDate}${w.lastMaintenanceResponsible ? ` (${w.lastMaintenanceResponsible})` : ''}` : 'Sem reg.'}
+          <td style="padding: 7px 8px; text-align: right; font-family: monospace; font-size: 11px; font-weight: 800; color: #000;">
+            ${escapeHtmlText(formatQtyUnits(row.count))}
           </td>
         </tr>
+      `).join('');
+
+      const typeSummaryHtml = Object.entries(typeCountMap).map(([t, count]) => {
+        return `<span style="display: inline-block; margin-right: 12px; margin-bottom: 4px; font-size: 10px;"><strong>${escapeHtmlText(t)}:</strong> ${count} un.</span>`;
+      }).join('');
+
+      const caliberSummaryHtml = Object.entries(caliberCountMap).map(([c, count]) => {
+        return `<span style="display: inline-block; margin-right: 12px; margin-bottom: 4px; font-size: 10px;"><strong>${escapeHtmlText(c)}:</strong> ${count} un.</span>`;
+      }).join('');
+
+      const tableRowsHtml = unitWeapons.map((w, index) => {
+        const unit = units.find(u => u.id === w.unitId);
+        const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+
+        const locationText = vault
+          ? `Cofre: ${vault.code} (${vault.type})`
+          : (w.status === 'Em Trânsito' ? 'Em Cautela / Trânsito' : (w.status === 'Pendente de Recibo' ? 'Aguardando Recebimento' : 'Armazém / Não Alocada'));
+
+        const unitText = unit ? unit.name : group.unitName;
+
+        return `
+          <tr style="border-bottom: 1px solid #d1d5db; ${index % 2 === 1 ? 'background-color: #f9fafb;' : ''}">
+            <td style="padding: 6px 4px; text-align: center; font-family: monospace; font-size: 10px; font-weight: bold;">
+              ${(index + 1).toString().padStart(2, '0')}
+            </td>
+            <td style="padding: 6px 4px; font-weight: 700; font-size: 11px; text-transform: uppercase;">
+              ${escapeHtmlText(w.type || 'ARMA DE FOGO')}
+            </td>
+            <td style="padding: 6px 4px; font-size: 11px;">
+              ${escapeHtmlText(w.manufacturer || '-')}
+            </td>
+            <td style="padding: 6px 4px; font-size: 11px; font-weight: 600;">
+              ${escapeHtmlText(w.model || '-')}
+            </td>
+            <td style="padding: 6px 4px; font-family: monospace; font-size: 10.5px; font-weight: bold; color: #1e293b;">
+              ${escapeHtmlText(w.caliber || '-')}
+            </td>
+            <td style="padding: 6px 4px; font-family: monospace; font-size: 11px; font-weight: 900; color: #000; letter-spacing: 0.5px;">
+              ${escapeHtmlText(w.serialNumber)}
+            </td>
+            <td style="padding: 6px 4px; font-size: 10px;">
+              <div style="font-weight: 700; color: #0f172a;">${escapeHtmlText(unitText)}</div>
+              <div style="font-family: monospace; color: #475569; font-size: 9.5px;">${escapeHtmlText(locationText)}</div>
+            </td>
+            <td style="padding: 6px 4px; text-align: center; font-family: monospace; font-size: 10.5px; font-weight: bold;">
+              ${w.magazineQuantity || 0}
+            </td>
+            <td style="padding: 6px 4px; font-size: 9.5px;">
+              <span style="display: inline-block; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-family: monospace; text-transform: uppercase; ${
+                w.status === 'No Cofre'
+                  ? 'background-color: #d1fae5; color: #065f46; border: 1px solid #6ee7b7;'
+                  : (w.status === 'Em Trânsito'
+                    ? 'background-color: #fef3c7; color: #92400e; border: 1px solid #fcd34d;'
+                    : 'background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;')
+              }">
+                ${escapeHtmlText(w.status)}
+              </span>
+            </td>
+            <td style="padding: 6px 4px; font-size: 9px; font-family: monospace; color: #475569;">
+              ${escapeHtmlText(w.lastMaintenanceDate ? `${w.lastMaintenanceDate}${w.lastMaintenanceResponsible ? ` (${w.lastMaintenanceResponsible})` : ''}` : 'Sem reg.')}
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      const unitDeptObj = units.find(u => u.name.trim() === group.unitName);
+      const unitDeptName = unitDeptObj
+        ? (departments.find(d => d.id === unitDeptObj.departmentId)?.name || deptDisplayName)
+        : deptDisplayName;
+
+      return `
+        <!-- PÁGINA RESUMO DA UNIDADE: ${escapeHtmlText(group.unitName)} -->
+        <div class="report-page page-break">
+          <div class="header-box">
+            <div>
+              <div class="gov-title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+              <div class="dept-title">${escapeHtmlText(unitDeptName)}</div>
+              <div class="doc-title">RESUMO DO ESTOQUE DE ARMAMENTO — ${escapeHtmlText(group.unitName)}</div>
+            </div>
+            <div class="meta-pill">
+              AUTENTICAÇÃO: <strong>${escapeHtmlText(authCode)}</strong><br>
+              EMISSÃO: <strong>${escapeHtmlText(emissionDate)}</strong>
+            </div>
+          </div>
+
+          <div class="info-panel">
+            <div>
+              <div class="info-block" style="margin-bottom: 6px;">
+                <div class="info-label">Unidade Policial de Lotação / Arsenal</div>
+                <div class="info-value" style="font-size: 12px; color: #000;">${escapeHtmlText(group.unitName)}</div>
+              </div>
+              <div class="info-block">
+                <div class="info-label">Critérios do Filtro / Escopo da Relação</div>
+                <div class="info-value" style="font-size: 10px; color: #1e293b;">
+                  ${escapeHtmlText(filterDescription || 'Inventário Geral das Armas')}
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <div class="info-block" style="margin-bottom: 6px;">
+                <div class="info-label">Armeiro / Operador Responsável pela Emissão</div>
+                <div class="info-value">${escapeHtmlText(currentUser.name)} (MASP: ${escapeHtmlText(formatMasp(currentUser.masp))})</div>
+                <div style="font-size: 9px; color: #64748b;">${escapeHtmlText(currentUser.cargo || 'Policial Civil')} • Perfil: ${escapeHtmlText(currentUser.role)}</div>
+              </div>
+              <div class="info-block">
+                <div class="info-label">Total de Armas na Unidade</div>
+                <div class="info-value" style="font-size: 14px; color: #000; font-family: monospace;">
+                  ${escapeHtmlText(formatQtyUnits(unitWeapons.length))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stats-panel">
+            <div style="margin-bottom: 4px; font-weight: bold; font-size: 9.5px; text-transform: uppercase; color: #334155;">
+              Distribuição Bélica (${escapeHtmlText(group.unitName)}):
+            </div>
+            <div style="margin-bottom: 4px;">
+              ${typeSummaryHtml}
+            </div>
+            <div>
+              ${caliberSummaryHtml}
+              <span style="display: inline-block; margin-left: 8px; font-size: 10px;">
+                <strong>Total de Carregadores da Carga:</strong> ${totalCarregadores} un.
+              </span>
+            </div>
+          </div>
+
+          <div class="summary-banner">
+            QUADRO RESUMO DE ESTOQUE POR CALIBRE, TIPO E MODELO — ${escapeHtmlText(group.unitName)}
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 22%;">Calibre</th>
+                <th style="width: 26%;">Tipo de Arma</th>
+                <th style="width: 30%;">Modelo</th>
+                <th style="width: 22%; text-align: right;">Quantidade em Estoque</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${summaryTableRowsHtml}
+            </tbody>
+            <tfoot>
+              <tr style="background-color: #f1f5f9; font-weight: 900;">
+                <td colspan="3" style="padding: 8px; text-align: right; text-transform: uppercase; font-size: 10.5px;">
+                  Total Geral em Estoque (${escapeHtmlText(group.unitName)}):
+                </td>
+                <td style="padding: 8px; text-align: right; font-family: monospace; font-size: 11.5px; color: #000;">
+                  ${escapeHtmlText(formatQtyUnits(unitWeapons.length))}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- PÁGINA RELAÇÃO COMPLETA DA UNIDADE: ${escapeHtmlText(group.unitName)} -->
+        <div class="report-page ${!isLastUnit ? 'page-break' : ''}">
+          <div class="header-box">
+            <div>
+              <div class="gov-title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+              <div class="dept-title">${escapeHtmlText(unitDeptName)}</div>
+              <div class="doc-title">RELAÇÃO COMPLETA DE ARMAMENTO — ${escapeHtmlText(group.unitName)}</div>
+            </div>
+            <div class="meta-pill">
+              AUTENTICAÇÃO: <strong>${escapeHtmlText(authCode)}</strong><br>
+              EMISSÃO: <strong>${escapeHtmlText(emissionDate)}</strong>
+            </div>
+          </div>
+
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 28px; text-align: center;">#</th>
+                <th style="width: 85px;">Tipo</th>
+                <th style="width: 80px;">Fabricante</th>
+                <th style="width: 75px;">Modelo</th>
+                <th style="width: 75px;">Calibre</th>
+                <th style="width: 95px;">Nº de Série</th>
+                <th>Localização / Cofre</th>
+                <th style="width: 45px; text-align: center;">Carreg.</th>
+                <th style="width: 85px;">Situação</th>
+                <th style="width: 80px;">Últ. Manut.</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRowsHtml}
+            </tbody>
+          </table>
+
+          ${isLastUnit ? `
+            <div class="statement">
+              <strong>DECLARAÇÃO DE CONFERÊNCIA FÍSICA E SISTÊMICA:</strong><br>
+              Certifico que o armamento constante na presente relação pertence à carga desta Unidade Policial e que todos os dados técnicos, números de série, dotações de carregadores e localizações de cofre foram devidamente conferidos e conferem com o acervo físico em custódia.
+            </div>
+
+            <div class="signatures-container">
+              <div class="signature-box">
+                <div class="signature-line">
+                  ${escapeHtmlText(currentUser.name.toUpperCase())}
+                </div>
+                <div class="signature-sub">
+                  MASP: ${escapeHtmlText(formatMasp(currentUser.masp))} • ${escapeHtmlText(currentUser.cargo || 'Policial Civil')}<br>
+                  <strong>ARMEIRO RESPONSÁVEL / ENCARREGADO DE MATERIAL BÉLICO</strong>
+                </div>
+              </div>
+
+              <div class="signature-box">
+                <div class="signature-line">
+                  AUTORIDADE POLICIAL / DELEGADO TITULAR
+                </div>
+                <div class="signature-sub">
+                  CHEFIA DA UNIDADE POLICIAL / DELEGACIA<br>
+                  VISTO E CONFERÊNCIA DA CARGA BÉLICA
+                </div>
+              </div>
+            </div>
+
+            <div class="footer-note">
+              <div>
+                SISTEMA DE ARMARIA • POLÍCIA CIVIL DE MINAS GERAIS (PCMG)
+              </div>
+              <div>
+                Registro de Auditoria: ${escapeHtmlText(authCode)}
+              </div>
+            </div>
+          ` : ''}
+        </div>
       `;
-    }).join('');
-
-    const typeSummaryHtml = Object.entries(typeCountMap).map(([t, count]) => {
-      return `<span style="display: inline-block; margin-right: 12px; margin-bottom: 4px; font-size: 10px;"><strong>${t}:</strong> ${count} un.</span>`;
-    }).join('');
-
-    const caliberSummaryHtml = Object.entries(caliberCountMap).map(([c, count]) => {
-      return `<span style="display: inline-block; margin-right: 12px; margin-bottom: 4px; font-size: 10px;"><strong>${c}:</strong> ${count} un.</span>`;
     }).join('');
 
     const docTitle = buildStandardDocumentTitle(
@@ -386,6 +613,24 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
             padding: 10px;
             font-size: 11px;
             line-height: 1.35;
+          }
+          .report-page {
+            width: 100%;
+          }
+          .page-break {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .summary-banner {
+            background-color: #1e293b;
+            color: #ffffff;
+            font-size: 10px;
+            font-weight: 800;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            padding: 7px 10px;
+            border-radius: 4px 4px 0 0;
+            margin-top: 8px;
           }
           .header-box {
             border-bottom: 2px solid #0f172a;
@@ -469,7 +714,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
             font-size: 9.5px;
             font-weight: 800;
             text-transform: uppercase;
-            padding: 6px 4px;
+            padding: 6px 6px;
             letter-spacing: 0.4px;
             text-align: left;
             border: 1px solid #0f172a;
@@ -528,124 +773,7 @@ export const PrintArsenalModal: React.FC<PrintArsenalModalProps> = ({
         </style>
       </head>
       <body>
-        <!-- Header -->
-        <div class="header-box">
-          <div>
-            <div class="gov-title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
-            <div class="dept-title">${deptDisplayName}</div>
-            <div class="doc-title">RELAÇÃO E INVENTÁRIO OFICIAL DO ARSENAL DE ARMAMENTO</div>
-          </div>
-          <div class="meta-pill">
-            AUTENTICAÇÃO: <strong>${authCode}</strong><br>
-            EMISSÃO: <strong>${emissionDate}</strong>
-          </div>
-        </div>
-
-        <!-- Info Panel -->
-        <div class="info-panel">
-          <div>
-            <div class="info-block" style="margin-bottom: 6px;">
-              <div class="info-label">Unidade Policial de Lotação / Arsenal</div>
-              <div class="info-value" style="font-size: 12px; color: #000;">${unitDisplayName}</div>
-            </div>
-            <div class="info-block">
-              <div class="info-label">Critérios do Filtro / Escopo da Relação</div>
-              <div class="info-value" style="font-size: 10px; color: #1e293b;">
-                ${filterDescription || 'Inventário Geral das Armas'}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div class="info-block" style="margin-bottom: 6px;">
-              <div class="info-label">Armeiro / Operador Responsável pela Emissão</div>
-              <div class="info-value">${currentUser.name} (MASP: ${formatMasp(currentUser.masp)})</div>
-              <div style="font-size: 9px; color: #64748b;">${currentUser.cargo || 'Policial Civil'} • Perfil: ${currentUser.role}</div>
-            </div>
-            <div class="info-block">
-              <div class="info-label">Total de Armas na Relação</div>
-              <div class="info-value" style="font-size: 14px; color: #000; font-family: monospace;">
-                ${sortedWeapons.length} arma(s) cadastrada(s)
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Summary Panel -->
-        <div class="stats-panel">
-          <div style="margin-bottom: 4px; font-weight: bold; font-size: 9.5px; text-transform: uppercase; color: #334155;">
-            Distribuição Bélica:
-          </div>
-          <div style="margin-bottom: 4px;">
-            ${typeSummaryHtml}
-          </div>
-          <div>
-            ${caliberSummaryHtml}
-            <span style="display: inline-block; margin-left: 8px; font-size: 10px;">
-              <strong>Total de Carregadores da Carga:</strong> ${totalCarregadores} un.
-            </span>
-          </div>
-        </div>
-
-        <!-- Weapons Inventory Table -->
-        <table>
-          <thead>
-            <tr>
-              <th style="width: 28px; text-align: center;">#</th>
-              <th style="width: 85px;">Tipo</th>
-              <th style="width: 80px;">Fabricante</th>
-              <th style="width: 75px;">Modelo</th>
-              <th style="width: 75px;">Calibre</th>
-              <th style="width: 95px;">Nº de Série</th>
-              <th>Localização / Cofre</th>
-              <th style="width: 45px; text-align: center;">Carreg.</th>
-              <th style="width: 85px;">Situação</th>
-              <th style="width: 80px;">Últ. Manut.</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${tableRowsHtml}
-          </tbody>
-        </table>
-
-        <!-- Legal Statement -->
-        <div class="statement">
-          <strong>DECLARAÇÃO DE CONFERÊNCIA FÍSICA E SISTÊMICA:</strong><br>
-          Certifico que o armamento constante na presente relação pertence à carga desta Unidade Policial e que todos os dados técnicos, números de série, dotações de carregadores e localizações de cofre foram devidamente conferidos e conferem com o acervo físico em custódia.
-        </div>
-
-        <!-- Signatures (Armeiro Responsável Obrigatório) -->
-        <div class="signatures-container">
-          <div class="signature-box">
-            <div class="signature-line">
-              ${currentUser.name.toUpperCase()}
-            </div>
-            <div class="signature-sub">
-              MASP: ${formatMasp(currentUser.masp)} • ${currentUser.cargo || 'Policial Civil'}<br>
-              <strong>ARMEIRO RESPONSÁVEL / ENCARREGADO DE MATERIAL BÉLICO</strong>
-            </div>
-          </div>
-
-          <div class="signature-box">
-            <div class="signature-line">
-              AUTORIDADE POLICIAL / DELEGADO TITULAR
-            </div>
-            <div class="signature-sub">
-              CHEFIA DA UNIDADE POLICIAL / DELEGACIA<br>
-              VISTO E CONFERÊNCIA DA CARGA BÉLICA
-            </div>
-          </div>
-        </div>
-
-        <!-- Footer -->
-        <div class="footer-note">
-          <div>
-            SISTEMA DE ARMARIA • POLÍCIA CIVIL DE MINAS GERAIS (PCMG)
-          </div>
-          <div>
-            Página 1 de 1 • Registro de Auditoria: ${authCode}
-          </div>
-        </div>
+        ${unitSectionsHtml}
       </body>
       </html>
     `;

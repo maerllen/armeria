@@ -903,111 +903,264 @@ export const AmmunitionModule: React.FC<AmmunitionModuleProps> = ({
       return;
     }
 
-    const pagesHtml = vaultsToPrint.map((vault, idx) => {
-      const vaultStocks = stocks.filter(s => s.vaultSpaceId === vault.id);
-      const totalQuantity = vaultStocks.reduce((sum, s) => sum + s.quantity, 0);
+    // Agrupa os cofres por unidade (ordem alfabética) para gerar:
+    // Página 1 da Unidade = Quadro Resumo de Munições (Calibre | Tipo / Peso | Quantidade em Estoque)
+    // Páginas seguintes = Relação detalhada de cada cofre daquela unidade
+    const vaultsByUnitMap = new Map<string, { unitObj?: Unit; deptObj?: Department; vaults: VaultSpace[] }>();
+    vaultsToPrint.forEach(vault => {
+      const uObj = units.find(u => u.id === vault.unitId) || selectedUnitObj;
+      const dObj = departments.find(d => d.id === (uObj?.departmentId || vault.departmentId)) || selectedDepartmentObj;
+      const uName = (uObj?.name || 'Unidade Policial').trim();
+      const existing = vaultsByUnitMap.get(uName);
+      if (existing) {
+        existing.vaults.push(vault);
+      } else {
+        vaultsByUnitMap.set(uName, { unitObj: uObj, deptObj: dObj, vaults: [vault] });
+      }
+    });
 
-      const rowsHtml = vaultStocks.length > 0
-        ? vaultStocks.map(stock => {
-            const cal = calibers.find(c => c.id === stock.caliberId);
-            const obs = stock.observacaoEstoqueMunicao || stock.additionalInfo || stock.observacao || '-';
-            return `
-              <tr>
-                <td style="font-weight: bold;">${cal?.name || 'Munição'}</td>
-                <td>${stock.fabricante || '-'} / ${stock.loteMunicao || 'S/L'}</td>
-                <td>${stock.tipoMunicao || '-'} ${stock.pesoMunicao ? `(${stock.pesoMunicao})` : ''}</td>
-                <td>${stock.anoFabricacao || '-'} / ${stock.destinacao || 'Operacional'}</td>
-                <td style="font-size: 10px; color: #334155;">${obs}</td>
-                <td style="text-align: right; font-weight: bold; font-family: monospace;">${stock.quantity}</td>
-              </tr>
-            `;
-          }).join('')
+    const unitGroups = Array.from(vaultsByUnitMap.entries())
+      .map(([unitName, info]) => ({ unitName, ...info }))
+      .sort((a, b) => a.unitName.localeCompare(b.unitName, 'pt-BR', { sensitivity: 'base' }));
+
+    const formatQtyUnits = (n: number) => `${n.toLocaleString('pt-BR')} ${n === 1 ? 'unidade' : 'unidades'}`;
+
+    // Total de páginas estimadas (1 página de resumo por unidade + 1 por cofre)
+    const totalPagesCount = unitGroups.reduce((sum, g) => sum + 1 + g.vaults.length, 0);
+    let currentPageNum = 0;
+
+    const pagesHtml = unitGroups.map((group) => {
+      const unitLogo = getSystemLogo(group.unitObj || selectedUnitObj, group.deptObj || selectedDepartmentObj);
+      const unitVaultIds = new Set(group.vaults.map(v => v.id));
+      const unitStocks = stocks.filter(s => unitVaultIds.has(s.vaultSpaceId));
+      const unitTotalQty = unitStocks.reduce((sum, s) => sum + Number(s.quantity || 0), 0);
+
+      // Consolida por Calibre + Tipo/Peso
+      const summaryMap = new Map<string, { caliber: string; tipoPeso: string; quantity: number }>();
+      unitStocks.forEach(stock => {
+        const cal = calibers.find(c => c.id === stock.caliberId);
+        const caliberName = (cal?.name || 'Munição').trim();
+        const tipoPart = (stock.tipoMunicao || '').trim();
+        const pesoPart = (stock.pesoMunicao || '').trim();
+        const tipoPeso = [tipoPart, pesoPart].filter(Boolean).join(' ') || 'Padrão';
+        const key = `${caliberName.toUpperCase()}|${tipoPeso.toUpperCase()}`;
+        const existing = summaryMap.get(key);
+        if (existing) {
+          existing.quantity += Number(stock.quantity || 0);
+        } else {
+          summaryMap.set(key, { caliber: caliberName, tipoPeso, quantity: Number(stock.quantity || 0) });
+        }
+      });
+
+      const summaryRows = Array.from(summaryMap.values()).sort((a, b) => {
+        const c = a.caliber.localeCompare(b.caliber, 'pt-BR', { sensitivity: 'base' });
+        if (c !== 0) return c;
+        return a.tipoPeso.localeCompare(b.tipoPeso, 'pt-BR', { sensitivity: 'base' });
+      });
+
+      const summaryRowsHtml = summaryRows.length > 0
+        ? summaryRows.map(row => `
+            <tr>
+              <td style="font-weight: bold;">${escapeHtmlText(row.caliber)}</td>
+              <td>${escapeHtmlText(row.tipoPeso)}</td>
+              <td style="text-align: right; font-weight: bold; font-family: monospace;">${escapeHtmlText(formatQtyUnits(row.quantity))}</td>
+            </tr>
+          `).join('')
         : `
-          <tr>
-            <td colspan="6" style="text-align: center; color: #64748b; padding: 16px; font-style: italic;">
-              Nenhuma munição armazenada neste cofre no momento (Cofre Vazio).
-            </td>
-          </tr>
-        `;
+            <tr>
+              <td colspan="3" style="text-align: center; color: #64748b; padding: 16px; font-style: italic;">
+                Nenhuma munição em estoque nos cofres selecionados desta unidade.
+              </td>
+            </tr>
+          `;
 
-      return `
-        <div class="vault-report-page ${idx < vaultsToPrint.length - 1 ? 'page-break' : ''}">
+      currentPageNum += 1;
+      const summaryPageNumber = currentPageNum;
+
+      const summaryPageHtml = `
+        <div class="vault-report-page page-break">
           <div class="header">
             <div style="display: flex; align-items: center; gap: 14px;">
-              <img src="${systemLogo}" alt="Logo" style="height: 55px; width: auto; object-fit: contain;" />
+              <img src="${escapeHtmlText(unitLogo)}" alt="Logo" style="height: 55px; width: auto; object-fit: contain;" />
               <div>
                 <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
-                <div class="subtitle">${selectedDepartmentObj?.name || 'Departamento de Polícia Civil'}</div>
-                <div class="subtitle" style="font-size: 10px; color: #475569;">${selectedUnitObj?.name || 'Unidade Policial'}</div>
+                <div class="subtitle">${escapeHtmlText(group.deptObj?.name || 'Departamento de Polícia Civil')}</div>
+                <div class="subtitle" style="font-size: 10px; color: #475569;">${escapeHtmlText(group.unitName)}</div>
               </div>
             </div>
             <div class="badge">
-              INVENTÁRIO DE COFRE<br>
-              <span style="font-size: 11px; color: #000;">COFRE: ${vault.code}</span>
+              RESUMO DE ESTOQUE<br>
+              <span style="font-size: 11px; color: #000;">UNIDADE: ${escapeHtmlText(group.unitName)}</span>
             </div>
           </div>
 
           <div class="meta-box">
             <div class="meta-item">
-              <label>Local / Código do Cofre</label>
-              <span>${vault.code} (${vault.type})</span>
+              <label>Unidade Policial</label>
+              <span>${escapeHtmlText(group.unitName)}</span>
             </div>
             <div class="meta-item">
-              <label>Unidade Policial</label>
-              <span>${selectedUnitObj?.name || '-'}</span>
+              <label>Cofres Consolidados</label>
+              <span>${group.vaults.length} cofre(s) selecionado(s)</span>
             </div>
             <div class="meta-item">
               <label>Data e Hora da Emissão</label>
-              <span>${emitDate}</span>
+              <span>${escapeHtmlText(emitDate)}</span>
             </div>
             <div class="meta-item">
               <label>Armeiro Emitente</label>
-              <span>${currentUser.name} (MASP: ${currentUser.masp || '-'})</span>
+              <span>${escapeHtmlText(currentUser.name)} (MASP: ${escapeHtmlText(currentUser.masp || '-')})</span>
             </div>
           </div>
 
-          <div class="section-title">DETALHAMENTO DO ESTOQUE DE MUNIÇÕES NO COFRE</div>
+          <div class="section-title">RESUMO DO ESTOQUE DE MUNIÇÕES POR CALIBRE E TIPO — ${escapeHtmlText(group.unitName)}</div>
           <table class="detail-table">
             <thead>
               <tr style="background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase;">
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Calibre</th>
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Fabricante / Lote</th>
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Tipo / Peso</th>
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Ano / Destinação</th>
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Observações</th>
-                <th style="padding: 7px 10px; border: 1px solid #cbd5e1; text-align: right;">Qtd (un)</th>
+                <th style="padding: 7px 10px; border: 1px solid #cbd5e1; width: 32%;">Calibre</th>
+                <th style="padding: 7px 10px; border: 1px solid #cbd5e1; width: 42%;">Tipo / Peso</th>
+                <th style="padding: 7px 10px; border: 1px solid #cbd5e1; width: 26%; text-align: right;">Quantidade em Estoque</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsHtml}
+              ${summaryRowsHtml}
             </tbody>
             <tfoot>
               <tr style="background: #f8fafc; font-weight: bold;">
-                <td colspan="5" style="padding: 8px 10px; text-align: right; text-transform: uppercase;">Total de Munições no Cofre:</td>
-                <td style="padding: 8px 10px; text-align: right; font-family: monospace; font-size: 12px;">${totalQuantity} un</td>
+                <td colspan="2" style="padding: 8px 10px; text-align: right; text-transform: uppercase;">Total de Munições em Estoque (${escapeHtmlText(group.unitName)}):</td>
+                <td style="padding: 8px 10px; text-align: right; font-family: monospace; font-size: 12px;">${escapeHtmlText(formatQtyUnits(unitTotalQty))}</td>
               </tr>
             </tfoot>
           </table>
 
-          <!-- TEXTO CERTIFICADOR EXATO SOLICITADO -->
           <div class="info-footer-box">
-            Certifico que o inventário acima reflete fielmente o material bélico (munições) sob guarda no espaço do cofre ${vault.code} na presente data, conforme conferência física realizada pelo armeiro responsável.
+            Certifico que o quadro resumo acima consolida fielmente o estoque de munições sob guarda nos cofres da unidade ${escapeHtmlText(group.unitName)} na presente data, seguido nas páginas subsequentes pela relação detalhada por cofre.
           </div>
 
-          <!-- ASSINATURA DO ARMEIRO: PRESENTE EM TODAS AS PÁGINAS, LOGO ABAIXO DO TEXTO CERTIFICADOR -->
           <div class="signatures">
             <div class="sig-box">
               <div class="sig-line"></div>
-              <div class="sig-name">${currentUser.name}</div>
-              <div class="sig-role">MASP: ${currentUser.masp || 'Armeiro'} - Armeiro / Responsável pelo Material Bélico</div>
+              <div class="sig-name">${escapeHtmlText(currentUser.name)}</div>
+              <div class="sig-role">MASP: ${escapeHtmlText(currentUser.masp || 'Armeiro')} - Armeiro / Responsável pelo Material Bélico</div>
             </div>
           </div>
 
           <div class="footer">
-            Página ${idx + 1} de ${vaultsToPrint.length} • Relatório individual emitido via Sistema de Gestão Bélica da PCMG em ${emitDate}.
+            Página ${summaryPageNumber} de ${totalPagesCount} • Resumo consolidado emitido via Sistema de Gestão Bélica da PCMG em ${escapeHtmlText(emitDate)}.
           </div>
         </div>
       `;
+
+      const detailPagesHtml = group.vaults.map((vault) => {
+        currentPageNum += 1;
+        const pageNum = currentPageNum;
+        const isLastPageOverall = pageNum === totalPagesCount;
+
+        const vaultStocks = stocks.filter(s => s.vaultSpaceId === vault.id);
+        const totalQuantity = vaultStocks.reduce((sum, s) => sum + s.quantity, 0);
+
+        const rowsHtml = vaultStocks.length > 0
+          ? vaultStocks.map(stock => {
+              const cal = calibers.find(c => c.id === stock.caliberId);
+              const obs = stock.observacaoEstoqueMunicao || stock.additionalInfo || stock.observacao || '-';
+              return `
+                <tr>
+                  <td style="font-weight: bold;">${escapeHtmlText(cal?.name || 'Munição')}</td>
+                  <td>${escapeHtmlText(stock.fabricante || '-')} / ${escapeHtmlText(stock.loteMunicao || 'S/L')}</td>
+                  <td>${escapeHtmlText(stock.tipoMunicao || '-')} ${stock.pesoMunicao ? `(${escapeHtmlText(stock.pesoMunicao)})` : ''}</td>
+                  <td>${escapeHtmlText(String(stock.anoFabricacao || '-'))} / ${escapeHtmlText(stock.destinacao || 'Operacional')}</td>
+                  <td style="font-size: 10px; color: #334155;">${escapeHtmlText(obs)}</td>
+                  <td style="text-align: right; font-weight: bold; font-family: monospace;">${stock.quantity.toLocaleString('pt-BR')}</td>
+                </tr>
+              `;
+            }).join('')
+          : `
+            <tr>
+              <td colspan="6" style="text-align: center; color: #64748b; padding: 16px; font-style: italic;">
+                Nenhuma munição armazenada neste cofre no momento (Cofre Vazio).
+              </td>
+            </tr>
+          `;
+
+        return `
+          <div class="vault-report-page ${!isLastPageOverall ? 'page-break' : ''}">
+            <div class="header">
+              <div style="display: flex; align-items: center; gap: 14px;">
+                <img src="${escapeHtmlText(unitLogo)}" alt="Logo" style="height: 55px; width: auto; object-fit: contain;" />
+                <div>
+                  <div class="title">POLÍCIA CIVIL DO ESTADO DE MINAS GERAIS</div>
+                  <div class="subtitle">${escapeHtmlText(group.deptObj?.name || 'Departamento de Polícia Civil')}</div>
+                  <div class="subtitle" style="font-size: 10px; color: #475569;">${escapeHtmlText(group.unitName)}</div>
+                </div>
+              </div>
+              <div class="badge">
+                INVENTÁRIO DE COFRE<br>
+                <span style="font-size: 11px; color: #000;">COFRE: ${escapeHtmlText(vault.code)}</span>
+              </div>
+            </div>
+
+            <div class="meta-box">
+              <div class="meta-item">
+                <label>Local / Código do Cofre</label>
+                <span>${escapeHtmlText(vault.code)} (${escapeHtmlText(vault.type)})</span>
+              </div>
+              <div class="meta-item">
+                <label>Unidade Policial</label>
+                <span>${escapeHtmlText(group.unitName)}</span>
+              </div>
+              <div class="meta-item">
+                <label>Data e Hora da Emissão</label>
+                <span>${escapeHtmlText(emitDate)}</span>
+              </div>
+              <div class="meta-item">
+                <label>Armeiro Emitente</label>
+                <span>${escapeHtmlText(currentUser.name)} (MASP: ${escapeHtmlText(currentUser.masp || '-')})</span>
+              </div>
+            </div>
+
+            <div class="section-title">DETALHAMENTO DO ESTOQUE DE MUNIÇÕES NO COFRE</div>
+            <table class="detail-table">
+              <thead>
+                <tr style="background: #f1f5f9; text-align: left; font-size: 10px; text-transform: uppercase;">
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Calibre</th>
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Fabricante / Lote</th>
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Tipo / Peso</th>
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Ano / Destinação</th>
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1;">Observações</th>
+                  <th style="padding: 7px 10px; border: 1px solid #cbd5e1; text-align: right;">Qtd (un)</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${rowsHtml}
+              </tbody>
+              <tfoot>
+                <tr style="background: #f8fafc; font-weight: bold;">
+                  <td colspan="5" style="padding: 8px 10px; text-align: right; text-transform: uppercase;">Total de Munições no Cofre:</td>
+                  <td style="padding: 8px 10px; text-align: right; font-family: monospace; font-size: 12px;">${totalQuantity.toLocaleString('pt-BR')} un</td>
+                </tr>
+              </tfoot>
+            </table>
+
+            <div class="info-footer-box">
+              Certifico que o inventário acima reflete fielmente o material bélico (munições) sob guarda no espaço do cofre ${escapeHtmlText(vault.code)} na presente data, conforme conferência física realizada pelo armeiro responsável.
+            </div>
+
+            <div class="signatures">
+              <div class="sig-box">
+                <div class="sig-line"></div>
+                <div class="sig-name">${escapeHtmlText(currentUser.name)}</div>
+                <div class="sig-role">MASP: ${escapeHtmlText(currentUser.masp || 'Armeiro')} - Armeiro / Responsável pelo Material Bélico</div>
+              </div>
+            </div>
+
+            <div class="footer">
+              Página ${pageNum} de ${totalPagesCount} • Relatório individual emitido via Sistema de Gestão Bélica da PCMG em ${escapeHtmlText(emitDate)}.
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      return summaryPageHtml + detailPagesHtml;
     }).join('');
 
     const docTitle = buildStandardDocumentTitle(

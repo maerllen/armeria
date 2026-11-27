@@ -966,19 +966,191 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
     const unitObj = units.find(u => u.id === selectedUnitId);
     const deptTitle = deptObj ? deptObj.name : 'TODOS OS DEPARTAMENTOS';
     const unitTitle = unitObj ? unitObj.name : 'TODAS AS UNIDADES';
+    const emissionDate = formatTimestamp(new Date().toISOString());
 
-    const rows = filteredExplosivos.map(item => `
-      <tr style="border-bottom: 1px solid #cbd5e1;">
-        <td style="padding: 8px; font-weight: bold;">${item.nome}</td>
-        <td style="padding: 8px;">${item.tipo}</td>
-        <td style="padding: 8px; text-align: center; font-weight: bold; font-family: monospace;">${item.quantidade} ${item.unidadeMedida}</td>
-        <td style="padding: 8px; font-family: monospace;">${item.lote}</td>
-        <td style="padding: 8px;">${item.fabricante}</td>
-        <td style="padding: 8px; font-size: 11px;">${item.classeRisco}</td>
-        <td style="padding: 8px; font-weight: bold; color: #0369a1;">${item.localArmazenamento}</td>
-        <td style="padding: 8px; font-weight: bold; text-align: center;">${item.status}</td>
-      </tr>
-    `).join('');
+    const formatMeasureLabel = (measureRaw: string | undefined, qty: number): string => {
+      const m = (measureRaw || 'un').trim();
+      const lower = m.toLowerCase();
+      if (lower === 'm' || lower === 'metro' || lower === 'metros') return qty === 1 ? 'Metro' : 'Metros';
+      if (lower === 'un' || lower === 'unid' || lower === 'unidade' || lower === 'unidades') return qty === 1 ? 'Unidade' : 'Unidades';
+      if (lower === 'caixas' || lower === 'caixa') return qty === 1 ? 'Caixa' : 'Caixas';
+      if (lower === 'cartuchos' || lower === 'cartucho') return qty === 1 ? 'Cartucho' : 'Cartuchos';
+      if (lower === 'litros' || lower === 'litro') return qty === 1 ? 'Litro' : 'Litros';
+      return m;
+    };
+
+    const formatDecimalBr = (n: number): string => {
+      const num = Number(n || 0);
+      if (!Number.isFinite(num)) return '0';
+      return num.toLocaleString('pt-BR', {
+        minimumFractionDigits: Number.isInteger(num) ? 0 : 1,
+        maximumFractionDigits: 3
+      });
+    };
+
+    // Agrupa os explosivos por unidade (ordem alfabética)
+    const unitGroupMap = new Map<string, Explosivo[]>();
+    if (filteredExplosivos.length === 0) {
+      unitGroupMap.set(unitTitle, []);
+    } else {
+      filteredExplosivos.forEach(item => {
+        const uObj = units.find(u => u.id === item.unitId);
+        const uName = (uObj?.name || (unitObj ? unitObj.name : 'Unidade Policial')).trim();
+        const existing = unitGroupMap.get(uName);
+        if (existing) existing.push(item);
+        else unitGroupMap.set(uName, [item]);
+      });
+    }
+
+    const unitGroups = Array.from(unitGroupMap.entries())
+      .map(([unitName, items]) => ({ unitName, items }))
+      .sort((a, b) => a.unitName.localeCompare(b.unitName, 'pt-BR', { sensitivity: 'base' }));
+
+    const unitSectionsHtml = unitGroups.map((group, groupIdx) => {
+      const isLastUnit = groupIdx === unitGroups.length - 1;
+      const unitItems = group.items;
+      const uObj = units.find(u => u.name.trim() === group.unitName);
+      const uDeptName = uObj
+        ? (departments.find(d => d.id === uObj.departmentId)?.name || deptTitle)
+        : deptTitle;
+
+      // Consolida por Tipo + Subtipo + Unidade de Medida
+      const summaryMap = new Map<string, { tipo: string; subtipo: string; unidadeMedida: string; quantidade: number }>();
+      const totalsByMeasure = new Map<string, number>();
+
+      unitItems.forEach(item => {
+        const tipo = (item.tipo || 'Explosivo').trim();
+        const subtipo = (item.subtipo || item.nome || 'Padrão').trim();
+        const medida = (item.unidadeMedida || 'un').trim();
+        const qty = Number(item.quantidade || 0);
+
+        const key = `${tipo.toUpperCase()}|${subtipo.toUpperCase()}|${medida.toUpperCase()}`;
+        const existing = summaryMap.get(key);
+        if (existing) {
+          existing.quantidade += qty;
+        } else {
+          summaryMap.set(key, { tipo, subtipo, unidadeMedida: medida, quantidade: qty });
+        }
+
+        const measureKey = formatMeasureLabel(medida, 2);
+        totalsByMeasure.set(measureKey, (totalsByMeasure.get(measureKey) || 0) + qty);
+      });
+
+      const summaryRows = Array.from(summaryMap.values()).sort((a, b) => {
+        const t = a.tipo.localeCompare(b.tipo, 'pt-BR', { sensitivity: 'base' });
+        if (t !== 0) return t;
+        return a.subtipo.localeCompare(b.subtipo, 'pt-BR', { sensitivity: 'base' });
+      });
+
+      const summaryRowsHtml = summaryRows.length > 0
+        ? summaryRows.map((row, idx) => `
+            <tr style="border-bottom: 1px solid #cbd5e1; ${idx % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+              <td style="padding: 8px; font-weight: bold;">${escapeHtmlText(row.tipo)}</td>
+              <td style="padding: 8px; font-weight: 600;">${escapeHtmlText(row.subtipo)}</td>
+              <td style="padding: 8px; text-align: right; font-weight: bold; font-family: monospace;">
+                ${escapeHtmlText(`${formatDecimalBr(row.quantidade)} ${formatMeasureLabel(row.unidadeMedida, row.quantidade)}`)}
+              </td>
+            </tr>
+          `).join('')
+        : '<tr><td colspan="3" style="text-align: center; padding: 20px; color: #64748b; font-style: italic;">Nenhum item explosivo registrado nesta unidade.</td></tr>';
+
+      const totalsText = Array.from(totalsByMeasure.entries())
+        .map(([label, val]) => `${formatDecimalBr(val)} ${formatMeasureLabel(label, val)}`)
+        .join(' | ') || '0';
+
+      const detailRowsHtml = unitItems.length > 0
+        ? unitItems.map((item, idx) => `
+            <tr style="border-bottom: 1px solid #cbd5e1; ${idx % 2 === 1 ? 'background-color: #f8fafc;' : ''}">
+              <td style="padding: 8px; font-weight: bold;">${escapeHtmlText(item.nome)}</td>
+              <td style="padding: 8px;">${escapeHtmlText(item.tipo)}${item.subtipo ? `<div style="font-size: 10px; color: #475569;">${escapeHtmlText(item.subtipo)}</div>` : ''}</td>
+              <td style="padding: 8px; text-align: center; font-weight: bold; font-family: monospace;">${escapeHtmlText(`${formatDecimalBr(item.quantidade)} ${item.unidadeMedida}`)}</td>
+              <td style="padding: 8px; font-family: monospace;">${escapeHtmlText(item.lote || '-')}</td>
+              <td style="padding: 8px;">${escapeHtmlText(item.fabricante || '-')}</td>
+              <td style="padding: 8px; font-size: 11px;">${escapeHtmlText(item.classeRisco || '-')}</td>
+              <td style="padding: 8px; font-weight: bold; color: #0369a1;">${escapeHtmlText(item.localArmazenamento || '-')}</td>
+              <td style="padding: 8px; font-weight: bold; text-align: center;">${escapeHtmlText(item.status)}</td>
+            </tr>
+          `).join('')
+        : '<tr><td colspan="8" style="text-align: center; padding: 20px;">Nenhum item explosivo registrado.</td></tr>';
+
+      return `
+        <!-- PÁGINA RESUMO DA UNIDADE: ${escapeHtmlText(group.unitName)} -->
+        <div class="report-page page-break">
+          <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px;">
+            <h2 style="margin: 0; font-size: 18px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
+            <h3 style="margin: 4px 0 0; font-size: 14px; color: #0f172a;">RESUMO DO ESTOQUE DE EXPLOSIVOS — ${escapeHtmlText(group.unitName)}</h3>
+            <p style="margin: 6px 0 0; font-size: 12px; color: #475569;">
+              <strong>Departamento:</strong> ${escapeHtmlText(uDeptName)} | <strong>Unidade:</strong> ${escapeHtmlText(group.unitName)} | <strong>Emissão:</strong> ${escapeHtmlText(emissionDate)}
+            </p>
+          </div>
+
+          <div style="background: #0f172a; color: #fff; font-weight: bold; font-size: 11px; text-transform: uppercase; padding: 7px 10px; border-radius: 4px 4px 0 0;">
+            QUADRO RESUMO POR TIPO, SUBTIPO E QUANTIDADE EM ESTOQUE — ${escapeHtmlText(group.unitName)}
+          </div>
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px;">
+            <thead>
+              <tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8; text-align: left;">
+                <th style="padding: 8px; width: 38%;">Tipo de Explosivo</th>
+                <th style="padding: 8px; width: 34%;">Subtipo</th>
+                <th style="padding: 8px; width: 28%; text-align: right;">Quantidade em Estoque</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${summaryRowsHtml}
+            </tbody>
+            <tfoot>
+              <tr style="background-color: #f1f5f9; border-top: 2px solid #94a3b8; font-weight: bold;">
+                <td colspan="2" style="padding: 8px; text-align: right; text-transform: uppercase;">Total Consolidado (${escapeHtmlText(group.unitName)}):</td>
+                <td style="padding: 8px; text-align: right; font-family: monospace;">${escapeHtmlText(totalsText)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+
+        <!-- PÁGINA RELAÇÃO COMPLETA DA UNIDADE: ${escapeHtmlText(group.unitName)} -->
+        <div class="report-page ${!isLastUnit ? 'page-break' : ''}">
+          <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 12px; margin-bottom: 16px;">
+            <h2 style="margin: 0; font-size: 18px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
+            <h3 style="margin: 4px 0 0; font-size: 14px; color: #475569;">RELATÓRIO DE INVENTÁRIO DO PAIOL DE EXPLOSIVOS — ${escapeHtmlText(group.unitName)}</h3>
+            <p style="margin: 6px 0 0; font-size: 12px; color: #64748b;">
+              <strong>Departamento:</strong> ${escapeHtmlText(uDeptName)} | <strong>Unidade:</strong> ${escapeHtmlText(group.unitName)} | <strong>Emissão:</strong> ${escapeHtmlText(emissionDate)}
+            </p>
+          </div>
+
+          <table style="width: 100%; border-collapse: collapse; font-size: 11.5px; margin-bottom: 20px;">
+            <thead>
+              <tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8; text-align: left;">
+                <th style="padding: 8px;">Nome do Explosivo</th>
+                <th style="padding: 8px;">Tipo / Subtipo</th>
+                <th style="padding: 8px; text-align: center;">Quantidade</th>
+                <th style="padding: 8px;">Lote</th>
+                <th style="padding: 8px;">Fabricante</th>
+                <th style="padding: 8px;">Classe de Risco</th>
+                <th style="padding: 8px;">Local do Cofre</th>
+                <th style="padding: 8px; text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${detailRowsHtml}
+            </tbody>
+          </table>
+
+          ${isLastUnit ? `
+            <div style="margin-top: 40px; display: flex; justify-content: space-around; text-align: center; page-break-inside: avoid;">
+              <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 12px;">
+                <strong>${escapeHtmlText(currentUser.name)}</strong><br />
+                MASP: ${escapeHtmlText(currentUser.masp)}<br />
+                Responsável pelo Paiol / Explosivista
+              </div>
+              <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 12px;">
+                <strong>Visto da Autoridade Policial</strong><br />
+                Titular da Unidade Policial
+              </div>
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
 
     const inventoryDocTitle = buildStandardDocumentTitle(
       'Inventário do Paiol (Explosivos)',
@@ -992,47 +1164,15 @@ export const ModuloExplosivos: React.FC<ModuloExplosivosProps> = ({
       <head>
         <meta charset="UTF-8" />
         <title>${escapeHtmlText(inventoryDocTitle)}</title>
+        <style>
+          @page { size: A4 landscape; margin: 12mm; }
+          body { font-family: Arial, sans-serif; color: #0f172a; margin: 0; padding: 12px; background: #fff; }
+          .report-page { width: 100%; }
+          .page-break { page-break-after: always !important; break-after: page !important; }
+        </style>
       </head>
       <body>
-      <div style="font-family: Arial, sans-serif; color: #0f172a; padding: 20px;">
-        <div style="text-align: center; border-bottom: 2px solid #0f172a; padding-bottom: 15px; margin-bottom: 20px;">
-          <h2 style="margin: 0; font-size: 20px; text-transform: uppercase;">POLÍCIA CIVIL DE MINAS GERAIS</h2>
-          <h3 style="margin: 5px 0 0; font-size: 16px; color: #475569;">RELATÓRIO DE INVENTÁRIO DO PAIOL DE EXPLOSIVOS</h3>
-          <p style="margin: 8px 0 0; font-size: 13px; color: #64748b;">
-            <strong>Departamento:</strong> ${deptTitle} | <strong>Unidade:</strong> ${unitTitle} | <strong>Emissão:</strong> ${formatTimestamp(new Date().toISOString())}
-          </p>
-        </div>
-
-        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px;">
-          <thead>
-            <tr style="background-color: #f1f5f9; border-bottom: 2px solid #94a3b8; text-align: left;">
-              <th style="padding: 8px;">Nome do Explosivo</th>
-              <th style="padding: 8px;">Tipo de Explosivo</th>
-              <th style="padding: 8px; text-align: center;">Quantidade</th>
-              <th style="padding: 8px;">Lote</th>
-              <th style="padding: 8px;">Fabricante</th>
-              <th style="padding: 8px;">Classe de Risco</th>
-              <th style="padding: 8px;">Local do Cofre</th>
-              <th style="padding: 8px; text-align: center;">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows || '<tr><td colspan="8" style="text-align: center; padding: 20px;">Nenhum item explosivo registrado.</td></tr>'}
-          </tbody>
-        </table>
-
-        <div style="margin-top: 50px; display: flex; justify-content: space-around; text-align: center;">
-          <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 12px;">
-            <strong>${currentUser.name}</strong><br />
-            MASP: ${currentUser.masp}<br />
-            Responsável pelo Paiol / Explosivista
-          </div>
-          <div style="border-top: 1px solid #0f172a; width: 280px; padding-top: 5px; font-size: 12px;">
-            <strong>Visto da Autoridade Policial</strong><br />
-            Titular da Unidade Policial
-          </div>
-        </div>
-      </div>
+        ${unitSectionsHtml}
       </body>
       </html>
     `;
