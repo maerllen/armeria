@@ -85,6 +85,7 @@ export default function App() {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showAuditModal, setShowAuditModal] = useState(false);
   const [preselectedCautelaWeaponId, setPreselectedCautelaWeaponId] = useState<string | null>(null);
+  const [cautelaArmasInitialTab, setCautelaArmasInitialTab] = useState<'MINHAS' | 'DEFERIDAS' | 'EXTERNA' | 'NOVA' | null>(null);
   const [preselectedAmmoLinkedWeaponCautelaId, setPreselectedAmmoLinkedWeaponCautelaId] = useState<string | null>(null);
 
   const [loginError, setLoginError] = useState('');
@@ -783,6 +784,8 @@ export default function App() {
               departments={departments}
               preselectedWeaponId={preselectedCautelaWeaponId}
               onClearPreselectedWeapon={() => setPreselectedCautelaWeaponId(null)}
+              initialTab={cautelaArmasInitialTab}
+              onClearInitialTab={() => setCautelaArmasInitialTab(null)}
               onStartLinkedAmmoCautela={
                 getAllowedModulesForUser(effectiveUser).includes('cautela-municoes')
                   ? (cautela) => {
@@ -877,6 +880,15 @@ export default function App() {
                 getAllowedModulesForUser(effectiveUser).includes('cautela-armas')
                   ? (weapon) => {
                       setPreselectedCautelaWeaponId(weapon.id);
+                      setActiveModule('cautela-armas');
+                      window.scrollTo({ top: 0, behavior: 'smooth' });
+                    }
+                  : undefined
+              }
+              onStartExternalCautela={
+                getAllowedModulesForUser(effectiveUser).includes('cautela-armas')
+                  ? () => {
+                      setCautelaArmasInitialTab('EXTERNA');
                       setActiveModule('cautela-armas');
                       window.scrollTo({ top: 0, behavior: 'smooth' });
                     }

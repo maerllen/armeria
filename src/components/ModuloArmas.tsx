@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { User, Weapon, Caliber, VaultSpace, Department, Unit, Movement, WeaponTransfer, WeaponCustodyMovement, isUserExplosivista } from '../types';
 import { formatTimestamp } from '../utils/masks';
 import { storage } from '../services/storage';
-import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { Crosshair, Plus, Edit2, Trash2, History, AlertCircle, Check, Wrench, Shield, Search, Info, Layers, X, Building, ChevronRight, Eye, Filter, ArrowRightLeft, FileText, Inbox, Clock, SlidersHorizontal, RotateCcw, Printer, CheckCircle2, ArrowUpRight, ArrowDownLeft, UserPlus } from 'lucide-react';
 import { ConfirmDeleteModal } from './ModalConfirmarExclusao';
 import { TransferWeaponModal } from './ModalTransferirArmas';
 import { TransferReceiptModal } from './ModalReciboTransferencia';
@@ -24,6 +24,7 @@ interface WeaponModuleProps {
   departments: Department[];
   units: Unit[];
   onStartCautela?: (weapon: Weapon) => void;
+  onStartExternalCautela?: () => void;
   onRefresh: () => void;
 }
 
@@ -35,6 +36,7 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
   departments,
   units,
   onStartCautela,
+  onStartExternalCautela,
   onRefresh
 }) => {
   const effectiveRole = currentUser.activeRole || currentUser.role;
@@ -733,6 +735,18 @@ export const WeaponModule: React.FC<WeaponModuleProps> = ({
             >
               <Layers className="w-4 h-4 text-amber-400" />
               <span>Armas Disponíveis (Tipos e Modelos)</span>
+            </button>
+          )}
+
+          {(isArmeiro || isAdmin || isGeral) && onStartExternalCautela && (
+            <button
+              id="open-external-cautela-btn"
+              onClick={onStartExternalCautela}
+              className="bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl shadow transition flex items-center space-x-1.5"
+              title="Abrir guia de cautela de arma para pessoa fora do sistema"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Cautela Externa</span>
             </button>
           )}
 

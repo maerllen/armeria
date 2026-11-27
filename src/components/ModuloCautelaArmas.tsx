@@ -7,7 +7,7 @@ import {
   Shield, Crosshair, Disc, AlertCircle, Check, Clock, Search, 
   Printer, ArrowRightLeft, CheckCircle2, XCircle, FileText, 
   ChevronRight, Sparkles, Filter, AlertTriangle, RotateCcw, Eye, Lock, X, Trash2, Edit2,
-  ArrowUpRight, ArrowDownLeft, History, Plus
+  ArrowUpRight, ArrowDownLeft, History, Plus, UserPlus
 } from 'lucide-react';
 import { printDocumentInPage, buildStandardDocumentTitle, escapeHtmlText } from '../utils/printHelper';
 import { TopLayerAlert } from './TopLayerAlert';
@@ -22,6 +22,8 @@ interface ModuloCautelaArmasProps {
   departments: Department[];
   preselectedWeaponId?: string | null;
   onClearPreselectedWeapon?: () => void;
+  initialTab?: 'MINHAS' | 'DEFERIDAS' | 'EXTERNA' | 'NOVA' | null;
+  onClearInitialTab?: () => void;
   onStartLinkedAmmoCautela?: (cautela: CautelaArma) => void;
   onRefresh: () => void | Promise<void>;
 }
@@ -36,6 +38,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   departments,
   preselectedWeaponId,
   onClearPreselectedWeapon,
+  initialTab,
+  onClearInitialTab,
   onStartLinkedAmmoCautela,
   onRefresh
 }) => {
@@ -182,8 +186,8 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     return rawName;
   }, [userUnit]);
 
-  // Tabs: Solicitações Pendentes, Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Histórico de cautelas (Unidade), Indeferidas, Nova
-  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'HISTORICO_UNIDADE' | 'INDEFERIDAS' | 'NOVA'>('MINHAS');
+  // Tabs: Solicitações Pendentes, Deferidas (Unidade), Deferidas/Ativas Própria (Armeiro), Histórico de cautelas (Unidade), Indeferidas, Cautela Externa (Armeiro), Nova
+  const [activeTab, setActiveTab] = useState<'MINHAS' | 'DEFERIDAS' | 'DEFERIDAS_PROPRIA' | 'HISTORICO_UNIDADE' | 'INDEFERIDAS' | 'EXTERNA' | 'NOVA'>('MINHAS');
   const [pendentesSubFilter, setPendentesSubFilter] = useState<'TODAS' | 'SOLICITACOES' | 'DEVOLUCOES'>('TODAS');
   const [deferidasSubFilter, setDeferidasSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('ATIVAS');
   const [propriaSubFilter, setPropriaSubFilter] = useState<'TODAS' | 'ATIVAS' | 'DEVOLVIDAS'>('ATIVAS');
@@ -313,6 +317,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const [selectedAmmoStockId, setSelectedAmmoStockId] = useState('');
   const [novaCautelaUnitFilter, setNovaCautelaUnitFilter] = useState<string>('TODAS');
 
+  // Cautela Externa (Recebedor fora do sistema - exclusivo Armeiro/Admin/Geral)
+  const [extMasp, setExtMasp] = useState('');
+  const [extNome, setExtNome] = useState('');
+  const [extDepartamento, setExtDepartamento] = useState('');
+  const [extUnidade, setExtUnidade] = useState('');
+  const [extCargo, setExtCargo] = useState('');
+  const [extMotivo, setExtMotivo] = useState('');
+  const [extUnitFilter, setExtUnitFilter] = useState<string>('TODAS');
+  const [extWeaponSearch, setExtWeaponSearch] = useState('');
+  const [extWeaponId, setExtWeaponId] = useState('');
+  const [extMagazineQuantity, setExtMagazineQuantity] = useState<number>(2);
+  const [extIncludeAmmo, setExtIncludeAmmo] = useState(false);
+  const [extAmmoStockId, setExtAmmoStockId] = useState('');
+  const [extAmmoQuantity, setExtAmmoQuantity] = useState<number>(30);
+  const [extAmmoDestinacao, setExtAmmoDestinacao] = useState<'Defesa' | 'Treinamento'>('Defesa');
+  const [extAmmoSeraDevolvida, setExtAmmoSeraDevolvida] = useState(true);
+
   // Modal de Autorização pelo Armeiro (seleciona cofre/lote e permanente vs devolver depois)
   const [authorizingCautela, setAuthorizingCautela] = useState<CautelaArma | null>(null);
   const [authWeaponId, setAuthWeaponId] = useState('');
@@ -386,6 +407,93 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     setActiveTab('NOVA');
     onClearPreselectedWeapon?.();
   }, [preselectedWeaponId, weapons, hasDeptWideScope, onClearPreselectedWeapon]);
+
+  // Navegação direta para aba específica (ex: botão "Cautela Externa" no Módulo de Armas)
+  useEffect(() => {
+    if (!initialTab) return;
+    if (initialTab === 'EXTERNA' && !canAuthorize) {
+      onClearInitialTab?.();
+      return;
+    }
+    setActiveTab(initialTab);
+    onClearInitialTab?.();
+  }, [initialTab, canAuthorize, onClearInitialTab]);
+
+  // Armas disponíveis "No Cofre" para a guia Cautela Externa
+  const extAvailableWeapons = useMemo(() => {
+    const userUnitId = currentUser.unitId;
+    const sourceWeapons = weapons && weapons.length > 0 ? weapons : storage.getAllWeapons();
+    const term = extWeaponSearch.trim().toLowerCase();
+    return sourceWeapons.filter(w => {
+      if (hasDeptWideScope && extUnitFilter !== 'TODAS') {
+        if (w.unitId !== extUnitFilter) return false;
+      }
+      const sameScope = isGeral
+        ? true
+        : hasDeptWideScope
+          ? (
+              (currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
+              (w.unitId ? deptUnitIds.has(w.unitId) : false)
+            )
+          : (
+              (userUnitId && w.unitId === userUnitId) ||
+              (!w.unitId && currentUser.departmentId && w.departmentId === currentUser.departmentId) ||
+              (!userUnitId && currentUser.departmentId && w.departmentId === currentUser.departmentId)
+            );
+      const st = (w.status || '').trim().toLowerCase();
+      const isNoCofre = st === 'no cofre' || st === 'nocofre';
+      if (!sameScope || !isNoCofre) return false;
+      if (!term) return true;
+      const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+      return (
+        (w.model || '').toLowerCase().includes(term) ||
+        (w.serialNumber || '').toLowerCase().includes(term) ||
+        (w.caliber || '').toLowerCase().includes(term) ||
+        (w.manufacturer || '').toLowerCase().includes(term) ||
+        (w.type || '').toLowerCase().includes(term) ||
+        (vault?.code || '').toLowerCase().includes(term)
+      );
+    });
+  }, [weapons, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds, extUnitFilter, extWeaponSearch, vaultSpaces]);
+
+  const extSelectedWeapon = useMemo(() => {
+    return weapons.find(w => w.id === extWeaponId) || extAvailableWeapons.find(w => w.id === extWeaponId);
+  }, [weapons, extAvailableWeapons, extWeaponId]);
+
+  const extAvailableAmmoStocks = useMemo(() => {
+    if (!extSelectedWeapon) return [];
+    const targetUnitId = extSelectedWeapon.unitId || currentUser.unitId;
+    const selCal = (extSelectedWeapon.caliber || '').toLowerCase().trim();
+    return ammoStocks.filter(st => {
+      const matchUnit = isGeral
+        ? true
+        : targetUnitId
+          ? st.unitId === targetUnitId || (hasDeptWideScope && !st.unitId && st.departmentId === currentUser.departmentId)
+          : hasDeptWideScope
+            ? (st.departmentId === currentUser.departmentId || (st.unitId ? deptUnitIds.has(st.unitId) : false))
+            : st.unitId === currentUser.unitId;
+      const cal = calibers.find(c => c.id === st.caliberId);
+      const calName = (cal?.name || '').toLowerCase().trim();
+      const matchCaliber =
+        !selCal ||
+        (cal && (calName.includes(selCal) || selCal.includes(calName))) ||
+        st.caliberId === extSelectedWeapon.caliber;
+      return matchUnit && matchCaliber && st.quantity > 0;
+    });
+  }, [extSelectedWeapon, ammoStocks, calibers, currentUser.unitId, currentUser.departmentId, isGeral, hasDeptWideScope, deptUnitIds]);
+
+  useEffect(() => {
+    if (extAvailableAmmoStocks.length > 0) {
+      const currentExists = extAvailableAmmoStocks.find(s => s.id === extAmmoStockId);
+      if (!currentExists) {
+        const first = extAvailableAmmoStocks[0];
+        setExtAmmoStockId(first.id);
+        setExtAmmoQuantity(prev => Math.min(Math.max(1, prev || 30), first.quantity));
+      }
+    } else if (extAmmoStockId) {
+      setExtAmmoStockId('');
+    }
+  }, [extAvailableAmmoStocks, extAmmoStockId]);
 
   // Munições disponíveis na unidade correspondentes ao calibre da arma selecionada
   const availableAmmoForSelectedWeapon = useMemo(() => {
@@ -753,6 +861,14 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
   const getResolvedRequester = useCallback((cautela: CautelaArma | null | undefined) => {
     if (!cautela) {
       return { name: 'Usuário não identificado', masp: 'N/I', cargo: 'Policial' };
+    }
+
+    if (cautela.isExternal) {
+      return {
+        name: (cautela.requesterName || 'Recebedor Externo').trim(),
+        masp: (cautela.requesterMasp || 'N/I').trim(),
+        cargo: (cautela.requesterCargo || 'Externo').trim()
+      };
     }
 
     const isGenericName = (val?: string | null) => {
@@ -3055,6 +3171,198 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
     }
   };
 
+  // Submeter Cautela Externa (para pessoas fora do sistema - exclusivo Armeiro/Admin/Geral)
+  const handleExternalCautelaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+
+    if (!canAuthorize) {
+      setErrorMsg('Apenas Armeiros ou Administradores podem registrar cautela externa.');
+      return;
+    }
+
+    const cleanMasp = extMasp.trim();
+    const cleanNome = extNome.trim();
+    const cleanDepartamento = extDepartamento.trim();
+    const cleanUnidade = extUnidade.trim();
+    const cleanCargo = extCargo.trim();
+    const cleanMotivo = extMotivo.trim();
+
+    if (!cleanMasp || !cleanNome || !cleanDepartamento || !cleanUnidade || !cleanCargo) {
+      setErrorMsg('Preencha todos os dados obrigatórios do recebedor externo: MASP, Nome, Departamento, Unidade e Cargo.');
+      return;
+    }
+
+    if (!cleanMotivo) {
+      setErrorMsg('Informe uma breve descrição do motivo da cautela (até 250 caracteres).');
+      return;
+    }
+
+    if (cleanMotivo.length > 250) {
+      setErrorMsg('A descrição do motivo da cautela deve ter no máximo 250 caracteres.');
+      return;
+    }
+
+    if (!extWeaponId || !extSelectedWeapon) {
+      setErrorMsg('Selecione uma arma disponível no cofre para realizar a cautela externa.');
+      return;
+    }
+
+    let selectedStock: AmmunitionStock | undefined;
+    if (extIncludeAmmo) {
+      selectedStock = extAvailableAmmoStocks.find(s => s.id === extAmmoStockId);
+      if (!selectedStock) {
+        setErrorMsg('Selecione um lote de munição disponível ou desmarque a opção de associar munição.');
+        return;
+      }
+      if (!Number.isFinite(extAmmoQuantity) || extAmmoQuantity <= 0) {
+        setErrorMsg('Informe uma quantidade válida de munições maior que zero.');
+        return;
+      }
+      if (extAmmoQuantity > selectedStock.quantity) {
+        setErrorMsg(`Saldo insuficiente no lote selecionado. Disponível: ${selectedStock.quantity} munições.`);
+        return;
+      }
+    }
+
+    setIsSubmitting(true);
+    try {
+      const weapon = extSelectedWeapon;
+      const payload: any = {
+        weaponId: weapon.id,
+        weaponSerialNumber: weapon.serialNumber,
+        weaponModel: weapon.model,
+        weaponType: weapon.type,
+        weaponCaliber: weapon.caliber,
+        magazineQuantity: Math.max(1, Number(extMagazineQuantity) || 1),
+        vaultSpaceId: weapon.vaultSpaceId,
+        departmentId: weapon.departmentId || currentUser.departmentId,
+        unitId: weapon.unitId || currentUser.unitId,
+        requesterId: `ext-${Date.now()}`,
+        requesterName: cleanNome,
+        requesterMasp: cleanMasp,
+        requesterCargo: cleanCargo,
+        isExternal: true,
+        externalDepartment: cleanDepartamento,
+        externalUnit: cleanUnidade,
+        reason: cleanMotivo,
+        directAuthorized: true,
+        status: 'AUTORIZADA',
+        armorerId: currentUser.id,
+        armorerName: currentUser.name,
+        armorerMasp: currentUser.masp,
+        actor: currentUser
+      };
+
+      if (extIncludeAmmo && selectedStock && extAmmoQuantity > 0) {
+        const calObj = calibers.find(c => c.id === selectedStock!.caliberId);
+        const resolvedFab = selectedStock.fabricante || calObj?.fabricante || 'CBC';
+        const resolvedTipo = selectedStock.tipoMunicao || calObj?.tipo || (extAmmoDestinacao === 'Defesa' ? 'Defesa / Operacional' : 'Treinamento');
+        const resolvedPeso = selectedStock.pesoMunicao || calObj?.peso || '124gr';
+        const resolvedLote = selectedStock.loteMunicao || 'Lote Unidade';
+
+        payload.ammunition = {
+          caliberId: selectedStock.caliberId || weapon.caliber,
+          caliberName: weapon.caliber,
+          quantity: Number(extAmmoQuantity),
+          fabricante: resolvedFab,
+          tipoMunicao: resolvedTipo,
+          pesoMunicao: resolvedPeso,
+          loteMunicao: resolvedLote,
+          destinacao: extAmmoDestinacao,
+          vaultSpaceId: selectedStock.vaultSpaceId || weapon.vaultSpaceId,
+          reason: `Cautela externa em conjunto com ${weapon.model} Nº ${weapon.serialNumber} — ${cleanNome} (MASP ${cleanMasp})`,
+          seraDevolvida: extAmmoSeraDevolvida
+        };
+        payload.ammoQuantity = Number(extAmmoQuantity);
+        payload.ammoDestinacao = extAmmoDestinacao;
+        payload.ammoFabricante = resolvedFab;
+        payload.ammoTipo = resolvedTipo;
+        payload.ammoPeso = resolvedPeso;
+        payload.ammoLote = resolvedLote;
+      }
+
+      const res = await storage.requestCautelaArma(payload);
+      if (!res.success) {
+        setErrorMsg(res.error || 'Erro ao registrar cautela externa.');
+      } else {
+        const nowIso = new Date().toISOString();
+        const newCautelaObj: CautelaArma = {
+          id: res.id || `caut-ext-${Date.now()}`,
+          weaponId: weapon.id,
+          weaponSerialNumber: weapon.serialNumber,
+          weaponModel: weapon.model,
+          weaponType: weapon.type,
+          weaponCaliber: weapon.caliber,
+          magazineQuantity: payload.magazineQuantity,
+          vaultSpaceId: weapon.vaultSpaceId,
+          departmentId: payload.departmentId,
+          unitId: payload.unitId,
+          requesterId: payload.requesterId,
+          requesterName: cleanNome,
+          requesterMasp: cleanMasp,
+          requesterCargo: cleanCargo,
+          isExternal: true,
+          externalDepartment: cleanDepartamento,
+          externalUnit: cleanUnidade,
+          reason: cleanMotivo,
+          status: 'AUTORIZADA',
+          requestDate: nowIso,
+          authorizedAt: nowIso,
+          armorerId: currentUser.id,
+          armorerName: currentUser.name,
+          armorerMasp: currentUser.masp,
+          ammoQuantity: payload.ammoQuantity,
+          ammoDestinacao: payload.ammoDestinacao,
+          ammoFabricante: payload.ammoFabricante,
+          ammoTipo: payload.ammoTipo,
+          ammoPeso: payload.ammoPeso,
+          ammoLote: payload.ammoLote,
+          hadShots: false,
+          shotsFired: 0,
+          isWorking: true,
+          hadMalfunction: false,
+          returnedMagazinesCount: payload.magazineQuantity,
+          createdAt: nowIso
+        };
+
+        setLastDirectCautelaArma(newCautelaObj);
+        setSuccessMsg(
+          `Cautela externa da arma ${weapon.model} (Série: ${weapon.serialNumber}) registrada para ${cleanNome} (MASP: ${cleanMasp} • ${cleanUnidade}/${cleanDepartamento})${payload.ammoQuantity ? ` com ${payload.ammoQuantity} munições associadas` : ''}. O termo foi gerado imediatamente.`
+        );
+
+        setExtMasp('');
+        setExtNome('');
+        setExtDepartamento('');
+        setExtUnidade('');
+        setExtCargo('');
+        setExtMotivo('');
+        setExtWeaponId('');
+        setExtWeaponSearch('');
+        setExtMagazineQuantity(2);
+        setExtIncludeAmmo(false);
+        setExtAmmoStockId('');
+        setExtAmmoQuantity(30);
+        setExtAmmoDestinacao('Defesa');
+        setExtAmmoSeraDevolvida(true);
+
+        setTimeout(() => {
+          handlePrintTermo(newCautelaObj);
+        }, 150);
+
+        setActiveTab('DEFERIDAS');
+        setLocalSyncTick(t => t + 1);
+        await onRefresh();
+        setLocalSyncTick(t => t + 1);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Erro inesperado ao registrar cautela externa.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   // Abertura do fluxo de autorização pelo armeiro
   const handleOpenAuthorize = (cautela: CautelaArma) => {
     const linkedAmmo = getLinkedAmmoForCautela(cautela);
@@ -4845,12 +5153,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         ? `${returnVault.code}${returnUnit ? ` (${returnUnit.name})` : ''}`
         : 'Cofre de Origem da Unidade';
 
-    const storedReqUser = storage.getUsers().find(u => u.id === cautela.requesterId);
+    const storedReqUser = cautela.isExternal ? undefined : storage.getUsers().find(u => u.id === cautela.requesterId);
     const storedLoggedUser = storage.getUsers().find(u => u.id === currentUser.id);
     const requesterCareer = (cautela.requesterCargo || (isPolicial ? currentUser.cargo : undefined) || storedReqUser?.cargo || 'Policial Civil').trim();
     const signerName = isPolicial ? currentUser.name : cautela.requesterName;
     const signerCareer = isPolicial ? (currentUser.cargo || storedLoggedUser?.cargo || requesterCareer || 'Policial Civil').trim() : requesterCareer;
     const signerMasp = isPolicial ? (currentUser.masp || cautela.requesterMasp) : cautela.requesterMasp;
+
+    const safeReqName = escapeHtmlText(cautela.requesterName || '');
+    const safeReqMasp = escapeHtmlText(cautela.requesterMasp || '');
+    const safeReqCargo = escapeHtmlText(requesterCareer);
+    const safeReqPhone = escapeHtmlText(cautela.requesterPhone || 'N/A');
+    const safeExtDept = escapeHtmlText(cautela.externalDepartment || 'N/A');
+    const safeExtUnit = escapeHtmlText(cautela.externalUnit || 'N/A');
+    const safeReason = escapeHtmlText(cautela.reason || 'Serviço Policial Operacional');
+    const safeSignerName = escapeHtmlText(signerName || '');
+    const safeSignerCareer = escapeHtmlText(signerCareer || '');
+    const safeSignerMasp = escapeHtmlText(signerMasp || '');
 
     const armorerInfo = getResolvedArmorer(cautela);
 
@@ -5074,20 +5393,31 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
         <div>
           <div class="section-banner">
-            1. DADOS DO SERVIDOR RECEBEDOR (POLICIAL)
+            ${cautela.isExternal ? '1. DADOS DO RECEBEDOR EXTERNO (FORA DO SISTEMA)' : '1. DADOS DO SERVIDOR RECEBEDOR (POLICIAL)'}
           </div>
           <table class="info-table">
             <tr>
-              <td style="width: 60%;"><strong>Nome:</strong> ${cautela.requesterName}</td>
-              <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
+              <td style="width: 60%;"><strong>Nome:</strong> ${safeReqName}</td>
+              <td style="width: 40%;"><strong>MASP:</strong> ${safeReqMasp}</td>
+            </tr>
+            ${cautela.isExternal ? `
+            <tr>
+              <td><strong>Cargo/Função:</strong> ${safeReqCargo}</td>
+              <td><strong>Modalidade:</strong> Cautela Externa</td>
             </tr>
             <tr>
-              <td><strong>Cargo/Função:</strong> ${requesterCareer}</td>
-              <td><strong>Telefone/Contato:</strong> ${cautela.requesterPhone || 'N/A'}</td>
+              <td><strong>Departamento (Origem):</strong> ${safeExtDept}</td>
+              <td><strong>Unidade (Origem):</strong> ${safeExtUnit}</td>
+            </tr>
+            ` : `
+            <tr>
+              <td><strong>Cargo/Função:</strong> ${safeReqCargo}</td>
+              <td><strong>Telefone/Contato:</strong> ${safeReqPhone}</td>
             </tr>
             <tr>
-              <td colspan="2"><strong>Unidade de Lotação:</strong> ${unitObj ? unitObj.name : 'N/A'}</td>
+              <td colspan="2"><strong>Unidade de Lotação:</strong> ${escapeHtmlText(unitObj ? unitObj.name : 'N/A')}</td>
             </tr>
+            `}
           </table>
         </div>
 
@@ -5165,7 +5495,7 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           </div>
           <table class="info-table">
             <tr>
-              <td style="width: 60%;"><strong>Finalidade da Cautela:</strong> ${cautela.reason || 'Serviço Policial Operacional'}</td>
+              <td style="width: 60%;"><strong>Finalidade da Cautela:</strong> ${safeReason}</td>
               <td style="width: 40%;"><strong>Data/Hora Solicitação:</strong> ${new Date(cautela.requestDate).toLocaleString('pt-BR')}</td>
             </tr>
             <tr>
@@ -5208,9 +5538,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
         <div class="signatures-container" ${isPolicial ? 'style="justify-content: center;"' : ''}>
           <div class="signature-box">
-            <strong>${signerName}</strong><br/>
-            ${signerCareer}<br/>
-            MASP: ${signerMasp}
+            <strong>${safeSignerName}</strong><br/>
+            ${safeSignerCareer}<br/>
+            MASP: ${safeSignerMasp}
           </div>
           ${!isPolicial ? `
             <div class="signature-box">
@@ -5252,17 +5582,23 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
             <div>
               <div class="section-banner">
-                1. DADOS DO SERVIDOR REQUISITANTE / RECEBEDOR
+                ${cautela.isExternal ? '1. DADOS DO RECEBEDOR EXTERNO (FORA DO SISTEMA)' : '1. DADOS DO SERVIDOR REQUISITANTE / RECEBEDOR'}
               </div>
               <table class="info-table">
                 <tr>
-                  <td style="width: 60%;"><strong>Nome:</strong> ${cautela.requesterName}</td>
-                  <td style="width: 40%;"><strong>MASP:</strong> ${cautela.requesterMasp}</td>
+                  <td style="width: 60%;"><strong>Nome:</strong> ${safeReqName}</td>
+                  <td style="width: 40%;"><strong>MASP:</strong> ${safeReqMasp}</td>
                 </tr>
                 <tr>
-                  <td><strong>Cargo/Função:</strong> ${requesterCareer}</td>
-                  <td><strong>Armamento Vinculado:</strong> Nº ${cautela.weaponSerialNumber} (${cautela.weaponModel} • ${cautela.weaponCaliber || 'N/A'})</td>
+                  <td><strong>Cargo/Função:</strong> ${safeReqCargo}</td>
+                  <td><strong>Armamento Vinculado:</strong> Nº ${escapeHtmlText(cautela.weaponSerialNumber || '')} (${escapeHtmlText(cautela.weaponModel || '')} • ${escapeHtmlText(cautela.weaponCaliber || 'N/A')})</td>
                 </tr>
+                ${cautela.isExternal ? `
+                <tr>
+                  <td><strong>Departamento (Origem):</strong> ${safeExtDept}</td>
+                  <td><strong>Unidade (Origem):</strong> ${safeExtUnit}</td>
+                </tr>
+                ` : ''}
               </table>
             </div>
 
@@ -5320,9 +5656,9 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
 
             <div class="signatures-container" ${isPolicial ? 'style="justify-content: center;"' : ''}>
               <div class="signature-box">
-                <strong>${signerName}</strong><br/>
-                ${signerCareer}<br/>
-                MASP: ${signerMasp}
+                <strong>${safeSignerName}</strong><br/>
+                ${safeSignerCareer}<br/>
+                MASP: ${safeSignerMasp}
               </div>
               ${!isPolicial ? `
                 <div class="signature-box">
@@ -7629,9 +7965,28 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
           )}
         </button>
 
+        {canAuthorize && (
+          <button
+            onClick={() => {
+              setErrorMsg('');
+              setSuccessMsg('');
+              setActiveTab('EXTERNA');
+            }}
+            className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ml-auto ${
+              activeTab === 'EXTERNA'
+                ? 'bg-cyan-500 text-slate-950 font-black shadow-sm'
+                : 'text-cyan-300/90 hover:text-cyan-200 hover:bg-slate-900 border border-cyan-500/30'
+            }`}
+            title="Registrar cautela de arma para pessoa fora do sistema (inserção manual)"
+          >
+            <UserPlus className="w-3.5 h-3.5" />
+            <span>Cautela Externa</span>
+          </button>
+        )}
+
         <button
           onClick={handleOpenNovaSolicitacao}
-          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ml-auto ${
+          className={`flex items-center space-x-2 px-4 py-2 rounded-xl text-xs font-bold transition whitespace-nowrap ${canAuthorize ? '' : 'ml-auto'} ${
             activeTab === 'NOVA'
               ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
               : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
@@ -8175,8 +8530,390 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
         </div>
       )}
 
+      {/* VIEW: CAUTELA EXTERNA (PARA PESSOAS FORA DO SISTEMA - EXCLUSIVO ARMEIRO) */}
+      {canAuthorize && activeTab === 'EXTERNA' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-sm">
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="border-b border-slate-800 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <h3 className="text-base font-bold text-slate-100 flex items-center space-x-2">
+                  <UserPlus className="w-5 h-5 text-cyan-400" />
+                  <span>Cautela Externa de Armamento (Pessoa Fora do Sistema)</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-1">
+                  Insira manualmente os dados do recebedor externo, escolha a arma disponível no cofre e, se desejar, associe munições correspondentes.
+                </p>
+              </div>
+              <span className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 self-start sm:self-center">
+                Autorização Direta • Recibo Imediato
+              </span>
+            </div>
+
+            <form onSubmit={handleExternalCautelaSubmit} className="space-y-5">
+              {/* Bloco 1: Dados Manuais do Recebedor Externo */}
+              <div className="p-4 bg-slate-950 border border-cyan-800/40 rounded-xl space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
+                  <span className="text-xs font-bold text-cyan-300 uppercase tracking-wider">
+                    1. Dados do Recebedor (Inserção Manual)
+                  </span>
+                  <span className="text-[10px] text-slate-400">Todos os campos abaixo são obrigatórios</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      MASP <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={extMasp}
+                      onChange={(e) => setExtMasp(e.target.value)}
+                      placeholder="Ex: 123456-7"
+                      maxLength={32}
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Nome Completo <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={extNome}
+                      onChange={(e) => setExtNome(e.target.value)}
+                      placeholder="Nome completo do recebedor"
+                      maxLength={120}
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Departamento <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={extDepartamento}
+                      onChange={(e) => setExtDepartamento(e.target.value)}
+                      placeholder="Ex: DEOESP / DHPP / 1º DEP"
+                      maxLength={120}
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Unidade <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={extUnidade}
+                      onChange={(e) => setExtUnidade(e.target.value)}
+                      placeholder="Ex: Delegacia / Equipe / Coordenação"
+                      maxLength={120}
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1">
+                      Cargo <span className="text-cyan-400">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={extCargo}
+                      onChange={(e) => setExtCargo(e.target.value)}
+                      placeholder="Ex: Investigador / Delegado / Perito"
+                      maxLength={100}
+                      required
+                      className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
+                      Breve Descrição / Motivo da Cautela <span className="text-cyan-400">*</span>
+                    </label>
+                    <span
+                      className={`text-[10px] font-mono ${
+                        extMotivo.length >= 230 ? 'text-amber-400 font-bold' : 'text-slate-400'
+                      }`}
+                    >
+                      {extMotivo.length}/250 caracteres
+                    </span>
+                  </div>
+                  <textarea
+                    value={extMotivo}
+                    onChange={(e) => setExtMotivo(e.target.value.slice(0, 250))}
+                    maxLength={250}
+                    rows={3}
+                    required
+                    placeholder="Descreva brevemente o motivo da cautela externa (máximo de 250 caracteres)..."
+                    className="w-full bg-slate-900 border border-slate-700 focus:border-cyan-400 rounded-xl px-3 py-2 text-xs text-slate-100 focus:outline-none resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Bloco 2: Seleção do Armamento Disponível no Cofre */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="block text-xs font-bold text-slate-300 uppercase tracking-wider">
+                    2. Selecione a Arma Disponível no Cofre ({extAvailableWeapons.length} disponível{extAvailableWeapons.length === 1 ? '' : 'is'})
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {hasDeptWideScope && departmentUnits.length > 1 && (
+                      <select
+                        value={extUnitFilter}
+                        onChange={(e) => {
+                          setExtUnitFilter(e.target.value);
+                          setExtWeaponId('');
+                        }}
+                        className="bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl px-2.5 py-1.5 text-[11px] text-slate-200 font-semibold"
+                      >
+                        <option value="TODAS">Todas as Unidades ({departmentUnits.length})</option>
+                        {departmentUnits.map(u => (
+                          <option key={u.id} value={u.id}>{u.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    <div className="relative">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={extWeaponSearch}
+                        onChange={(e) => setExtWeaponSearch(e.target.value)}
+                        placeholder="Filtrar modelo, série, calibre..."
+                        className="bg-slate-950 border border-slate-700 focus:border-cyan-400 rounded-xl pl-8 pr-3 py-1.5 text-[11px] text-slate-100 placeholder-slate-500 w-56 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {extAvailableWeapons.length === 0 ? (
+                  <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl text-center text-xs text-slate-400">
+                    <AlertTriangle className="w-6 h-6 text-amber-400 mx-auto mb-2" />
+                    Não há armas com status "No Cofre" disponíveis para os filtros informados.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-h-56 overflow-y-auto p-1">
+                    {extAvailableWeapons.map(w => {
+                      const isSelected = extWeaponId === w.id;
+                      const vault = vaultSpaces.find(v => v.id === w.vaultSpaceId);
+                      const weapUnit = departmentUnits.find(u => u.id === w.unitId) || units.find(u => u.id === w.unitId);
+                      return (
+                        <div
+                          key={w.id}
+                          onClick={() => {
+                            setExtWeaponId(w.id);
+                            setExtMagazineQuantity(w.magazineQuantity || 2);
+                          }}
+                          className={`p-3 rounded-xl border text-left cursor-pointer transition flex flex-col justify-between ${
+                            isSelected
+                              ? 'bg-cyan-950/60 border-cyan-400 shadow-md ring-1 ring-cyan-400'
+                              : 'bg-slate-950 border-slate-800 hover:border-slate-700'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-100">{w.model}</span>
+                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 shrink-0">
+                                {w.caliber}
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-mono text-cyan-300 mt-0.5">
+                              Série: {w.serialNumber}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between text-[10px] text-slate-400 mt-2 pt-2 border-t border-slate-800/60 gap-2">
+                            <span className="truncate">
+                              {`${hasDeptWideScope && weapUnit ? `${weapUnit.name} • ` : ''}Local: ${vault ? vault.code : 'Cofre'}`}
+                            </span>
+                            <span className="shrink-0">{w.magazineQuantity || 1} carregadores</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {extSelectedWeapon && (
+                  <div className="p-3 bg-cyan-950/30 border border-cyan-700/50 rounded-xl text-xs text-cyan-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      Arma selecionada: <strong>{extSelectedWeapon.model}</strong> (Série: <span className="font-mono text-cyan-300">{extSelectedWeapon.serialNumber}</span>) — Calibre: <strong>{extSelectedWeapon.caliber}</strong>
+                    </div>
+                    <div className="flex items-center space-x-2 shrink-0">
+                      <label className="text-[11px] font-semibold text-slate-300">Carregadores:</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="10"
+                        value={extMagazineQuantity}
+                        onChange={(e) => setExtMagazineQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="w-16 bg-slate-950 border border-slate-700 rounded-lg px-2 py-1 text-xs text-slate-100 font-mono text-center"
+                        required
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Bloco 3: Associação Opcional de Munição */}
+              <div className="pt-3 border-t border-slate-800 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="checkbox"
+                      id="extIncludeAmmoCheckbox"
+                      checked={extIncludeAmmo}
+                      onChange={(e) => setExtIncludeAmmo(e.target.checked)}
+                      className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-500 bg-slate-950 border-slate-700 cursor-pointer"
+                    />
+                    <label htmlFor="extIncludeAmmoCheckbox" className="text-xs font-bold text-slate-200 cursor-pointer">
+                      Associar munição do calibre {extSelectedWeapon?.caliber || '(selecione a arma)'} a esta cautela (opcional)
+                    </label>
+                  </div>
+                  <span className="text-[10px] text-slate-400">
+                    {extIncludeAmmo ? 'Será deduzida do estoque do cofre' : 'Somente armamento, sem munição vinculada'}
+                  </span>
+                </div>
+
+                {extIncludeAmmo && (
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3.5">
+                    {!extSelectedWeapon ? (
+                      <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300">
+                        Selecione uma arma acima para listar os lotes de munição disponíveis no calibre correspondente.
+                      </div>
+                    ) : extAvailableAmmoStocks.length === 0 ? (
+                      <div className="p-3 bg-amber-950/20 border border-amber-800/40 rounded-xl text-xs text-amber-300">
+                        Não há estoque de munição disponível no calibre <strong>{extSelectedWeapon.caliber}</strong>. Desmarque a opção acima para acautelar apenas a arma.
+                      </div>
+                    ) : (
+                      <>
+                        <div>
+                          <label className="block text-[11px] font-semibold text-slate-300 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                            <span>Lote de Munição no Cofre (Calibre {extSelectedWeapon.caliber})</span>
+                            <span className="text-[10px] text-cyan-400 font-mono font-normal">
+                              {extAvailableAmmoStocks.length} lote(s) disponível(is)
+                            </span>
+                          </label>
+                          <select
+                            value={extAmmoStockId}
+                            onChange={(e) => {
+                              const found = extAvailableAmmoStocks.find(s => s.id === e.target.value);
+                              setExtAmmoStockId(e.target.value);
+                              if (found) {
+                                setExtAmmoQuantity(prev => Math.min(Math.max(1, prev || 30), found.quantity));
+                              }
+                            }}
+                            className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-slate-100 font-mono focus:border-cyan-400"
+                          >
+                            {extAvailableAmmoStocks.map(st => {
+                              const vault = vaultSpaces.find(v => v.id === st.vaultSpaceId);
+                              const cal = calibers.find(c => c.id === st.caliberId);
+                              const calDisplay = formatCaliberDisplay({
+                                name: cal?.name || extSelectedWeapon.caliber,
+                                tipo: st.tipoMunicao || cal?.tipo || 'Padrão',
+                                peso: st.pesoMunicao || cal?.peso
+                              });
+                              return (
+                                <option key={st.id} value={st.id}>
+                                  Cofre: {vault ? vault.code : 'Cofre'} • {calDisplay} • Lote: {st.loteMunicao || 'S/L'} • Ano: {st.anoFabricacao || 'N/A'} — Saldo: {st.quantity} un.
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Quantidade de Munições
+                            </label>
+                            <input
+                              type="number"
+                              min="1"
+                              max={extAvailableAmmoStocks.find(s => s.id === extAmmoStockId)?.quantity || 500}
+                              value={extAmmoQuantity}
+                              onChange={(e) => setExtAmmoQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-mono font-bold"
+                              required={extIncludeAmmo}
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Destinação
+                            </label>
+                            <select
+                              value={extAmmoDestinacao}
+                              onChange={(e) => setExtAmmoDestinacao(e.target.value as 'Defesa' | 'Treinamento')}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium"
+                            >
+                              <option value="Defesa">Defesa</option>
+                              <option value="Treinamento">Treinamento</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-semibold text-slate-400 uppercase mb-1">
+                              Tipo de Retirada
+                            </label>
+                            <select
+                              value={extAmmoSeraDevolvida ? 'DEVOLVER' : 'PERMANENTE'}
+                              onChange={(e) => setExtAmmoSeraDevolvida(e.target.value === 'DEVOLVER')}
+                              className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-100 font-medium"
+                            >
+                              <option value="DEVOLVER">Irá devolver depois</option>
+                              <option value="PERMANENTE">Retirada permanente</option>
+                            </select>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-4 flex justify-end space-x-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('DEFERIDAS')}
+                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-slate-200"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={
+                    !extWeaponId ||
+                    isSubmitting ||
+                    extAvailableWeapons.length === 0 ||
+                    (extIncludeAmmo && extAvailableAmmoStocks.length === 0)
+                  }
+                  className="px-5 py-2.5 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-bold text-xs rounded-xl transition flex items-center space-x-2 shadow-md"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  <span>
+                    {isSubmitting ? 'Registrando...' : 'Registrar Cautela Externa e Gerar Recibo'}
+                  </span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* VIEW: LISTAGEM DE CAUTELAS */}
-      {activeTab !== 'NOVA' && (
+      {activeTab !== 'NOVA' && activeTab !== 'EXTERNA' && (
         <div className="space-y-4">
           {/* Barra de Filtro e Busca */}
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3 shadow-sm">
@@ -9162,9 +9899,21 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                               Acautelada (Ativa)
                                             </span>
                                           )}
+                                          {cautela.isExternal && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-cyan-500/20 text-cyan-300 border-cyan-500/40">
+                                              Cautela Externa
+                                            </span>
+                                          )}
                                         </div>
                                         <p className="text-xs text-slate-400 mt-0.5">
-                                          Solicitante: <strong className="text-slate-200">{requesterInfo.name}</strong> <span className="font-mono text-slate-300">(MASP: {requesterInfo.masp})</span> • {requesterInfo.cargo}
+                                          {cautela.isExternal ? 'Recebedor Externo:' : 'Solicitante:'}{' '}
+                                          <strong className="text-slate-200">{requesterInfo.name}</strong>{' '}
+                                          <span className="font-mono text-slate-300">(MASP: {requesterInfo.masp})</span> • {requesterInfo.cargo}
+                                          {cautela.isExternal && (cautela.externalUnit || cautela.externalDepartment) && (
+                                            <span className="text-cyan-300/90">
+                                              {' '}• Origem: {[cautela.externalUnit, cautela.externalDepartment].filter(Boolean).join(' / ')}
+                                            </span>
+                                          )}
                                         </p>
                                       </div>
                                     </div>
@@ -10025,15 +10774,25 @@ export const ModuloCautelaArmas: React.FC<ModuloCautelaArmasProps> = ({
                                               {cautela.weaponCaliber || weapon?.caliber}
                                             </span>
                                           )}
+                                          {cautela.isExternal && (
+                                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase border bg-cyan-500/20 text-cyan-300 border-cyan-500/40">
+                                              Externa
+                                            </span>
+                                          )}
                                         </div>
 
                                         <p className="text-xs text-slate-300 mt-1">
-                                          Usuário da Cautela:{' '}
+                                          {cautela.isExternal ? 'Recebedor Externo:' : 'Usuário da Cautela:'}{' '}
                                           <strong className="text-slate-100">{requesterInfo.name}</strong>{' '}
                                           <span className="font-mono text-amber-300">
                                             (MASP: {requesterInfo.masp})
                                           </span>
                                           {requesterInfo.cargo ? ` • ${requesterInfo.cargo}` : ''}
+                                          {cautela.isExternal && (cautela.externalUnit || cautela.externalDepartment) && (
+                                            <span className="text-cyan-300/90">
+                                              {' '}• Origem: {[cautela.externalUnit, cautela.externalDepartment].filter(Boolean).join(' / ')}
+                                            </span>
+                                          )}
                                         </p>
                                       </div>
                                     </div>

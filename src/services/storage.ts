@@ -4454,6 +4454,9 @@ class StorageService {
       requesterMasp: payload.requesterMasp,
       requesterCargo: payload.requesterCargo,
       requesterPhone: payload.requesterPhone,
+      isExternal: Boolean(payload.isExternal),
+      externalDepartment: payload.externalDepartment,
+      externalUnit: payload.externalUnit,
       reason: payload.reason,
       authorizationNotes: payload.authorizationNotes || payload.notes,
       status: payload.directAuthorized ? 'AUTORIZADA' : 'PENDENTE',
@@ -4522,7 +4525,9 @@ class StorageService {
       weap.status = payload.directAuthorized ? 'Acautelada' : 'Cautela Pendente';
       if (payload.directAuthorized) {
         weap.previousVaultSpaceId = payload.vaultSpaceId || weap.vaultSpaceId;
-        (weap as any).locationNote = `Acautelada com ${payload.requesterName} (MASP: ${payload.requesterMasp})`;
+        (weap as any).locationNote = payload.isExternal
+          ? `Acautelada (Externa) com ${payload.requesterName} (MASP: ${payload.requesterMasp})`
+          : `Acautelada com ${payload.requesterName} (MASP: ${payload.requesterMasp})`;
       }
     }
 
@@ -4530,10 +4535,13 @@ class StorageService {
       const res = await fetch('/api/cautelas-armas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ ...payload, actor: payload.actor || this.state.currentUser })
       });
       const data = await res.json();
-      if (!res.ok) return { success: false, error: data.error };
+      if (!res.ok) {
+        await this.refreshFromServer();
+        return { success: false, error: data.error };
+      }
       if (data.id) {
         newCautela.id = data.id;
       }

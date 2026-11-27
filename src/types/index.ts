@@ -2005,6 +2005,9 @@ export interface CautelaArma {
   requesterMasp: string;
   requesterCargo?: string;
   requesterPhone?: string;
+  isExternal?: boolean;
+  externalDepartment?: string;
+  externalUnit?: string;
   reason?: string;
   requestDate: string;
   status: CautelaArmaStatus;

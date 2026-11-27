@@ -15990,6 +15990,33 @@ async function ensureCautelaReturnSchema(pool: any) {
       await pool.query('ALTER TABLE `ARMAS` ADD COLUMN `TIROS_DISPARADOS_ARMAS` INT NOT NULL DEFAULT 0');
     }
   } catch (_) {}
+  const ensureAcautelaCol = async (colName: string, ddl: string) => {
+    try {
+      const [cRows]: any = await pool.query(
+        `SELECT COUNT(*) as cnt FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ACAUTELAR_ARMAS' AND COLUMN_NAME = ?`,
+        [colName]
+      );
+      if (Number(cRows?.[0]?.cnt || 0) === 0) {
+        await pool.query(ddl);
+      }
+    } catch (_) {}
+  };
+  await ensureAcautelaCol(
+    'IS_EXTERNA_ACAUTELAR_ARMAS',
+    'ALTER TABLE `ACAUTELAR_ARMAS` ADD COLUMN `IS_EXTERNA_ACAUTELAR_ARMAS` TINYINT(1) NOT NULL DEFAULT 0 AFTER `REQUERENTE_TELEFONE_ACAUTELAR_ARMAS`'
+  );
+  await ensureAcautelaCol(
+    'REQUERENTE_DEPARTAMENTO_EXTERNO_ACAUTELAR_ARMAS',
+    'ALTER TABLE `ACAUTELAR_ARMAS` ADD COLUMN `REQUERENTE_DEPARTAMENTO_EXTERNO_ACAUTELAR_ARMAS` VARCHAR(180) DEFAULT NULL AFTER `IS_EXTERNA_ACAUTELAR_ARMAS`'
+  );
+  await ensureAcautelaCol(
+    'REQUERENTE_UNIDADE_EXTERNA_ACAUTELAR_ARMAS',
+    'ALTER TABLE `ACAUTELAR_ARMAS` ADD COLUMN `REQUERENTE_UNIDADE_EXTERNA_ACAUTELAR_ARMAS` VARCHAR(180) DEFAULT NULL AFTER `REQUERENTE_DEPARTAMENTO_EXTERNO_ACAUTELAR_ARMAS`'
+  );
+  try {
+    await pool.query('ALTER TABLE `ACAUTELAR_ARMAS` MODIFY COLUMN `REQUERENTE_CARGO_ACAUTELAR_ARMAS` VARCHAR(100) DEFAULT NULL');
+  } catch (_) {}
   cautelaReturnSchemaEnsured = true;
 }
 
@@ -16282,6 +16309,9 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         a.REQUERENTE_MASP_ACAUTELAR_ARMAS as requesterMasp,
         a.REQUERENTE_CARGO_ACAUTELAR_ARMAS as requesterCargo,
         a.REQUERENTE_TELEFONE_ACAUTELAR_ARMAS as requesterPhone,
+        a.IS_EXTERNA_ACAUTELAR_ARMAS as isExternal,
+        a.REQUERENTE_DEPARTAMENTO_EXTERNO_ACAUTELAR_ARMAS as externalDepartment,
+        a.REQUERENTE_UNIDADE_EXTERNA_ACAUTELAR_ARMAS as externalUnit,
         a.FINALIDADE_MOTIVO_ACAUTELAR_ARMAS as reason,
         a.DATA_SOLICITACAO_ACAUTELAR_ARMAS as requestDate,
         a.STATUS_ACAUTELAR_ARMAS as status,
@@ -16404,16 +16434,19 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
         ? 'DEVOLUCAO_PENDENTE'
         : r.status;
 
+      const isExtRow = Boolean(Number(r.isExternal || 0)) || String(r.requesterId || '').startsWith('ext-');
       const cleanedFromStored = parseUserFromWeaponNote(r.requesterName);
-      let finalReqName =
-        (r.dbUserName && !isPlaceholderRequesterName(r.dbUserName) ? String(r.dbUserName).trim() : '') ||
-        (!isPlaceholderRequesterName(cleanedFromStored.name) ? cleanedFromStored.name : '');
-      let finalReqMasp =
-        (r.dbUserMasp && !isPlaceholderRequesterMasp(r.dbUserMasp) ? String(r.dbUserMasp).trim() : '') ||
-        (!isPlaceholderRequesterMasp(r.requesterMasp)
-          ? String(r.requesterMasp).trim()
-          : (!isPlaceholderRequesterMasp(cleanedFromStored.masp) ? cleanedFromStored.masp : ''));
-      let finalReqCargo = r.dbUserCargo || r.requesterCargo || undefined;
+      let finalReqName = isExtRow
+        ? String(r.requesterName || '').trim()
+        : (r.dbUserName && !isPlaceholderRequesterName(r.dbUserName) ? String(r.dbUserName).trim() : '') ||
+          (!isPlaceholderRequesterName(cleanedFromStored.name) ? cleanedFromStored.name : '');
+      let finalReqMasp = isExtRow
+        ? String(r.requesterMasp || '').trim()
+        : (r.dbUserMasp && !isPlaceholderRequesterMasp(r.dbUserMasp) ? String(r.dbUserMasp).trim() : '') ||
+          (!isPlaceholderRequesterMasp(r.requesterMasp)
+            ? String(r.requesterMasp).trim()
+            : (!isPlaceholderRequesterMasp(cleanedFromStored.masp) ? cleanedFromStored.masp : ''));
+      let finalReqCargo = isExtRow ? (r.requesterCargo || undefined) : (r.dbUserCargo || r.requesterCargo || undefined);
 
       if ((!finalReqName || !finalReqMasp) && r.weaponLocationNote) {
         const parsedNote = parseUserFromWeaponNote(r.weaponLocationNote);
@@ -16498,6 +16531,9 @@ apiRouter.get('/cautelas-armas', async (req: Request, res: Response) => {
 
       mapped.push({
         ...cleanRow,
+        isExternal: isExtRow,
+        externalDepartment: r.externalDepartment ? String(r.externalDepartment) : undefined,
+        externalUnit: r.externalUnit ? String(r.externalUnit) : undefined,
         requesterName: finalReqName || r.requesterName || 'Usuário não identificado',
         requesterMasp: finalReqMasp || r.requesterMasp || 'N/I',
         requesterCargo: finalReqCargo,
@@ -16543,35 +16579,147 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
       requesterMasp,
       requesterCargo,
       requesterPhone,
+      isExternal,
+      externalDepartment,
+      externalUnit,
       reason,
       ammunition // optional ammo request in parallel: { caliberId, caliberName, quantity, tipoMunicao, loteMunicao, vaultSpaceId, reason, seraDevolvida }
     } = req.body;
 
-    if (!weaponId || !requesterId) {
-      return res.status(400).json({ error: 'Armamento e solicitante são obrigatórios.' });
-    }
-
     const pool = getPool();
+    await ensureCautelaReturnSchema(pool);
 
-    if (!requesterName || !requesterMasp) {
-      try {
-        const [uRows]: any = await pool.query(
-          'SELECT NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS, TELEFONE_USUARIOS FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
-          [requesterId]
-        );
-        if (uRows && uRows.length > 0) {
-          requesterName = requesterName || uRows[0].NOME_USUARIOS;
-          requesterMasp = requesterMasp || uRows[0].MASP_USUARIOS;
-          requesterCargo = requesterCargo || uRows[0].CARGO_USUARIOS;
-          requesterPhone = requesterPhone || uRows[0].TELEFONE_USUARIOS;
+    const isExternalFlag = Boolean(isExternal);
+    const isDirect = isExternalFlag || Boolean(req.body.directAuthorized || req.body.status === 'AUTORIZADA');
+    let armorer = req.body.armorer || req.body.actor || (isDirect ? { id: req.body.armorerId, name: req.body.armorerName, masp: req.body.armorerMasp } : null);
+
+    if (isExternalFlag) {
+      // Validação de perfil autorizador no servidor (apenas Armeiro, Administrador ou Geral)
+      const actorId = String(armorer?.id || req.body.armorerId || '').trim();
+      if (!actorId) {
+        return res.status(403).json({ error: 'Somente usuários com perfil Armeiro, Administrador ou Geral podem realizar cautela externa.' });
+      }
+      const [actorRows]: any = await pool.query(
+        'SELECT ID_USUARIOS, NOME_USUARIOS, MASP_USUARIOS, PERFIL_USUARIOS, ROLES_USUARIOS FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
+        [actorId]
+      );
+      if (!actorRows || actorRows.length === 0) {
+        return res.status(403).json({ error: 'Usuário autorizador não encontrado.' });
+      }
+      const actorDb = actorRows[0];
+      const primaryRole = String(actorDb.PERFIL_USUARIOS || '').trim().toLowerCase();
+      let roleList: string[] = primaryRole ? [primaryRole] : [];
+      if (actorDb.ROLES_USUARIOS) {
+        try {
+          const parsed = typeof actorDb.ROLES_USUARIOS === 'string' ? JSON.parse(actorDb.ROLES_USUARIOS) : actorDb.ROLES_USUARIOS;
+          if (Array.isArray(parsed)) {
+            roleList = roleList.concat(parsed.map((r: any) => String(r || '').trim().toLowerCase()));
+          }
+        } catch {
+          roleList = roleList.concat(String(actorDb.ROLES_USUARIOS).split(',').map(s => s.trim().toLowerCase()));
         }
-      } catch (_) {}
+      }
+      const canIssueExternal = roleList.some(r => r === 'armeiro' || r === 'administrador' || r === 'geral');
+      if (!canIssueExternal) {
+        return res.status(403).json({ error: 'Permissão negada: apenas Armeiro, Administrador ou Geral podem realizar cautela externa.' });
+      }
+      armorer = {
+        id: String(actorDb.ID_USUARIOS),
+        name: String(actorDb.NOME_USUARIOS || armorer?.name || ''),
+        masp: String(actorDb.MASP_USUARIOS || armorer?.masp || ''),
+        role: String(actorDb.PERFIL_USUARIOS || 'Armeiro')
+      };
+
+      requesterMasp = String(requesterMasp || '').trim().slice(0, 32);
+      requesterName = String(requesterName || '').trim().slice(0, 255);
+      externalDepartment = String(externalDepartment || '').trim().slice(0, 180);
+      externalUnit = String(externalUnit || '').trim().slice(0, 180);
+      requesterCargo = String(requesterCargo || '').trim().slice(0, 100);
+      reason = String(reason || '').trim();
+
+      if (!weaponId) {
+        return res.status(400).json({ error: 'Selecione um armamento disponível no cofre.' });
+      }
+      if (!requesterMasp || !requesterName || !externalDepartment || !externalUnit || !requesterCargo) {
+        return res.status(400).json({ error: 'Preencha todos os dados obrigatórios: MASP, Nome, Departamento, Unidade e Cargo.' });
+      }
+      if (!reason) {
+        return res.status(400).json({ error: 'Informe uma breve descrição do motivo da cautela.' });
+      }
+      if (reason.length > 250) {
+        return res.status(400).json({ error: 'A descrição do motivo da cautela deve ter no máximo 250 caracteres.' });
+      }
+
+      if (!requesterId || !String(requesterId).startsWith('ext-')) {
+        requesterId = `ext-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      }
+
+      // Garante que o armamento selecionado esteja efetivamente No Cofre
+      const [weapCheckRows]: any = await pool.query(
+        `SELECT ID_ARMAS, NUMERO_SERIE_ARMAS, MODELO_ARMAS, TIPO_ARMAS, CALIBRE_ARMAS,
+                COFRE_ID_ARMAS, DEPARTAMENTO_ID_ARMAS, UNIDADE_ID_ARMAS, STATUS_ARMAS
+           FROM ARMAS
+          WHERE ID_ARMAS = ?
+          LIMIT 1`,
+        [weaponId]
+      );
+      if (!weapCheckRows || weapCheckRows.length === 0) {
+        return res.status(404).json({ error: 'Armamento não encontrado.' });
+      }
+      const wRow = weapCheckRows[0];
+      const wStatus = String(wRow.STATUS_ARMAS || '').trim().toLowerCase();
+      if (wStatus !== 'no cofre' && wStatus !== 'nocofre') {
+        return res.status(409).json({ error: 'O armamento selecionado não está disponível "No Cofre" no momento.' });
+      }
+      weaponSerialNumber = wRow.NUMERO_SERIE_ARMAS || weaponSerialNumber;
+      weaponModel = wRow.MODELO_ARMAS || weaponModel;
+      weaponType = wRow.TIPO_ARMAS || weaponType;
+      weaponCaliber = wRow.CALIBRE_ARMAS || weaponCaliber;
+      vaultSpaceId = wRow.COFRE_ID_ARMAS || vaultSpaceId;
+      departmentId = wRow.DEPARTAMENTO_ID_ARMAS || departmentId;
+      unitId = wRow.UNIDADE_ID_ARMAS || unitId;
+
+      // Se houver munição associada, valida saldo positivo em estoque antes de gravar
+      if (ammunition && Number(ammunition.quantity) > 0) {
+        const ammoQtyCheck = parseInt(String(ammunition.quantity), 10);
+        if (!Number.isFinite(ammoQtyCheck) || ammoQtyCheck <= 0) {
+          return res.status(400).json({ error: 'Informe uma quantidade válida de munições.' });
+        }
+        const ammoVaultCheck = ammunition.vaultSpaceId || vaultSpaceId;
+        if (!ammoVaultCheck) {
+          return res.status(400).json({ error: 'Selecione o lote/cofre da munição a ser associada.' });
+        }
+        const [stockRows]: any = await pool.query(
+          'SELECT QUANTIDADE_ESTOQUE_MUNICOES FROM ESTOQUE_MUNICOES WHERE COFRE_ID_ESTOQUE_MUNICOES = ? AND (CALIBRE_ID_ESTOQUE_MUNICOES = ? OR ? IS NULL) LIMIT 1',
+          [ammoVaultCheck, ammunition.caliberId || null, ammunition.caliberId || null]
+        );
+        const saldoAtual = Number(stockRows?.[0]?.QUANTIDADE_ESTOQUE_MUNICOES ?? 0);
+        if (!stockRows || stockRows.length === 0 || saldoAtual < ammoQtyCheck) {
+          return res.status(409).json({ error: `Saldo insuficiente no lote selecionado (disponível: ${saldoAtual} un.).` });
+        }
+      }
+    } else {
+      if (!weaponId || !requesterId) {
+        return res.status(400).json({ error: 'Armamento e solicitante são obrigatórios.' });
+      }
+      if (!requesterName || !requesterMasp) {
+        try {
+          const [uRows]: any = await pool.query(
+            'SELECT NOME_USUARIOS, MASP_USUARIOS, CARGO_USUARIOS, TELEFONE_USUARIOS FROM USUARIOS WHERE ID_USUARIOS = ? LIMIT 1',
+            [requesterId]
+          );
+          if (uRows && uRows.length > 0) {
+            requesterName = requesterName || uRows[0].NOME_USUARIOS;
+            requesterMasp = requesterMasp || uRows[0].MASP_USUARIOS;
+            requesterCargo = requesterCargo || uRows[0].CARGO_USUARIOS;
+            requesterPhone = requesterPhone || uRows[0].TELEFONE_USUARIOS;
+          }
+        } catch (_) {}
+      }
     }
 
     const id = `caut-arma-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
     let ammoCautelaId: string | null = null;
-    const isDirect = Boolean(req.body.directAuthorized || req.body.status === 'AUTORIZADA');
-    const armorer = req.body.armorer || req.body.actor || (isDirect ? { id: req.body.armorerId, name: req.body.armorerName, masp: req.body.armorerMasp } : null);
 
     // Garante que uma solicitação pendente (ex.: policial selecionando apenas Modelo + Calibre)
     // sempre reserve uma unidade efetivamente "No Cofre", evitando colisão em pedidos simultâneos
@@ -16687,13 +16835,18 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
             FABRICANTE_MUNICAO, TIPO_MUNICAO, PESO_MUNICAO, LOTE_MUNICAO, ANO_FABRICACAO_MUNICAO, DESTINACAO_MUNICAO,
             TIPO_RESPONSAVEL_MOVIMENTACOES_MUNICOES, RESPONSAVEL_USUARIO_ID_MOVIMENTACOES_MUNICOES, RESPONSAVEL_NOME_MOVIMENTACOES_MUNICOES, RESPONSAVEL_MASP_MOVIMENTACOES_MUNICOES, 
             OBSERVACAO_MOVIMENTACOES_MUNICOES, USUARIO_ID_MOVIMENTACOES_MUNICOES, NOME_USUARIO_MOVIMENTACOES_MUNICOES, DATA_CRIACAO_MOVIMENTACOES_MUNICOES)
-           VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'SISTEMA', ?, ?, ?, ?, ?, ?, NOW())`,
+           VALUES (?, 'Saída', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
           [
             movId, ammunition.caliberId || 'padrao', ammoQty, departmentId || null, unitId || null, vId,
-            `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp})`,
+            isExternalFlag
+              ? `Cautela Externa de Munição - ${requesterName} (MASP ${requesterMasp}) - ${externalUnit} / ${externalDepartment}`
+              : `Cautela de Munição - Policial ${requesterName} (MASP ${requesterMasp})`,
             ammunition.fabricante || null, ammunition.tipoMunicao || null, ammunition.pesoMunicao || null, ammunition.loteMunicao || null, ammunition.anoFabricacao || null, ammunition.destinacao || null,
+            isExternalFlag ? 'EXTERNO' : 'SISTEMA',
             requesterId, requesterName, requesterMasp,
-            `Cautela direta autorizada pelo armeiro ${armorer?.name || ''}`,
+            isExternalFlag
+              ? `Cautela externa autorizada pelo armeiro ${armorer?.name || ''} — Motivo: ${reason}`
+              : `Cautela direta autorizada pelo armeiro ${armorer?.name || ''}`,
             armorer?.id || requesterId, armorer?.name || requesterName
           ]
         );
@@ -16708,11 +16861,13 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
         DEPARTAMENTO_ID_ACAUTELAR_ARMAS, UNIDADE_ID_ACAUTELAR_ARMAS,
         REQUERENTE_ID_ACAUTELAR_ARMAS, REQUERENTE_NOME_ACAUTELAR_ARMAS,
         REQUERENTE_MASP_ACAUTELAR_ARMAS, REQUERENTE_CARGO_ACAUTELAR_ARMAS,
-        REQUERENTE_TELEFONE_ACAUTELAR_ARMAS, FINALIDADE_MOTIVO_ACAUTELAR_ARMAS,
+        REQUERENTE_TELEFONE_ACAUTELAR_ARMAS, IS_EXTERNA_ACAUTELAR_ARMAS,
+        REQUERENTE_DEPARTAMENTO_EXTERNO_ACAUTELAR_ARMAS, REQUERENTE_UNIDADE_EXTERNA_ACAUTELAR_ARMAS,
+        FINALIDADE_MOTIVO_ACAUTELAR_ARMAS,
         DATA_SOLICITACAO_ACAUTELAR_ARMAS, STATUS_ACAUTELAR_ARMAS,
         ARMEIRO_ID_ACAUTELAR_ARMAS, ARMEIRO_NOME_ACAUTELAR_ARMAS, ARMEIRO_MASP_ACAUTELAR_ARMAS, DATA_AUTORIZACAO_ACAUTELAR_ARMAS,
         CAUTELA_MUNICAO_ID_ACAUTELAR_ARMAS, OBSERVACOES_AUTORIZACAO_ACAUTELAR_ARMAS, DATA_CRIACAO_ACAUTELAR_ARMAS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, ?, ?, NOW())
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ${isDirect ? 'NOW()' : 'NULL'}, ?, ?, NOW())
     `, [
       id,
       weaponId,
@@ -16729,6 +16884,9 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
       requesterMasp,
       requesterCargo || null,
       requesterPhone || null,
+      isExternalFlag ? 1 : 0,
+      isExternalFlag ? (externalDepartment || null) : null,
+      isExternalFlag ? (externalUnit || null) : null,
       reason || null,
       initialStatus,
       isDirect && armorer ? armorer.id : null,
@@ -16773,7 +16931,9 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
           vaultCode = vaultSpaceId;
         }
       }
-      const locationNote = `Acautelada com ${requesterName} (MASP: ${requesterMasp}) • Último cofre: ${vaultCode || 'N/A'}`;
+      const locationNote = isExternalFlag
+        ? `Acautelada (Externa) com ${requesterName} (MASP: ${requesterMasp}) • ${externalUnit} / ${externalDepartment} • Último cofre: ${vaultCode || 'N/A'}`
+        : `Acautelada com ${requesterName} (MASP: ${requesterMasp}) • Último cofre: ${vaultCode || 'N/A'}`;
       try {
         await pool.query(
           "UPDATE ARMAS SET STATUS_ARMAS = 'Acautelada', COFRE_ID_ARMAS = NULL, OBSERVACAO_LOCALIZACAO_ARMAS = ?, LOCAL_ANTERIOR_COFRE_ID_ARMAS = COALESCE(?, LOCAL_ANTERIOR_COFRE_ID_ARMAS) WHERE ID_ARMAS = ?",
@@ -16803,8 +16963,10 @@ apiRouter.post('/cautelas-armas', async (req: Request, res: Response) => {
 
     await insertAuditLog(
       'Armas',
-      isDirect ? 'Acautelamento Direto' : 'Solicitar',
-      `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela da'} arma ${weaponModel} Nº ${weaponSerialNumber} para ${requesterName} (MASP ${requesterMasp})`,
+      isExternalFlag ? 'Acautelamento Externo' : (isDirect ? 'Acautelamento Direto' : 'Solicitar'),
+      isExternalFlag
+        ? `Armeiro acautelou externamente arma ${weaponModel} Nº ${weaponSerialNumber} para ${requesterName} (MASP ${requesterMasp}, Cargo: ${requesterCargo}, ${externalUnit}/${externalDepartment})${ammoCautelaId ? ` com ${ammunition?.quantity} munições` : ''}`
+        : `${isDirect ? 'Armeiro acautelou diretamente' : 'Policial solicitou cautela da'} arma ${weaponModel} Nº ${weaponSerialNumber} para ${requesterName} (MASP ${requesterMasp})`,
       armorer || { id: requesterId, name: requesterName, masp: requesterMasp, role: 'Policial' } as any,
       req.ip
     );
