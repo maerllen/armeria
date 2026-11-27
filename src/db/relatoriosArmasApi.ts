@@ -10,10 +10,14 @@ import {
   generateSystemMunicoesPdf,
   generateSystemExplosivosPdf,
   generateSystemMateriaisPdf,
+  generateSystemSinopseOperacionalPdf,
   SystemArmaPdfRecord,
   SystemMunicaoPdfRecord,
   SystemExplosivoPdfRecord,
-  SystemMaterialPdfRecord
+  SystemMaterialPdfRecord,
+  SystemCatOpPdfRecord,
+  SystemPolicialOpPdfRecord,
+  SystemCanilOpPdfRecord
 } from './institutionalPdfTemplates';
 
 interface RelatoriosApiDeps {
@@ -324,7 +328,7 @@ function resolveWeaponReportSpec(raw?: string | null): WeaponReportSpec | null {
 function stripInteractiveUnitPrefix(raw: string): string {
   return normalizeKey(raw)
     .replace(
-      /^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|MUNICOES?|MUNICAO|MUN|EXPLOSIVOS?|EXPLOSIVO|EXP|MATERIAIS?|MATERIAL|MAT|CALIBRE|CAL|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i,
+      /^(?:FUZIS?|SUBMETRALHADORAS?|SUBMET|SMT|ESPINGARDAS?|ESP|MUNICOES?|MUNICAO|MUN|EXPLOSIVOS?|EXPLOSIVO|EXP|MATERIAIS?|MATERIAL|MAT|SINOPSE|OPERACIONAL|OPERACOES|OPERACAO|OP|HIST|CALIBRE|CAL|ARMAS?|UNIDADE|UNIT|RELATORIO)[_\-\s:]+/i,
       ''
     )
     .trim();
@@ -1754,6 +1758,419 @@ export function registerRelatoriosArmasApiRoutes(apiRouter: Router, deps: Relato
     ['/relatorios/materiais', '/relatorios/materiais/unidade', '/relatorios/materiais/por-unidade', '/relatorios/material'],
     (req: Request, res: Response) => handleAssetUnitReportRequest(req, res, 'materiais')
   );
+
+  // ============================================================================
+  // ENDPOINT DE RELATÓRIOS — SINOPSE OPERACIONAL (Make.com / WhatsApp)
+  // Mesmo documento do "Módulo Relatórios" -> "Relatório da unidade" -> "Imprimir Histórico" (Operações)
+  // ============================================================================
+  const handleSinopseOperacionalRequest = async (req: Request, res: Response) => {
+    const pool = getPool();
+    const clientIp = String(req.ip || req.socket?.remoteAddress || 'unknown');
+    const tipoRelatorioDb = 'SINOPSE_OPERACIONAL';
+
+    try {
+      await ensureRelatoriosApiSchema(pool);
+      void cleanupExpiredPdfFiles(pool);
+
+      // 1. Limite de requisições por IP
+      const ipLimit = checkRateLimit(ipRateBuckets, clientIp, RATE_LIMIT_MAX_PER_IP);
+      if (!ipLimit.allowed) {
+        res.setHeader('Retry-After', String(ipLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de requisições atingido. Tente novamente em ${ipLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const idRegistro = `rel-sinop-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
+      const rawUnidadeForLog = String(body.unidade || body.unidade_codigo || '').trim() || 'NAO_INFORMADA';
+      const rawCodigoForLog = String(body.unidade_codigo || body.unidade || '').trim() || 'NAO_INFORMADA';
+      const rawPhoneForLog =
+        normalizePhoneDigits(body.telefone_usuario || body.telefone || body.phone || body.from) || 'NAO_INFORMADO';
+      const rawSolicitacaoForLog = String(body.solicitacao_id || '').trim() || `make-${Date.now()}`;
+
+      // 2. Validar token de autenticação (Bearer, X-Make-Api-Key ou X-Api-Key)
+      const tokenCheck = await verifyRelatoriosApiToken(pool, req);
+      if (!tokenCheck.ok) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId: rawSolicitacaoForLog,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: rawUnidadeForLog,
+          unidadeCodigo: rawCodigoForLog,
+          telefoneUsuario: rawPhoneForLog,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          erroMensagem: tokenCheck.error || 'Token ausente ou inválido.',
+          ipOrigem: clientIp
+        });
+        return res.status(tokenCheck.status || 401).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: tokenCheck.codigo || 'TOKEN_INVALIDO',
+          mensagem: tokenCheck.error || 'Não autorizado.'
+        });
+      }
+
+      // 3. Validar corpo da requisição
+      const unidade = String(body.unidade || '').trim();
+      const unidadeCodigo = String(body.unidade_codigo || unidade || '').trim();
+      const telefoneRaw = String(body.telefone_usuario || body.telefone || body.phone || body.from || '').trim();
+      const telefoneDigits = normalizePhoneDigits(telefoneRaw);
+      const solicitacaoId =
+        String(body.solicitacao_id || '').trim().slice(0, 128) ||
+        `make-${Date.now()}-${crypto.randomBytes(3).toString('hex')}`;
+      const formato = String(body.formato || 'pdf').trim().toLowerCase() || 'pdf';
+      const dataHoraRaw = body.data_hora_solicitacao ? String(body.data_hora_solicitacao).trim() : '';
+
+      if (!unidade && !unidadeCodigo) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: 'NAO_INFORMADA',
+          unidadeCodigo: 'NAO_INFORMADA',
+          telefoneUsuario: telefoneDigits || 'NAO_INFORMADO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          erroMensagem: 'Campo unidade/unidade_codigo ausente na requisição.',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'CAMPOS_OBRIGATORIOS_AUSENTES',
+          mensagem: 'Informe o campo obrigatório "unidade" ou "unidade_codigo".'
+        });
+      }
+
+      if (telefoneDigits.length < 10 || telefoneDigits.length > 15) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits || 'INVALIDO',
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'TELEFONE_INVALIDO',
+          erroMensagem: 'Campo telefone_usuario ausente ou fora do padrão (10-15 dígitos).',
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'TELEFONE_INVALIDO',
+          mensagem: 'Informe "telefone_usuario" válido com DDD (ex: 5531999999999).'
+        });
+      }
+
+      if (formato !== 'pdf') {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao: new Date(),
+          erroCodigo: 'FORMATO_NAO_SUPORTADO',
+          erroMensagem: `Formato não suportado: ${formato}`,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'FORMATO_NAO_SUPORTADO',
+          mensagem: 'Formato não suportado. Utilize formato "pdf".'
+        });
+      }
+
+      let dataSolicitacao = new Date();
+      if (dataHoraRaw) {
+        const parsedDate = parseRequestDateTime(dataHoraRaw);
+        if (parsedDate) {
+          dataSolicitacao = parsedDate;
+        }
+      }
+
+      // Validar filtro de período solicitado
+      const periodResolution = resolveOperationalPeriodFilter(body, dataSolicitacao);
+      if ('codigo' in periodResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: periodResolution.codigo,
+          erroMensagem: periodResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(400).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: periodResolution.codigo,
+          mensagem: periodResolution.mensagem
+        });
+      }
+
+      const periodFilter = periodResolution.filter;
+
+      // Limite de requisições por telefone
+      const phoneLimit = checkRateLimit(phoneRateBuckets, telefoneDigits, RATE_LIMIT_MAX_PER_PHONE);
+      if (!phoneLimit.allowed) {
+        res.setHeader('Retry-After', String(phoneLimit.retryAfterSec));
+        return res.status(429).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'LIMITE_REQUISICOES_EXCEDIDO',
+          mensagem: `Limite de solicitações por usuário atingido. Tente novamente em ${phoneLimit.retryAfterSec} segundos.`
+        });
+      }
+
+      // 4. Identificar usuário no sistema Arsenal pelo telefone
+      const user = await resolveWhatsappUserContext(pool, telefoneDigits);
+      if (!user) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: 'USUARIO_NAO_AUTORIZADO',
+          erroMensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.',
+          ipOrigem: clientIp
+        });
+        return res.status(403).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'USUARIO_NAO_AUTORIZADO',
+          mensagem: 'Telefone não vinculado a um usuário ativo no sistema Arsenal.'
+        });
+      }
+
+      // 5. Validar unidade recebida e permissão de acesso
+      const unitResolution = await resolveUnitSelectionForUser(
+        pool,
+        user,
+        unidade,
+        unidadeCodigo,
+        'os relatórios operacionais'
+      );
+      if ('codigo' in unitResolution) {
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: unidade || unidadeCodigo,
+          unidadeCodigo,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          dataSolicitacao,
+          erroCodigo: unitResolution.codigo,
+          erroMensagem: unitResolution.mensagem,
+          ipOrigem: clientIp
+        });
+        return res.status(unitResolution.status).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: unitResolution.codigo,
+          mensagem: unitResolution.mensagem
+        });
+      }
+
+      const { selection } = unitResolution;
+
+      // 6. Consultar relatórios operacionais da(s) unidade(s) no período
+      const { catOps, polOps, canilOps } = await querySinopseOperacionalByUnitAndPeriod(
+        pool,
+        selection.unitIds,
+        periodFilter
+      );
+      const totalRegistros = catOps.length + polOps.length + canilOps.length;
+
+      if (totalRegistros === 0) {
+        const emptyMsg = 'Não existem registros de relatórios com os filtros selecionados.';
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'sem_registros',
+          totalRegistros: 0,
+          dataSolicitacao,
+          ipOrigem: clientIp
+        });
+
+        await insertAuditLog(
+          'WhatsApp / API Relatórios',
+          'Sinopse Operacional (Sem Registros)',
+          `Solicitação ${solicitacaoId} via Make.com — unidade ${selection.displayName} (${periodFilter.label}) — nenhum relatório operacional encontrado.`,
+          { id: user.id, name: user.name, masp: user.masp, role: user.role },
+          clientIp
+        );
+
+        return res.status(200).json({
+          sucesso: true,
+          status: 'sem_registros',
+          tipo_relatorio: 'sinopse_operacional',
+          unidade: selection.displayName,
+          unidade_codigo: selection.fileSlug,
+          periodo: periodFilter.key,
+          periodo_descricao: periodFilter.label,
+          data_inicio: periodFilter.startDateBr,
+          data_fim: periodFilter.endDateBr,
+          total_registros: 0,
+          mensagem: emptyMsg
+        });
+      }
+
+      // 7. Gerar PDF institucional idêntico ao "Imprimir Histórico" (Operações) e salvar em diretório confinado
+      const geradoEm = new Date();
+      const expiraEm = new Date(geradoEm.getTime() + PDF_RETENTION_HOURS * 60 * 60 * 1000);
+      const arquivoNome = `sinopse-operacional-${selection.fileSlug}-${periodFilter.fileSlug}.pdf`;
+      const arquivoToken = crypto.randomBytes(16).toString('hex');
+      const storedFilename = `${arquivoToken}__${arquivoNome}`;
+      const targetPath = path.resolve(PDF_STORAGE_DIR, storedFilename);
+
+      if (!targetPath.startsWith(PDF_STORAGE_DIR + path.sep)) {
+        throw new Error('Caminho de armazenamento inválido.');
+      }
+
+      let pdfBuffer: Buffer;
+      try {
+        pdfBuffer = await generateSystemSinopseOperacionalPdf({
+          departamentoLabel: selection.departmentName,
+          unidadeLabel: selection.displayName,
+          isTodosUnidades: selection.isTodos,
+          periodoLabel: periodFilter.label,
+          solicitacaoId,
+          geradoEm,
+          solicitanteNome: user.name,
+          solicitanteMasp: user.masp,
+          logoDataUri: selection.logoDataUri,
+          catOps,
+          polOps,
+          canilOps
+        });
+        fs.mkdirSync(PDF_STORAGE_DIR, { recursive: true });
+        fs.writeFileSync(targetPath, pdfBuffer);
+      } catch (pdfErr: any) {
+        console.error('[Relatorios API] Erro ao gerar/salvar PDF de Sinopse Operacional:', pdfErr?.message);
+        await logSolicitacaoDb(pool, {
+          idRegistro,
+          solicitacaoId,
+          tipoRelatorio: tipoRelatorioDb,
+          unidadeSolicitada: selection.displayName,
+          unidadeCodigo: selection.fileSlug,
+          unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+          telefoneUsuario: telefoneDigits,
+          usuario: user,
+          status: 'erro',
+          totalRegistros,
+          dataSolicitacao,
+          erroCodigo: 'ERRO_GERACAO_PDF',
+          erroMensagem: pdfErr?.message || 'Falha ao gerar PDF.',
+          ipOrigem: clientIp
+        });
+        return res.status(500).json({
+          sucesso: false,
+          status: 'erro',
+          codigo: 'ERRO_GERACAO_PDF',
+          mensagem: 'Não foi possível gerar o relatório.'
+        });
+      }
+
+      const baseUrl = resolvePublicHttpsBaseUrl(req, tokenCheck.callbackUrlPublica);
+      const arquivoUrl = `${baseUrl}/arquivos/${arquivoToken}/${encodeURIComponent(arquivoNome)}`;
+
+      await logSolicitacaoDb(pool, {
+        idRegistro,
+        solicitacaoId,
+        tipoRelatorio: tipoRelatorioDb,
+        unidadeSolicitada: selection.displayName,
+        unidadeCodigo: selection.fileSlug,
+        unidadeIdResolvida: selection.unitIds.length === 1 ? selection.unitIds[0] : null,
+        telefoneUsuario: telefoneDigits,
+        usuario: user,
+        status: 'concluido',
+        arquivoNome,
+        arquivoToken,
+        arquivoCaminho: storedFilename,
+        totalRegistros,
+        expiraEm,
+        dataSolicitacao,
+        ipOrigem: clientIp
+      });
+
+      await insertAuditLog(
+        'WhatsApp / API Relatórios',
+        'Gerar PDF Sinopse Operacional (Make.com)',
+        `Solicitação ${solicitacaoId}: ${totalRegistros} relatório(s) operacional(is) da unidade ${selection.displayName} (${periodFilter.label}) — arquivo ${arquivoNome}`,
+        { id: user.id, name: user.name, masp: user.masp, role: user.role },
+        clientIp
+      );
+
+      return res.status(200).json({
+        sucesso: true,
+        status: 'concluido',
+        tipo_relatorio: 'sinopse_operacional',
+        unidade: selection.displayName,
+        unidade_codigo: selection.fileSlug,
+        periodo: periodFilter.key,
+        periodo_descricao: periodFilter.label,
+        data_inicio: periodFilter.startDateBr,
+        data_fim: periodFilter.endDateBr,
+        solicitacao_id: solicitacaoId,
+        total_registros: totalRegistros,
+        total_operacoes_policial: polOps.length,
+        total_operacoes_cat: catOps.length,
+        total_operacoes_canil: canilOps.length,
+        arquivo_nome: arquivoNome,
+        arquivo_url: arquivoUrl,
+        gerado_em: geradoEm.toISOString(),
+        expira_em: expiraEm.toISOString()
+      });
+    } catch (err: any) {
+      console.error('[Relatorios API] Erro inesperado em Sinopse Operacional:', err?.message);
+      return res.status(500).json({
+        sucesso: false,
+        status: 'erro',
+        codigo: 'ERRO_GERACAO_PDF',
+        mensagem: 'Não foi possível gerar o relatório.'
+      });
+    }
+  };
+
+  // Endpoints de Sinopse Operacional (Relatórios -> Sinopse operacional)
+  apiRouter.post(
+    [
+      '/relatorios/sinopse-operacional',
+      '/relatorios/sinopse/operacional',
+      '/relatorios/operacoes',
+      '/relatorios/relatorios-operacionais'
+    ],
+    (req: Request, res: Response) => handleSinopseOperacionalRequest(req, res)
+  );
 }
 
 // ============================================================================
@@ -2155,6 +2572,840 @@ async function queryMateriaisByUnit(pool: any, unitIds: string[]): Promise<Syste
       observacoes: String(r.OBSERVACOES_MATERIAIS || '').trim()
     };
   });
+}
+
+// ============================================================================
+// AUXILIARES DE PERÍODO E CONSULTA DE SINOPSE OPERACIONAL (OPERAÇÕES)
+// ============================================================================
+type OperationalPeriodKey =
+  | 'ultima_permanencia'
+  | 'essa_semana'
+  | 'esse_mes'
+  | 'mes_passado'
+  | 'esse_ano'
+  | 'informar_periodo';
+
+interface ResolvedOperationalPeriodFilter {
+  key: OperationalPeriodKey;
+  mode: 'window_24h' | 'date_range';
+  startIsoDate: string; // YYYY-MM-DD
+  endIsoDate: string; // YYYY-MM-DD
+  startWallClock: string; // YYYY-MM-DD HH:MM:SS (Brasília)
+  endWallClock: string; // YYYY-MM-DD HH:MM:SS (Brasília)
+  startDateBr: string; // DD/MM/YYYY
+  endDateBr: string; // DD/MM/YYYY
+  label: string;
+  fileSlug: string;
+}
+
+interface BrasiliaParts {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  isoDate: string;
+  hhmm: string;
+  wallClock: string;
+  weekday: number; // 0 = Domingo .. 6 = Sábado
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+function formatUtcDateIso(d: Date): string {
+  return `${d.getUTCFullYear()}-${pad2(d.getUTCMonth() + 1)}-${pad2(d.getUTCDate())}`;
+}
+
+function formatIsoToBr(iso: string): string {
+  const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function getBrasiliaDateParts(date: Date): BrasiliaParts {
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Sao_Paulo',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    }).formatToParts(date);
+
+    const getNum = (type: string, fallback: number): number => {
+      const v = parts.find(p => p.type === type)?.value;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : fallback;
+    };
+
+    const year = getNum('year', date.getUTCFullYear());
+    const month = getNum('month', date.getUTCMonth() + 1);
+    const day = getNum('day', date.getUTCDate());
+    let hour = getNum('hour', date.getUTCHours());
+    if (hour === 24) hour = 0;
+    const minute = getNum('minute', date.getUTCMinutes());
+    const second = getNum('second', date.getUTCSeconds());
+    const isoDate = `${year}-${pad2(month)}-${pad2(day)}`;
+    const hhmm = `${pad2(hour)}:${pad2(minute)}`;
+    const wallClock = `${isoDate} ${hhmm}:${pad2(second)}`;
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return { year, month, day, hour, minute, second, isoDate, hhmm, wallClock, weekday };
+  } catch {
+    // Fallback UTC-3
+    const shifted = new Date(date.getTime() - 3 * 60 * 60 * 1000);
+    const year = shifted.getUTCFullYear();
+    const month = shifted.getUTCMonth() + 1;
+    const day = shifted.getUTCDate();
+    const hour = shifted.getUTCHours();
+    const minute = shifted.getUTCMinutes();
+    const second = shifted.getUTCSeconds();
+    const isoDate = `${year}-${pad2(month)}-${pad2(day)}`;
+    const hhmm = `${pad2(hour)}:${pad2(minute)}`;
+    const wallClock = `${isoDate} ${hhmm}:${pad2(second)}`;
+    const weekday = new Date(Date.UTC(year, month - 1, day)).getUTCDay();
+    return { year, month, day, hour, minute, second, isoDate, hhmm, wallClock, weekday };
+  }
+}
+
+function parseRequestDateTime(raw: string): Date | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+
+  // Aceita DD/MM/YYYY HH:mm(:ss)? em horário de Brasília
+  const brDt = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:[\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+  if (brDt) {
+    const day = Number(brDt[1]);
+    const month = Number(brDt[2]);
+    const year = Number(brDt[3]);
+    const hour = brDt[4] !== undefined ? Number(brDt[4]) : 12;
+    const minute = brDt[5] !== undefined ? Number(brDt[5]) : 0;
+    const second = brDt[6] !== undefined ? Number(brDt[6]) : 0;
+    const candidate = new Date(
+      `${year}-${pad2(month)}-${pad2(day)}T${pad2(hour)}:${pad2(minute)}:${pad2(second)}-03:00`
+    );
+    if (!Number.isNaN(candidate.getTime())) return candidate;
+  }
+
+  const parsed = new Date(s);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseStrictDateInputToIso(raw?: string | null): string | null {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+
+  // Formato brasileiro: DD/MM/AAAA (ou DD-MM-AAAA, DD.MM.AAAA)
+  const brMatch = s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})(?:[\sT].*)?$/);
+  if (brMatch) {
+    day = Number(brMatch[1]);
+    month = Number(brMatch[2]);
+    year = Number(brMatch[3]);
+  } else {
+    // Formato ISO: AAAA-MM-DD (ou AAAA/MM/DD)
+    const isoMatch = s.match(/^(\d{4})[\/.-](\d{1,2})[\/.-](\d{1,2})(?:[\sT].*)?$/);
+    if (!isoMatch) return null;
+    year = Number(isoMatch[1]);
+    month = Number(isoMatch[2]);
+    day = Number(isoMatch[3]);
+  }
+
+  if (year < 1900 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31) {
+    return null;
+  }
+
+  // Validação real de calendário (rejeita 31/02, 31/04, etc.)
+  const check = new Date(Date.UTC(year, month - 1, day));
+  if (
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() + 1 !== month ||
+    check.getUTCDate() !== day
+  ) {
+    return null;
+  }
+
+  return `${year}-${pad2(month)}-${pad2(day)}`;
+}
+
+function extractTwoDatesFromString(raw?: string | null): { start?: string; end?: string } {
+  const s = String(raw || '').trim();
+  if (!s) return {};
+  const matches = s.match(/(\d{1,2}[\/.-]\d{1,2}[\/.-]\d{4}|\d{4}[\/.-]\d{1,2}[\/.-]\d{1,2})/g);
+  if (!matches || matches.length < 2) return {};
+  return { start: matches[0], end: matches[1] };
+}
+
+function resolveOperationalPeriodFilter(
+  body: Record<string, any>,
+  dataSolicitacao: Date
+): { ok: true; filter: ResolvedOperationalPeriodFilter } | { ok: false; codigo: string; mensagem: string } {
+  const rawPeriodo = String(
+    body.periodo || body.filtro_periodo || body.tipo_periodo || body.periodo_codigo || ''
+  ).trim();
+  const rawStart = String(
+    body.data_inicio || body.data_inicial || body.inicio || body.start_date || ''
+  ).trim();
+  const rawEnd = String(
+    body.data_fim || body.data_final || body.fim || body.end_date || ''
+  ).trim();
+  const rawRange = String(
+    body.periodo_custom || body.periodo_informado || body.intervalo || ''
+  ).trim();
+
+  const compactPeriodo = normalizeKey(rawPeriodo)
+    .replace(/^(?:PERIODO|FILTRO|SINOPSE|OP)[_\-\s:]+/i, '')
+    .replace(/[^A-Z0-9]/g, '');
+
+  const nowBr = getBrasiliaDateParts(dataSolicitacao);
+
+  const hasExplicitDates = Boolean(rawStart || rawEnd || rawRange);
+  const isCustomPeriod =
+    compactPeriodo === 'INFORMARPERIODO' ||
+    compactPeriodo === 'PERIODO' ||
+    compactPeriodo === 'PERSONALIZADO' ||
+    compactPeriodo === 'CUSTOM' ||
+    compactPeriodo === 'INTERVALO' ||
+    compactPeriodo === 'DATAS' ||
+    (hasExplicitDates && !compactPeriodo) ||
+    Boolean(extractTwoDatesFromString(rawPeriodo).start);
+
+  if (isCustomPeriod) {
+    let startCandidate = rawStart;
+    let endCandidate = rawEnd;
+    if (!startCandidate || !endCandidate) {
+      const fromRange = extractTwoDatesFromString(rawRange || rawPeriodo);
+      if (!startCandidate && fromRange.start) startCandidate = fromRange.start;
+      if (!endCandidate && fromRange.end) endCandidate = fromRange.end;
+    }
+
+    const startIso = parseStrictDateInputToIso(startCandidate);
+    const endIso = parseStrictDateInputToIso(endCandidate);
+
+    if (!startIso || !endIso) {
+      return {
+        ok: false,
+        codigo: 'PERIODO_INVALIDO',
+        mensagem:
+          'Informe "data_inicio" e "data_fim" válidas no formato DD/MM/AAAA (ex: "01/11/2026" e "27/11/2026").'
+      };
+    }
+
+    if (startIso > endIso) {
+      return {
+        ok: false,
+        codigo: 'PERIODO_INVALIDO',
+        mensagem: 'A data de início não pode ser posterior à data final.'
+      };
+    }
+
+    const startBr = formatIsoToBr(startIso);
+    const endBr = formatIsoToBr(endIso);
+    return {
+      ok: true,
+      filter: {
+        key: 'informar_periodo',
+        mode: 'date_range',
+        startIsoDate: startIso,
+        endIsoDate: endIso,
+        startWallClock: `${startIso} 00:00:00`,
+        endWallClock: `${endIso} 23:59:59`,
+        startDateBr: startBr,
+        endDateBr: endBr,
+        label: `Período informado (${startBr} até ${endBr})`,
+        fileSlug: `${startIso}_a_${endIso}`
+      }
+    };
+  }
+
+  // 1. Última permanência (19h do dia anterior até a hora da solicitação)
+  if (
+    !compactPeriodo ||
+    compactPeriodo === 'ULTIMAPERMANENCIA' ||
+    compactPeriodo === 'ULTIMAS24H' ||
+    compactPeriodo === 'ULTIMA24H' ||
+    compactPeriodo === '24H' ||
+    compactPeriodo === 'PERMANENCIA'
+  ) {
+    const prevDayUtc = new Date(Date.UTC(nowBr.year, nowBr.month - 1, nowBr.day - 1));
+    const prevIso = formatUtcDateIso(prevDayUtc);
+    const prevBr = formatIsoToBr(prevIso);
+    const currBr = formatIsoToBr(nowBr.isoDate);
+    return {
+      ok: true,
+      filter: {
+        key: 'ultima_permanencia',
+        mode: 'window_24h',
+        startIsoDate: prevIso,
+        endIsoDate: nowBr.isoDate,
+        startWallClock: `${prevIso} 19:00:00`,
+        endWallClock: nowBr.wallClock,
+        startDateBr: prevBr,
+        endDateBr: currBr,
+        label: `Última permanência (${prevBr} 19:00 até ${currBr} ${nowBr.hhmm})`,
+        fileSlug: 'ultima-permanencia'
+      }
+    };
+  }
+
+  // 2. Essa semana (de domingo ao dia da solicitação)
+  if (
+    compactPeriodo === 'ESSASEMANA' ||
+    compactPeriodo === 'ESTASEMANA' ||
+    compactPeriodo === 'SEMANA' ||
+    compactPeriodo === 'SEMANAATUAL' ||
+    compactPeriodo === 'SEMANAL'
+  ) {
+    const sundayUtc = new Date(Date.UTC(nowBr.year, nowBr.month - 1, nowBr.day - nowBr.weekday));
+    const startIso = formatUtcDateIso(sundayUtc);
+    const endIso = nowBr.isoDate;
+    const startBr = formatIsoToBr(startIso);
+    const endBr = formatIsoToBr(endIso);
+    return {
+      ok: true,
+      filter: {
+        key: 'essa_semana',
+        mode: 'date_range',
+        startIsoDate: startIso,
+        endIsoDate: endIso,
+        startWallClock: `${startIso} 00:00:00`,
+        endWallClock: nowBr.wallClock,
+        startDateBr: startBr,
+        endDateBr: endBr,
+        label: `Essa semana (${startBr} até ${endBr})`,
+        fileSlug: 'essa-semana'
+      }
+    };
+  }
+
+  // 3. Esse mês (do dia 01 ao dia atual do mês da solicitação)
+  if (
+    compactPeriodo === 'ESSEMES' ||
+    compactPeriodo === 'ESTEMES' ||
+    compactPeriodo === 'MES' ||
+    compactPeriodo === 'MESATUAL' ||
+    compactPeriodo === 'MENSAL'
+  ) {
+    const startIso = `${nowBr.year}-${pad2(nowBr.month)}-01`;
+    const endIso = nowBr.isoDate;
+    const startBr = formatIsoToBr(startIso);
+    const endBr = formatIsoToBr(endIso);
+    return {
+      ok: true,
+      filter: {
+        key: 'esse_mes',
+        mode: 'date_range',
+        startIsoDate: startIso,
+        endIsoDate: endIso,
+        startWallClock: `${startIso} 00:00:00`,
+        endWallClock: nowBr.wallClock,
+        startDateBr: startBr,
+        endDateBr: endBr,
+        label: `Esse mês (${startBr} até ${endBr})`,
+        fileSlug: 'esse-mes'
+      }
+    };
+  }
+
+  // 4. Mês passado (todo o mês anterior à solicitação)
+  if (
+    compactPeriodo === 'MESPASSADO' ||
+    compactPeriodo === 'MESANTERIOR' ||
+    compactPeriodo === 'ULTIMOMES'
+  ) {
+    const prevMonthStartUtc = new Date(Date.UTC(nowBr.year, nowBr.month - 2, 1));
+    const prevMonthEndUtc = new Date(Date.UTC(nowBr.year, nowBr.month - 1, 0));
+    const startIso = formatUtcDateIso(prevMonthStartUtc);
+    const endIso = formatUtcDateIso(prevMonthEndUtc);
+    const startBr = formatIsoToBr(startIso);
+    const endBr = formatIsoToBr(endIso);
+    return {
+      ok: true,
+      filter: {
+        key: 'mes_passado',
+        mode: 'date_range',
+        startIsoDate: startIso,
+        endIsoDate: endIso,
+        startWallClock: `${startIso} 00:00:00`,
+        endWallClock: `${endIso} 23:59:59`,
+        startDateBr: startBr,
+        endDateBr: endBr,
+        label: `Mês passado (${startBr} até ${endBr})`,
+        fileSlug: 'mes-passado'
+      }
+    };
+  }
+
+  // 5. Esse ano (01/01 do ano corrente até a data atual)
+  if (
+    compactPeriodo === 'ESSEANO' ||
+    compactPeriodo === 'ESTEANO' ||
+    compactPeriodo === 'ANO' ||
+    compactPeriodo === 'ANOATUAL' ||
+    compactPeriodo === 'ANUAL'
+  ) {
+    const startIso = `${nowBr.year}-01-01`;
+    const endIso = nowBr.isoDate;
+    const startBr = formatIsoToBr(startIso);
+    const endBr = formatIsoToBr(endIso);
+    return {
+      ok: true,
+      filter: {
+        key: 'esse_ano',
+        mode: 'date_range',
+        startIsoDate: startIso,
+        endIsoDate: endIso,
+        startWallClock: `${startIso} 00:00:00`,
+        endWallClock: nowBr.wallClock,
+        startDateBr: startBr,
+        endDateBr: endBr,
+        label: `Esse ano (${startBr} até ${endBr})`,
+        fileSlug: 'esse-ano'
+      }
+    };
+  }
+
+  return {
+    ok: false,
+    codigo: 'PERIODO_INVALIDO',
+    mensagem:
+      'Período inválido. Utilize: "ultima_permanencia", "essa_semana", "esse_mes", "mes_passado", "esse_ano" ou "informar_periodo" (com data_inicio e data_fim em DD/MM/AAAA).'
+  };
+}
+
+function safeParseJsonArray(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'string') return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function safeParseJsonObject(raw: any): Record<string, any> {
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) return raw;
+  if (!raw || typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function formatPolOpMandadoPrisao(mp: any): string {
+  if (!mp?.ativo) return '';
+  if (typeof mp.quantidadeAlvos === 'number' && mp.quantidadeAlvos > 0) {
+    const alvos = mp.quantidadeAlvos;
+    const presos = typeof mp.quantidadePresos === 'number' ? mp.quantidadePresos : mp.foragidoPreso ? alvos : 0;
+    const foragidos = Math.max(0, alvos - presos);
+    const presosTxt = `${presos} ${presos === 1 ? 'preso' : 'presos'}`;
+    if (foragidos === 0) return `Alvos: ${alvos} - ${presosTxt} (todos presos)`;
+    const foragTxt = `${foragidos} ${foragidos === 1 ? 'permanece foragido' : 'permanecem foragidos'}`;
+    let extra = '';
+    if (mp.foragidoNoLocalChegada) {
+      const fug = mp.quantidadeFugiram || foragidos;
+      extra = ` - No local na chegada: SIM (${fug} ${fug === 1 ? 'fugiu' : 'fugiram'}${
+        mp.descricaoFuga ? `: ${mp.descricaoFuga}` : ''
+      })`;
+    } else if (mp.foragidoNoLocalChegada === false) {
+      extra = ' - No local na chegada: NAO';
+    }
+    return `Alvos: ${alvos} - ${presosTxt} - ${foragTxt}${extra}`;
+  }
+  return `Foragido preso: ${mp.foragidoPreso ? 'SIM' : 'NAO'}`;
+}
+
+function formatPolOpMandadoBusca(mb: any): string {
+  if (!mb?.ativo) return '';
+  if (!mb.materialArrecadado) return 'Material arrecadado: NAO';
+  const partes: string[] = [];
+  for (const m of Array.isArray(mb.materiais) ? mb.materiais : []) {
+    if (m === 'ARMA') {
+      const list = (Array.isArray(mb.armasArrecadadas) ? mb.armasArrecadadas : []).map(
+        (a: any) => `${a.quantidade} ${a.tipo}`
+      );
+      partes.push(list.length > 0 ? `ARMA (${list.join(', ')})` : 'ARMA');
+    } else if (m === 'DROGA') {
+      const list = (Array.isArray(mb.drogasArrecadadas) ? mb.drogasArrecadadas : []).map(
+        (d: any) => `${d.quantidade} ${d.unidade === 't' ? 't' : 'kg'} de ${d.tipo}`
+      );
+      partes.push(list.length > 0 ? `DROGA (${list.join(', ')})` : 'DROGA');
+    } else if (m === 'VEÍCULOS' || m === 'VEICULOS') {
+      const list = (Array.isArray(mb.veiculosArrecadados) ? mb.veiculosArrecadados : []).map(
+        (v: any) => `${v.quantidade} ${v.tipo}`
+      );
+      partes.push(list.length > 0 ? `VEICULOS (${list.join(', ')})` : 'VEICULOS');
+    } else if (m === 'OUTROS') {
+      partes.push(mb.outrosDetalhes ? `OUTROS (${mb.outrosDetalhes})` : 'OUTROS');
+    } else {
+      partes.push(String(m));
+    }
+  }
+  return partes.length > 0 ? `Material arrecadado: SIM - ${partes.join(', ')}` : 'Material arrecadado: SIM';
+}
+
+function formatPolOpCrise(gc: any): string {
+  if (!gc?.ativo) return '';
+  if (gc.tipo === 'SUICÍDIO' || gc.tipo === 'SUICIDIO') {
+    const consumado = gc.suicidioConsumado ? 'SIM' : 'NAO';
+    const atuacao = gc.atuacaoAdotada
+      ? ` - Atuacao adotada: ${gc.atuacaoAdotada}${
+          gc.atuacaoAdotada === 'Outros' && gc.atuacaoOutrosDescricao ? ` (${gc.atuacaoOutrosDescricao})` : ''
+        }`
+      : '';
+    return `Tipo: SUICIDIO - Consumado: ${consumado}${atuacao}`;
+  }
+  return `Tipo: ${gc.tipo || 'OUTROS'}${gc.outrosDetalhes ? ` (${gc.outrosDetalhes})` : ''}`;
+}
+
+function normalizeHHMM(raw?: string | null): string {
+  const s = String(raw || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '00:00';
+  return `${pad2(Number(m[1]))}:${pad2(Number(m[2]))}`;
+}
+
+function matchesPeriodRecord(
+  dataOperacao: string,
+  horaOperacao: string,
+  dataCriacao: any,
+  period: ResolvedOperationalPeriodFilter
+): boolean {
+  const isoDay = String(dataOperacao || '').trim().slice(0, 10);
+  if (period.mode === 'date_range') {
+    return isoDay >= period.startIsoDate && isoDay <= period.endIsoDate;
+  }
+
+  // Modo window_24h (Última permanência: das 19:00 do dia anterior até a hora da solicitação)
+  const opWall = `${isoDay} ${normalizeHHMM(horaOperacao)}:00`;
+  if (isoDay.length === 10 && opWall >= period.startWallClock && opWall <= period.endWallClock) {
+    return true;
+  }
+
+  if (dataCriacao) {
+    const createdDate = new Date(dataCriacao);
+    if (!Number.isNaN(createdDate.getTime())) {
+      const createdBr = getBrasiliaDateParts(createdDate).wallClock;
+      if (createdBr >= period.startWallClock && createdBr <= period.endWallClock) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+async function querySinopseOperacionalByUnitAndPeriod(
+  pool: any,
+  unitIds: string[],
+  period: ResolvedOperationalPeriodFilter
+): Promise<{
+  catOps: SystemCatOpPdfRecord[];
+  polOps: SystemPolicialOpPdfRecord[];
+  canilOps: SystemCanilOpPdfRecord[];
+}> {
+  const unitClauseSql =
+    unitIds.length > 0 ? ` AND r.UNIDADE_ID IN (${unitIds.map(() => '?').join(', ')})` : '';
+  const windowStartUtc = new Date(`${period.startIsoDate}T19:00:00-03:00`);
+
+  const buildDateFilter = (): { sql: string; params: any[] } => {
+    if (period.mode === 'date_range') {
+      return {
+        sql: ' AND r.DATA_OPERACAO >= ? AND r.DATA_OPERACAO <= ?',
+        params: [period.startIsoDate, period.endIsoDate]
+      };
+    }
+    return {
+      sql: ' AND ((r.DATA_OPERACAO >= ? AND r.DATA_OPERACAO <= ?) OR r.DATA_CRIACAO >= ?)',
+      params: [period.startIsoDate, period.endIsoDate, windowStartUtc]
+    };
+  };
+
+  const df = buildDateFilter();
+
+  // 1. RELATORIOS_OPERACOES_CAT
+  let catOps: SystemCatOpPdfRecord[] = [];
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT
+        r.ID_REL_OP_CAT,
+        r.DATA_OPERACAO,
+        r.HORARIO_DECOLAGEM,
+        r.HORARIO_VOO_OPERACAO,
+        r.ESTADO_OPERACAO,
+        r.MUNICIPIO_OPERACAO,
+        r.APENAS_UM_MUNICIPIO,
+        r.OUTROS_MUNICIPIOS_JSON,
+        r.APOIO_OUTRO_DEPARTAMENTO,
+        r.DEPARTAMENTOS_APOIO_JSON,
+        r.COM_EMPREGO_AERONAVE,
+        r.TIPO_VOO,
+        r.TIPO_VOO_OUTROS_DESC,
+        r.AERONAVES_JSON,
+        r.TRIPULANTES_OPERACIONAIS_JSON,
+        r.VIATURAS_JSON,
+        r.EQUIPE_SOLO_JSON,
+        r.SINOPSE_VOO,
+        r.TEVE_DISPAROS_CAT,
+        r.DISPAROS_CAT_JSON,
+        r.TEVE_OBITO,
+        r.QTD_OBITOS,
+        r.DATA_CRIACAO,
+        COALESCE(u.NOME_UNIDADES, r.UNIDADE_NOME, 'CAT') AS UNIDADE_FINAL
+      FROM RELATORIOS_OPERACOES_CAT r
+      LEFT JOIN UNIDADES u ON u.ID_UNIDADES = r.UNIDADE_ID
+      WHERE 1=1${unitClauseSql}${df.sql}
+      ORDER BY r.DATA_OPERACAO DESC, r.HORARIO_DECOLAGEM DESC, r.DATA_CRIACAO DESC`,
+      [...unitIds, ...df.params]
+    );
+
+    catOps = (rows || [])
+      .filter((r: any) =>
+        matchesPeriodRecord(
+          r.DATA_OPERACAO,
+          r.HORARIO_DECOLAGEM || r.HORARIO_VOO_OPERACAO || '00:00',
+          r.DATA_CRIACAO,
+          period
+        )
+      )
+      .map((r: any) => {
+        const disparos = safeParseJsonArray(r.DISPAROS_CAT_JSON);
+        const totalDisparosCat = disparos.reduce(
+          (acc, d) => acc + Number(d?.quantidadeTiros || 0),
+          0
+        );
+        const tipoVooRaw = String(r.TIPO_VOO || '').trim();
+        const tipoVoo =
+          tipoVooRaw.toUpperCase() === 'OUTROS' && r.TIPO_VOO_OUTROS_DESC
+            ? `Outros: ${String(r.TIPO_VOO_OUTROS_DESC).trim()}`
+            : tipoVooRaw;
+
+        return {
+          id: String(r.ID_REL_OP_CAT || ''),
+          unidadeNome: String(r.UNIDADE_FINAL || 'CAT'),
+          dataOperacao: String(r.DATA_OPERACAO || ''),
+          horarioDecolagem: String(r.HORARIO_DECOLAGEM || ''),
+          horarioVooOperacao: String(r.HORARIO_VOO_OPERACAO || ''),
+          estadoOperacao: String(r.ESTADO_OPERACAO || 'MG'),
+          municipioOperacao: String(r.MUNICIPIO_OPERACAO || ''),
+          apenasUmMunicipio: Boolean(Number(r.APENAS_UM_MUNICIPIO ?? 1)),
+          outrosMunicipios: safeParseJsonArray(r.OUTROS_MUNICIPIOS_JSON).map((m: any) => ({
+            municipio: String(m?.municipio || ''),
+            uf: String(m?.uf || '')
+          })),
+          apoioOutroDepartamento: Boolean(Number(r.APOIO_OUTRO_DEPARTAMENTO || 0)),
+          departamentosApoio: safeParseJsonArray(r.DEPARTAMENTOS_APOIO_JSON).map((d: any) => String(d || '')).filter(Boolean),
+          comEmpregoAeronave: Boolean(Number(r.COM_EMPREGO_AERONAVE ?? 1)),
+          tipoVoo,
+          aeronaves: safeParseJsonArray(r.AERONAVES_JSON).map((a: any) => ({
+            tipo: String(a?.tipo || ''),
+            prefixo: String(a?.prefixo || ''),
+            horasVoo: String(a?.horasVoo || '00:00'),
+            pilotoNome: String(a?.pilotoNome || ''),
+            copilotoNome: String(a?.copilotoNome || '')
+          })),
+          tripulantesOperacionais: safeParseJsonArray(r.TRIPULANTES_OPERACIONAIS_JSON)
+            .map((t: any) => ({ name: String(t?.name || t?.nome || '') }))
+            .filter((t: any) => Boolean(t.name)),
+          viaturas: safeParseJsonArray(r.VIATURAS_JSON).map((v: any) => ({
+            placa: String(v?.placa || ''),
+            descricao: String(v?.descricao || ''),
+            operadores: safeParseJsonArray(v?.operadores)
+              .map((o: any) => ({ name: String(o?.name || o?.nome || '') }))
+              .filter((o: any) => Boolean(o.name))
+          })),
+          equipeSolo: safeParseJsonArray(r.EQUIPE_SOLO_JSON)
+            .map((s: any) => ({ name: String(s?.name || s?.nome || '') }))
+            .filter((s: any) => Boolean(s.name)),
+          sinopseVoo: String(r.SINOPSE_VOO || ''),
+          teveDisparosCat: Boolean(Number(r.TEVE_DISPAROS_CAT || 0)),
+          totalDisparosCat,
+          teveObito: Boolean(Number(r.TEVE_OBITO || 0)),
+          quantidadeObitos: Number(r.QTD_OBITOS || 0)
+        };
+      });
+  } catch (err: any) {
+    console.warn('[Relatorios API] Aviso ao consultar RELATORIOS_OPERACOES_CAT:', err?.message);
+  }
+
+  // 2. RELATORIOS_OPERACOES_POLICIAL
+  let polOps: SystemPolicialOpPdfRecord[] = [];
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT
+        r.ID_REL_OP_POL,
+        r.DATA_OPERACAO,
+        r.HORA_OPERACAO,
+        r.ESTADO_OPERACAO,
+        r.MUNICIPIO_OPERACAO,
+        r.APENAS_UM_MUNICIPIO,
+        r.OUTROS_MUNICIPIOS_JSON,
+        r.TIPO_ATENDIMENTO,
+        r.ACIONAMENTO_VIA,
+        r.ACIONAMENTO_OUTROS_DESC,
+        r.DEPARTAMENTOS_APOIO_JSON,
+        r.VIATURAS_JSON,
+        r.OPERADORES_JSON,
+        r.CRIADOR_NOME,
+        r.SINOPSE,
+        r.DETALHES_ADICIONAIS_JSON,
+        r.HOUVE_OBITO,
+        r.QUANTIDADE_OBITOS,
+        r.DATA_CRIACAO,
+        COALESCE(u.NOME_UNIDADES, r.UNIDADE_NOME, 'Sem Unidade') AS UNIDADE_FINAL
+      FROM RELATORIOS_OPERACOES_POLICIAL r
+      LEFT JOIN UNIDADES u ON u.ID_UNIDADES = r.UNIDADE_ID
+      WHERE 1=1${unitClauseSql}${df.sql}
+      ORDER BY r.DATA_OPERACAO DESC, r.HORA_OPERACAO DESC, r.DATA_CRIACAO DESC`,
+      [...unitIds, ...df.params]
+    );
+
+    polOps = (rows || [])
+      .filter((r: any) =>
+        matchesPeriodRecord(r.DATA_OPERACAO, r.HORA_OPERACAO || '00:00', r.DATA_CRIACAO, period)
+      )
+      .map((r: any) => {
+        const det = safeParseJsonObject(r.DETALHES_ADICIONAIS_JSON);
+        const extras: string[] = [];
+        const mpTxt = formatPolOpMandadoPrisao(det.mandadoPrisao);
+        if (mpTxt) extras.push(`Mandado de Prisao: ${mpTxt}`);
+        const mbTxt = formatPolOpMandadoBusca(det.mandadoBusca);
+        if (mbTxt) extras.push(`Mandado de Busca: ${mbTxt}`);
+        const gcTxt = formatPolOpCrise(det.gerenciamentoCrise);
+        if (gcTxt) extras.push(`Crise: ${gcTxt}`);
+        if (Boolean(Number(r.HOUVE_OBITO || 0))) {
+          extras.push(`Obitos: ${Number(r.QUANTIDADE_OBITOS || 1)}`);
+        }
+
+        const acViaRaw = String(r.ACIONAMENTO_VIA || '').trim();
+        const acionamentoVia =
+          acViaRaw.toUpperCase() === 'OUTROS' && r.ACIONAMENTO_OUTROS_DESC
+            ? `Outros (${String(r.ACIONAMENTO_OUTROS_DESC).trim()})`
+            : acViaRaw;
+
+        return {
+          id: String(r.ID_REL_OP_POL || ''),
+          unidadeNome: String(r.UNIDADE_FINAL || 'Sem Unidade'),
+          dataOperacao: String(r.DATA_OPERACAO || ''),
+          horarioOperacao: String(r.HORA_OPERACAO || ''),
+          estadoOperacao: String(r.ESTADO_OPERACAO || 'MG'),
+          municipioOperacao: String(r.MUNICIPIO_OPERACAO || ''),
+          apenasUmMunicipio: Boolean(Number(r.APENAS_UM_MUNICIPIO ?? 1)),
+          outrosMunicipios: safeParseJsonArray(r.OUTROS_MUNICIPIOS_JSON).map((m: any) => ({
+            municipio: String(m?.municipio || ''),
+            uf: String(m?.uf || '')
+          })),
+          tipoAtendimento: String(r.TIPO_ATENDIMENTO || ''),
+          acionamentoVia,
+          departamentosApoio: safeParseJsonArray(r.DEPARTAMENTOS_APOIO_JSON).map((d: any) => String(d || '')).filter(Boolean),
+          viaturas: safeParseJsonArray(r.VIATURAS_JSON).map((v: any) => ({
+            placa: String(v?.placa || ''),
+            descricao: String(v?.descricao || '')
+          })),
+          operadores: safeParseJsonArray(r.OPERADORES_JSON)
+            .map((o: any) => ({
+              name: String(o?.name || o?.nome || ''),
+              masp: String(o?.masp || '')
+            }))
+            .filter((o: any) => Boolean(o.name)),
+          criadorNome: String(r.CRIADOR_NOME || ''),
+          sinopse: String(r.SINOPSE || ''),
+          detalhesExtras: extras
+        };
+      });
+  } catch (err: any) {
+    console.warn('[Relatorios API] Aviso ao consultar RELATORIOS_OPERACOES_POLICIAL:', err?.message);
+  }
+
+  // 3. RELATORIOS_OPERACOES_CANIL (COC / Canil K9)
+  let canilOps: SystemCanilOpPdfRecord[] = [];
+  try {
+    const [rows]: any = await pool.query(
+      `SELECT
+        r.ID_REL_OPERACAO,
+        r.DATA_OPERACAO,
+        r.HORA_OPERACAO,
+        r.ESTADO_OPERACAO,
+        r.COMARCA,
+        r.SOLICITACAO_TIPO,
+        r.SOLICITACAO_OUTROS_DETALHES,
+        r.APOIO_OUTRO_DEPARTAMENTO,
+        r.DEPARTAMENTOS_APOIO_JSON,
+        r.MATERIAL_ENCONTRADO,
+        r.MATERIAIS_ENCONTRADOS_JSON,
+        r.OPERADORES_JSON,
+        r.VIATURAS_JSON,
+        r.DETALHAMENTO,
+        r.CRIADOR_NOME,
+        r.DATA_CRIACAO,
+        COALESCE(u.NOME_UNIDADES, 'COC') AS UNIDADE_FINAL
+      FROM RELATORIOS_OPERACOES_CANIL r
+      LEFT JOIN UNIDADES u ON u.ID_UNIDADES = r.UNIDADE_ID
+      WHERE 1=1${unitClauseSql}${df.sql}
+      ORDER BY r.DATA_OPERACAO DESC, r.HORA_OPERACAO DESC, r.DATA_CRIACAO DESC`,
+      [...unitIds, ...df.params]
+    );
+
+    canilOps = (rows || [])
+      .filter((r: any) =>
+        matchesPeriodRecord(r.DATA_OPERACAO, r.HORA_OPERACAO || '00:00', r.DATA_CRIACAO, period)
+      )
+      .map((r: any) => {
+        const solTipo = String(r.SOLICITACAO_TIPO || '').trim();
+        const solicitacaoTexto =
+          solTipo === 'Outros' && r.SOLICITACAO_OUTROS_DETALHES
+            ? `Outros: ${String(r.SOLICITACAO_OUTROS_DETALHES).trim()}`
+            : solTipo;
+
+        return {
+          id: String(r.ID_REL_OPERACAO || ''),
+          unidadeNome: String(r.UNIDADE_FINAL || 'COC'),
+          dataOperacao: String(r.DATA_OPERACAO || ''),
+          horaOperacao: String(r.HORA_OPERACAO || ''),
+          estadoOperacao: String(r.ESTADO_OPERACAO || 'MG'),
+          comarca: String(r.COMARCA || ''),
+          solicitacaoTexto,
+          apoioOutroDepartamento: Boolean(Number(r.APOIO_OUTRO_DEPARTAMENTO || 0)),
+          departamentosApoio: safeParseJsonArray(r.DEPARTAMENTOS_APOIO_JSON).map((d: any) => String(d || '')).filter(Boolean),
+          viaturas: safeParseJsonArray(r.VIATURAS_JSON).map((v: any) => ({
+            placa: String(v?.placa || ''),
+            descricao: String(v?.descricao || '')
+          })),
+          materialEncontrado: Boolean(Number(r.MATERIAL_ENCONTRADO || 0)),
+          materiaisEncontrados: safeParseJsonArray(r.MATERIAIS_ENCONTRADOS_JSON).map((m: any) => ({
+            tipo: String(m?.tipo || ''),
+            cachorros: safeParseJsonArray(m?.cachorros)
+              .map((c: any) => String(typeof c === 'string' ? c : c?.nome || c?.name || ''))
+              .filter(Boolean)
+          })),
+          operadores: safeParseJsonArray(r.OPERADORES_JSON)
+            .map((o: any) => ({
+              name: String(o?.name || o?.nome || ''),
+              cachorros: safeParseJsonArray(o?.cachorros)
+                .map((c: any) => String(typeof c === 'string' ? c : c?.nome || c?.name || ''))
+                .filter(Boolean)
+            }))
+            .filter((o: any) => Boolean(o.name)),
+          criadorNome: String(r.CRIADOR_NOME || ''),
+          detalhamento: String(r.DETALHAMENTO || '')
+        };
+      });
+  } catch (err: any) {
+    console.warn('[Relatorios API] Aviso ao consultar RELATORIOS_OPERACOES_CANIL:', err?.message);
+  }
+
+  return { catOps, polOps, canilOps };
 }
 
 // Rota HTTPS pública de entrega do PDF gerado (com token criptográfico de 128 bits e expiração automática)

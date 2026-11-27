@@ -2280,3 +2280,716 @@ export async function generateSystemMateriaisPdf(params: {
   const pdfBytes = await doc.save();
   return Buffer.from(pdfBytes);
 }
+
+// ============================================================================
+// 5. PDF DE SINOPSE OPERACIONAL — LAYOUT IDÊNTICO AO "IMPRIMIR HISTÓRICO"
+//    (Módulo Relatórios -> Relatório da unidade -> Operações — A4 Paisagem)
+// ============================================================================
+export interface SystemCatOpPdfRecord {
+  id: string;
+  unidadeNome: string;
+  dataOperacao: string; // YYYY-MM-DD
+  horarioDecolagem: string;
+  horarioVooOperacao: string;
+  estadoOperacao: string;
+  municipioOperacao: string;
+  apenasUmMunicipio: boolean;
+  outrosMunicipios: Array<{ municipio: string; uf: string }>;
+  apoioOutroDepartamento: boolean;
+  departamentosApoio: string[];
+  comEmpregoAeronave: boolean;
+  tipoVoo: string;
+  aeronaves: Array<{
+    tipo: string;
+    prefixo: string;
+    horasVoo: string;
+    pilotoNome: string;
+    copilotoNome: string;
+  }>;
+  tripulantesOperacionais: Array<{ name: string }>;
+  viaturas: Array<{ placa: string; descricao: string; operadores: Array<{ name: string }> }>;
+  equipeSolo: Array<{ name: string }>;
+  sinopseVoo: string;
+  teveDisparosCat: boolean;
+  totalDisparosCat: number;
+  teveObito: boolean;
+  quantidadeObitos: number;
+}
+
+export interface SystemPolicialOpPdfRecord {
+  id: string;
+  unidadeNome: string;
+  dataOperacao: string; // YYYY-MM-DD
+  horarioOperacao: string;
+  estadoOperacao: string;
+  municipioOperacao: string;
+  apenasUmMunicipio: boolean;
+  outrosMunicipios: Array<{ municipio: string; uf: string }>;
+  tipoAtendimento: string;
+  acionamentoVia: string;
+  departamentosApoio: string[];
+  viaturas: Array<{ placa: string; descricao: string }>;
+  operadores: Array<{ name: string; masp: string }>;
+  criadorNome: string;
+  sinopse: string;
+  detalhesExtras: string[];
+}
+
+export interface SystemCanilOpPdfRecord {
+  id: string;
+  unidadeNome: string;
+  dataOperacao: string; // YYYY-MM-DD
+  horaOperacao: string;
+  estadoOperacao: string;
+  comarca: string;
+  solicitacaoTexto: string;
+  apoioOutroDepartamento: boolean;
+  departamentosApoio: string[];
+  viaturas: Array<{ placa: string; descricao: string }>;
+  materialEncontrado: boolean;
+  materiaisEncontrados: Array<{ tipo: string; cachorros: string[] }>;
+  operadores: Array<{ name: string; cachorros: string[] }>;
+  criadorNome: string;
+  detalhamento: string;
+}
+
+function formatIsoDateOnlyBr(iso?: string | null): string {
+  const s = String(iso || '').trim();
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return s || '-';
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
+function sumCatFlightHoursHHMM(aeronaves: Array<{ horasVoo?: string }>): string {
+  let totalMin = 0;
+  for (const a of aeronaves) {
+    const raw = String(a?.horasVoo || '').trim();
+    const m = raw.match(/^(\d{1,4}):(\d{2})$/);
+    if (m) {
+      totalMin += Number(m[1]) * 60 + Number(m[2]);
+    }
+  }
+  if (totalMin <= 0) return '';
+  const hh = Math.floor(totalMin / 60);
+  const mm = totalMin % 60;
+  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+}
+
+export async function generateSystemSinopseOperacionalPdf(params: {
+  departamentoLabel: string;
+  unidadeLabel: string;
+  isTodosUnidades: boolean;
+  periodoLabel: string;
+  solicitacaoId: string;
+  geradoEm: Date;
+  solicitanteNome: string;
+  solicitanteMasp: string;
+  logoDataUri: string | null;
+  catOps: SystemCatOpPdfRecord[];
+  polOps: SystemPolicialOpPdfRecord[];
+  canilOps: SystemCanilOpPdfRecord[];
+}): Promise<Buffer> {
+  const totalCount = params.catOps.length + params.polOps.length + params.canilOps.length;
+  const isCocOnly =
+    !params.isTodosUnidades &&
+    params.canilOps.length > 0 &&
+    params.catOps.length === 0 &&
+    params.polOps.length === 0;
+
+  const doc = await PDFDocument.create();
+  doc.setTitle(
+    isCocOnly
+      ? `Histórico de Relatórios da Unidade — Canil K9 (COC)`
+      : `Histórico de Relatórios da Unidade — ${params.unidadeLabel}`
+  );
+  doc.setAuthor('Sistema ARMARIA - Polícia Civil de Minas Gerais');
+  doc.setCreator('Sistema ARMARIA PCMG');
+
+  const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const fontMono = await doc.embedFont(StandardFonts.Courier);
+  const fontMonoBold = await doc.embedFont(StandardFonts.CourierBold);
+  const logoImage = await tryEmbedSystemLogo(doc, params.logoDataUri);
+
+  // A4 Paisagem (idêntico ao @page { size: A4 landscape; margin: 12mm; } do Imprimir Histórico)
+  const pageWidth = 841.89;
+  const pageHeight = 595.28;
+  const marginX = 28;
+  const contentWidth = pageWidth - marginX * 2; // 785.89pt
+  const footerSafeY = 54;
+
+  const docCode = generateUniqueDocControlCode();
+  const emissaoBr = formatDateTimeBr(params.geradoEm);
+
+  const totalCatFlightHours =
+    params.catOps.length > 0
+      ? sumCatFlightHoursHHMM(
+          params.catOps.flatMap(r => (r.comEmpregoAeronave ? r.aeronaves || [] : []))
+        )
+      : '';
+
+  // Distribuição por unidade quando selecionado "Todos"
+  const unitCounts = new Map<string, number>();
+  for (const r of [...params.catOps, ...params.polOps, ...params.canilOps]) {
+    const uName = r.unidadeNome || 'Sem Unidade';
+    unitCounts.set(uName, (unitCounts.get(uName) || 0) + 1);
+  }
+  const unitBreakdownText =
+    params.isTodosUnidades && unitCounts.size > 0
+      ? '   |   Por unidade: ' +
+        Array.from(unitCounts.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .map(([u, c]) => `${u}: ${c}`)
+          .join(' - ')
+      : '';
+
+  const filtersSummaryText = `Tipo: Operacoes - Unidade: ${params.unidadeLabel} - Periodo: ${params.periodoLabel}`;
+
+  const drawPageTopHeader = (page: PDFPage, isFirstPage: boolean): number => {
+    let y = drawTopUniqueCodeBar(
+      page,
+      pageWidth,
+      pageHeight,
+      marginX,
+      fontMono,
+      fontMonoBold,
+      docCode,
+      emissaoBr
+    );
+
+    const headerTopY = y;
+    let textX = marginX;
+    if (logoImage) {
+      const dims = logoImage.scaleToFit(42, 42);
+      page.drawImage(logoImage, {
+        x: marginX,
+        y: headerTopY - 42 + (42 - dims.height) / 2,
+        width: dims.width,
+        height: dims.height
+      });
+      textX = marginX + dims.width + 10;
+    }
+
+    const rightBlockW = 240;
+    const titleMaxW = contentWidth - (textX - marginX) - rightBlockW - 10;
+    const mainTitle = isCocOnly
+      ? 'POLICIA CIVIL DE MINAS GERAIS - HISTORICO DE RELATORIOS DA UNIDADE (COC / CANIL K9)'
+      : 'POLICIA CIVIL DE MINAS GERAIS - HISTORICO DE RELATORIOS DA UNIDADE';
+
+    page.drawText(fitTextToWidth(mainTitle, fontBold, 10.6, titleMaxW), {
+      x: textX,
+      y: headerTopY - 14,
+      size: 10.6,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    page.drawText(
+      fitTextToWidth(
+        `${params.departamentoLabel} - Unidade: ${params.unidadeLabel}`,
+        fontRegular,
+        8.6,
+        titleMaxW
+      ),
+      {
+        x: textX,
+        y: headerTopY - 29,
+        size: 8.6,
+        font: fontRegular,
+        color: PCMG_COLORS.slate600
+      }
+    );
+
+    const emitLine = fitTextToWidth(
+      `Emitido por: ${params.solicitanteNome}${
+        params.solicitanteMasp ? ` (MASP ${formatMaspBr(params.solicitanteMasp)})` : ''
+      }`,
+      fontBold,
+      7.9,
+      rightBlockW
+    );
+    const dateLine = `Emissao: ${emissaoBr}`;
+    page.drawText(emitLine, {
+      x: pageWidth - marginX - fontBold.widthOfTextAtSize(emitLine, 7.9),
+      y: headerTopY - 15,
+      size: 7.9,
+      font: fontBold,
+      color: PCMG_COLORS.slate700
+    });
+    page.drawText(dateLine, {
+      x: pageWidth - marginX - fontRegular.widthOfTextAtSize(dateLine, 7.8),
+      y: headerTopY - 28,
+      size: 7.8,
+      font: fontRegular,
+      color: PCMG_COLORS.slate700
+    });
+
+    y = headerTopY - 46;
+    page.drawLine({
+      start: { x: marginX, y },
+      end: { x: pageWidth - marginX, y },
+      thickness: 1.8,
+      color: PCMG_COLORS.ink
+    });
+    y -= 9;
+
+    if (isFirstPage) {
+      // .filters-box (#f8fafc, border #cbd5e1)
+      const filterLines = wrapCellLines(
+        `FILTROS APLICADOS: ${filtersSummaryText}`,
+        fontRegular,
+        7.8,
+        contentWidth - 16,
+        3
+      );
+      const filterBoxH = Math.max(20, filterLines.length * 10 + 9);
+      page.drawRectangle({
+        x: marginX,
+        y: y - filterBoxH,
+        width: contentWidth,
+        height: filterBoxH,
+        color: PCMG_COLORS.slate50,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.75
+      });
+      filterLines.forEach((ln, idx) => {
+        page.drawText(ln, {
+          x: marginX + 8,
+          y: y - 12 - idx * 10,
+          size: 7.8,
+          font: idx === 0 ? fontBold : fontRegular,
+          color: PCMG_COLORS.ink
+        });
+      });
+      y -= filterBoxH + 8;
+
+      // .summary-bar
+      const summaryParts = [
+        `Total de registros: ${totalCount}`,
+        `Operacoes: ${totalCount}`,
+        totalCatFlightHours ? `Total Horas de Voo (CAT): ${totalCatFlightHours}` : ''
+      ].filter(Boolean);
+      const summaryText = summaryParts.join('   |   ') + unitBreakdownText;
+      const summaryLines = wrapCellLines(summaryText, fontBold, 8, contentWidth, 2);
+      summaryLines.forEach((ln, idx) => {
+        page.drawText(ln, {
+          x: marginX,
+          y: y - 8 - idx * 10,
+          size: 8,
+          font: fontBold,
+          color: PCMG_COLORS.slate700
+        });
+      });
+      y -= summaryLines.length * 10 + 6;
+    }
+
+    return y;
+  };
+
+  let page = doc.addPage([pageWidth, pageHeight]);
+  let cursorY = drawPageTopHeader(page, true);
+
+  interface TableColSpec {
+    key: string;
+    label: string;
+    width: number;
+    mono?: boolean;
+    boldFirstLine?: boolean;
+  }
+
+  const drawColsHeader = (cols: TableColSpec[]): void => {
+    const thH = 18;
+    page.drawRectangle({
+      x: marginX,
+      y: cursorY - thH,
+      width: contentWidth,
+      height: thH,
+      color: PCMG_COLORS.slate200,
+      borderColor: PCMG_COLORS.slate300,
+      borderWidth: 0.7
+    });
+    let colX = marginX;
+    for (const col of cols) {
+      page.drawRectangle({
+        x: colX,
+        y: cursorY - thH,
+        width: col.width,
+        height: thH,
+        borderColor: PCMG_COLORS.slate300,
+        borderWidth: 0.55
+      });
+      const lbl = fitTextToWidth(col.label, fontBold, 7.1, col.width - 8);
+      page.drawText(lbl, {
+        x: colX + 4,
+        y: cursorY - 11.8,
+        size: 7.1,
+        font: fontBold,
+        color: PCMG_COLORS.slate800
+      });
+      colX += col.width;
+    }
+    cursorY -= thH;
+  };
+
+  const drawSectionHeaderAndTableHead = (sectionTitle: string, cols: TableColSpec[]): void => {
+    const neededH = 18 + 18 + 22; // título + header + 1 linha mínima
+    if (cursorY - neededH < footerSafeY) {
+      page = doc.addPage([pageWidth, pageHeight]);
+      cursorY = drawPageTopHeader(page, false);
+    }
+
+    // .section-title (bold uppercase #0f172a + border-bottom #cbd5e1)
+    page.drawText(fitTextToWidth(sectionTitle.toUpperCase(), fontBold, 8.8, contentWidth), {
+      x: marginX,
+      y: cursorY - 10,
+      size: 8.8,
+      font: fontBold,
+      color: PCMG_COLORS.ink
+    });
+    page.drawLine({
+      start: { x: marginX, y: cursorY - 14 },
+      end: { x: pageWidth - marginX, y: cursorY - 14 },
+      thickness: 0.85,
+      color: PCMG_COLORS.slate300
+    });
+    cursorY -= 18;
+
+    drawColsHeader(cols);
+  };
+
+  const drawTableRows = (
+    sectionTitle: string,
+    cols: TableColSpec[],
+    rows: Array<Record<string, string>>
+  ): void => {
+    drawSectionHeaderAndTableHead(sectionTitle, cols);
+
+    const fontSize = 7.4;
+    const lineH = 9.6;
+
+    rows.forEach((rowMap, rowIdx) => {
+      const wrapped: Record<string, string[]> = {};
+      let maxLines = 1;
+
+      for (const col of cols) {
+        const useFont = col.mono ? fontMono : fontRegular;
+        const lines = wrapCellLines(rowMap[col.key] || '-', useFont, fontSize, col.width - 8, 30);
+        wrapped[col.key] = lines;
+        if (lines.length > maxLines) maxLines = lines.length;
+      }
+
+      const maxUsableHeight = pageHeight - 135 - footerSafeY;
+      const rawRowH = Math.max(20, maxLines * lineH + 8);
+      const rowH = Math.min(rawRowH, maxUsableHeight);
+
+      if (cursorY - rowH < footerSafeY) {
+        page = doc.addPage([pageWidth, pageHeight]);
+        cursorY = drawPageTopHeader(page, false);
+        drawColsHeader(cols);
+      }
+
+      const rowBottomY = cursorY - rowH;
+      if (rowIdx % 2 === 1) {
+        page.drawRectangle({
+          x: marginX,
+          y: rowBottomY,
+          width: contentWidth,
+          height: rowH,
+          color: PCMG_COLORS.grayRow
+        });
+      }
+
+      const maxRenderableLines = Math.max(1, Math.floor((rowH - 6) / lineH));
+      let colX = marginX;
+      for (const col of cols) {
+        page.drawRectangle({
+          x: colX,
+          y: rowBottomY,
+          width: col.width,
+          height: rowH,
+          borderColor: PCMG_COLORS.slate300,
+          borderWidth: 0.5
+        });
+
+        const lines = (wrapped[col.key] || ['-']).slice(0, maxRenderableLines);
+        lines.forEach((line, lIdx) => {
+          const isFirst = lIdx === 0;
+          const useFont = col.mono
+            ? isFirst
+              ? fontMonoBold
+              : fontMono
+            : col.boldFirstLine && isFirst
+              ? fontBold
+              : fontRegular;
+          const useSize = col.mono && !isFirst ? 6.9 : fontSize;
+          const useColor =
+            col.mono && !isFirst
+              ? PCMG_COLORS.slate600
+              : PCMG_COLORS.ink;
+
+          page.drawText(line, {
+            x: colX + 4,
+            y: cursorY - 10.5 - lIdx * lineH,
+            size: useSize,
+            font: useFont,
+            color: useColor
+          });
+        });
+
+        colX += col.width;
+      }
+
+      cursorY = rowBottomY;
+    });
+
+    cursorY -= 10;
+  };
+
+  // --- SEÇÃO 1: RELATÓRIOS DE OPERAÇÕES CAT ---
+  if (params.catOps.length > 0) {
+    const wData = Math.round(contentWidth * 0.09);
+    const wMun = Math.round(contentWidth * 0.13);
+    const wMod = Math.round(contentWidth * 0.12);
+    const wAero = Math.round(contentWidth * 0.20);
+    const wVtr = Math.round(contentWidth * 0.15);
+    const wSin = contentWidth - (wData + wMun + wMod + wAero + wVtr);
+
+    const catCols: TableColSpec[] = [
+      { key: 'data', label: 'DATA / HORARIO', width: wData, mono: true },
+      { key: 'mun', label: 'MUNICIPIO(S) / UF', width: wMun, boldFirstLine: true },
+      { key: 'mod', label: 'MODALIDADE / VOO', width: wMod, boldFirstLine: true },
+      { key: 'aero', label: 'AERONAVE E TRIPULACAO', width: wAero },
+      { key: 'vtr', label: 'VIATURAS / EQUIPE', width: wVtr },
+      { key: 'sin', label: 'SINOPSE / OCORRENCIAS', width: wSin }
+    ];
+
+    const catRows = params.catOps.map(rel => {
+      const muns = [
+        `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+        ...(!rel.apenasUmMunicipio
+          ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`)
+          : [])
+      ];
+      if (rel.apoioOutroDepartamento && rel.departamentosApoio.length > 0) {
+        muns.push(`Apoio: ${rel.departamentosApoio.join(', ')}`);
+      }
+
+      const aeroParts: string[] = [];
+      if (rel.comEmpregoAeronave && rel.aeronaves.length > 0) {
+        for (const a of rel.aeronaves) {
+          aeroParts.push(`${a.tipo} ${a.prefixo} (${a.horasVoo || '00:00'})`);
+          aeroParts.push(
+            `Piloto: ${a.pilotoNome || '-'}${a.copilotoNome ? ` - Copiloto: ${a.copilotoNome}` : ''}`
+          );
+        }
+        if (rel.tripulantesOperacionais.length > 0) {
+          aeroParts.push(
+            `Op. Aerotaticos: ${rel.tripulantesOperacionais.map(t => t.name).join(', ')}`
+          );
+        }
+      } else {
+        aeroParts.push('Sem emprego de aeronave');
+      }
+
+      const vtrParts: string[] = [];
+      if (rel.viaturas.length > 0) {
+        for (const v of rel.viaturas) {
+          vtrParts.push(`${v.placa}${v.descricao ? ` (${v.descricao})` : ''}`);
+          if (v.operadores.length > 0) {
+            vtrParts.push(v.operadores.map(o => o.name).join(', '));
+          }
+        }
+      } else if (!rel.comEmpregoAeronave && rel.equipeSolo.length > 0) {
+        vtrParts.push(rel.equipeSolo.map(s => s.name).join(', '));
+      } else {
+        vtrParts.push('-');
+      }
+
+      const sinParts = [rel.sinopseVoo || '-'];
+      if (rel.teveDisparosCat) {
+        sinParts.push(
+          `Disparos CAT: ${rel.totalDisparosCat} tiro(s)${
+            rel.teveObito ? ` - Obitos: ${rel.quantidadeObitos}` : ''
+          }`
+        );
+      } else if (rel.teveObito) {
+        sinParts.push(`Obitos: ${rel.quantidadeObitos}`);
+      }
+
+      const dateLines = [
+        formatIsoDateOnlyBr(rel.dataOperacao),
+        `${rel.horarioDecolagem || '--:--'}-${rel.horarioVooOperacao || '--:--'}`
+      ];
+      if (params.isTodosUnidades && rel.unidadeNome) {
+        dateLines.push(rel.unidadeNome);
+      }
+
+      return {
+        data: dateLines.join('\n'),
+        mun: muns.join('\n'),
+        mod: [
+          rel.comEmpregoAeronave ? 'Com Aeronave' : 'Sem Aeronave',
+          rel.comEmpregoAeronave && rel.tipoVoo ? rel.tipoVoo : ''
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        aero: aeroParts.join('\n'),
+        vtr: vtrParts.join('\n'),
+        sin: sinParts.join('\n')
+      };
+    });
+
+    const catTitle = `Relatorios de Operacoes CAT (${params.catOps.length})${
+      totalCatFlightHours ? ` - Total Horas de Voo: ${totalCatFlightHours}` : ''
+    }`;
+    drawTableRows(catTitle, catCols, catRows);
+  }
+
+  // --- SEÇÃO 2: RELATÓRIOS DE OPERAÇÕES DA UNIDADE (POLICIAL: COE, CORE, CAP, etc.) ---
+  if (params.polOps.length > 0) {
+    const wData = Math.round(contentWidth * 0.09);
+    const wMun = Math.round(contentWidth * 0.13);
+    const wAtd = Math.round(contentWidth * 0.15);
+    const wVtr = Math.round(contentWidth * 0.13);
+    const wOps = Math.round(contentWidth * 0.18);
+    const wSin = contentWidth - (wData + wMun + wAtd + wVtr + wOps);
+
+    const polCols: TableColSpec[] = [
+      { key: 'data', label: 'DATA / HORA', width: wData, mono: true },
+      { key: 'mun', label: 'MUNICIPIO(S) / UF', width: wMun, boldFirstLine: true },
+      { key: 'atd', label: 'ATENDIMENTO / APOIO', width: wAtd, boldFirstLine: true },
+      { key: 'vtr', label: 'VIATURAS', width: wVtr },
+      { key: 'ops', label: 'POLICIAIS / OPERADORES', width: wOps },
+      { key: 'sin', label: 'SINOPSE / DESFECHO', width: wSin }
+    ];
+
+    const polRows = params.polOps.map(rel => {
+      const muns = [
+        `${rel.municipioOperacao}/${rel.estadoOperacao}`,
+        ...(!rel.apenasUmMunicipio
+          ? (rel.outrosMunicipios || []).map(m => `${m.municipio}/${m.uf}`)
+          : [])
+      ];
+
+      const atdLines = [rel.tipoAtendimento || '-', `Via: ${rel.acionamentoVia || '-'}`];
+      if (rel.departamentosApoio.length > 0) {
+        atdLines.push(`Apoio: ${rel.departamentosApoio.join(', ')}`);
+      }
+
+      const vtrLines =
+        rel.viaturas.length > 0
+          ? rel.viaturas.map(v => `${v.placa}${v.descricao ? ` - ${v.descricao}` : ''}`)
+          : ['-'];
+
+      const opsLines =
+        rel.operadores.length > 0
+          ? rel.operadores.map(
+              o => `${o.name}${o.masp ? ` (${formatMaspBr(o.masp)})` : ''}`
+            )
+          : [rel.criadorNome || '-'];
+
+      const sinLines = [rel.sinopse || '-'];
+      if (rel.detalhesExtras.length > 0) {
+        sinLines.push(`Detalhes: ${rel.detalhesExtras.join(' | ')}`);
+      }
+
+      const dateLines = [formatIsoDateOnlyBr(rel.dataOperacao), rel.horarioOperacao || '--:--'];
+      if (params.isTodosUnidades && rel.unidadeNome) {
+        dateLines.push(rel.unidadeNome);
+      }
+
+      return {
+        data: dateLines.join('\n'),
+        mun: muns.join('\n'),
+        atd: atdLines.join('\n'),
+        vtr: vtrLines.join('\n'),
+        ops: opsLines.join('\n'),
+        sin: sinLines.join('\n')
+      };
+    });
+
+    drawTableRows(`Relatorios de Operacoes da Unidade (${params.polOps.length})`, polCols, polRows);
+  }
+
+  // --- SEÇÃO 3: RELATÓRIOS DE OPERAÇÕES K9 / COC ---
+  if (params.canilOps.length > 0) {
+    const wData = Math.round(contentWidth * 0.08);
+    const wCid = Math.round(contentWidth * 0.11);
+    const wSol = Math.round(contentWidth * 0.10);
+    const wVtr = Math.round(contentWidth * 0.14);
+    const wMat = Math.round(contentWidth * 0.14);
+    const wOps = Math.round(contentWidth * 0.18);
+    const wDet = contentWidth - (wData + wCid + wSol + wVtr + wMat + wOps);
+
+    const canilCols: TableColSpec[] = [
+      { key: 'data', label: 'DATA / HORA', width: wData, mono: true },
+      { key: 'cid', label: 'CIDADE / UF', width: wCid, boldFirstLine: true },
+      { key: 'sol', label: 'SOLICITACAO', width: wSol },
+      { key: 'vtr', label: 'VEICULOS / VIATURAS', width: wVtr },
+      { key: 'mat', label: 'MATERIAL ENCONTRADO', width: wMat },
+      { key: 'ops', label: 'OPERADORES & ANIMAIS', width: wOps },
+      { key: 'det', label: 'DETALHAMENTO', width: wDet }
+    ];
+
+    const canilRows = params.canilOps.map(rel => {
+      const solLines = [rel.solicitacaoTexto || '-'];
+      if (rel.apoioOutroDepartamento && rel.departamentosApoio.length > 0) {
+        solLines.push(`Apoio: ${rel.departamentosApoio.join('; ')}`);
+      }
+
+      const vtrLines =
+        rel.viaturas.length > 0
+          ? rel.viaturas.map(v => `${v.placa}${v.descricao ? ` - ${v.descricao}` : ''}`)
+          : ['-'];
+
+      const matLines = !rel.materialEncontrado
+        ? ['Nao']
+        : rel.materiaisEncontrados.length > 0
+          ? rel.materiaisEncontrados.map(
+              m => `${m.tipo} (${m.cachorros.length > 0 ? m.cachorros.join(', ') : '-'})`
+            )
+          : ['Sim'];
+
+      const opsLines =
+        rel.operadores.length > 0
+          ? rel.operadores.map(
+              o => `${o.name} (${o.cachorros.length > 0 ? o.cachorros.join(', ') : 'Sem animal'})`
+            )
+          : [rel.criadorNome || '-'];
+
+      const dateLines = [formatIsoDateOnlyBr(rel.dataOperacao), rel.horaOperacao || '--:--'];
+      if (params.isTodosUnidades && rel.unidadeNome) {
+        dateLines.push(rel.unidadeNome);
+      }
+
+      return {
+        data: dateLines.join('\n'),
+        cid: `${rel.comarca || '-'} / ${rel.estadoOperacao || 'MG'}`,
+        sol: solLines.join('\n'),
+        vtr: vtrLines.join('\n'),
+        mat: matLines.join('\n'),
+        ops: opsLines.join('\n'),
+        det: rel.detalhamento || '-'
+      };
+    });
+
+    const canilTitle = isCocOnly
+      ? `Relatorios de Operacoes K9 (${params.canilOps.length})`
+      : `Relatorios de Operacoes K9 / COC (${params.canilOps.length})`;
+    drawTableRows(canilTitle, canilCols, canilRows);
+  }
+
+  drawInstitutionalFooters({
+    doc,
+    marginX,
+    pageWidth,
+    fontMono,
+    fontMonoBold,
+    docCode,
+    emissaoBr,
+    footerLeftText: `Sistema ARMARIA - Policia Civil de Minas Gerais | Historico consolidado da unidade ${params.unidadeLabel}`
+  });
+
+  const pdfBytes = await doc.save();
+  return Buffer.from(pdfBytes);
+}
+

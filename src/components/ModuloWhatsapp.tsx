@@ -387,6 +387,10 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
     return `${computedBasePublicUrl}/api/relatorios/materiais`;
   }, [computedBasePublicUrl]);
 
+  const computedRelatorioSinopseOperacionalUrl = useMemo(() => {
+    return `${computedBasePublicUrl}/api/relatorios/sinopse-operacional`;
+  }, [computedBasePublicUrl]);
+
   const computedTermsUrl = useMemo(() => {
     return `${computedBasePublicUrl}/termos-de-servico`;
   }, [computedBasePublicUrl]);
@@ -1766,6 +1770,7 @@ export const ModuloWhatsapp: React.FC<ModuloWhatsappProps> = ({ currentUser, all
                     { key: 'mkRelMunUni', method: 'POST', label: 'Munições — Relação por Unidade (todos os calibres da unidade; JSON: {"unidade":"COE",...})', url: computedRelatorioMunicoesUnidadeUrl },
                     { key: 'mkRelExp', method: 'POST', label: 'Explosivos — Relação por Unidade (JSON: {"unidade":"COE",...})', url: computedRelatorioExplosivosUrl },
                     { key: 'mkRelMat', method: 'POST', label: 'Materiais — Relação por Unidade (JSON: {"unidade":"COE",...})', url: computedRelatorioMateriaisUrl },
+                    { key: 'mkRelSinopOp', method: 'POST', label: 'Relatórios — Sinopse Operacional (JSON: {"unidade":"COE","periodo":"ultima_permanencia|essa_semana|esse_mes|mes_passado|esse_ano|informar_periodo","data_inicio":"DD/MM/AAAA","data_fim":"DD/MM/AAAA",...})', url: computedRelatorioSinopseOperacionalUrl },
                     { key: 'mkEnviar', method: 'POST', label: 'Enviar mensagem WhatsApp (text/template/buttons/list/document)', url: computedMakeEnviarUrl },
                     { key: 'mkUsuario', method: 'POST', label: 'Consultar policial por telefone (JSON: {"phone":"..."})', url: computedMakeUsuarioUrl },
                     { key: 'mkStatus', method: 'GET', label: 'Validar autenticação e status da integração', url: computedMakeStatusUrl }
